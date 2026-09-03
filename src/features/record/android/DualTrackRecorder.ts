@@ -237,25 +237,44 @@ export class DualTrackRecorder {
     }
 
     // Coalesce consecutive inputText events on the same element only when the
-    // previous inputText is still the most recent step (no intervening actions)
-    if (
-      this.lastInputText &&
-      elementKey &&
-      this.lastInputText.elementKey === elementKey &&
-      this.lastInputText.stepIndex === this.steps.length - 1
-    ) {
-      const existing = this.steps[this.lastInputText.stepIndex];
-      if (existing && existing.tool === "inputText") {
-        existing.params.text = event.text;
-        return;
-      }
+    // previous replacement is still the most recent step (no intervening actions).
+    // Accessibility events carry the field's complete value, so recording an
+    // insert would duplicate text when the plan is replayed.
+    if (this.coalesceInputText(elementKey, event.text)) {
+      return;
     }
 
     const stepIndex = this.steps.length;
-    this.steps.push({ tool: "inputText", params: { text: event.text } });
+    this.steps.push({
+      tool: "sendKeys",
+      params: {
+        commands: [{ action: "type", text: event.text, operation: "replace" }],
+      },
+    });
     if (elementKey) {
       this.lastInputText = { elementKey, text: event.text, stepIndex };
     }
+  }
+
+  private coalesceInputText(elementKey: string | null, text: string): boolean {
+    const previous = this.lastInputText;
+    if (
+      !previous ||
+      !elementKey ||
+      previous.elementKey !== elementKey ||
+      previous.stepIndex !== this.steps.length - 1
+    ) {
+      return false;
+    }
+
+    const existing = this.steps[previous.stepIndex];
+    const command = existing?.params.commands?.[0];
+    if (existing?.tool !== "sendKeys" || command?.action !== "type") {
+      return false;
+    }
+
+    command.text = text;
+    return true;
   }
 
   // -------------------------------------------------------------------------

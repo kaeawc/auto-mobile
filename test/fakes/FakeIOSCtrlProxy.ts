@@ -9,6 +9,7 @@ import {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyKeyboardResult,
+  CtrlProxyPressKeyResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
@@ -30,6 +31,10 @@ import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import type {
+  InputKeyModifier,
+  InputKeyName,
+} from "../../src/features/action/InputKey";
 
 /**
  * Fake implementation of IOSCtrlProxy for testing
@@ -96,6 +101,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private imeActionHistory: Array<{
     action: "done" | "next" | "search" | "send" | "go" | "previous";
   }> = [];
+
+  private pressKeyHistory: Array<{ key: InputKeyName; modifiers: InputKeyModifier[] }> = [];
 
   private screenshotRequestCount: number = 0;
   private hierarchyRequestCount: number = 0;
@@ -323,6 +330,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return [...this.keyboardHistory];
   }
 
+  getPressKeyHistory(): Array<{ key: InputKeyName; modifiers: InputKeyModifier[] }> {
+    return [...this.pressKeyHistory];
+  }
+
   getPressBackRequestCount(): number {
     return this.pressBackRequestCount;
   }
@@ -464,6 +475,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.hierarchyRequestCount = 0;
     this.keyboardOpen = false;
     this.keyboardHistory = [];
+    this.pressKeyHistory = [];
     this.pressHomeRequestCount = 0;
     this.pressBackRequestCount = 0;
     this.recentAppsRequestCount = 0;
@@ -798,6 +810,22 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       open: this.keyboardOpen,
       totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined,
+    };
+  }
+
+  async requestPressKey(
+    key: InputKeyName,
+    modifiers: InputKeyModifier[],
+    timeoutMs: number = 5000,
+    _perf?: PerformanceTracker,
+  ): Promise<CtrlProxyPressKeyResult> {
+    await this.applyDelay("pressKey");
+    this.checkFailure("pressKey");
+    this.pressKeyHistory.push({ key, modifiers });
+    return {
+      success: true,
+      totalTimeMs: timeoutMs > 0 ? 1 : 0,
       perfTiming: this.performanceTiming || undefined,
     };
   }

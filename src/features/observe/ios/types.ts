@@ -192,6 +192,9 @@ export interface CtrlProxyKeyboardResult extends BaseResult {
   open: boolean;
 }
 
+/** Discrete keyboard key result from CtrlProxy iOS */
+export type CtrlProxyPressKeyResult = BaseResult;
+
 /** Press home result from CtrlProxy iOS */
 export type CtrlProxyPressHomeResult = BaseResult;
 

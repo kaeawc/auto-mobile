@@ -40,6 +40,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_ime_action",
   "request_select_all",
   "request_keyboard",
+  "request_press_key",
   "request_press_button",
   "request_press_home",
   "request_press_back",

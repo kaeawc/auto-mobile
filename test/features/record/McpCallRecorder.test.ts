@@ -66,11 +66,12 @@ describe("McpCallRecorder", () => {
       recorder.record("observe", {});
       recorder.record("tapOn", { text: "Login" });
       recorder.record("inputText", { text: "test" });
+      recorder.record("sendKeys", { commands: [{ action: "type", text: "test" }] });
       recorder.record("pressButton", { button: "back" });
       recorder.record("swipeOn", { direction: "up" });
       recorder.record("terminateApp", { appId: "com.test" });
 
-      expect(recorder.stepCount).toBe(7);
+      expect(recorder.stepCount).toBe(8);
     });
 
     test("records crashApp with only reproducible plan parameters", () => {

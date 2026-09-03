@@ -932,6 +932,36 @@ final class CommandHandlerTests: XCTestCase {
         )
     }
 
+    func testPressKeyForwardsModifiers() {
+        let request = WebSocketRequest.pressKey(RequestPressKey(
+            requestId: "key-1",
+            key: "tab",
+            modifiers: ["shift", "meta"]
+        ))
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_key_result")
+        XCTAssertEqual(fakeGesturePerformer.getKeyHistory().count, 1)
+        XCTAssertEqual(fakeGesturePerformer.getKeyHistory().first?.key, "tab")
+        XCTAssertEqual(fakeGesturePerformer.getKeyHistory().first?.modifiers, ["shift", "meta"])
+    }
+
+    func testPressKeyFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "pressKey",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focus"])
+        )
+        let request = WebSocketRequest.pressKey(RequestPressKey(
+            requestId: "key-fail",
+            key: "delete",
+            modifiers: []
+        ))
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(response.success, false)
+    }
+
     func testClearTextWithoutResourceId() {
         let request = WebSocketRequest.clearText(RequestClearText(requestId: "clear-1"))
 

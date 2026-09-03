@@ -36,6 +36,7 @@ const KOTLIN_SERIAL_NAMES = [
   "request_gesture_move",
   "request_gesture_end",
   "request_set_text",
+  "request_insert_text",
   "request_ime_action",
   "request_select_all",
   "request_action",

@@ -100,6 +100,19 @@ function classifyObservationAction(
     }
     case "inputText":
       return isSubmitImeAction(args?.imeAction) ? "navigation" : "inPlace";
+    case "sendKeys": {
+      const commands = Array.isArray(args?.commands) ? args.commands : [];
+      const maySubmit = commands.some((command) => {
+        if (!command || typeof command !== "object") {
+          return false;
+        }
+        const value = command as Record<string, unknown>;
+        return (
+          value.action === "key" && ["done", "go", "search", "send"].includes(String(value.key))
+        );
+      });
+      return maySubmit ? "navigation" : "inPlace";
+    }
     case "clearText":
     case "selectAllText":
     case "keyboard":
@@ -131,6 +144,7 @@ function classifyObservationAction(
 export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "tapOn",
   "inputText",
+  "sendKeys",
   "launchApp",
   "tapAny",
   "dragAndDrop",

@@ -107,7 +107,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -135,7 +134,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -150,9 +148,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -365,14 +365,14 @@
       "type": "object",
       "properties": {
         "lock": {
-          "description": "Shared barrier name; all devices using the same name synchronize together",
-          "type": "string"
+          "type": "string",
+          "description": "Shared barrier name; all devices using the same name synchronize together"
         },
         "deviceCount": {
-          "description": "Number of devices that must arrive before the barrier lifts",
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Number of devices that must arrive before the barrier lifts"
         },
         "timeout": {
           "description": "Barrier timeout ms (default 30000)",
@@ -397,9 +397,9 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "match/fail/enroll/unenroll on iOS Simulator; cancel/error require Android SDK hook",
           "type": "string",
-          "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"]
+          "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"],
+          "description": "match/fail/enroll/unenroll on iOS Simulator; cancel/error require Android SDK hook"
         },
         "modality": {
           "description": "Modality: any default, fingerprint, or face",
@@ -570,8 +570,8 @@
           "type": "string"
         },
         "name": {
-          "description": "Storage name",
-          "type": "string"
+          "type": "string",
+          "description": "Storage name"
         },
         "fileName": {
           "description": "Deprecated alias for name",
@@ -671,14 +671,14 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "Clipboard action",
           "type": "string",
+          "description": "Clipboard action",
           "enum": ["copy", "paste", "clear", "get"]
         },
         "text": {
-          "description": "Text to copy (required for 'copy' action)",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Text to copy (required for 'copy' action)"
         },
         "platform": {
           "type": "string",
@@ -825,27 +825,26 @@
       "type": "object",
       "properties": {
         "lock": {
-          "description": "Shared barrier lock name",
-          "type": "string"
+          "type": "string",
+          "description": "Shared barrier lock name"
         },
         "steps": {
-          "description": "Serial steps; each needs params.device",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "tool": {
-                "description": "Tool name",
-                "type": "string"
+                "type": "string",
+                "description": "Tool name"
               },
               "params": {
-                "description": "Tool params; must include device",
                 "type": "object",
                 "propertyNames": {
                   "type": "string"
                 },
-                "additionalProperties": {}
+                "additionalProperties": {},
+                "description": "Tool params; must include device"
               },
               "label": {
                 "description": "Step label",
@@ -854,13 +853,14 @@
             },
             "required": ["tool", "params"],
             "additionalProperties": {}
-          }
+          },
+          "description": "Serial steps; each needs params.device"
         },
         "deviceCount": {
-          "description": "Devices required at barrier",
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Devices required at barrier"
         },
         "timeout": {
           "description": "Barrier timeout ms (default 30000)",
@@ -918,8 +918,8 @@
               "type": "object",
               "properties": {
                 "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
+                  "type": "string",
+                  "description": "Container resource ID"
                 }
               },
               "required": ["elementId"],
@@ -929,8 +929,8 @@
               "type": "object",
               "properties": {
                 "text": {
-                  "description": "Container text",
-                  "type": "string"
+                  "type": "string",
+                  "description": "Container text"
                 }
               },
               "required": ["text"],
@@ -978,28 +978,28 @@
       "type": "object",
       "properties": {
         "operationId": {
-          "description": "Caller-generated idempotency and diagnostic correlation ID",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$"
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+          "description": "Caller-generated idempotency and diagnostic correlation ID"
         },
         "target": {
           "type": "object",
           "properties": {
             "platform": {
-              "description": "Platform reported by automobile:devices/booted",
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios"],
+              "description": "Platform reported by automobile:devices/booted"
             },
             "isVirtual": {
-              "description": "Virtual-device flag reported by automobile:devices/booted",
               "type": "boolean",
-              "const": true
+              "const": true,
+              "description": "Virtual-device flag reported by automobile:devices/booted"
             },
             "stableId": {
-              "description": "Stable platform device identity from automobile:devices/booted",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Stable platform device identity from automobile:devices/booted"
             },
             "stableName": {
               "description": "Stable platform representation name when available",
@@ -1011,14 +1011,14 @@
           "additionalProperties": false
         },
         "mode": {
-          "description": "Stop and permanently delete the platform device representation",
           "type": "string",
-          "const": "destroy"
+          "const": "destroy",
+          "description": "Stop and permanently delete the platform device representation"
         },
         "verifyAbsence": {
-          "description": "Require a complete inventory observation proving durable absence",
           "type": "boolean",
-          "const": true
+          "const": true,
+          "description": "Require a complete inventory observation proving durable absence"
         },
         "timeoutMs": {
           "description": "Total bounded teardown timeout in ms",
@@ -1117,12 +1117,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Source ID",
-              "type": "string"
+              "type": "string",
+              "description": "Source ID"
             },
             "text": {
-              "description": "Source text",
-              "type": "string"
+              "type": "string",
+              "description": "Source text"
             }
           },
           "oneOf": [
@@ -1140,12 +1140,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Target ID",
-              "type": "string"
+              "type": "string",
+              "description": "Target ID"
             },
             "text": {
-              "description": "Target text",
-              "type": "string"
+              "type": "string",
+              "description": "Target text"
             }
           },
           "oneOf": [
@@ -1213,12 +1213,12 @@
       "type": "object",
       "properties": {
         "planContent": {
-          "description": "YAML plan content",
-          "type": "string"
+          "type": "string",
+          "description": "YAML plan content"
         },
         "startStep": {
-          "description": "Start step index",
           "default": 0,
+          "description": "Start step index",
           "type": "number"
         },
         "platform": {
@@ -1247,13 +1247,13 @@
           }
         },
         "deviceAllocationTimeoutMs": {
-          "description": "Allocation timeout ms",
           "default": 300000,
+          "description": "Allocation timeout ms",
           "type": "number"
         },
         "abortStrategy": {
-          "description": "Abort strategy",
           "default": "immediate",
+          "description": "Abort strategy",
           "type": "string",
           "enum": ["immediate", "finish-current-step"]
         },
@@ -1649,12 +1649,12 @@
           "type": "string"
         },
         "adapterName": {
-          "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
-          "type": "string"
+          "type": "string",
+          "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)"
         },
         "name": {
-          "description": "DataStore instance name",
-          "type": "string"
+          "type": "string",
+          "description": "DataStore instance name"
         },
         "platform": {
           "type": "string",
@@ -1749,14 +1749,14 @@
       "type": "object",
       "properties": {
         "deviceType": {
-          "description": "CoreSimulator device-type identifier selected from automobile:devices/images.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "CoreSimulator device-type identifier selected from automobile:devices/images."
         },
         "runtime": {
-          "description": "CoreSimulator runtime identifier selected from automobile:devices/images.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "CoreSimulator runtime identifier selected from automobile:devices/images."
         }
       },
       "required": ["deviceType", "runtime"],
@@ -1874,9 +1874,9 @@
       "type": "object",
       "properties": {
         "scope": {
-          "description": "Preference scope",
           "type": "string",
-          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"],
+          "description": "Preference scope"
         },
         "appId": {
           "description": "App package or bundle id",
@@ -1887,9 +1887,9 @@
           "type": "string"
         },
         "key": {
-          "description": "Preference key or Android system property name",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Preference key or Android system property name"
         },
         "platform": {
           "type": "string",
@@ -1937,7 +1937,7 @@
         },
         "shape": {
           "description": "Optional highlight shape definition",
-          "anyOf": [
+          "oneOf": [
             {
               "type": "object",
               "properties": {
@@ -2436,12 +2436,12 @@
           ]
         },
         "elementId": {
-          "description": "Resource ID, e.g. com.app:id/btn_login",
-          "type": "string"
+          "type": "string",
+          "description": "Resource ID, e.g. com.app:id/btn_login"
         },
         "text": {
-          "description": "Text, content-desc, or placeholder",
-          "type": "string"
+          "type": "string",
+          "description": "Text, content-desc, or placeholder"
         },
         "container": {
           "description": "Scope search to a container",
@@ -2450,8 +2450,8 @@
               "type": "object",
               "properties": {
                 "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
+                  "type": "string",
+                  "description": "Container resource ID"
                 }
               },
               "required": ["elementId"],
@@ -2461,8 +2461,8 @@
               "type": "object",
               "properties": {
                 "text": {
-                  "description": "Container text",
-                  "type": "string"
+                  "type": "string",
+                  "description": "Container text"
                 }
               },
               "required": ["text"],
@@ -2612,9 +2612,9 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "IME action",
           "type": "string",
-          "enum": ["done", "next", "search", "send", "go", "previous"]
+          "enum": ["done", "next", "search", "send", "go", "previous"],
+          "description": "IME action"
         },
         "platform": {
           "type": "string",
@@ -2663,9 +2663,9 @@
               "type": "object",
               "properties": {
                 "elementId": {
-                  "description": "Resource ID, e.g. com.app:id/field",
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Resource ID, e.g. com.app:id/field"
                 }
               },
               "required": ["elementId"],
@@ -2675,9 +2675,9 @@
               "type": "object",
               "properties": {
                 "testTag": {
-                  "description": "Android accessibility test tag",
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Android accessibility test tag"
                 }
               },
               "required": ["testTag"],
@@ -2687,9 +2687,9 @@
               "type": "object",
               "properties": {
                 "text": {
-                  "description": "Text, content-desc, or placeholder of the field",
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Text, content-desc, or placeholder of the field"
                 }
               },
               "required": ["text"],
@@ -2699,13 +2699,13 @@
               "type": "object",
               "properties": {
                 "textAny": {
-                  "description": "Ordered text variants; first visible match wins",
                   "minItems": 1,
                   "type": "array",
                   "items": {
                     "type": "string",
                     "minLength": 1
-                  }
+                  },
+                  "description": "Ordered text variants; first visible match wins"
                 }
               },
               "required": ["textAny"],
@@ -2764,8 +2764,8 @@
       "type": "object",
       "properties": {
         "artifactPath": {
-          "description": "App artifact path (.apk, .app, or .ipa)",
-          "type": "string"
+          "type": "string",
+          "description": "App artifact path (.apk, .app, or .ipa)"
         },
         "platform": {
           "type": "string",
@@ -2795,9 +2795,9 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "Keyboard action",
           "type": "string",
-          "enum": ["open", "close", "detect"]
+          "enum": ["open", "close", "detect"],
+          "description": "Keyboard action"
         },
         "platform": {
           "type": "string",
@@ -2830,8 +2830,8 @@
           "type": "object",
           "properties": {
             "name": {
-              "description": "Device image name",
-              "type": "string"
+              "type": "string",
+              "description": "Device image name"
             },
             "deviceId": {
               "type": "string"
@@ -2920,8 +2920,8 @@
           "type": "string"
         },
         "adapterName": {
-          "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
-          "type": "string"
+          "type": "string",
+          "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)"
         },
         "platform": {
           "type": "string",
@@ -2982,12 +2982,12 @@
       "type": "object",
       "properties": {
         "host": {
-          "description": "Host pattern (regex)",
-          "type": "string"
+          "type": "string",
+          "description": "Host pattern (regex)"
         },
         "path": {
-          "description": "Path pattern (regex)",
-          "type": "string"
+          "type": "string",
+          "description": "Path pattern (regex)"
         },
         "method": {
           "description": "HTTP method; default *",
@@ -3051,8 +3051,8 @@
       "type": "object",
       "properties": {
         "targetScreen": {
-          "description": "Target screen name",
-          "type": "string"
+          "type": "string",
+          "description": "Target screen name"
         },
         "platform": {
           "default": "android",
@@ -3392,10 +3392,10 @@
           "type": "object",
           "properties": {
             "quietPeriodMs": {
-              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches",
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
             }
           },
           "required": ["quietPeriodMs"],
@@ -3415,11 +3415,9 @@
           "type": "boolean"
         },
         "scope": {
-          "description": "Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)",
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor.",
               "anyOf": [
                 {
                   "type": "boolean"
@@ -3438,7 +3436,8 @@
                   },
                   "additionalProperties": false
                 }
-              ]
+              ],
+              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor."
             },
             "region": {
               "description": "Crop to a normalized 0..1 box; true = inset content rect.",
@@ -3480,7 +3479,8 @@
               "type": "boolean"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)"
         },
         "sessionUuid": {
           "description": "Session",
@@ -3537,7 +3537,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -3565,7 +3564,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -3580,9 +3578,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "occlusionState": {
               "type": "string"
@@ -3784,13 +3784,13 @@
                             "additionalProperties": false
                           },
                           {
-                            "description": "Compact bounds tuple [left, top, right, bottom].",
                             "minItems": 4,
                             "maxItems": 4,
                             "type": "array",
                             "items": {
                               "type": "number"
-                            }
+                            },
+                            "description": "Compact bounds tuple [left, top, right, bottom]."
                           }
                         ]
                       }
@@ -3987,7 +3987,6 @@
                         "type": "string"
                       },
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -4015,7 +4014,6 @@
                             "additionalProperties": false
                           },
                           {
-                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                             "type": "array",
                             "prefixItems": [
                               {
@@ -4030,9 +4028,11 @@
                               {
                                 "type": "number"
                               }
-                            ]
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        ]
+                        ],
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       }
                     },
                     "required": ["bounds"],
@@ -4163,7 +4163,6 @@
                     "type": "object",
                     "properties": {
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -4191,7 +4190,6 @@
                             "additionalProperties": false
                           },
                           {
-                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                             "type": "array",
                             "prefixItems": [
                               {
@@ -4206,9 +4204,11 @@
                               {
                                 "type": "number"
                               }
-                            ]
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        ]
+                        ],
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       },
                       "hierarchy": {
                         "$ref": "#/$defs/__schema0"
@@ -4230,7 +4230,6 @@
                     "type": "object",
                     "properties": {
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -4258,7 +4257,6 @@
                             "additionalProperties": false
                           },
                           {
-                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                             "type": "array",
                             "prefixItems": [
                               {
@@ -4273,9 +4271,11 @@
                               {
                                 "type": "number"
                               }
-                            ]
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        ]
+                        ],
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       },
                       "reason": {
                         "type": "string"
@@ -4451,13 +4451,13 @@
                                 "additionalProperties": false
                               },
                               {
-                                "description": "Compact bounds tuple [left, top, right, bottom].",
                                 "minItems": 4,
                                 "maxItems": 4,
                                 "type": "array",
                                 "items": {
                                   "type": "number"
-                                }
+                                },
+                                "description": "Compact bounds tuple [left, top, right, bottom]."
                               }
                             ]
                           }
@@ -4662,7 +4662,6 @@
                 }
               },
               "bounds": {
-                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
                 "type": "array",
                 "prefixItems": [
                   {
@@ -4677,7 +4676,8 @@
                   {
                     "type": "number"
                   }
-                ]
+                ],
+                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries."
               },
               "affordances": {
                 "type": "array",
@@ -4796,7 +4796,6 @@
                 "type": "object",
                 "properties": {
                   "bounds": {
-                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                     "anyOf": [
                       {
                         "type": "object",
@@ -4824,7 +4823,6 @@
                         "additionalProperties": false
                       },
                       {
-                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                         "type": "array",
                         "prefixItems": [
                           {
@@ -4839,9 +4837,11 @@
                           {
                             "type": "number"
                           }
-                        ]
+                        ],
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                       }
-                    ]
+                    ],
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                   }
                 },
                 "additionalProperties": {}
@@ -4869,7 +4869,6 @@
                 "type": "string"
               },
               "bounds": {
-                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                 "anyOf": [
                   {
                     "type": "object",
@@ -4897,7 +4896,6 @@
                     "additionalProperties": false
                   },
                   {
-                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                     "type": "array",
                     "prefixItems": [
                       {
@@ -4912,9 +4910,11 @@
                       {
                         "type": "number"
                       }
-                    ]
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                   }
-                ]
+                ],
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
               },
               "indexInMatches": {
                 "type": "integer",
@@ -4954,7 +4954,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -4982,7 +4981,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -4997,9 +4995,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5200,7 +5200,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -5228,7 +5227,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -5243,9 +5241,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5446,7 +5446,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -5474,7 +5473,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -5489,9 +5487,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5710,7 +5710,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -5738,7 +5737,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -5753,9 +5751,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5958,7 +5958,6 @@
             "type": "object",
             "properties": {
               "bounds": {
-                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                 "anyOf": [
                   {
                     "type": "object",
@@ -5986,7 +5985,6 @@
                     "additionalProperties": false
                   },
                   {
-                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                     "type": "array",
                     "prefixItems": [
                       {
@@ -6001,9 +5999,11 @@
                       {
                         "type": "number"
                       }
-                    ]
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                   }
-                ]
+                ],
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
               },
               "text": {
                 "type": "string"
@@ -6695,7 +6695,6 @@
               "maximum": 9007199254740991
             },
             "regionPx": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -6723,7 +6722,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -6738,9 +6736,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "focus": {
               "type": "object",
@@ -6808,8 +6808,8 @@
       "type": "object",
       "properties": {
         "url": {
-          "description": "URL to open",
-          "type": "string"
+          "type": "string",
+          "description": "URL to open"
         },
         "platform": {
           "type": "string",
@@ -7047,10 +7047,10 @@
           "type": "object",
           "properties": {
             "quietPeriodMs": {
-              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches",
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
             }
           },
           "required": ["quietPeriodMs"],
@@ -7122,9 +7122,9 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "call/accept/cancel/busy/hold; hold needs no phoneNumber",
           "type": "string",
-          "enum": ["call", "accept", "cancel", "busy", "hold"]
+          "enum": ["call", "accept", "cancel", "busy", "hold"],
+          "description": "call/accept/cancel/busy/hold; hold needs no phoneNumber"
         },
         "phoneNumber": {
           "description": "Phone number; required except for hold",
@@ -7158,9 +7158,9 @@
       "type": "object",
       "properties": {
         "direction": {
-          "description": "Pinch direction",
           "type": "string",
-          "enum": ["in", "out"]
+          "enum": ["in", "out"],
+          "description": "Pinch direction"
         },
         "distanceStart": {
           "description": "Initial finger distance (px, default: 400)",
@@ -7191,12 +7191,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
+              "type": "string",
+              "description": "Container resource ID"
             },
             "text": {
-              "description": "Container text",
-              "type": "string"
+              "type": "string",
+              "description": "Container text"
             }
           },
           "oneOf": [
@@ -7250,14 +7250,14 @@
       "type": "object",
       "properties": {
         "title": {
-          "description": "Notification title",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Notification title"
         },
         "body": {
-          "description": "Notification body",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Notification body"
         },
         "imageType": {
           "description": "Notification image type (default: normal)",
@@ -7275,14 +7275,14 @@
             "type": "object",
             "properties": {
               "label": {
-                "description": "Action label",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Action label"
               },
               "actionId": {
-                "description": "Action identifier",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Action identifier"
               }
             },
             "required": ["label", "actionId"],
@@ -7294,9 +7294,9 @@
           "type": "string"
         },
         "appId": {
-          "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted"
         },
         "platform": {
           "type": "string",
@@ -7377,9 +7377,9 @@
       "type": "object",
       "properties": {
         "operationId": {
-          "description": "Caller-generated idempotency key",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Caller-generated idempotency key"
         },
         "device": {
           "oneOf": [
@@ -7391,22 +7391,22 @@
                   "const": "android"
                 },
                 "name": {
-                  "description": "Exact AVD name",
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Exact AVD name"
                 },
                 "spec": {
                   "type": "object",
                   "properties": {
                     "runtime": {
-                      "description": "Installed Android system-image package identifier",
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Installed Android system-image package identifier"
                     },
                     "deviceType": {
-                      "description": "Android avdmanager device profile identifier",
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Android avdmanager device profile identifier"
                     },
                     "displayCutout": {
                       "description": "Required display cutout class for the exact device type; 'any' accepts every class",
@@ -7440,22 +7440,22 @@
                   "const": "ios"
                 },
                 "name": {
-                  "description": "Exact simulator name",
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Exact simulator name"
                 },
                 "spec": {
                   "type": "object",
                   "properties": {
                     "runtime": {
-                      "description": "CoreSimulator runtime identifier",
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "CoreSimulator runtime identifier"
                     },
                     "deviceType": {
-                      "description": "CoreSimulator device-type identifier",
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "CoreSimulator device-type identifier"
                     },
                     "displayCutout": {
                       "description": "Required display cutout class for the exact device type; 'any' accepts every class",
@@ -7515,9 +7515,9 @@
                   "minLength": 1
                 },
                 "container": {
-                  "description": "App container",
                   "type": "string",
-                  "enum": ["documents", "library", "cache", "tmp", "externalFiles"]
+                  "enum": ["documents", "library", "cache", "tmp", "externalFiles"],
+                  "description": "App container"
                 }
               },
               "required": ["domain", "appId", "container"],
@@ -7531,8 +7531,8 @@
                   "const": "user_files"
                 },
                 "namespace": {
-                  "description": "One caller-named fixture namespace",
-                  "type": "string"
+                  "type": "string",
+                  "description": "One caller-named fixture namespace"
                 },
                 "reset": {
                   "description": "Remove only this fixture namespace before writing",
@@ -7556,7 +7556,6 @@
           ]
         },
         "files": {
-          "description": "Files to write",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -7576,8 +7575,8 @@
                 "type": "string"
               },
               "destinationPath": {
-                "description": "Safe path relative to the declared storage target",
-                "type": "string"
+                "type": "string",
+                "description": "Safe path relative to the declared storage target"
               }
             },
             "required": ["destinationPath"],
@@ -7593,7 +7592,8 @@
                 "required": ["contentBase64"]
               }
             ]
-          }
+          },
+          "description": "Files to write"
         },
         "platform": {
           "type": "string",
@@ -7750,16 +7750,16 @@
           "type": "string"
         },
         "name": {
-          "description": "Storage name",
-          "type": "string"
+          "type": "string",
+          "description": "Storage name"
         },
         "fileName": {
           "description": "Deprecated alias for name",
           "type": "string"
         },
         "key": {
-          "description": "Key",
-          "type": "string"
+          "type": "string",
+          "description": "Key"
         },
         "platform": {
           "type": "string",
@@ -7789,13 +7789,13 @@
       "type": "object",
       "properties": {
         "appId": {
-          "description": "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value."
         },
         "confirm": {
-          "description": "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId."
         },
         "platform": {
           "type": "string",
@@ -7894,6 +7894,189 @@
     }
   },
   {
+    "name": "sendKeys",
+    "description": "Execute an ordered sequence of text insertion/replacement, clear, raw keys, and semantic IME keys.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "selector": {
+          "description": "Field to focus once before executing the ordered command sequence",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Resource ID, e.g. com.app:id/field"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Android accessibility test tag"
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Text, content-desc, or placeholder of the field"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "textAny": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Ordered text variants; first visible match wins"
+                }
+              },
+              "required": ["textAny"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "commands": {
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "type"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Text to insert or replace; never echoed in the result"
+                  },
+                  "operation": {
+                    "default": "insert",
+                    "description": "Insert at the current selection (default) or replace the focused field",
+                    "type": "string",
+                    "enum": ["insert", "replace"]
+                  },
+                  "mode": {
+                    "default": "auto",
+                    "description": "Delivery mode. auto prefers eventAll for insert and a11y for replace; explicit modes are honored on Android and iOS",
+                    "type": "string",
+                    "enum": ["auto", "a11y", "eventLast", "eventAll", "eventOnly"]
+                  }
+                },
+                "required": ["action", "text"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "key"
+                  },
+                  "key": {
+                    "type": "string",
+                    "enum": [
+                      "enter",
+                      "tab",
+                      "escape",
+                      "backspace",
+                      "delete",
+                      "arrow_up",
+                      "arrow_down",
+                      "arrow_left",
+                      "arrow_right",
+                      "next",
+                      "previous",
+                      "done",
+                      "search",
+                      "send",
+                      "go"
+                    ],
+                    "description": "Raw key or semantic IME key. Semantic next/previous/done/search/send/go ignore modifiers"
+                  },
+                  "modifiers": {
+                    "description": "Raw-key modifier chord: shift, ctrl, alt, or meta",
+                    "maxItems": 4,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["shift", "ctrl", "alt", "meta"]
+                    }
+                  }
+                },
+                "required": ["action", "key"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "clear"
+                  }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "description": "One to 100 commands executed serially; execution stops on the first failure"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["commands", "platform"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "sendSms",
     "description": "Send simulated incoming SMS on Android emulator.",
     "inputSchema": {
@@ -7901,12 +8084,12 @@
       "type": "object",
       "properties": {
         "phoneNumber": {
-          "description": "Sender phone number",
-          "type": "string"
+          "type": "string",
+          "description": "Sender phone number"
         },
         "message": {
-          "description": "SMS body; max 1024 chars, no newlines/NUL",
-          "type": "string"
+          "type": "string",
+          "description": "SMS body; max 1024 chars, no newlines/NUL"
         },
         "platform": {
           "type": "string",
@@ -8067,9 +8250,9 @@
           "type": "object",
           "properties": {
             "enrollment": {
-              "description": "Set iOS Simulator biometric enrollment state.",
               "type": "string",
-              "enum": ["enrolled", "not_enrolled"]
+              "enum": ["enrolled", "not_enrolled"],
+              "description": "Set iOS Simulator biometric enrollment state."
             }
           },
           "required": ["enrollment"],
@@ -8105,19 +8288,18 @@
           "type": "string"
         },
         "name": {
-          "description": "Storage name",
-          "type": "string"
+          "type": "string",
+          "description": "Storage name"
         },
         "fileName": {
           "description": "Deprecated alias for name",
           "type": "string"
         },
         "key": {
-          "description": "Key",
-          "type": "string"
+          "type": "string",
+          "description": "Key"
         },
         "value": {
-          "description": "Value string; null clears",
           "anyOf": [
             {
               "type": "string"
@@ -8125,10 +8307,10 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Value string; null clears"
         },
         "type": {
-          "description": "Value type",
           "type": "string",
           "enum": [
             "STRING",
@@ -8143,7 +8325,8 @@
             "ARRAY",
             "DICTIONARY",
             "UNKNOWN"
-          ]
+          ],
+          "description": "Value type"
         },
         "platform": {
           "type": "string",
@@ -8177,8 +8360,8 @@
           "minLength": 1
         },
         "policyAccess": {
-          "description": "Android: allow DND policy access",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Android: allow DND policy access"
         },
         "platform": {
           "type": "string",
@@ -8208,9 +8391,9 @@
       "type": "object",
       "properties": {
         "scope": {
-          "description": "Preference scope",
           "type": "string",
-          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"],
+          "description": "Preference scope"
         },
         "appId": {
           "description": "App package or bundle id",
@@ -8221,12 +8404,11 @@
           "type": "string"
         },
         "key": {
-          "description": "Preference key or Android system property name",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Preference key or Android system property name"
         },
         "value": {
-          "description": "Value to write",
           "anyOf": [
             {
               "type": "string"
@@ -8237,12 +8419,13 @@
             {
               "type": "number"
             }
-          ]
+          ],
+          "description": "Value to write"
         },
         "type": {
-          "description": "Value type for typed preference stores",
           "type": "string",
-          "enum": ["string", "bool", "int", "float"]
+          "enum": ["string", "bool", "int", "float"],
+          "description": "Value type for typed preference stores"
         },
         "platform": {
           "type": "string",
@@ -8272,9 +8455,9 @@
       "type": "object",
       "properties": {
         "toolName": {
-          "description": "Exact case-sensitive AutoMobile tool name to enable or disable.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Exact case-sensitive AutoMobile tool name to enable or disable."
         },
         "enabled": {
           "description": "Whether to enable the tool (default: true).",
@@ -8299,26 +8482,25 @@
       "type": "object",
       "properties": {
         "fields": {
-          "description": "Fields to set",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "selector": {
-                "description": "Field selector",
                 "type": "object",
                 "properties": {
                   "elementId": {
-                    "description": "Resource ID, e.g. com.app:id/btn_login",
-                    "type": "string"
+                    "type": "string",
+                    "description": "Resource ID, e.g. com.app:id/btn_login"
                   },
                   "text": {
-                    "description": "Text, content-desc, or placeholder",
-                    "type": "string"
+                    "type": "string",
+                    "description": "Text, content-desc, or placeholder"
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "description": "Field selector"
               },
               "value": {
                 "description": "Text/dropdown value",
@@ -8331,7 +8513,8 @@
             },
             "required": ["selector"],
             "additionalProperties": false
-          }
+          },
+          "description": "Fields to set"
         },
         "scrollDirection": {
           "description": "Initial search scroll direction",
@@ -8362,11 +8545,10 @@
       "type": "object",
       "properties": {
         "success": {
-          "description": "All fields set",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "All fields set"
         },
         "fields": {
-          "description": "Field results",
           "type": "array",
           "items": {
             "type": "object",
@@ -8405,11 +8587,12 @@
             },
             "required": ["selector", "success", "attempts"],
             "additionalProperties": false
-          }
+          },
+          "description": "Field results"
         },
         "totalAttempts": {
-          "description": "Total attempts",
-          "type": "number"
+          "type": "number",
+          "description": "Total attempts"
         },
         "error": {
           "description": "Error message",
@@ -8475,12 +8658,12 @@
           "type": "string"
         },
         "databasePath": {
-          "description": "Database path",
-          "type": "string"
+          "type": "string",
+          "description": "Database path"
         },
         "query": {
-          "description": "SQL query",
-          "type": "string"
+          "type": "string",
+          "description": "SQL query"
         },
         "platform": {
           "type": "string",
@@ -8510,27 +8693,26 @@
       "type": "object",
       "properties": {
         "platform": {
-          "description": "Android platform",
           "default": "android",
+          "description": "Android platform",
           "type": "string",
           "const": "android"
         },
         "namespace": {
-          "description": "One caller-named child directory beneath Downloads",
-          "type": "string"
+          "type": "string",
+          "description": "One caller-named child directory beneath Downloads"
         },
         "reset": {
-          "description": "Remove only this declared namespace before writing",
           "default": false,
+          "description": "Remove only this declared namespace before writing",
           "type": "boolean"
         },
         "indexMedia": {
-          "description": "Request Android media indexing for media files",
           "default": true,
+          "description": "Request Android media indexing for media files",
           "type": "boolean"
         },
         "files": {
-          "description": "Files to stage into the namespace",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -8550,13 +8732,14 @@
                 "type": "string"
               },
               "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
+                "type": "string",
+                "description": "Path relative to the declared Downloads namespace"
               }
             },
             "required": ["destinationPath"],
             "additionalProperties": false
-          }
+          },
+          "description": "Files to stage into the namespace"
         },
         "sessionUuid": {
           "description": "Session",
@@ -8582,27 +8765,26 @@
       "type": "object",
       "properties": {
         "platform": {
-          "description": "Android platform",
           "default": "android",
+          "description": "Android platform",
           "type": "string",
           "const": "android"
         },
         "namespace": {
-          "description": "One caller-named child directory beneath Downloads",
-          "type": "string"
+          "type": "string",
+          "description": "One caller-named child directory beneath Downloads"
         },
         "reset": {
-          "description": "Remove only this declared namespace before writing",
           "default": false,
+          "description": "Remove only this declared namespace before writing",
           "type": "boolean"
         },
         "indexMedia": {
-          "description": "Request Android media indexing for media files",
           "default": true,
+          "description": "Request Android media indexing for media files",
           "type": "boolean"
         },
         "files": {
-          "description": "Files to stage into the namespace",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -8622,13 +8804,14 @@
                 "type": "string"
               },
               "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
+                "type": "string",
+                "description": "Path relative to the declared Downloads namespace"
               }
             },
             "required": ["destinationPath"],
             "additionalProperties": false
-          }
+          },
+          "description": "Files to stage into the namespace"
         },
         "sessionUuid": {
           "description": "Session",
@@ -8698,12 +8881,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
+              "type": "string",
+              "description": "Container resource ID"
             },
             "text": {
-              "description": "Container text",
-              "type": "string"
+              "type": "string",
+              "description": "Container text"
             }
           },
           "oneOf": [
@@ -8721,9 +8904,9 @@
           "type": "boolean"
         },
         "direction": {
-          "description": "Swipe/scroll direction",
           "type": "string",
-          "enum": ["up", "down", "left", "right"]
+          "enum": ["up", "down", "left", "right"],
+          "description": "Swipe/scroll direction"
         },
         "gestureType": {
           "description": "Finger direction or content scroll direction; default: scrollTowardsDirection",
@@ -8735,12 +8918,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "ID of the element to look for",
-              "type": "string"
+              "type": "string",
+              "description": "ID of the element to look for"
             },
             "text": {
-              "description": "Text to look for",
-              "type": "string"
+              "type": "string",
+              "description": "Text to look for"
             }
           },
           "oneOf": [
@@ -8811,9 +8994,9 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "open/close/find/tap/dismiss/clearAll notification",
           "type": "string",
-          "enum": ["open", "close", "find", "tap", "dismiss", "clearAll"]
+          "enum": ["open", "close", "find", "tap", "dismiss", "clearAll"],
+          "description": "open/close/find/tap/dismiss/clearAll notification"
         },
         "notification": {
           "description": "Notification criteria to match",
@@ -8883,12 +9066,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
+              "type": "string",
+              "description": "Container resource ID"
             },
             "text": {
-              "description": "Container text",
-              "type": "string"
+              "type": "string",
+              "description": "Container text"
             }
           },
           "oneOf": [
@@ -8911,8 +9094,8 @@
           "type": "boolean"
         },
         "action": {
-          "description": "Action type (default: tap)",
           "default": "tap",
+          "description": "Action type (default: tap)",
           "type": "string",
           "enum": ["tap", "doubleTap", "longPress"]
         },
@@ -8975,33 +9158,33 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Resource ID, e.g. com.app:id/btn_login",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Resource ID, e.g. com.app:id/btn_login"
             },
             "testTag": {
-              "description": "Android accessibility test tag",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Android accessibility test tag"
             },
             "text": {
-              "description": "Text, content-desc, or placeholder",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Text, content-desc, or placeholder"
             },
             "accessibilityLink": {
-              "description": "Exact visible text of a semantic accessibility link",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Exact visible text of a semantic accessibility link"
             },
             "textAny": {
-              "description": "Ordered text variants; first visible match wins",
               "minItems": 1,
               "type": "array",
               "items": {
                 "type": "string",
                 "minLength": 1
-              }
+              },
+              "description": "Ordered text variants; first visible match wins"
             }
           },
           "oneOf": [
@@ -9032,12 +9215,12 @@
           "additionalProperties": false,
           "properties": {
             "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
+              "type": "string",
+              "description": "Container resource ID"
             },
             "text": {
-              "description": "Container text",
-              "type": "string"
+              "type": "string",
+              "description": "Container text"
             }
           },
           "oneOf": [
@@ -9051,8 +9234,8 @@
           "description": "Scope search to a container"
         },
         "action": {
-          "description": "Action type (default: tap)",
           "default": "tap",
+          "description": "Action type (default: tap)",
           "type": "string",
           "enum": ["tap", "doubleTap", "longPress", "focus"]
         },
@@ -9077,9 +9260,9 @@
           "type": "object",
           "properties": {
             "text": {
-              "description": "Exact visible text of a semantic link inside the selected element",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Exact visible text of a semantic link inside the selected element"
             },
             "occurrence": {
               "description": "Zero-based occurrence among exact semantic-link matches (default: 0)",
@@ -9236,7 +9419,6 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -9264,7 +9446,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -9279,9 +9460,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -9501,7 +9684,6 @@
                         "type": "string"
                       },
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -9529,7 +9711,6 @@
                             "additionalProperties": false
                           },
                           {
-                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                             "type": "array",
                             "prefixItems": [
                               {
@@ -9544,9 +9725,11 @@
                               {
                                 "type": "number"
                               }
-                            ]
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        ]
+                        ],
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       },
                       "indexInMatches": {
                         "type": "integer",
@@ -9586,7 +9769,6 @@
                   "type": "object",
                   "properties": {
                     "bounds": {
-                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                       "anyOf": [
                         {
                           "type": "object",
@@ -9614,7 +9796,6 @@
                           "additionalProperties": false
                         },
                         {
-                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                           "type": "array",
                           "prefixItems": [
                             {
@@ -9629,9 +9810,11 @@
                             {
                               "type": "number"
                             }
-                          ]
+                          ],
+                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                         }
-                      ]
+                      ],
+                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                     },
                     "text": {
                       "type": "string"
@@ -9832,7 +10015,6 @@
                   "type": "object",
                   "properties": {
                     "bounds": {
-                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                       "anyOf": [
                         {
                           "type": "object",
@@ -9860,7 +10042,6 @@
                           "additionalProperties": false
                         },
                         {
-                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                           "type": "array",
                           "prefixItems": [
                             {
@@ -9875,9 +10056,11 @@
                             {
                               "type": "number"
                             }
-                          ]
+                          ],
+                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                         }
-                      ]
+                      ],
+                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                     },
                     "text": {
                       "type": "string"
@@ -10419,7 +10602,6 @@
               "type": "string"
             },
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
               "anyOf": [
                 {
                   "type": "object",
@@ -10447,7 +10629,6 @@
                   "additionalProperties": false
                 },
                 {
-                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                   "type": "array",
                   "prefixItems": [
                     {
@@ -10462,9 +10643,11 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              ]
+              ],
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "indexInMatches": {
               "type": "integer",
@@ -10533,7 +10716,6 @@
                 "type": "string"
               },
               "bounds": {
-                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                 "anyOf": [
                   {
                     "type": "object",
@@ -10561,7 +10743,6 @@
                     "additionalProperties": false
                   },
                   {
-                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                     "type": "array",
                     "prefixItems": [
                       {
@@ -10576,9 +10757,11 @@
                       {
                         "type": "number"
                       }
-                    ]
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                   }
-                ]
+                ],
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
               },
               "indexInMatches": {
                 "type": "integer",
@@ -10652,17 +10835,15 @@
           "type": "object",
           "properties": {
             "reachable": {
-              "description": "Whether swipe cursor navigation reached the target",
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Whether swipe cursor navigation reached the target"
             },
             "traversalOrder": {
-              "description": "Focused nodes in cursor traversal order",
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
                   "bounds": {
-                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                     "anyOf": [
                       {
                         "type": "object",
@@ -10690,7 +10871,6 @@
                         "additionalProperties": false
                       },
                       {
-                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
                         "type": "array",
                         "prefixItems": [
                           {
@@ -10705,9 +10885,11 @@
                           {
                             "type": "number"
                           }
-                        ]
+                        ],
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                       }
-                    ]
+                    ],
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                   },
                   "text": {
                     "type": "string"
@@ -10903,11 +11085,12 @@
                 },
                 "required": ["bounds"],
                 "additionalProperties": {}
-              }
+              },
+              "description": "Focused nodes in cursor traversal order"
             },
             "focusTrapDetected": {
-              "description": "Whether cursor navigation got stuck or failed to converge",
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Whether cursor navigation got stuck or failed to converge"
             }
           },
           "required": ["reachable", "traversalOrder", "focusTrapDetected"],
@@ -11078,7 +11261,6 @@
                 "type": "string"
               },
               "shape": {
-                "description": "Highlight shape",
                 "oneOf": [
                   {
                     "type": "object",
@@ -11575,7 +11757,8 @@
                     "required": ["type", "points"],
                     "additionalProperties": false
                   }
-                ]
+                ],
+                "description": "Highlight shape"
               },
               "timing": {
                 "description": "Highlight timing",

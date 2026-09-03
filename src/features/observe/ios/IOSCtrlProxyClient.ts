@@ -140,6 +140,7 @@ import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
+import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
@@ -163,6 +164,7 @@ import type {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyKeyboardResult,
+  CtrlProxyPressKeyResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
@@ -305,6 +307,13 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult>;
+
+  requestPressKey(
+    key: InputKeyName,
+    modifiers: InputKeyModifier[],
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyPressKeyResult>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
@@ -2269,6 +2278,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult> {
     return this.keyboard.requestKeyboard(action, timeoutMs, perf);
+  }
+
+  async requestPressKey(
+    key: InputKeyName,
+    modifiers: InputKeyModifier[],
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyPressKeyResult> {
+    return this.keyboard.requestPressKey(key, modifiers, timeoutMs, perf);
   }
 
   // ===========================================================================

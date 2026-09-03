@@ -136,6 +136,8 @@ interface CtrlProxyActions {
     frameContext: String?,
   ) = requestSetText(requestId, text, resourceId, dismissKeyboard)
 
+  fun requestInsertText(requestId: String?, text: String)
+
   fun requestImeAction(requestId: String?, action: String)
 
   fun requestImeAction(requestId: String?, action: String, frameContext: String?) =

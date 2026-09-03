@@ -14,6 +14,7 @@ describe("NAVIGATION_RELEVANT_TOOLS", () => {
       "inputText",
       "pinchOn",
       "pressButton",
+      "sendKeys",
       "swipeOn",
       "tapOn",
     ]);

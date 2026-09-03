@@ -423,6 +423,12 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches request_insert_text`() = runTest {
+    dispatch("""{"type":"request_insert_text","requestId":"txt2","text":" world"}""")
+    assertEquals("requestInsertText" to listOf<Any?>("txt2", " world"), lastCall)
+  }
+
+  @Test
   fun `dispatches request_ime_action`() = runTest {
     dispatch("""{"type":"request_ime_action","requestId":"i1","action":"search"}""")
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search"), lastCall)

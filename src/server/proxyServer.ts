@@ -95,7 +95,9 @@ function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError)
   );
 }
 
-function deviceControlTransportFailureResult(error: DeviceControlTransportError): CallToolResult {
+export function deviceControlTransportFailureResult(
+  error: DeviceControlTransportError,
+): CallToolResult {
   const failure = sanitizeDeviceControlTransportFailure(error.failure);
   return {
     content: [

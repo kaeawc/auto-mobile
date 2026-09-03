@@ -1767,7 +1767,7 @@ jobs:
         run: ./scripts/ios/swift-test.sh
 
   ios-xcode-build:
-    name: "Build Xcode Projects (${{ matrix.config.name }})"
+    name: "Build Xcode Projects (${{ matrix.config.name }}, ${{ matrix.project }})"
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -1781,6 +1781,16 @@ jobs:
         # PR runs only the primary Xcode toolchain; full sweep runs on nightly.yml.
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
+        # Shard the two Xcode projects across two runners so they build in
+        # parallel, halving this required leg's wall time. The "iOS Build" gate
+        # reads needs.ios-xcode-build.result, which aggregates the whole matrix
+        # (green only if every shard is green), so the gate needs no change. Costs
+        # one extra concurrent macOS slot per PR — offset by moving the Playground
+        # tests to CircleCI (see .circleci/continue_config.yml). Names must match
+        # the generated <name>.xcodeproj basenames passed to xcode-build.sh.
+        project:
+          - Playground
+          - CtrlProxy
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1802,19 +1812,22 @@ jobs:
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Build Xcode Projects"
-        run: ./scripts/ios/xcode-build.sh
+        run: ./scripts/ios/xcode-build.sh ${{ matrix.project }}
 
-  # Runs the Playground PlaygroundTests target (design-system colour/contrast/
-  # typography/shape tests, #5102) via xcode-test.sh, scoped to "Playground" so
-  # the heavier CtrlProxy tests (covered by ios-xctest-runner-simulator-tests)
-  # are not double-run. Simulator-based, so it feeds the non-required "iOS" gate
-  # (not the deterministic "iOS Build" gate) — matching the repo policy that
-  # simulator tests must not gate merges.
+  # The Playground design-system tests (colour/contrast/typography/shape, #5102)
+  # normally run on CircleCI (.circleci/continue_config.yml → ios-playground-tests),
+  # which frees a concurrent GitHub macOS slot for the sharded build lanes above.
+  # CircleCI derives its run-ios parameter from changed PATHS only, so it cannot
+  # see the run-ios / run-native LABEL force. This GHA job is the fallback for that
+  # one case: a label-forced run whose diff touches no iOS path (ios_should_run is
+  # true only via the label, ios_changed is false). On a normal iOS-path PR
+  # ios_changed is true and this job is skipped — CircleCI runs Playground instead,
+  # so there is no double-run. Advisory, like the other simulator tests.
   ios-playground-tests:
     name: "iOS Playground Tests (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true'
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -3255,6 +3268,10 @@ jobs:
     timeout-minutes: 10
     name: "iOS"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    # ios-playground-tests normally runs on CircleCI; the GHA job stays in this
+    # roll-up for the label-forced-without-iOS-paths fallback, where it runs here.
+    # In the common iOS-path case it is skipped (result 'skipped'), which this
+    # gate treats as non-failing.
     needs:
       - detect-changes
       - ios-build-gate

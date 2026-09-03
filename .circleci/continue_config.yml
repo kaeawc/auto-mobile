@@ -1,0 +1,121 @@
+version: 2.1
+
+# Continuation config for the CircleCI macOS/iOS lanes. Reached from
+# .circleci/config.yml (the setup pipeline) only when the path-filtering job
+# decided iOS sources changed and set `run-ios` to true. See that file's header
+# for the why, the budget, and the REQUIRED dynamic-config project setting.
+#
+# Scope: ios-swift-packages and ios-xcode-build mirror the same-named jobs in
+# .github/workflows/pull_request.yml — the ones feeding the required "iOS Build"
+# gate. ios-playground-tests mirrors the design-system Playground tests that used
+# to run on GitHub Actions; they were moved here to free a concurrent macOS slot
+# on GitHub (throughput) and stay advisory (simulator tests must not gate merges,
+# per repo policy), so this job's CircleCI check is NOT a required status check.
+# All jobs call the SAME repo scripts, so build logic stays single-sourced.
+#
+# Signing: the scripts only sign when IOS_SIGNING_ENABLED / MACOS_SIGNING_ENABLED
+# are "true" (derived from cert-secret presence). No secrets are configured on
+# CircleCI, so these build unsigned — correct for a simulator build+test lane.
+
+parameters:
+  run-ios:
+    type: boolean
+    default: false
+
+executors:
+  ios:
+    macos:
+      # Match the Xcode pinned by pull_request.yml. Verify the exact image is
+      # offered at https://circleci.com/developer/machine/image/xcode and adjust.
+      xcode: "26.5"
+    # m4pro.medium is the ONLY macOS class available on the Free plan (all
+    # Free-plan macOS jobs run on it since 2025-11-10) and it is ~200 credits/min.
+    # Apple-silicon classes take NO `macos.` prefix (that prefix is only on the
+    # legacy m1/Intel classes, e.g. macos.m1.medium.gen1). Do NOT use m1/m2 — they
+    # reached end-of-life 2026-02-16 and are rejected as invalid resource classes.
+    resource_class: m4pro.medium
+
+commands:
+  restore_spm_cache:
+    steps:
+      - run:
+          name: "Compute SwiftPM cache key"
+          command: cat ios/*/Package.swift > /tmp/spm-lock.txt
+      - restore_cache:
+          keys:
+            - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+            - spm-v1-
+
+jobs:
+  ios-swift-packages:
+    executor: ios
+    steps:
+      - checkout
+      - restore_spm_cache
+      - run:
+          name: "Report toolchain"
+          command: xcodebuild -version && swift --version
+      - run:
+          name: "Build Swift packages"
+          command: ./scripts/ios/swift-build.sh
+      - run:
+          name: "Test Swift packages"
+          command: ./scripts/ios/swift-test.sh
+      - save_cache:
+          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+          paths:
+            - ~/Library/Caches/org.swift.swiftpm
+            - ios/auto-mobile-sdk/.build
+            - ios/control-proxy/.build
+            - ios/screen-capture/.build
+            - ios/XCTestRunner/.build
+
+  ios-xcode-build:
+    executor: ios
+    steps:
+      - checkout
+      - run:
+          name: "Install XcodeGen"
+          # CircleCI's macOS image has a non-writable /usr/local/share, which the
+          # script's default prefix can't create. The script honors an override,
+          # so install into $HOME/.local and persist that on PATH (via CircleCI's
+          # $BASH_ENV) for the drift-check and build steps that follow.
+          command: |
+            export XCODEGEN_PREFIX="${HOME}/.local"
+            ./scripts/ios/install-xcodegen.sh
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+      - run:
+          name: "Check XcodeGen project drift"
+          command: ./scripts/ios/xcodegen-drift-check.sh --all
+      - run:
+          name: "Ensure iOS Simulator runtime"
+          command: ./scripts/ios/ensure-simulator-runtime.sh
+      - run:
+          name: "Build Xcode projects (iOS Simulator)"
+          command: ./scripts/ios/xcode-build.sh
+
+  # Design-system Playground tests (colour/contrast/typography/shape, #5102),
+  # moved off GitHub Actions to free a concurrent macOS slot there. Simulator
+  # tests are advisory (must not gate merges), so this job's status check must
+  # stay OFF the branch-protection required list.
+  ios-playground-tests:
+    executor: ios
+    steps:
+      - checkout
+      - restore_spm_cache
+      - run:
+          name: "Ensure iOS Simulator runtime"
+          command: ./scripts/ios/ensure-simulator-runtime.sh
+      - run:
+          name: "Run Playground tests"
+          command: ./scripts/ios/xcode-test.sh Playground
+
+workflows:
+  ios-macos:
+    # Gate the whole workflow on the parameter path-filtering set. When false
+    # (no iOS changes) the workflow has no jobs and no macOS executor is used.
+    when: << pipeline.parameters.run-ios >>
+    jobs:
+      - ios-swift-packages
+      - ios-xcode-build
+      - ios-playground-tests

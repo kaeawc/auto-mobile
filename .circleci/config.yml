@@ -6,148 +6,62 @@ version: 2.1
 # GitHub Actions, where it runs free and fast on Linux. CircleCI exists here for
 # one reason: AutoMobile is a public repo, so GitHub-hosted macOS minutes are
 # free but capped at 5 CONCURRENT macOS jobs, and the per-PR iOS matrix competes
-# for that cap. Running the iOS build/test on CircleCI's macOS executor adds a
-# parallel lane. (CircleCI's auto-generated Linux node/java/python jobs were
-# intentionally discarded — importing free-on-GitHub Linux work buys nothing.)
+# for that cap. Running iOS build/test on CircleCI's macOS executor adds
+# parallel lanes.
 #
-# Scope: the two jobs below mirror `ios-swift-packages` and `ios-xcode-build`
-# in .github/workflows/pull_request.yml — the ones that feed the required
-# "iOS Build" gate. They call the SAME repo scripts, so build logic stays
-# single-sourced. The heavier simulator TESTS (Playground / XCTestRunner) are
-# left on GitHub Actions: they need a booted simulator, they cost more macOS
-# minutes, and they feed only the non-required "iOS" gate.
+# DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline.
+# The path-filtering job diffs the branch against main and continues to
+# .circleci/continue_config.yml ONLY when iOS sources changed — so a non-iOS
+# push never spins up (or checks out on) a macOS executor at all. This replaces
+# the old `halt_if_no_ios_changes`, which ran AFTER a full macOS checkout and
+# therefore still billed macOS minutes for every push. The heavier macOS jobs
+# live in continue_config.yml.
+#
+# ── REQUIRED ONE-TIME PROJECT SETTING ────────────────────────────────────────
+# CircleCI → Project Settings → Advanced → "Enable dynamic config using setup
+# workflows" MUST be ON, or CircleCI rejects this `setup: true` config. There is
+# no config-file equivalent; it is a dashboard toggle.
+# ─────────────────────────────────────────────────────────────────────────────
 #
 # Budget: CircleCI's open-source plan includes ~30,000 macOS credits/month
 # (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
-# Every job halts early unless ios/**, scripts/ios/**, or this config changed, so non-iOS
-# commits cost nothing. To trim spend further, drop `ios-xcode-build` from the
-# workflow and keep only `ios-swift-packages`.
-#
-# Signing: the scripts only sign when IOS_SIGNING_ENABLED / MACOS_SIGNING_ENABLED
-# are "true" (derived from cert-secret presence). No secrets are configured on
-# CircleCI, so these build unsigned — correct for a simulator build+test lane.
+# With path filtering, only pushes that touch ios/**, scripts/ios/**, or
+# .circleci/** reach the macOS lanes; everything else costs a few Linux seconds.
 
-executors:
-  ios:
-    macos:
-      # Match the Xcode pinned by pull_request.yml. Verify the exact image is
-      # offered at https://circleci.com/developer/machine/image/xcode and adjust.
-      xcode: "26.5"
-    # m4pro.medium is the ONLY macOS class available on the Free plan (all
-    # Free-plan macOS jobs run on it since 2025-11-10) and it is ~200 credits/min.
-    # Apple-silicon classes take NO `macos.` prefix (that prefix is only on the
-    # legacy m1/Intel classes, e.g. macos.m1.medium.gen1). Do NOT use m1/m2 — they
-    # reached end-of-life 2026-02-16 and are rejected as invalid resource classes.
-    resource_class: m4pro.medium
+setup: true
 
-commands:
-  halt_if_no_ios_changes:
-    description: "Save macOS credits: stop the job unless iOS sources changed."
-    steps:
-      - run:
-          name: "Halt if no iOS changes"
-          command: |
-            set -euo pipefail
-            # Diff the WHOLE branch against its base (merge-base with main), not
-            # just HEAD~1..HEAD: a multi-commit push — or a post-rebase tip that
-            # only touches docs — can leave an earlier commit's ios/** change
-            # invisible to a tip-only diff, wrongly halting a build that should
-            # run. Always fall back to RUNNING if a base can't be established, so
-            # a real iOS change is never skipped.
-            if ! git fetch --no-tags --quiet origin main 2>/dev/null; then
-              echo "Could not fetch origin/main — running to be safe."
-              exit 0
-            fi
-            BASE="$(git merge-base FETCH_HEAD HEAD 2>/dev/null || true)"
-            if [ -z "${BASE}" ]; then
-              echo "No merge-base with main — running to be safe."
-              exit 0
-            fi
-            if [ "${BASE}" = "$(git rev-parse HEAD)" ]; then
-              # HEAD is an ancestor of main (e.g. a build on main itself): no PR
-              # delta to test, and main was already validated on its PR.
-              echo "On base branch (no delta vs main) — halting to save macOS credits."
-              circleci-agent step halt
-              exit 0
-            fi
-            # --no-renames so a move OUT of ios/** (e.g. `git mv ios/a docs/a`)
-            # still reports the ios/ source path, not just the destination.
-            # Write the list to a file and grep the file — NOT `git diff | grep`
-            # (grep exits on first match while git diff is still writing, and
-            # under pipefail that SIGPIPE (141) would divert a real match into
-            # the halt branch) and NOT a shell here-string: CircleCI's config
-            # processor reads the here-string redirection operator as a
-            # parameter-tag delimiter and rejects the whole config. Keep every
-            # such double-angle sequence out of this file entirely.
-            git diff --no-renames --name-only "${BASE}" HEAD > /tmp/ios_changed.txt || true
-            if grep -qE '^(ios/|scripts/ios/|\.circleci/)' /tmp/ios_changed.txt; then
-              echo "iOS changes in this branch vs main — continuing."
-            else
-              echo "No ios/**, scripts/ios/**, or .circleci/ changes vs main — halting to save macOS credits."
-              circleci-agent step halt
-            fi
-  restore_spm_cache:
-    steps:
-      - run:
-          name: "Compute SwiftPM cache key"
-          command: cat ios/*/Package.swift > /tmp/spm-lock.txt
-      - restore_cache:
-          keys:
-            - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
-            - spm-v1-
-
-jobs:
-  ios-swift-packages:
-    executor: ios
-    steps:
-      - checkout
-      - halt_if_no_ios_changes
-      - restore_spm_cache
-      - run:
-          name: "Report toolchain"
-          command: xcodebuild -version && swift --version
-      - run:
-          name: "Build Swift packages"
-          command: ./scripts/ios/swift-build.sh
-      - run:
-          name: "Test Swift packages"
-          command: ./scripts/ios/swift-test.sh
-      - save_cache:
-          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
-          paths:
-            - ~/Library/Caches/org.swift.swiftpm
-            - ios/auto-mobile-sdk/.build
-            - ios/control-proxy/.build
-            - ios/screen-capture/.build
-            - ios/XCTestRunner/.build
-
-  ios-xcode-build:
-    executor: ios
-    steps:
-      - checkout
-      - halt_if_no_ios_changes
-      - run:
-          name: "Install XcodeGen"
-          # CircleCI's macOS image has a non-writable /usr/local/share, which the
-          # script's default prefix can't create. The script honors an override,
-          # so install into $HOME/.local and persist that on PATH (via CircleCI's
-          # $BASH_ENV) for the drift-check and build steps that follow.
-          command: |
-            export XCODEGEN_PREFIX="${HOME}/.local"
-            ./scripts/ios/install-xcodegen.sh
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-      - run:
-          name: "Check XcodeGen project drift"
-          command: ./scripts/ios/xcodegen-drift-check.sh --all
-      - run:
-          name: "Ensure iOS Simulator runtime"
-          command: ./scripts/ios/ensure-simulator-runtime.sh
-      - run:
-          name: "Build Xcode projects (iOS Simulator)"
-          command: ./scripts/ios/xcode-build.sh
+orbs:
+  # Latest stable at time of writing. The filter job's base-revision/config-path/
+  # mapping interface used below is unchanged across the 1.x–3.x line.
+  path-filtering: circleci/path-filtering@3.0.0
 
 workflows:
-  ios-macos:
+  detect-ios-changes:
     jobs:
-      - ios-swift-packages
-      - ios-xcode-build
+      # Runs on a small Linux executor. Computes the changed-file set vs main
+      # (merge-base) and sets the `run-ios` pipeline parameter, then continues to
+      # continue_config.yml.
+      #
+      # `branches: ignore: main` excludes post-merge main builds entirely. On the
+      # base branch the orb's merge-base equals HEAD, and path-filtering's
+      # `same-base-run` default (true) then falls back to diffing HEAD~1..HEAD —
+      # which would re-run every merged iOS change on macOS after the PR already
+      # validated it. Skipping main restores the old "halt on base branch" and
+      # protects the limited macOS budget.
+      #
+      # The mapping mirrors GitHub's filter-ios paths (ios/**, scripts/ios/**,
+      # .swiftformat, .swiftlint.yml) plus .circleci/** so a config change also
+      # revalidates. Keep it in sync with `filter-ios` in pull_request.yml.
+      - path-filtering/filter:
+          name: detect-ios-changes
+          base-revision: main
+          config-path: .circleci/continue_config.yml
+          filters:
+            branches:
+              ignore: main
+          mapping: |
+            ios/.* run-ios true
+            scripts/ios/.* run-ios true
+            \.swiftformat run-ios true
+            \.swiftlint\.yml run-ios true
+            \.circleci/.* run-ios true

@@ -618,6 +618,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       executionSessionUuid,
       sessionId,
     );
+    if (
+      daemonMode &&
+      providedSessionUuid &&
+      !isDeviceSessionAcquisitionTool(name) &&
+      name !== SET_TOOL_ENABLED_TOOL_NAME
+    ) {
+      // Plain tools can strip or ignore sessionUuid themselves. Admit it here so
+      // an unissued UUID cannot be treated as a successful proxy binding.
+      await DaemonState.getInstance()
+        .getSessionManager()
+        .admitIssuedSessionForAutomation(providedSessionUuid, {
+          executionId: execution.id,
+          startTime: execution.startTime,
+        });
+    }
     const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
     const handlerParams =
       parsedParams && typeof parsedParams === "object"

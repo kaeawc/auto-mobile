@@ -75,7 +75,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
   public static final int[] $EnumSwitchMapping$0;
 }
 Compiled from "AutoMobileSDK.kt"
-public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$6$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
+public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$1$6$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
   public void onStart(androidx.lifecycle.LifecycleOwner);
   public void onStop(androidx.lifecycle.LifecycleOwner);
   public void onCreate(androidx.lifecycle.LifecycleOwner);

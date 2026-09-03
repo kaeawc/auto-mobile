@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -69,6 +70,24 @@ class AutoMobileSDKShutdownTest {
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
 
     assertSame(originalHandler, Thread.getDefaultUncaughtExceptionHandler())
+  }
+
+  @Test
+  fun `reinitialization waits for pending main thread teardown`() {
+    AutoMobileSDK.initialize(context)
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+
+    val shutdownThread = Thread { AutoMobileSDK.shutdown() }
+    shutdownThread.start()
+    shutdownThread.join()
+    AutoMobileSDK.initialize(context)
+
+    assertNull(AutoMobileSDK.getEventBuffer())
+
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+
+    assertTrue(AutoMobileCrashes.isInitialized())
+    assertTrue(AutoMobileSDK.getEventBuffer() != null)
   }
 
   @Test

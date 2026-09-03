@@ -174,14 +174,24 @@ has_test_targets=0
 args=("$@")
 for ((arg_index = 0; arg_index < ${#args[@]}; arg_index += 1)); do
   arg="${args[$arg_index]}"
-  if [[ "$arg" == --bail ]]; then
+  if [[ "$arg" == --cwd || "$arg" == --cwd=* ]]; then
+    echo "--cwd is not supported because test lanes are resolved from the repository root." >&2
+    exit 2
+  elif [[ "$arg" == --bail || "$arg" == --parallel ]]; then
     passthrough_args+=("$arg")
     next_arg="${args[$((arg_index + 1))]:-}"
     if [[ "$next_arg" =~ ^[0-9]+$ ]]; then
       passthrough_args+=("$next_arg")
       arg_index=$((arg_index + 1))
     fi
-  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" || "$arg" == --import || "$arg" == --inspect || "$arg" == --inspect-wait || "$arg" == --inspect-brk || "$arg" == --cpu-prof-name || "$arg" == --cpu-prof-dir || "$arg" == --cpu-prof-interval || "$arg" == --heap-prof-name || "$arg" == --heap-prof-dir || "$arg" == --install || "$arg" == "--eval" || "$arg" == "-e" || "$arg" == --print || "$arg" == "-p" || "$arg" == --port || "$arg" == --conditions || "$arg" == --fetch-preconnect || "$arg" == --max-http-header-size || "$arg" == --dns-result-order || "$arg" == --unhandled-rejections || "$arg" == --console-depth || "$arg" == --user-agent || "$arg" == --cron-title || "$arg" == --cron-period || "$arg" == --elide-lines || "$arg" == "--filter" || "$arg" == "-F" || "$arg" == --shell || "$arg" == --env-file || "$arg" == --cwd || "$arg" == --config || "$arg" == "-c" ]]; then
+  elif [[ "$arg" == --changed || "$arg" == --inspect || "$arg" == --inspect-wait || "$arg" == --inspect-brk ]]; then
+    passthrough_args+=("$arg")
+    next_arg="${args[$((arg_index + 1))]:-}"
+    if [[ -n "$next_arg" && "$next_arg" != -* && "$next_arg" != test/* && "$next_arg" != "$ROOT"/test/* ]]; then
+      passthrough_args+=("$next_arg")
+      arg_index=$((arg_index + 1))
+    fi
+  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" || "$arg" == --import || "$arg" == --cpu-prof-name || "$arg" == --cpu-prof-dir || "$arg" == --cpu-prof-interval || "$arg" == --heap-prof-name || "$arg" == --heap-prof-dir || "$arg" == --install || "$arg" == "--eval" || "$arg" == "-e" || "$arg" == --print || "$arg" == "-p" || "$arg" == --port || "$arg" == --conditions || "$arg" == --fetch-preconnect || "$arg" == --max-http-header-size || "$arg" == --dns-result-order || "$arg" == --unhandled-rejections || "$arg" == --console-depth || "$arg" == --user-agent || "$arg" == --cron-title || "$arg" == --cron-period || "$arg" == --elide-lines || "$arg" == "--filter" || "$arg" == "-F" || "$arg" == --shell || "$arg" == --env-file || "$arg" == --config || "$arg" == "-c" ]]; then
     passthrough_args+=("$arg")
     if [[ "$arg_index" -lt $((${#args[@]} - 1)) ]]; then
       arg_index=$((arg_index + 1))

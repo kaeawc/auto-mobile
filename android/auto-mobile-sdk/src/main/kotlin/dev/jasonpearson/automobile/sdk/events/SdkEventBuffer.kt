@@ -194,11 +194,11 @@ internal class SdkEventBuffer(
   private fun dropOldestPendingEvent() {
     val oldestBatch = pendingBatches.firstOrNull()
     if (oldestBatch == null) {
-      buffer.removeFirst()
+      buffer.removeAt(0)
       return
     }
 
-    oldestBatch.removeFirst()
+    oldestBatch.removeAt(0)
     if (oldestBatch.isEmpty()) {
       pendingBatches.removeFirst()
     }

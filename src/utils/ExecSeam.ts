@@ -12,6 +12,7 @@ export interface ExecSeamOptions {
   maxBuffer?: number;
   cwd?: string;
   signal?: AbortSignal;
+  killSignal?: NodeJS.Signals;
 }
 
 /** Raw stdout/stderr an exec seam resolves with, before Buffer coercion. */
@@ -29,6 +30,7 @@ export interface ExecRequestOptions {
   maxBuffer?: number;
   cwd?: string;
   signal?: AbortSignal;
+  killSignal?: NodeJS.Signals;
 }
 
 /** Behavior toggles for {@link runExecSeam} that do not map to node exec options. */
@@ -64,6 +66,7 @@ export async function runExecSeam(
       maxBuffer: options.maxBuffer,
       cwd: options.cwd,
       signal: options.signal,
+      killSignal: options.killSignal,
     });
     return createExecResult(stdout, stderr);
   } catch (error) {

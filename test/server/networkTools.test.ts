@@ -543,16 +543,20 @@ describe("network tool schema", () => {
     expect(JSON.parse(androidMessages[0]).type).toBe("set_network_mock_rules");
   });
 
-  test("mockNetwork rejects invalid response headers before changing state", async () => {
+  test("mockNetwork rejects invalid response header values before changing state", async () => {
     const tool = ToolRegistry.getTool("mockNetwork");
 
-    await expect(
-      tool!.deviceAwareHandler!(androidDevice, {
-        host: "api\\.example\\.com",
-        path: "/users",
-        responseHeaders: { "X-Invalid": "line\nbreak" },
+    await Promise.all(
+      [{ "X-Invalid": "line\nbreak" }, { "X-Invalid": "café" }].map(async (responseHeaders) => {
+        await expect(
+          tool!.deviceAwareHandler!(androidDevice, {
+            host: "api\\.example\\.com",
+            path: "/users",
+            responseHeaders,
+          }),
+        ).rejects.toThrow("Invalid mock response header");
       }),
-    ).rejects.toThrow("Invalid mock response header");
+    );
 
     expect(NetworkState.getInstance().getMockSummary()).toEqual({});
     expect(androidMessages).toHaveLength(0);

@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { validateHeaderName, validateHeaderValue } from "node:http";
+import { validateHeaderName } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
@@ -92,9 +92,11 @@ function assertValidResponseHeaders(responseHeaders: Record<string, string> | un
   for (const [name, value] of Object.entries(responseHeaders)) {
     try {
       validateHeaderName(name);
-      validateHeaderValue(name, value);
     } catch (error) {
       throw new ActionableError(`Invalid mock response header '${name}': ${errorMessage(error)}`);
+    }
+    if (!/^[\t\x20-\x7e]*$/.test(value)) {
+      throw new ActionableError(`Invalid mock response header '${name}': value must be ASCII`);
     }
   }
 }

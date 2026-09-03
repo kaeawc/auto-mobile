@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
+import dev.jasonpearson.automobile.sdk.events.DropCounter
+import dev.jasonpearson.automobile.sdk.events.DropReason
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.io.IOException
 import java.net.Proxy
@@ -17,6 +20,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import okhttp3.Authenticator
 import okhttp3.Cache
@@ -61,6 +65,24 @@ class AutoMobileNetworkInterceptorTest {
 
   private fun drainDelivery() {
     bufferExecutor!!.submit {}.get(1, TimeUnit.SECONDS)
+  }
+
+  private fun throwingBuffer(): SdkEventBuffer {
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        dropCounter =
+          object : DropCounter {
+            override fun increment(reason: DropReason, count: Int): Nothing =
+              throw IllegalStateException("recording failed")
+
+            override fun snapshot(): Map<DropReason, Long> = emptyMap()
+
+            override fun reset() = Unit
+          },
+      )
+    buffer.shutdown()
+    return buffer
   }
 
   private fun fakeChain(
@@ -486,6 +508,17 @@ class AutoMobileNetworkInterceptorTest {
     }
   }
 
+  private fun mutationEnabledInterceptor(
+    buffer: SdkEventBuffer,
+    ruleStore: NetworkMockRuleStore.RuleMatcher,
+  ) =
+    AutoMobileNetworkInterceptor(
+      buffer,
+      ruleStore = ruleStore,
+      policyProvider = { SdkCapturePolicy(allowMutations = true) },
+      networkControlProvider = { true },
+    )
+
   @Test
   fun `mock rule returns synthetic response without calling chain`() {
     val (buffer, flushed) = collectingBuffer()
@@ -505,8 +538,7 @@ class AutoMobileNetworkInterceptorTest {
         responseBody = """{"error":"service unavailable"}""",
         contentType = "application/json",
       )
-    val interceptor =
-      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(matchResult = mockRule))
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(matchResult = mockRule))
 
     val response = interceptor.intercept(chain)
 
@@ -543,8 +575,7 @@ class AutoMobileNetworkInterceptorTest {
         remaining = null,
         expiresAtEpochMs = 99999L,
       )
-    val interceptor =
-      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
 
     val response = interceptor.intercept(fakeChain())
 
@@ -565,8 +596,7 @@ class AutoMobileNetworkInterceptorTest {
         remaining = null,
         expiresAtEpochMs = 99999L,
       )
-    val interceptor =
-      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<java.net.SocketTimeoutException> {
       interceptor.intercept(fakeChain())
@@ -587,8 +617,7 @@ class AutoMobileNetworkInterceptorTest {
         remaining = null,
         expiresAtEpochMs = 99999L,
       )
-    val interceptor =
-      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<java.net.ConnectException> {
       interceptor.intercept(fakeChain())
@@ -605,8 +634,7 @@ class AutoMobileNetworkInterceptorTest {
         remaining = null,
         expiresAtEpochMs = 99999L,
       )
-    val interceptor =
-      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<java.net.UnknownHostException> {
       interceptor.intercept(fakeChain())
@@ -623,8 +651,7 @@ class AutoMobileNetworkInterceptorTest {
         remaining = null,
         expiresAtEpochMs = 99999L,
       )
-    val interceptor =
-      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<javax.net.ssl.SSLException> {
       interceptor.intercept(fakeChain())
@@ -650,9 +677,9 @@ class AutoMobileNetworkInterceptorTest {
         expiresAtEpochMs = 99999L,
       )
     val interceptor =
-      AutoMobileNetworkInterceptor(
+      mutationEnabledInterceptor(
         buffer,
-        ruleStore = fakeRuleMatcher(matchResult = mockRule, errorSim = sim),
+        fakeRuleMatcher(matchResult = mockRule, errorSim = sim),
       )
 
     val response = interceptor.intercept(fakeChain())
@@ -672,6 +699,138 @@ class AutoMobileNetworkInterceptorTest {
     val response = interceptor.intercept(fakeChain(responseCode = 200))
 
     assertEquals(200, response.code)
+  }
+
+  @Test
+  fun `observation failures leave a successful host request unchanged`() {
+    val buffer = throwingBuffer()
+    var proceedCalls = 0
+    val interceptor =
+      AutoMobileNetworkInterceptor(
+        buffer,
+        ruleStore =
+          object : NetworkMockRuleStore.RuleMatcher {
+            override fun findMatchingRule(host: String, path: String, method: String): Nothing =
+              throw IllegalStateException("rule matching failed")
+
+            override fun getErrorSimulation(): NetworkMockRuleStore.ErrorSimulationConfig? = null
+          },
+        policyProvider = { SdkCapturePolicy(allowMutations = true) },
+        networkControlProvider = { true },
+      )
+
+    val response =
+      interceptor.intercept(
+        FakeInterceptorChain(responseCode = 202, onProceed = { proceedCalls++ })
+      )
+
+    assertEquals(1, proceedCalls)
+    assertEquals(202, response.code)
+  }
+
+  @Test
+  fun `observation failures leave a failed host request unchanged`() {
+    val buffer = throwingBuffer()
+    val hostFailure = IOException("host failure")
+    var proceedCalls = 0
+    val interceptor =
+      AutoMobileNetworkInterceptor(
+        buffer,
+        policyProvider = { throw IllegalStateException("policy failed") },
+      )
+
+    val thrown =
+      assertFailsWith<IOException> {
+        interceptor.intercept(
+          FakeInterceptorChain(
+            throwOnProceed = hostFailure,
+            onProceed = { proceedCalls++ },
+          )
+        )
+      }
+
+    assertEquals(1, proceedCalls)
+    assertSame(hostFailure, thrown)
+  }
+
+  @Test
+  fun `mock rules require an explicitly enabled network control policy`() {
+    val (buffer, _) = collectingBuffer()
+    val mockRule =
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 503,
+        responseHeaders = emptyMap(),
+        responseBody = "mocked",
+        contentType = "text/plain",
+      )
+    var proceedCalls = 0
+    val interceptor =
+      AutoMobileNetworkInterceptor(
+        buffer,
+        ruleStore = fakeRuleMatcher(matchResult = mockRule),
+      )
+
+    val response =
+      interceptor.intercept(
+        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ })
+      )
+
+    assertEquals(1, proceedCalls)
+    assertEquals(204, response.code)
+  }
+
+  @Test
+  fun `policy lookup failure disables sensitive capture`() {
+    val (buffer, flushed) = collectingBuffer()
+    val request =
+      Request.Builder()
+        .url("https://api.example.com/users")
+        .header("Authorization", "Bearer token")
+        .post("secret".toRequestBody("text/plain".toMediaType()))
+        .build()
+    val interceptor =
+      AutoMobileNetworkInterceptor(
+        buffer,
+        captureHeaders = true,
+        captureBodies = true,
+        policyProvider = { throw IllegalStateException("policy failed") },
+      )
+
+    interceptor.intercept(fakeChain(request = request))
+    drainDelivery()
+
+    val event = flushed.single().single() as SdkNetworkRequestEvent
+    assertNull(event.requestHeaders)
+    assertNull(event.responseHeaders)
+    assertNull(event.requestBody)
+    assertNull(event.responseBody)
+  }
+
+  @Test
+  fun `invalid mock response falls through without recording a mock event`() {
+    val (buffer, flushed) = collectingBuffer()
+    var proceedCalls = 0
+    val mockRule =
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 503,
+        responseHeaders = mapOf("X-Invalid" to "line\nbreak"),
+        responseBody = "mocked",
+        contentType = "text/plain",
+      )
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(matchResult = mockRule))
+
+    val response =
+      interceptor.intercept(
+        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ })
+      )
+    drainDelivery()
+
+    assertEquals(1, proceedCalls)
+    assertEquals(204, response.code)
+    assertEquals(1, flushed.flatten().size)
+    assertNull((flushed.single().single() as SdkNetworkRequestEvent).error)
   }
 
   // --- Default behavior tests ---

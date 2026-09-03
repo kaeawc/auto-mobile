@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.network
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.UUID
 import okhttp3.Response
@@ -62,17 +63,26 @@ internal class AutoMobileWebSocketListener(
     type: WebSocketFrameType,
     size: Long,
   ) {
-    buffer.add(
-      SdkWebSocketFrameEvent(
-        timestamp = System.currentTimeMillis(),
-        applicationId = applicationId,
-        connectionId = connectionId,
-        url = url,
-        direction = direction,
-        frameType = type,
-        payloadSize = size,
-        success = true,
+    try {
+      buffer.add(
+        SdkWebSocketFrameEvent(
+          timestamp = System.currentTimeMillis(),
+          applicationId = applicationId,
+          connectionId = connectionId,
+          url = url,
+          direction = direction,
+          frameType = type,
+          payloadSize = size,
+          success = true,
+        )
       )
-    )
+    } catch (error: Exception) {
+      // Custom loggers are user supplied, so logging must not break host callbacks either.
+      runCatching {
+        AutoMobileSDK.logger.w("AutoMobileWebSocketListener", error) {
+          "WebSocket observation failed; continuing host callback"
+        }
+      }
+    }
   }
 }

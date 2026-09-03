@@ -31,7 +31,10 @@ android {
     sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
     targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
   }
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
 }
 
 dependencies {

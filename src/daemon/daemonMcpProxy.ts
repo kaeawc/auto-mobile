@@ -1671,6 +1671,7 @@ export class DaemonMcpProxy {
         isSessionAcquisition,
       );
       if (result?.isError) {
+        this.refreshReplayLeaseForBoundSessionResult(forwardedArgs, callReleaseEpoch);
         return result;
       }
       this.rememberToolSelectionProfile(name, args, result);
@@ -2247,6 +2248,22 @@ export class DaemonMcpProxy {
     const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     if (admittedSessionUuid) {
       this.updateBoundSessionUuid(admittedSessionUuid);
+      this.startBoundSessionHeartbeat();
+    }
+  }
+
+  private refreshReplayLeaseForBoundSessionResult(
+    forwardedArgs: Record<string, unknown>,
+    callReleaseEpoch: number,
+  ): void {
+    const releaseReason = this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
+    if (releaseReason) {
+      this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
+      return;
+    }
+    const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (forwardedSessionUuid && forwardedSessionUuid === this.boundSessionUuid) {
+      this.updateBoundSessionUuid(forwardedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
   }

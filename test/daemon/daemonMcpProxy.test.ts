@@ -2477,6 +2477,46 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("refreshes the replay lease when an admitted bound call returns an error result", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn"
+          ? { content: [{ type: "text", text: "tap failed after admission" }], isError: true }
+          : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).resolves.toMatchObject({
+          isError: true,
+        });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("keeps the prior binding when an unissued session UUID is rejected", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },

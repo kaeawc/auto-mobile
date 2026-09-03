@@ -690,7 +690,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         (DaemonState.getInstance().isInitialized()
           ? DaemonState.getInstance()
               .getSessionManager()
-              .getSessionForNewExecution(providedSessionUuid) !== null
+              .getSessionForNewExecution(providedSessionUuid, {
+                executionId: execution.id,
+                startTime: execution.startTime,
+              }) !== null
           : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
         sessionToolBinding.bind(sessionId, providedSessionUuid)
       ) {

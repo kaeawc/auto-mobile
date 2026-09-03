@@ -128,15 +128,18 @@ wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
 session_result="$(auto-mobile --debug --embedded-sdk --cli getApple --deviceId "${device_id}")"
 if ! session_uuid="$(
   jq -er '
-    if .sessionUuid? then .sessionUuid
-    elif .content? then
-      .content[]
-      | select(.type == "text")
-      | .text
-      | fromjson
-      | .sessionUuid
-    else empty
-    end
+    (
+      if .sessionUuid? then .sessionUuid
+      elif .content? then
+        .content[]
+        | select(.type == "text")
+        | .text
+        | fromjson
+        | .sessionUuid
+      else empty
+      end
+    )
+    | select(type == "string" and length > 0)
   ' <<<"${session_result}"
 )"; then
   echo "error: could not acquire navigation graph session for simulator ${device_id}" >&2

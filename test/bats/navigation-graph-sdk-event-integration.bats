@@ -32,6 +32,32 @@ SCRIPT
   chmod +x "${MOCK_BIN}/${name}"
 }
 
+@test "rejects an empty session UUID from getApple" {
+  make_mock xcrun 'exit 0'
+  make_mock curl 'exit 0'
+  make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exit 1
+fi
+printf "8765\n"
+'
+  make_mock auto-mobile '
+if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
+  printf "{\"ios\":{\"checks\":[]}}\n"
+  exit 0
+fi
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ]; then
+  printf "{\"sessionUuid\":\"\"}\n"
+  exit 0
+fi
+'
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "simulator-udid"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not acquire navigation graph session"* ]]
+}
+
 @test "renews the graph session while retrying post-bind CtrlProxy health" {
   make_mock xcrun 'exit 0'
   make_mock curl '

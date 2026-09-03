@@ -167,6 +167,18 @@ class AutoMobileSDKNavigationInitializationTest {
   }
 
   @Test
+  fun `navigation shutdown restores enabled capability state`() {
+    AutoMobileSDK.setEnabled(false)
+    AutoMobileSDK.initialize(NavigationConfiguration(context))
+
+    AutoMobileSDK.shutdown()
+    AutoMobileSDK.initialize(context)
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+
+    assertTrue(AutoMobileSDK.isCapabilitySupported("events.navigation"))
+  }
+
+  @Test
   fun `navigation initialization failure is contained and releases partial state`() {
     AutoMobileSDK.initialize(NavigationConfiguration(ThrowingApplicationContext(context)))
 

@@ -53,7 +53,6 @@ internal class SdkCapabilityRegistry {
   private var navigationOnly = false
   private var enabled = true
   private var initializedBeforeNavigation = false
-  private var enabledBeforeNavigation = true
   private var policy = SdkCapturePolicy()
 
   init {
@@ -71,7 +70,6 @@ internal class SdkCapabilityRegistry {
   fun markNavigationInitialized() {
     synchronized(lock) {
       initializedBeforeNavigation = initialized
-      enabledBeforeNavigation = enabled
       initialized = true
       navigationOnly = true
     }
@@ -82,7 +80,7 @@ internal class SdkCapabilityRegistry {
     synchronized(lock) {
       initialized = initializedBeforeNavigation
       navigationOnly = false
-      enabled = enabledBeforeNavigation
+      enabled = true
     }
   }
 

@@ -320,6 +320,7 @@ interface WsSetTextResultMessage extends WsRequestBase {
 
 interface WsInsertTextResultMessage extends WsRequestBase {
   type: "insert_text_result";
+  partialApplication?: boolean;
 }
 
 interface WsImeActionResultMessage extends WsRequestBase {
@@ -2441,6 +2442,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return connected && this.isCommandSupported("node_selector_actions");
   }
 
+  /**
+   * Connects and waits for the runner handshake before returning its advertised
+   * command set. A null result means no compatible handshake was available.
+   */
+  public async getSupportedCommands(): Promise<string[] | null> {
+    if (this.supportedCommands === null) {
+      const connected = await this.ensureConnected();
+      if (connected) {
+        await this.waitForHandshake();
+      }
+    }
+    return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
+  }
+
   async supportsAccessibilityLinkActivation(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
@@ -3620,6 +3635,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           success: message.success,
           totalTimeMs: message.totalTimeMs,
           error: message.error,
+          partialApplication: message.partialApplication,
           perfTiming: message.perfTiming,
         });
       }

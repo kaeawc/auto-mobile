@@ -27,6 +27,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
@@ -187,6 +188,21 @@ class WebSocketServerIntegrationTest {
         if (frame is Frame.Text) {
           val message = frame.readText()
           assertTrue("Should receive connection message", message.contains("connected"))
+          val supportedCommands =
+            json
+              .parseToJsonElement(message)
+              .jsonObject["supportedCommands"]
+              ?.jsonArray
+              ?.map { it.jsonPrimitive.content }
+              .orEmpty()
+          assertTrue(
+            "Should advertise request_insert_text",
+            supportedCommands.contains("request_insert_text"),
+          )
+          assertFalse(
+            "Should not advertise iOS-only request_press_key",
+            supportedCommands.contains("request_press_key"),
+          )
         }
       }
     }

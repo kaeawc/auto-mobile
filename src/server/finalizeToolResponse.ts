@@ -108,7 +108,8 @@ function classifyObservationAction(
         }
         const value = command as Record<string, unknown>;
         return (
-          value.action === "key" && ["done", "go", "search", "send"].includes(String(value.key))
+          value.action === "key" &&
+          ["enter", "done", "go", "search", "send"].includes(String(value.key))
         );
       });
       return maySubmit ? "navigation" : "inPlace";

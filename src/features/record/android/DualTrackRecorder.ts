@@ -7,6 +7,7 @@ import { discoverTouchNode } from "./TouchNodeDiscovery";
 import { buildAxisRanges, buildScaler, queryDensity, queryRotation } from "./AxisRanges";
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { isSendKeysReleased } from "../../action/SendKeys";
 
 /** An InteractionEvent from the CtrlProxy (subset of fields we use) */
 interface ReceivedInteraction {
@@ -65,6 +66,8 @@ export class DualTrackRecorder {
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
     private readonly timer: Timer = defaultTimer,
+    /** Override the release-gated recorded text tool in tests. */
+    private readonly recordWithSendKeys: boolean = isSendKeysReleased(),
   ) {}
 
   async start(): Promise<void> {
@@ -245,15 +248,22 @@ export class DualTrackRecorder {
     }
 
     const stepIndex = this.steps.length;
-    this.steps.push({
-      tool: "sendKeys",
-      params: {
-        commands: [{ action: "type", text: event.text, operation: "replace" }],
-      },
-    });
+    this.steps.push(this.buildRecordedTextStep(event.text));
     if (elementKey) {
       this.lastInputText = { elementKey, text: event.text, stepIndex };
     }
+  }
+
+  private buildRecordedTextStep(text: string): PlanStep {
+    if (!this.recordWithSendKeys) {
+      return { tool: "inputText", params: { text } };
+    }
+    return {
+      tool: "sendKeys",
+      params: {
+        commands: [{ action: "type", text, operation: "replace" }],
+      },
+    };
   }
 
   private coalesceInputText(elementKey: string | null, text: string): boolean {
@@ -267,7 +277,15 @@ export class DualTrackRecorder {
       return false;
     }
 
-    const existing = this.steps[previous.stepIndex];
+    return this.updateCoalescedTextStep(this.steps[previous.stepIndex], text);
+  }
+
+  private updateCoalescedTextStep(existing: PlanStep | undefined, text: string): boolean {
+    if (existing?.tool === "inputText") {
+      existing.params.text = text;
+      return true;
+    }
+
     const command = existing?.params.commands?.[0];
     if (existing?.tool !== "sendKeys" || command?.action !== "type") {
       return false;

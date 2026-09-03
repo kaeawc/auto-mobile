@@ -70,6 +70,36 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       await client.close();
     }
   });
+
+  test("returns the command set only after the connected handshake", async function () {
+    let socket: FakeWebSocket | null = null;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => {
+        socket = new FakeWebSocket(url, "none", 0, fakeTimer);
+        return socket as unknown as WebSocket;
+      },
+      fakeTimer,
+    );
+
+    try {
+      await client.ensureConnected();
+      const supported = client.getSupportedCommands();
+      await waitForPendingSleep(fakeTimer);
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          supportedCommands: ["request_press_key", "request_insert_text"],
+        }),
+      );
+      fakeTimer.resolveAll();
+
+      await expect(supported).resolves.toEqual(["request_insert_text", "request_press_key"]);
+    } finally {
+      await client.close();
+    }
+  });
 });
 
 async function waitForPendingSleep(timer: FakeTimer): Promise<void> {

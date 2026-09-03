@@ -6,6 +6,7 @@ setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIGINAL_PATH="$PATH"
   ORIGINAL_HOME="$HOME"
+  export REAL_JQ="$(command -v jq)"
   export HOME="${MOCK_BIN}/home"
   export ADB_LOG="${MOCK_BIN}/adb.log"
   export AUTO_MOBILE_LOG="${MOCK_BIN}/auto-mobile.log"
@@ -38,6 +39,32 @@ SCRIPT
 
 make_mock() {
   make_executable "${MOCK_BIN}/$1" "$2"
+}
+
+@test "rejects an empty session UUID from getAndroid" {
+  make_mock adb '
+if [ "$*" = "-s emulator-5554 root" ] || [ "$*" = "-s emulator-5554 wait-for-device" ]; then
+  exit 0
+fi
+'
+  make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
+exit 1
+'
+  make_mock auto-mobile '
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] &&
+    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ]; then
+  printf "{\"sessionUuid\":\"\"}\n"
+  exit 0
+fi
+'
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not acquire navigation graph session"* ]]
 }
 
 @test "binds the Android graph session before emitting and polling an SDK navigation event" {
@@ -76,6 +103,9 @@ fi
 '
   make_mock sleep 'exit 0'
   make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
 if [ "$1" = "-e" ] && [ "$2" = "--arg" ] && [ "$3" = "destination" ] &&
   grep -Fq -- "$4"; then
   exit 0
@@ -84,6 +114,11 @@ exit 1
 '
   make_mock auto-mobile '
 printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] &&
+    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ]; then
+  printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
+  exit 0
+fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ]; then
   case "$6" in
     launchApp)
@@ -134,6 +169,7 @@ exit 1
   first_observe_line="$(grep -n -- "observe --platform android --deviceId emulator-5554" "$AUTO_MOBILE_LOG" | head -n 1 | cut -d: -f1)"
   [ "$root_line" -lt "$wait_for_device_line" ]
   [ "$launch_line" -lt "$first_observe_line" ]
+  grep -q -- "getAndroid --deviceId emulator-5554" "$AUTO_MOBILE_LOG"
   # Regression for issue #4579: scope the graph read to the fixture package so a
   # concurrent hierarchy push cannot redirect the query to another app's graph.
   grep -q -- "getNavigationGraph --platform android --deviceId emulator-5554 --appId dev.jasonpearson.automobile.playground" "$AUTO_MOBILE_LOG"
@@ -163,6 +199,9 @@ fi
 '
   make_mock sleep 'exit 0'
   make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
 if [ "$1" = "-e" ] && [ "$2" = "--arg" ] && [ "$3" = "destination" ] &&
   grep -Fq -- "$4"; then
   exit 0
@@ -188,6 +227,11 @@ case "$6" in
     exit 0
     ;;
 esac
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] &&
+    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ]; then
+  printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
+  exit 0
+fi
 exit 1
 '
 

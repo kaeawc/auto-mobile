@@ -7983,7 +7983,7 @@
                   },
                   "mode": {
                     "default": "auto",
-                    "description": "Delivery mode. auto prefers eventAll for insert and a11y for replace; explicit modes are honored on Android and iOS",
+                    "description": "Android delivery mode. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
                     "type": "string",
                     "enum": ["auto", "a11y", "eventLast", "eventAll", "eventOnly"]
                   }

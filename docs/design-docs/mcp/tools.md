@@ -26,7 +26,7 @@ the exact arguments supported by your connection.
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                        |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                     |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.        |
-| ⌨️ <code>inputText</code>     | Legacy text input; disabled by default.                              |
+| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility.                        |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                        |
 | 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                     |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                               |
@@ -51,13 +51,19 @@ the exact arguments supported by your connection.
 ```
 
 Text defaults to `operation: "insert"` and `mode: "auto"`. Modes are `auto`,
-`a11y`, `eventLast`, `eventAll`, and `eventOnly`. Raw keys are `enter`, `tab`,
+`a11y`, `eventLast`, `eventAll`, and `eventOnly`. They select Android delivery
+strategies; iOS accepts the same values for cross-platform plans and reports the
+actual `xcuiTypeText` mechanism as `resolvedMode`. Raw keys are `enter`, `tab`,
 `escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
 `ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,
 `send`, and `go` perform the corresponding IME action and ignore modifiers. A
 standalone `{ "action": "clear" }` command clears the focused field. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
+
+`sendKeys` becomes default-enabled when the bundled CtrlProxy artifacts reach
+0.0.68. Until then, `inputText` remains the default compatibility path; a local
+fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
 
 ??? note "Pinch rotation semantics"
 

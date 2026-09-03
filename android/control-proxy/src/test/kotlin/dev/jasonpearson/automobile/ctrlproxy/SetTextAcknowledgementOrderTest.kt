@@ -46,6 +46,53 @@ class SetTextAcknowledgementOrderTest {
     )
   }
 
+  @Test
+  fun `performInsertText validates password caret and actions before mutating text`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    val body = functionBody(source, "private fun performInsertText(")
+    val passwordGuard = body.indexOf("if (targetNode.isPassword)")
+    val currentText = body.indexOf("val currentText")
+    val invalidSelection = body.indexOf("if (!hasValidSelection)")
+    val unsupportedAction = body.indexOf("val unsupportedAction")
+    val setText = body.indexOf("targetNode.performAction(", startIndex = unsupportedAction)
+
+    assertTrue("performInsertText must reject password fields", passwordGuard >= 0)
+    assertTrue(
+      "performInsertText must reject password fields before reading masked text",
+      currentText > passwordGuard,
+    )
+    assertTrue("performInsertText must reject an unknown selection", invalidSelection > currentText)
+    assertTrue(
+      "performInsertText must validate the required accessibility actions",
+      unsupportedAction > invalidSelection,
+    )
+    assertTrue(
+      "performInsertText must validate selection and actions before ACTION_SET_TEXT",
+      setText > unsupportedAction,
+    )
+  }
+
+  @Test
+  fun `performInsertText identifies a partial application after caret restore failure`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    val body = functionBody(source, "private fun performInsertText(")
+    val partial = body.indexOf("val partialApplication = setTextSucceeded && !selectionSucceeded")
+    val broadcast = body.indexOf("broadcastInsertTextResult(", startIndex = partial)
+    val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
+    val partialGuard = broadcaster.indexOf("if (partialApplication)")
+    val partialField = broadcaster.indexOf("put(", startIndex = partialGuard)
+
+    assertTrue("performInsertText must identify an applied text mutation", partial >= 0)
+    assertTrue(
+      "performInsertText must include partial-application state in its result",
+      broadcast > partial,
+    )
+    assertTrue(
+      "insert_text_result must serialize partial-application state",
+      partialGuard >= 0 && partialField > partialGuard,
+    )
+  }
+
   private fun functionBody(source: String, signature: String): String {
     val start = source.indexOf(signature)
     if (start < 0) fail("$signature not found in CtrlProxy.kt")

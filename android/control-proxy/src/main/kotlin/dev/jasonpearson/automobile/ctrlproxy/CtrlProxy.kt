@@ -4162,10 +4162,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /**
    * Insert text at the focused field's current selection using accessibility actions.
    *
-   * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build
-   * the new value from the node's UTF-16 selection range, then restore the caret immediately after
-   * the inserted text. This matches ordinary typing: a collapsed selection inserts at the caret,
-   * while a non-empty selection is replaced.
+   * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build the
+   * new value from the node's UTF-16 selection range, then restore the caret immediately after the
+   * inserted text. This matches ordinary typing: a collapsed selection inserts at the caret, while
+   * a non-empty selection is replaced.
    */
   private fun performInsertText(requestId: String?, text: String) {
     val startTime = System.currentTimeMillis()
@@ -4186,16 +4186,62 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return
       }
 
+      if (targetNode.isPassword) {
+        targetNode.recycle()
+        perfProvider.end()
+        kotlinx.coroutines.runBlocking {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "Cannot insert text into a password field without exposing its original value",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
       val currentText = targetNode.text?.toString().orEmpty()
       val rawStart = targetNode.textSelectionStart
       val rawEnd = targetNode.textSelectionEnd
-      val hasValidSelection = rawStart >= 0 && rawEnd >= 0
-      val selectionStart =
-        (if (hasValidSelection) minOf(rawStart, rawEnd) else currentText.length)
-          .coerceIn(0, currentText.length)
-      val selectionEnd =
-        (if (hasValidSelection) maxOf(rawStart, rawEnd) else currentText.length)
-          .coerceIn(selectionStart, currentText.length)
+      val hasValidSelection = rawStart in 0..currentText.length && rawEnd in 0..currentText.length
+      if (!hasValidSelection) {
+        targetNode.recycle()
+        perfProvider.end()
+        kotlinx.coroutines.runBlocking {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "Focused editable node did not report a valid text selection",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      val actionIds = targetNode.actionList.map { it.id }.toSet()
+      val requiredActions =
+        mapOf(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION to
+            "ACTION_SET_SELECTION",
+        )
+      val unsupportedAction = requiredActions.entries.firstOrNull { it.key !in actionIds }
+      if (unsupportedAction != null) {
+        targetNode.recycle()
+        perfProvider.end()
+        kotlinx.coroutines.runBlocking {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "Focused editable node does not support ${unsupportedAction.value}",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      val selectionStart = minOf(rawStart, rawEnd).coerceIn(0, currentText.length)
+      val selectionEnd = maxOf(rawStart, rawEnd).coerceIn(selectionStart, currentText.length)
       val updatedText =
         currentText.substring(0, selectionStart) + text + currentText.substring(selectionEnd)
       val updatedCaret = selectionStart + text.length
@@ -4237,10 +4283,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end()
 
       val success = setTextSucceeded && selectionSucceeded
+      val partialApplication = setTextSucceeded && !selectionSucceeded
       val error =
         when {
           !setTextSucceeded -> "ACTION_SET_TEXT returned false"
-          !selectionSucceeded -> "ACTION_SET_SELECTION returned false"
+          !selectionSucceeded ->
+            "Text was inserted, but ACTION_SET_SELECTION returned false; do not retry"
           else -> null
         }
       kotlinx.coroutines.runBlocking {
@@ -4249,6 +4297,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success,
           error,
           System.currentTimeMillis() - startTime,
+          partialApplication,
         )
       }
     } catch (e: Exception) {
@@ -5869,6 +5918,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    partialApplication: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
@@ -5882,6 +5932,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (error != null) {
             put("error", error)
+          }
+          if (partialApplication) {
+            put("partialApplication", true)
           }
         }
       }

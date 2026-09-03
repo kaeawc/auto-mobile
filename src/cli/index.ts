@@ -574,10 +574,20 @@ function handleToolResult(result: any, toolName: string): void {
     // Write error message to STDERR
     if (actualResult.error) {
       console.error(actualResult.error);
+    } else if (
+      result?.isError === true &&
+      Array.isArray(result.content) &&
+      result.content[0]?.type === "text"
+    ) {
+      console.error(result.content[0].text);
     }
 
-    // Special handling for executePlan tool
-    if (toolName === "executePlan") {
+    // Plan progress is only available in structured executePlan failures.
+    if (
+      toolName === "executePlan" &&
+      typeof actualResult.executedSteps === "number" &&
+      typeof actualResult.totalSteps === "number"
+    ) {
       console.error(`Executed ${actualResult.executedSteps} of ${actualResult.totalSteps} steps`);
       if (actualResult.failedStep) {
         console.error(

@@ -8,9 +8,11 @@ import {
 
 describe("isCliToolFailure (issue #6017)", () => {
   const originalProcessExit = process.exit;
+  const originalConsoleError = console.error;
 
   afterEach(() => {
     process.exit = originalProcessExit;
+    console.error = originalConsoleError;
     resetDaemonProxyFactoryForTesting();
   });
 
@@ -58,11 +60,15 @@ describe("isCliToolFailure (issue #6017)", () => {
     ).toBe(true);
   });
 
-  test("exits non-zero for an MCP error response", async () => {
+  test("prints an MCP error without executePlan diagnostics and exits non-zero", async () => {
     const exitCodes: number[] = [];
+    const errorMessages: unknown[][] = [];
     process.exit = ((code?: number) => {
       exitCodes.push(code ?? 0);
     }) as typeof process.exit;
+    console.error = ((...args: unknown[]) => {
+      errorMessages.push(args);
+    }) as typeof console.error;
     setDaemonProxyFactoryForTesting((): any => ({
       callTool: async () => ({
         content: [{ type: "text", text: "MCP error -32001: Request timed out" }],
@@ -73,8 +79,9 @@ describe("isCliToolFailure (issue #6017)", () => {
       },
     }));
 
-    await runCliCommand(["observe"]);
+    await runCliCommand(["executePlan"]);
 
     expect(exitCodes).toEqual([1]);
+    expect(errorMessages).toEqual([["MCP error -32001: Request timed out"]]);
   });
 });

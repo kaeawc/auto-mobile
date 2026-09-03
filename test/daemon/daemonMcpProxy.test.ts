@@ -2484,8 +2484,7 @@ describe("DaemonMcpProxy", () => {
           [
             "tapOn",
             new ActionableError(
-              "Unknown device session UUID session-b cannot access device device-b, " +
-                "which is owned by session session-a. " +
+              "Session session-b is not an active daemon session (not found). " +
                 "Acquire a device with getAndroid or getApple before using its sessionUuid.",
             ),
           ],
@@ -2502,7 +2501,7 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
         await expect(
           proxy.callTool("tapOn", { sessionUuid: "session-b", deviceId: "device-b" }),
-        ).rejects.toThrow("Unknown device session UUID");
+        ).rejects.toThrow("is not an active daemon session");
         await proxy.callTool("observe", { deviceId: "device-a" });
 
         expect(client.callToolCalls).toEqual([

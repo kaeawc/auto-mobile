@@ -59,6 +59,10 @@ if [ "$1" = "-cn" ]; then
   exit 0
 fi
 if [ "$1" = "-er" ]; then
+  if [[ "$2" == *"sessionUuid"* ]]; then
+    printf "44600000-0000-4000-8000-000000000000\\n"
+    exit 0
+  fi
   if [ -f "$POST_BIND_DOCTOR_FAILURE_FILE" ]; then
     exit 1
   fi
@@ -87,6 +91,10 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
     fi
   fi
   printf "{\"ios\":{\"checks\":[]}}\\n"
+  exit 0
+fi
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ] && [ "$5" = "--deviceId" ] && [ "$6" = "simulator-udid" ]; then
+  printf "{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\"}\\n"
   exit 0
 fi
 if [ "$1" = "--daemon" ] && [ "$2" = "heartbeat" ] && [ "$3" = "44600000-0000-4000-8000-000000000000" ]; then

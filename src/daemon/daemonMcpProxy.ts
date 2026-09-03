@@ -1433,7 +1433,7 @@ export class DaemonMcpProxy {
   }
 
   private isUnadmittedDaemonSessionError(error: unknown): boolean {
-    return errorMessage(error).includes("Unknown device session UUID");
+    return errorMessage(error).includes("is not an active daemon session");
   }
 
   private isUnknownToolError(error: unknown): boolean {

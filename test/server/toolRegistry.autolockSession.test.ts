@@ -228,7 +228,7 @@ describe("ToolRegistry autolock session enforcement", () => {
           deviceId: androidA.deviceId,
           sessionUuid,
         }),
-      ).rejects.toThrow("Unknown device session UUID");
+      ).rejects.toThrow("not an active daemon session");
       expect(daemonSessionManager.getSession(sessionUuid)).toBeNull();
     }
     expect(handlerCalls).toBe(0);

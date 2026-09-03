@@ -2619,6 +2619,54 @@ describe("SessionManager", () => {
     }
   });
 
+  test("admits a persisted daemon-restart session for recreation", async () => {
+    const persisted: DeviceSession = {
+      session_uuid: "restarted-session",
+      device_id: "emulator-5554",
+      platform: "android",
+      status: "expired",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 10,
+      heartbeat_timeout_ms: 5,
+      has_received_heartbeat: 1,
+      created_at: "2026-08-22T00:00:00.000Z",
+      updated_at: "2026-08-22T00:00:00.000Z",
+    };
+    const persistence: DeviceSessionPersistence = {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async markReleased() {},
+    };
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId: string): Promise<string> {
+        await restarted.createSession(sessionId, "emulator-5560", "android");
+        return "emulator-5560";
+      },
+    };
+    try {
+      await expect(
+        restarted.admitIssuedSessionForAutomation("restarted-session"),
+      ).resolves.toBeUndefined();
+      await expect(
+        restarted.getOrCreateSession("restarted-session", devicePool, "android"),
+      ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
   test("terminal device-loss UUID remains fenced after manager restart", async () => {
     const persisted: DeviceSession = {
       session_uuid: "lost-session",

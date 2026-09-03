@@ -112,9 +112,23 @@ add_test_target() {
   local target
   local test_path
   local found=0
+  local is_file_target=0
 
   if [[ -f "$requested_target" ]]; then
+    is_file_target=1
     absolute_target="$(cd "$(dirname "$requested_target")" && pwd -P)/$(basename "$requested_target")"
+    while [[ -L "$absolute_target" ]]; do
+      local target_directory
+      local link_target
+      target_directory="$(cd "$(dirname "$absolute_target")" && pwd -P)"
+      link_target="$(readlink "$absolute_target")"
+      if [[ "$link_target" == /* ]]; then
+        absolute_target="$link_target"
+      else
+        absolute_target="$target_directory/$link_target"
+      fi
+      absolute_target="$(cd "$(dirname "$absolute_target")" && pwd -P)/$(basename "$absolute_target")"
+    done
   elif [[ -d "$requested_target" ]]; then
     absolute_target="$(cd "$requested_target" && pwd -P)"
   else
@@ -131,7 +145,7 @@ add_test_target() {
     exit 2
   fi
 
-  if [[ -f "$requested_target" ]]; then
+  if [[ "$is_file_target" -eq 1 ]]; then
     if [[ "$target" != *.test.ts ]]; then
       echo "Test target is not a Bun test file: $requested_target" >&2
       exit 2
@@ -157,29 +171,22 @@ integration_test_paths=()
 stress_test_paths=()
 passthrough_args=()
 has_test_targets=0
-expect_option_value=0
-expect_bail_count=0
-for arg in "$@"; do
-  if [[ "$expect_bail_count" -eq 1 && "$arg" =~ ^[0-9]+$ ]]; then
+args=("$@")
+for ((arg_index = 0; arg_index < ${#args[@]}; arg_index += 1)); do
+  arg="${args[$arg_index]}"
+  if [[ "$arg" == --bail ]]; then
     passthrough_args+=("$arg")
-    expect_bail_count=0
-  elif [[ "$expect_option_value" -eq 1 ]]; then
-    passthrough_args+=("$arg")
-    expect_option_value=0
-  elif [[ "$expect_bail_count" -eq 1 ]]; then
-    expect_bail_count=0
-    if [[ "$arg" == -* ]]; then
-      passthrough_args+=("$arg")
-    else
-      has_test_targets=1
-      add_test_target "$arg"
+    next_arg="${args[$((arg_index + 1))]:-}"
+    if [[ "$next_arg" =~ ^[0-9]+$ ]]; then
+      passthrough_args+=("$next_arg")
+      arg_index=$((arg_index + 1))
     fi
-  elif [[ "$arg" == --bail ]]; then
+  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" || "$arg" == --import || "$arg" == --inspect || "$arg" == --inspect-wait || "$arg" == --inspect-brk || "$arg" == --cpu-prof-name || "$arg" == --cpu-prof-dir || "$arg" == --cpu-prof-interval || "$arg" == --heap-prof-name || "$arg" == --heap-prof-dir || "$arg" == --install || "$arg" == "--eval" || "$arg" == "-e" || "$arg" == --print || "$arg" == "-p" || "$arg" == --port || "$arg" == --conditions || "$arg" == --fetch-preconnect || "$arg" == --max-http-header-size || "$arg" == --dns-result-order || "$arg" == --unhandled-rejections || "$arg" == --console-depth || "$arg" == --user-agent || "$arg" == --cron-title || "$arg" == --cron-period || "$arg" == --elide-lines || "$arg" == "--filter" || "$arg" == "-F" || "$arg" == --shell || "$arg" == --env-file || "$arg" == --cwd || "$arg" == --config || "$arg" == "-c" ]]; then
     passthrough_args+=("$arg")
-    expect_bail_count=1
-  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" ]]; then
-    passthrough_args+=("$arg")
-    expect_option_value=1
+    if [[ "$arg_index" -lt $((${#args[@]} - 1)) ]]; then
+      arg_index=$((arg_index + 1))
+      passthrough_args+=("${args[$arg_index]}")
+    fi
   elif [[ "$arg" == -* ]]; then
     passthrough_args+=("$arg")
   else
@@ -299,7 +306,10 @@ fi
 
 case "$mode" in
   unit)
-    if [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
+    if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Unit test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
       echo "No unit test paths were selected." >&2
       exit 2
     elif [[ "${#unit_test_paths[@]}" -eq 0 && "${#passthrough_args[@]}" -eq 0 && "$runner_os" != "Windows" ]]; then
@@ -312,7 +322,10 @@ case "$mode" in
     fi
     ;;
   changed)
-    if [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
+    if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Unit test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
       echo "No unit test paths were selected." >&2
       exit 2
     fi
@@ -337,7 +350,10 @@ case "$mode" in
     if [[ "$runner_os" != "Windows" ]]; then
       integration_args+=(--no-orphans "--parallel=${integration_workers}")
     fi
-    if [[ "${#integration_test_paths[@]}" -gt 0 ]]; then
+    if [[ "${#integration_test_paths[@]}" -gt 0 && ( "${#unit_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Integration test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#integration_test_paths[@]}" -gt 0 ]]; then
       run_test_command \
         "${integration_args[@]}" \
         "${integration_test_paths[@]+"${integration_test_paths[@]}"}" \
@@ -353,7 +369,10 @@ case "$mode" in
     fi
     ;;
   stress)
-    if [[ "${#stress_test_paths[@]}" -gt 0 ]]; then
+    if [[ "${#stress_test_paths[@]}" -gt 0 && ( "${#unit_test_paths[@]}" -gt 0 || "${#integration_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Stress test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#stress_test_paths[@]}" -gt 0 ]]; then
       run_test_command \
         bun test --timeout "$per_test_timeout_ms" \
         "${stress_test_paths[@]+"${stress_test_paths[@]}"}" \
@@ -369,7 +388,10 @@ case "$mode" in
     fi
     ;;
   coverage)
-    if [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
+    if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Unit test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
       echo "No unit test paths were selected." >&2
       exit 2
     fi

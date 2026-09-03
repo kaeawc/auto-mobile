@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 // The custom rules' file-scoping used to be enforced (and tested) through
 // eslint.config.mjs's `files:` globs. Under oxlint that scoping lives in
@@ -11,8 +11,9 @@ import { join } from "node:path";
 //
 // Rather than parse .oxlintrc.json ourselves (it is JSONC — comments would break
 // a naive JSON.parse), we read oxlint's OWN resolved configuration via
-// `oxlint --print-config`, which emits strict JSON. That is the tool's typed
-// configuration contract and reflects exactly what oxlint will enforce.
+// `oxlint --print-config`, which emits strict JSON. That checks the declared
+// override ownership and severities; fixture linting below proves the globs are
+// applied to files in each configured scope.
 
 const ROOT = join(import.meta.dir, "..", "..");
 // `oxlint --print-config` normally completes in milliseconds, but it can be
@@ -58,6 +59,13 @@ function expectScopedRule(rule: string, files: string[], severity: string): void
   expect(override?.rules?.[rule]).toBe(severity);
 }
 
+function lintFixture(path: string) {
+  return Bun.spawnSync({
+    cmd: [join(ROOT, "node_modules", ".bin", "oxlint"), "--config", ".oxlintrc.json", path],
+    cwd: ROOT,
+  });
+}
+
 describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
   test("catch-convention and no-unknown-cast are scoped to src/**", () => {
     for (const rule of ["auto-mobile/catch-convention", "auto-mobile/no-unknown-cast"]) {
@@ -86,6 +94,71 @@ describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
       ],
       "deny",
     );
+  });
+
+  test("configured globs apply to linted src, test, and stress fixtures", async () => {
+    const sourceDirectory = await mkdtemp(join(ROOT, "src/oxlint-scoping-"));
+    const testDirectory = await mkdtemp(join(ROOT, "test/oxlint-scoping-"));
+    const stressDirectory = await mkdtemp(join(ROOT, "test/stress/oxlint-scoping-"));
+    const sourceAccumulator = join(sourceDirectory, "accumulator.ts");
+    const testAccumulator = join(testDirectory, "accumulator.ts");
+    const sourceBareExpect = join(sourceDirectory, "bare-expect.ts");
+    const testBareExpect = join(testDirectory, "bare-expect.ts");
+    const regularTimeout = join(testDirectory, "timeout.test.ts");
+    const stressTimeout = join(stressDirectory, "timeout.test.ts");
+    const accumulator = `const output: string[] = [];
+["item"].forEach((item) => {
+  output.push(item);
+});
+`;
+    const bareExpect = "expect(true);\n";
+    const missingTimeout = `import { test } from "bun:test";
+test("fixture", async () => {
+  await Promise.resolve();
+});
+`;
+
+    try {
+      await Promise.all([
+        writeFile(sourceAccumulator, accumulator),
+        writeFile(testAccumulator, accumulator),
+        writeFile(sourceBareExpect, bareExpect),
+        writeFile(testBareExpect, bareExpect),
+        writeFile(regularTimeout, missingTimeout),
+        writeFile(stressTimeout, missingTimeout),
+      ]);
+
+      const sourceAccumulatorResult = lintFixture(relative(ROOT, sourceAccumulator));
+      expect(sourceAccumulatorResult.exitCode).toBe(1);
+      expect(sourceAccumulatorResult.stdout.toString()).toContain(
+        "auto-mobile(no-accumulator-foreach)",
+      );
+
+      const testAccumulatorResult = lintFixture(relative(ROOT, testAccumulator));
+      expect(testAccumulatorResult.exitCode).toBe(0);
+
+      const sourceBareExpectResult = lintFixture(relative(ROOT, sourceBareExpect));
+      expect(sourceBareExpectResult.exitCode).toBe(0);
+
+      const testBareExpectResult = lintFixture(relative(ROOT, testBareExpect));
+      expect(testBareExpectResult.exitCode).toBe(1);
+      expect(testBareExpectResult.stdout.toString()).toContain("auto-mobile(no-bare-expect)");
+
+      const regularTimeoutResult = lintFixture(relative(ROOT, regularTimeout));
+      expect(regularTimeoutResult.exitCode).toBe(0);
+
+      const stressTimeoutResult = lintFixture(relative(ROOT, stressTimeout));
+      expect(stressTimeoutResult.exitCode).toBe(1);
+      expect(stressTimeoutResult.stdout.toString()).toContain(
+        "auto-mobile(stress-explicit-timeout)",
+      );
+    } finally {
+      await Promise.all([
+        rm(sourceDirectory, { recursive: true, force: true }),
+        rm(testDirectory, { recursive: true, force: true }),
+        rm(stressDirectory, { recursive: true, force: true }),
+      ]);
+    }
   });
 
   test("the raw-timer guard applies globally, with SystemTimer.ts exempted", () => {

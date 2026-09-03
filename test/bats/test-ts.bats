@@ -170,6 +170,22 @@ run_lane() {
   [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
 }
 
+@test "bare bail reprocesses a following value-bearing option" {
+  run_lane unit --bail --test-name-pattern "lane classification" test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--test-name-pattern lane\\ classification"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "Bun runtime option values are not classified as positional test targets" {
+  for option in --config --env-file --cwd; do
+    run_lane unit "$option" bunfig.toml test/scripts/testLaneClassification.test.ts
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$option bunfig.toml"* ]]
+    [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+  done
+}
+
 @test "rejects an unclassified positional Bun pattern" {
   run_lane unit oxlintConfigScoping
   [ "$status" -eq 2 ]
@@ -192,6 +208,29 @@ run_lane() {
     bash "$link/$SCRIPT" unit "$link/test/scripts/testLaneClassification.test.ts"
   [ "$status" -eq 0 ]
   [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "classifies a symlinked test file by its resolved target" {
+  link="test/.lane-classification-${BATS_TEST_NUMBER}.test.ts"
+  ln -s "stress/memory-leak.stress.test.ts" "$link"
+  run_lane unit "$link"
+  rm -f "$link"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No unit test paths were selected."* ]]
+}
+
+@test "single-lane modes reject a mixed-lane target list" {
+  run_lane unit test/scripts/testLaneClassification.test.ts test/contracts/runAll.integration.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Unit test targets cannot include other lanes."* ]]
+
+  run_lane integration test/contracts/runAll.integration.test.ts test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Integration test targets cannot include other lanes."* ]]
+
+  run_lane stress test/stress/memory-leak.stress.test.ts test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Stress test targets cannot include other lanes."* ]]
 }
 
 @test "targeting a stale test path fails before invoking Bun" {

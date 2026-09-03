@@ -20,7 +20,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
-import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
+import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

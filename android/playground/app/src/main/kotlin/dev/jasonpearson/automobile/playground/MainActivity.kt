@@ -40,11 +40,13 @@ class MainActivity : ComponentActivity() {
 
     // Initialize AutoMobile SDK for navigation tracking
     AutoMobileSDK.initialize(applicationContext)
-    // The playground installs the SDK network-control receiver, so opt in to its debug mocks.
-    AutoMobileSDK.registerCapability(
-      SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED)
-    )
-    AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
+    if (BuildConfig.DEBUG) {
+      // The playground installs the SDK network-control receiver, so opt in to its debug mocks.
+      AutoMobileSDK.registerCapability(
+        SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED)
+      )
+      AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
+    }
     // Enable storage and database inspection in debug builds
     SharedPreferencesInspector.setEnabled(true)
     DatabaseInspector.setEnabled(true)

@@ -85,7 +85,9 @@ const mockNetworkSchema = addDeviceTargetingToSchema(
 type MockNetworkArgs = z.infer<typeof mockNetworkSchema>;
 
 function assertValidResponseHeaders(responseHeaders: Record<string, string> | undefined): void {
-  if (responseHeaders === undefined) {return;}
+  if (responseHeaders === undefined) {
+    return;
+  }
 
   for (const [name, value] of Object.entries(responseHeaders)) {
     try {

@@ -338,6 +338,27 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ]);
   });
 
+  test("does not mark a replacement clear failure before its first delete as partial", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("KEYCODE_DEL", new Error("delete rejected"));
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("old")),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "replacement",
+      operation: "replace",
+      mode: "eventOnly",
+    });
+
+    expect(result).toMatchObject({ success: false, error: "delete rejected" });
+    expect(result).not.toHaveProperty("partialApplication");
+  });
+
   test("accepts focused custom editable controls that expose text actions", async () => {
     const adb = new FakeAdbExecutor();
     const executor = new DefaultSendKeysCommandExecutor(

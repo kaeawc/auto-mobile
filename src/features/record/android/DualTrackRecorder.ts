@@ -87,7 +87,7 @@ export class DualTrackRecorder {
     if (!connected) {
       throw new Error("[DualTrackRecorder] Unable to connect to the accessibility service.");
     }
-    if (this.recordWithSendKeys && a11y.getSupportedCommands) {
+    if (this.recordWithSendKeys) {
       const supportedCommands = await a11y.getSupportedCommands();
       this.recordWithSupportedSendKeys =
         supportedCommands?.includes("request_insert_text") ?? false;

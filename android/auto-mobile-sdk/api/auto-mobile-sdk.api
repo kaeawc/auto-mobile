@@ -75,7 +75,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
   public static final int[] $EnumSwitchMapping$0;
 }
 Compiled from "AutoMobileSDK.kt"
-public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$1$6$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
+public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$1$7$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
   public void onStart(androidx.lifecycle.LifecycleOwner);
   public void onStop(androidx.lifecycle.LifecycleOwner);
   public void onCreate(androidx.lifecycle.LifecycleOwner);
@@ -104,6 +104,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final void setLogger$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.logging.SdkLogger);
   public final void initialize(android.content.Context);
   public final void initialize(android.content.Context, dev.jasonpearson.automobile.sdk.AutoMobileConfiguration);
+  public final void initialize(dev.jasonpearson.automobile.sdk.NavigationConfiguration);
   public final void addNavigationListener(dev.jasonpearson.automobile.sdk.NavigationListener);
   public final void removeNavigationListener(dev.jasonpearson.automobile.sdk.NavigationListener);
   public final void addRuntimeContextListener(dev.jasonpearson.automobile.sdk.RuntimeContextListener);
@@ -215,6 +216,12 @@ public final class dev.jasonpearson.automobile.sdk.InspectorRegistration {
 Compiled from "InspectorRegistration.kt"
 public final class dev.jasonpearson.automobile.sdk.InspectorRegistrationKt {
   public static final <V> boolean removeIfIdentical(java.util.concurrent.ConcurrentHashMap<java.lang.String, V>, java.lang.String, V);
+}
+Compiled from "NavigationConfiguration.kt"
+public final class dev.jasonpearson.automobile.sdk.NavigationConfiguration {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.NavigationConfiguration(android.content.Context);
+  public final android.content.Context getContext$auto_mobile_sdk();
 }
 Compiled from "NavigationEvent.kt"
 public final class dev.jasonpearson.automobile.sdk.NavigationEvent {
@@ -598,6 +605,8 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityReg
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry();
   public final void markInitialized();
+  public final void markNavigationInitialized();
+  public final void markNavigationShutdown();
   public final void markLifecycleReady();
   public final void markShutdown();
   public final void setEnabled(boolean);

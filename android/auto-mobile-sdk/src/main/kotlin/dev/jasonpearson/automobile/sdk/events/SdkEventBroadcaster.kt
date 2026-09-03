@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.SdkConstants
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Broadcasts batched SDK events via Intent for cross-process communication.
@@ -25,9 +26,11 @@ object SdkEventBroadcaster {
   internal var retryPolicy: RetryPolicy = RetryPolicy()
   internal var retryHandler: Handler = Handler(Looper.getMainLooper())
   internal var dropCounter: DropCounter? = null
+  private val deliveryGeneration = AtomicLong()
 
   /** Reset mutable state. Called by [AutoMobileSDK.shutdown]. */
   internal fun reset() {
+    deliveryGeneration.incrementAndGet()
     retryHandler.removeCallbacksAndMessages(null)
     retryPolicy = RetryPolicy()
     retryHandler = Handler(Looper.getMainLooper())
@@ -43,12 +46,13 @@ object SdkEventBroadcaster {
   internal fun broadcastBatch(context: Context, events: List<SdkEvent>) {
     if (events.isEmpty()) return
 
+    val generation = deliveryGeneration.get()
     val batches = splitIntoBatches(events, context.packageName)
     val eventCount = events.size
     val perBatch = if (batches.size > 1) eventCount / batches.size else eventCount
     for ((i, json) in batches.withIndex()) {
       val count = if (i == batches.lastIndex) eventCount - perBatch * i else perBatch
-      sendBatchIntent(context, json, count)
+      sendBatchIntent(context, json, count, generation = generation)
     }
   }
 
@@ -99,7 +103,10 @@ object SdkEventBroadcaster {
     batchJson: String,
     eventCount: Int = 1,
     attempt: Int = 0,
+    generation: Long,
   ) {
+    if (generation != deliveryGeneration.get()) return
+
     try {
       val intent =
         Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH).apply {
@@ -112,13 +119,22 @@ object SdkEventBroadcaster {
         }
       context.sendBroadcast(intent)
     } catch (_: Exception) {
+      if (generation != deliveryGeneration.get()) return
       if (attempt < retryPolicy.maxRetries) {
         val delayMs = retryPolicy.delayForAttempt(attempt)
         retryHandler.postDelayed(
-          { sendBatchIntent(context, batchJson, eventCount, attempt + 1) },
+          {
+            sendBatchIntent(
+              context,
+              batchJson,
+              eventCount,
+              attempt + 1,
+              generation = generation,
+            )
+          },
           delayMs,
         )
-      } else {
+      } else if (generation == deliveryGeneration.get()) {
         dropCounter?.increment(DropReason.DELIVERY_FAILED, eventCount)
       }
     }

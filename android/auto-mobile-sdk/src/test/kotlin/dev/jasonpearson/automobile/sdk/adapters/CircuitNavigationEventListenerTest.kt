@@ -91,6 +91,7 @@ class CircuitNavigationEventListenerTest {
         ),
         events.map(NavigationEvent::destination),
       )
+      assertTrue(events.all { it.arguments.isEmpty() && it.metadata.isEmpty() })
     } finally {
       composition.dispose()
     }
@@ -229,6 +230,37 @@ class CircuitNavigationEventListenerTest {
       assertSame(initialListener, listener)
       assertEquals("updated", events.last().arguments["extractor"])
       assertEquals("updated", events.last().metadata["metadata"])
+    } finally {
+      composition.dispose()
+    }
+  }
+
+  @Test
+  fun `listener contains extractor failures`() = runTest {
+    val events = collectEvents()
+    val delegate = fakeNavigator(HomeScreen)
+    lateinit var navigator: Navigator
+    val composition = TestComposition()
+
+    try {
+      composition.setContent {
+        val listener =
+          CircuitAdapter.rememberCircuitNavigationEventListener(
+            extractArguments = { error("extractor failure") }
+          )
+        navigator =
+          rememberInterceptingNavigator(
+            navigator = delegate,
+            eventListeners = listOf(listener),
+            enableBackHandler = false,
+          )
+      }
+
+      composition.awaitIdle()
+      navigator.goTo(DetailScreen("ignored"))
+      composition.awaitIdle()
+
+      assertTrue(events.isEmpty())
     } finally {
       composition.dispose()
     }

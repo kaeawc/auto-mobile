@@ -50,7 +50,9 @@ internal class SdkCapabilityRegistry {
   private val lock = Any()
   private val descriptors = LinkedHashMap<String, SdkCapabilityDescriptor>()
   private var initialized = false
+  private var navigationOnly = false
   private var enabled = true
+  private var initializedBeforeNavigation = false
   private var policy = SdkCapturePolicy()
 
   init {
@@ -58,7 +60,28 @@ internal class SdkCapabilityRegistry {
   }
 
   fun markInitialized() {
-    synchronized(lock) { initialized = true }
+    synchronized(lock) {
+      initialized = true
+      navigationOnly = false
+    }
+  }
+
+  /** Marks only navigation event delivery as active. */
+  fun markNavigationInitialized() {
+    synchronized(lock) {
+      initializedBeforeNavigation = initialized
+      initialized = true
+      navigationOnly = true
+    }
+  }
+
+  /** Restores the pre-navigation initialization state without clearing host registrations. */
+  fun markNavigationShutdown() {
+    synchronized(lock) {
+      initialized = initializedBeforeNavigation
+      navigationOnly = false
+      enabled = true
+    }
   }
 
   fun markLifecycleReady() {
@@ -71,6 +94,7 @@ internal class SdkCapabilityRegistry {
   fun markShutdown() {
     synchronized(lock) {
       initialized = false
+      navigationOnly = false
       enabled = true
       policy = SdkCapturePolicy()
       descriptors.clear()
@@ -124,6 +148,11 @@ internal class SdkCapabilityRegistry {
       val visible =
         descriptors.values.map { descriptor ->
           when {
+            navigationOnly && descriptor.id != "events.navigation" ->
+              descriptor.copy(
+                state = SdkCapabilityState.UNSUPPORTED,
+                reason = "Unavailable in navigation-only mode",
+              )
             !initialized && descriptor.state != SdkCapabilityState.UNSUPPORTED ->
               descriptor.copy(
                 state = SdkCapabilityState.NOT_INITIALIZED,
@@ -145,7 +174,10 @@ internal class SdkCapabilityRegistry {
 
   private fun isSupported(id: String): Boolean {
     val descriptor = descriptors[id]
-    return initialized && enabled && descriptor?.state == SdkCapabilityState.SUPPORTED
+    return (initialized &&
+      enabled &&
+      (!navigationOnly || id == "events.navigation") &&
+      descriptor?.state == SdkCapabilityState.SUPPORTED)
   }
 
   fun isCapabilitySupported(id: String): Boolean = synchronized(lock) { isSupported(id) }

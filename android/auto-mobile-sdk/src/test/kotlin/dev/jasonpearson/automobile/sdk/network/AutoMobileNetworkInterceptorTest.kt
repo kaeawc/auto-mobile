@@ -7,6 +7,7 @@ import java.io.IOException
 import java.net.Proxy
 import java.net.ProxySelector
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import javax.net.SocketFactory
 import javax.net.ssl.HostnameVerifier
@@ -33,20 +34,33 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.junit.After
 import org.junit.Test
 
 class AutoMobileNetworkInterceptorTest {
+  private var bufferExecutor: ScheduledExecutorService? = null
+
+  @After
+  fun tearDown() {
+    bufferExecutor?.shutdownNow()
+  }
 
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<List<SdkEvent>>> {
     val flushed = mutableListOf<List<SdkEvent>>()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 1,
         flushIntervalMs = 60_000,
         onFlush = { flushed.add(it) },
-        executor = Executors.newSingleThreadScheduledExecutor(),
+        executor = executor,
       )
+    bufferExecutor = executor
     return buffer to flushed
+  }
+
+  private fun drainDelivery() {
+    bufferExecutor!!.submit {}.get(1, TimeUnit.SECONDS)
   }
 
   private fun fakeChain(
@@ -175,7 +189,7 @@ class AutoMobileNetworkInterceptorTest {
     val request = Request.Builder().url("https://api.example.com/users?page=1").get().build()
 
     interceptor.intercept(fakeChain(request = request, responseCode = 200))
-    buffer.flush()
+    drainDelivery()
 
     assertEquals(1, flushed.size)
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -195,7 +209,7 @@ class AutoMobileNetworkInterceptorTest {
     val body = "x".repeat(1024)
 
     interceptor.intercept(fakeChain(responseBody = body))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals(1024L, event.responseBodySize)
@@ -207,7 +221,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer)
 
     interceptor.intercept(fakeChain(protocol = Protocol.HTTP_2))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("h2", event.protocol)
@@ -221,7 +235,7 @@ class AutoMobileNetworkInterceptorTest {
     assertFailsWith<IOException> {
       interceptor.intercept(fakeChain(throwOnProceed = IOException("Connection refused")))
     }
-    buffer.flush()
+    drainDelivery()
 
     assertEquals(1, flushed.size)
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -251,7 +265,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request, responseCode = 201))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("POST", event.method)
@@ -265,7 +279,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer)
 
     interceptor.intercept(fakeChain())
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertTrue(event.durationMs >= 0, "Duration should be non-negative")
@@ -285,7 +299,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNotNull(event.requestHeaders)
@@ -309,7 +323,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("first, second, third", event.requestHeaders!!["X-Trace"])
@@ -329,7 +343,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("lower", event.requestHeaders!!["X-Case"])
@@ -342,7 +356,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = true)
 
     interceptor.intercept(fakeChain())
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNotNull(event.responseHeaders)
@@ -356,7 +370,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = false)
 
     interceptor.intercept(fakeChain())
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestHeaders)
@@ -376,7 +390,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request, responseCode = 201))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("""{"name":"test"}""", event.requestBody)
@@ -388,7 +402,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
 
     interceptor.intercept(fakeChain(responseBody = """{"ok":true}"""))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("""{"ok":true}""", event.responseBody)
@@ -405,7 +419,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestBody)
@@ -423,7 +437,7 @@ class AutoMobileNetworkInterceptorTest {
         .build()
 
     interceptor.intercept(fakeChain(request = request))
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestBody) // image/png is not a text type
@@ -435,7 +449,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer)
 
     interceptor.intercept(fakeChain())
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("application/json", event.contentType)
@@ -451,7 +465,7 @@ class AutoMobileNetworkInterceptorTest {
     assertFailsWith<IOException> {
       interceptor.intercept(fakeChain(request = request, throwOnProceed = IOException("timeout")))
     }
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNotNull(event.requestHeaders)
@@ -499,7 +513,7 @@ class AutoMobileNetworkInterceptorTest {
     assertEquals(false, chainCalled)
     assertEquals(503, response.code)
     assertEquals("""{"error":"service unavailable"}""", response.body.string())
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals(503, event.statusCode)
@@ -514,7 +528,7 @@ class AutoMobileNetworkInterceptorTest {
     val response = interceptor.intercept(fakeChain(responseCode = 200))
 
     assertEquals(200, response.code)
-    buffer.flush()
+    drainDelivery()
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.error)
   }
@@ -535,7 +549,7 @@ class AutoMobileNetworkInterceptorTest {
     val response = interceptor.intercept(fakeChain())
 
     assertEquals(500, response.code)
-    buffer.flush()
+    drainDelivery()
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals(500, event.statusCode)
     assertEquals("simulated:http500", event.error)
@@ -557,7 +571,7 @@ class AutoMobileNetworkInterceptorTest {
     assertFailsWith<java.net.SocketTimeoutException> {
       interceptor.intercept(fakeChain())
     }
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("simulated:timeout", event.error)
@@ -668,7 +682,7 @@ class AutoMobileNetworkInterceptorTest {
     val interceptor = AutoMobileNetworkInterceptor(buffer)
 
     interceptor.intercept(fakeChain())
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestHeaders)

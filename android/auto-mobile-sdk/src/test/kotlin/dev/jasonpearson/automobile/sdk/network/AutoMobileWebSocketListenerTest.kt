@@ -6,25 +6,40 @@ import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString.Companion.encodeUtf8
+import org.junit.After
 import org.junit.Test
 
 class AutoMobileWebSocketListenerTest {
+  private var bufferExecutor: ScheduledExecutorService? = null
+
+  @After
+  fun tearDown() {
+    bufferExecutor?.shutdownNow()
+  }
 
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<SdkEvent>> {
     val events = mutableListOf<SdkEvent>()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 1,
         flushIntervalMs = 60_000,
         onFlush = { events.addAll(it) },
-        executor = Executors.newSingleThreadScheduledExecutor(),
+        executor = executor,
       )
+    bufferExecutor = executor
     return buffer to events
+  }
+
+  private fun drainDelivery() {
+    bufferExecutor!!.submit {}.get(1, TimeUnit.SECONDS)
   }
 
   /** Minimal no-op WebSocket for testing callbacks */
@@ -57,6 +72,7 @@ class AutoMobileWebSocketListenerTest {
 
     listener.onMessage(fakeWebSocket, "hello world")
 
+    drainDelivery()
     assertEquals(1, events.size)
     val event = events[0] as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameDirection.RECEIVED, event.direction)
@@ -75,6 +91,7 @@ class AutoMobileWebSocketListenerTest {
     val bytes = "binary data".encodeUtf8()
     listener.onMessage(fakeWebSocket, bytes)
 
+    drainDelivery()
     val event = events[0] as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameDirection.RECEIVED, event.direction)
     assertEquals(WebSocketFrameType.BINARY, event.frameType)
@@ -89,6 +106,7 @@ class AutoMobileWebSocketListenerTest {
 
     listener.onClosing(fakeWebSocket, 1000, "goodbye")
 
+    drainDelivery()
     val event = events[0] as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameDirection.RECEIVED, event.direction)
     assertEquals(WebSocketFrameType.CLOSE, event.frameType)
@@ -161,6 +179,7 @@ class AutoMobileWebSocketListenerTest {
 
     listener.onMessage(fakeWebSocket, "msg")
 
+    drainDelivery()
     val event = events[0] as SdkWebSocketFrameEvent
     assertEquals("com.example.app", event.applicationId)
   }

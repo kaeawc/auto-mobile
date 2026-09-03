@@ -5,28 +5,38 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.junit.After
 import org.junit.Test
 
 class AutoMobileNetworkTest {
+  private var bufferExecutor: ScheduledExecutorService? = null
 
   @After
   fun tearDown() {
     AutoMobileNetwork.reset()
+    bufferExecutor?.shutdownNow()
   }
 
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<List<SdkEvent>>> {
     val flushed = mutableListOf<List<SdkEvent>>()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 1,
         flushIntervalMs = 60_000,
         onFlush = { flushed.add(it) },
-        executor = Executors.newSingleThreadScheduledExecutor(),
+        executor = executor,
       )
+    bufferExecutor = executor
     return buffer to flushed
+  }
+
+  private fun drainDelivery() {
+    bufferExecutor!!.submit {}.get(1, TimeUnit.SECONDS)
   }
 
   @Test
@@ -46,7 +56,7 @@ class AutoMobileNetworkTest {
         path = "/users",
       )
     )
-    buffer.flush()
+    drainDelivery()
 
     assertEquals(1, flushed.size)
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -73,7 +83,7 @@ class AutoMobileNetworkTest {
         method = "POST",
       )
     )
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("api.example.com", event.host)
@@ -108,7 +118,7 @@ class AutoMobileNetworkTest {
 
     // Without capture flags, headers and bodies should be null
     AutoMobileNetwork.recordRequest(record)
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestHeaders)
@@ -133,7 +143,7 @@ class AutoMobileNetworkTest {
       )
 
     AutoMobileNetwork.recordRequest(record, captureHeaders = true, captureBodies = true)
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals(mapOf("Authorization" to "Bearer token"), event.requestHeaders)
@@ -158,7 +168,7 @@ class AutoMobileNetworkTest {
       captureHeaders = true,
       captureBodies = true,
     )
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestHeaders)
@@ -197,7 +207,7 @@ class AutoMobileNetworkTest {
     session.complete(statusCode = 200, durationMs = 12)
     session.fail(IllegalStateException("late failure"))
     session.cancel()
-    buffer.flush()
+    drainDelivery()
 
     assertEquals(1, flushed.size)
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -224,7 +234,7 @@ class AutoMobileNetworkTest {
       responseHeaders = mapOf("X-Request-Id" to "abc"),
       responseBody = "{\"ok\":true}",
     )
-    buffer.flush()
+    drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals(mapOf("Authorization" to "secret"), event.requestHeaders)

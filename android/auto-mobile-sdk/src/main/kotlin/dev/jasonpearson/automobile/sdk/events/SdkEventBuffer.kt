@@ -40,7 +40,9 @@ internal class SdkEventBuffer(
 ) {
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
+  private val pendingBatches = ArrayDeque<MutableList<SdkEvent>>()
   private var flushTask: ScheduledFuture<*>? = null
+  private var isDeliveryScheduled = false
   @Volatile private var isShutdown = false
   @Volatile var isEnabled: Boolean = true
 
@@ -53,7 +55,7 @@ internal class SdkEventBuffer(
             // Backstop: any exception escaping the periodic task cancels all future
             // runs (the scheduleAtFixedRate contract). Per-batch errors are already
             // accounted inside deliverBatch; swallow here so the timer survives (#3605).
-            { runCatching { flush() } },
+            { runCatching { enqueueFlush() } },
             flushIntervalMs,
             flushIntervalMs,
             TimeUnit.MILLISECONDS,
@@ -88,14 +90,16 @@ internal class SdkEventBuffer(
       }
     }
 
-    val shouldFlush: Boolean
-    val snapshot: List<SdkEvent>
-
     lock.withLock {
-      if (buffer.size >= maxPendingEvents) {
+      if (isShutdown) {
+        dropCounter?.increment(DropReason.SHUTDOWN)
+        return
+      }
+
+      while (pendingEventCount() >= maxPendingEvents) {
         when (backPressureStrategy) {
           BackPressureStrategy.DROP_OLDEST -> {
-            buffer.removeFirst()
+            dropOldestPendingEvent()
             dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
           }
           BackPressureStrategy.IGNORE_NEWEST -> {
@@ -107,17 +111,10 @@ internal class SdkEventBuffer(
 
       buffer.add(current)
       if (buffer.size >= maxBufferSize) {
-        snapshot = ArrayList(buffer)
+        val snapshot = ArrayList(buffer)
         buffer.clear()
-        shouldFlush = true
-      } else {
-        snapshot = emptyList()
-        shouldFlush = false
+        enqueueDelivery(snapshot)
       }
-    }
-
-    if (shouldFlush) {
-      deliverBatch(snapshot)
     }
   }
 
@@ -136,17 +133,91 @@ internal class SdkEventBuffer(
 
   /** Submit a task to run on the buffer's background executor. */
   fun execute(task: Runnable) {
-    if (!isShutdown) {
-      executor.execute(task)
+    lock.withLock {
+      if (!isShutdown) {
+        executor.execute(task)
+      }
     }
   }
 
   /** Shutdown the buffer, flushing remaining events. */
   fun shutdown() {
-    isShutdown = true
-    flushTask?.cancel(false)
-    flush()
+    lock.withLock {
+      if (isShutdown) return
+      isShutdown = true
+      flushTask?.cancel(false)
+      if (buffer.isNotEmpty()) {
+        val snapshot = ArrayList(buffer)
+        buffer.clear()
+        enqueueDelivery(snapshot)
+      }
+    }
     executor.shutdown()
+    awaitExecutorTermination()
+  }
+
+  /** Snapshot and queue pending events from the periodic executor. */
+  private fun enqueueFlush() {
+    lock.withLock {
+      if (isShutdown || buffer.isEmpty()) return
+      val snapshot = ArrayList(buffer)
+      buffer.clear()
+      enqueueDelivery(snapshot)
+    }
+  }
+
+  /** Queue delivery while holding [lock] to preserve snapshot submission order and backpressure. */
+  private fun enqueueDelivery(events: MutableList<SdkEvent>) {
+    pendingBatches.addLast(events)
+    if (!isDeliveryScheduled) {
+      isDeliveryScheduled = true
+      executor.execute { drainDeliveries() }
+    }
+  }
+
+  private fun drainDeliveries() {
+    while (true) {
+      val events = lock.withLock {
+        if (pendingBatches.isEmpty()) {
+          isDeliveryScheduled = false
+          return
+        }
+        pendingBatches.removeFirst()
+      }
+      deliverBatch(events)
+    }
+  }
+
+  /** Must be called while holding [lock]. Delivery in progress is no longer pending. */
+  private fun pendingEventCount(): Int = buffer.size + pendingBatches.sumOf { it.size }
+
+  /** Must be called while holding [lock]. */
+  private fun dropOldestPendingEvent() {
+    val oldestBatch = pendingBatches.firstOrNull()
+    if (oldestBatch == null) {
+      buffer.removeAt(0)
+      return
+    }
+
+    oldestBatch.removeAt(0)
+    if (oldestBatch.isEmpty()) {
+      pendingBatches.removeFirst()
+    }
+  }
+
+  /** Preserve shutdown delivery completion without running delivery on the caller thread. */
+  private fun awaitExecutorTermination() {
+    var wasInterrupted = false
+    while (true) {
+      try {
+        if (executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) break
+      } catch (_: InterruptedException) {
+        wasInterrupted = true
+      }
+    }
+    if (wasInterrupted) {
+      Thread.currentThread().interrupt()
+    }
   }
 
   private fun deliverBatch(events: List<SdkEvent>) {

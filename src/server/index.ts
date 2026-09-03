@@ -579,12 +579,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       typeof rawSessionUuid === "string" && rawSessionUuid.trim().length > 0
         ? rawSessionUuid
         : undefined;
-    if (
-      name !== SET_TOOL_ENABLED_TOOL_NAME &&
-      sessionToolBinding.bind(sessionId, providedSessionUuid)
-    ) {
-      ToolRegistry.notifyToolListChanged();
-    }
 
     // Check if tool call should be blocked due to active executePlan in this session
     const decision = planExecutionLock.evaluate({
@@ -684,6 +678,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         isDeviceSessionAcquisitionTool(name) &&
         sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
+      ) {
+        ToolRegistry.notifyToolListChanged();
+      }
+      if (
+        !isDeviceSessionAcquisitionTool(name) &&
+        name !== SET_TOOL_ENABLED_TOOL_NAME &&
+        sessionToolBinding.bind(sessionId, providedSessionUuid)
       ) {
         ToolRegistry.notifyToolListChanged();
       }

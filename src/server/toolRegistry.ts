@@ -478,13 +478,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
       const sessionManager = DaemonState.getInstance().getSessionManager();
-      const activeSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
-      if (!activeSession && !sessionManager.getTerminalReleaseSnapshot(sessionUuid)) {
-        throw new ActionableError(
-          `Session ${sessionUuid} is not an active daemon session. ` +
-            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
-        );
-      }
+      // A missing assigner makes getOrCreateSession an admission-only lookup:
+      // terminal IDs retain their durable TerminalSessionError, while never-issued
+      // IDs cannot allocate a device.
+      await sessionManager.getOrCreateSession(sessionUuid, undefined, undefined, execution);
       const devicePool = DaemonState.getInstance().getDevicePool();
       const context = await createToolExecutionContext(
         sessionUuid,

@@ -538,11 +538,7 @@ async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<voi
   }
 }
 
-function handleToolResult(result: any, toolName: string): void {
-  console.log(JSON.stringify(result, null, 2));
-
-  // Check if the result indicates failure and exit with code 1
-  // Handle both direct result format and MCP content format
+function cliToolResultPayload(result: any): any {
   let actualResult = result;
   if (
     result &&
@@ -560,8 +556,21 @@ function handleToolResult(result: any, toolName: string): void {
       }
     }
   }
+  return actualResult;
+}
 
-  if (actualResult && typeof actualResult === "object" && actualResult.success === false) {
+export function isCliToolFailure(result: any): boolean {
+  return result?.isError === true || cliToolResultPayload(result)?.success === false;
+}
+
+function handleToolResult(result: any, toolName: string): void {
+  console.log(JSON.stringify(result, null, 2));
+
+  // MCP tool errors use the top-level `isError` flag, while older daemon
+  // responses encode their failure in the JSON payload.
+  const actualResult = cliToolResultPayload(result);
+
+  if (isCliToolFailure(result)) {
     // Write error message to STDERR
     if (actualResult.error) {
       console.error(actualResult.error);

@@ -2451,6 +2451,7 @@ describe("DaemonMcpProxy", () => {
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
         timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
       });
 
       try {
@@ -2469,6 +2470,184 @@ describe("DaemonMcpProxy", () => {
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("refreshes the replay lease when an admitted bound call returns an error result", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn"
+          ? { content: [{ type: "text", text: "tap failed after admission" }], isError: true }
+          : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).resolves.toMatchObject({
+          isError: true,
+        });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not remember a UUID passed to a tool that does not accept sessions", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const timer = new FakeTimer();
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("listDevices", { sessionUuid: "unissued-session" });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "listDevices", params: { sessionUuid: "unissued-session" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("renews a bound session from an unscoped call", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("listDevices", {});
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "listDevices", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("keeps the prior binding when an unissued session UUID is rejected", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([
+          [
+            "tapOn",
+            new ActionableError(
+              "Session session-b is not an active daemon session (not found). " +
+                "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+            ),
+          ],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await expect(
+          proxy.callTool("tapOn", { sessionUuid: "session-b", deviceId: "device-b" }),
+        ).rejects.toThrow("is not an active daemon session");
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("keeps the prior binding when an unissued session UUID returns an error result", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn"
+          ? { content: [{ type: "text", text: "session rejected" }], isError: true }
+          : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        const rejected = await proxy.callTool("tapOn", {
+          sessionUuid: "session-b",
+          deviceId: "device-b",
+        });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(rejected.isError).toBe(true);
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-b", deviceId: "device-b" } },
           { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
         ]);
       } finally {

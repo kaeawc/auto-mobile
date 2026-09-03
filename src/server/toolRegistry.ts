@@ -479,6 +479,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const devicePool = DaemonState.getInstance().getDevicePool();
+      // A terminal ID keeps its durable TerminalSessionError. Only an ID that
+      // was live during daemon restart can reach context creation without a
+      // live session; never-issued IDs are rejected before assignment.
+      const admittedSession = await sessionManager.admitIssuedSessionForAutomation(
+        sessionUuid,
+        execution,
+      );
       const context = await createToolExecutionContext(
         sessionUuid,
         sessionManager,
@@ -488,6 +495,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           platform: platform === "android" || platform === "ios" ? platform : undefined,
         },
         execution,
+        admittedSession,
       );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;

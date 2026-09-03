@@ -165,6 +165,23 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(0);
   });
 
+  test("does not recreate an admitted session released before setup", async () => {
+    const admittedSession = await sessionManager.createSession("session-1", "device-1", "android");
+    await sessionManager.releaseSession("session-1", "explicit-release");
+
+    await expect(
+      createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        undefined,
+        admittedSession,
+      ),
+    ).rejects.toThrow("Session session-1 was released during setup");
+    expect(sessionManager.getSession("session-1")).toBeNull();
+  });
+
   test("quarantines preserved reset-cohort session routing until recovery settles", async () => {
     const first: BootedDevice = {
       name: "Pixel_8_API_35",
@@ -296,6 +313,60 @@ describe("ToolExecutionContext", () => {
 
     await expect(context).resolves.toMatchObject({ deviceId: "device-1" });
     expect(setupCalls).toBe(1);
+  });
+
+  test("rejects an admitted session once its release begins", async () => {
+    const session = await sessionManager.createSession("session-releasing", "device-1", "android");
+    let finishSetup!: () => void;
+    const setup = sessionManager.trackSessionSetup(
+      session,
+      () =>
+        new Promise<void>((resolve) => {
+          finishSetup = resolve;
+        }),
+    );
+    const release = sessionManager.releaseSession("session-releasing");
+    await Promise.resolve();
+
+    await expect(
+      createToolExecutionContext(
+        "session-releasing",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        undefined,
+        session,
+      ),
+    ).rejects.toThrow("released during setup");
+
+    finishSetup();
+    await setup;
+    await release;
+  });
+
+  test("rechecks admission after setup releases its session", async () => {
+    const session = await sessionManager.createSession("session-releasing", "device-1", "android");
+    const trackSetup = spyOn(sessionManager, "trackSessionSetup").mockImplementation(
+      async (trackedSession, setup) => {
+        await setup();
+        await sessionManager.releaseSession(trackedSession.sessionId, "explicit-release");
+      },
+    );
+
+    try {
+      await expect(
+        createToolExecutionContext(
+          "session-releasing",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+          undefined,
+          session,
+        ),
+      ).rejects.toThrow("released during setup");
+    } finally {
+      trackSetup.mockRestore();
+    }
   });
 
   test("does not apply keep-awake after a session is released during setup", async () => {

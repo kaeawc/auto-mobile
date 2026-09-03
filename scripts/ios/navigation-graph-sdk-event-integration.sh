@@ -13,7 +13,7 @@ detail_screen="Issue4460Detail"
 # Keep the runner's SDK-event consumer and the public graph query in one session. Each CLI
 # invocation otherwise receives a distinct MCP session, which can route the injected events to a
 # different session-scoped NavigationGraphManager than getNavigationGraph reads.
-session_uuid="44600000-0000-4000-8000-000000000000"
+session_uuid=""
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -122,6 +122,29 @@ wait_for_ctrl_proxy_health() {
 ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
 
 wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
+
+# Acquire the booted Simulator before issuing session-scoped calls. A caller must
+# not fabricate a UUID to access a device it has not acquired.
+session_result="$(auto-mobile --debug --embedded-sdk --cli getApple --deviceId "${device_id}")"
+if ! session_uuid="$(
+  jq -er '
+    (
+      if .sessionUuid? then .sessionUuid
+      elif .content? then
+        .content[]
+        | select(.type == "text")
+        | .text
+        | fromjson
+        | .sessionUuid
+      else empty
+      end
+    )
+    | select(type == "string" and length > 0)
+  ' <<<"${session_result}"
+)"; then
+  echo "error: could not acquire navigation graph session for simulator ${device_id}" >&2
+  exit 1
+fi
 
 # The graph query selects the target device's latest observed foreground app.
 # Keep the injected SDK events and the following observations scoped to the

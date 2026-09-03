@@ -6,8 +6,9 @@ import {
   DeviceSessionRepository,
   type DeviceSessionPersistence,
 } from "../db/deviceSessionRepository";
+import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
@@ -217,6 +218,8 @@ const EXPIRY_RELEASE_REASONS = new Set([
   "missing-first-heartbeat",
   "heartbeat-timeout",
 ]);
+
+class UnissuedSessionError extends ActionableError {}
 
 function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
@@ -491,11 +494,14 @@ export class SessionManager {
     sessionId: string,
   ): Promise<SessionReleaseSnapshot | undefined> {
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
-    if (
-      !persisted ||
-      !persisted.release_reason ||
-      !isTerminalReleaseReason(persisted.release_reason)
-    ) {
+    return persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined;
+  }
+
+  private terminalReleaseFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    if (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) {
       return undefined;
     }
     const releasedAtMs = persisted.released_at_ms ?? persisted.last_used_at_ms;
@@ -668,6 +674,37 @@ export class SessionManager {
     return await assignment;
   }
 
+  /** Admit an identity already issued by this daemon, including a nonterminal persisted one. */
+  async admitIssuedSessionForAutomation(
+    sessionId: string,
+    execution?: SessionExecutionMetadata,
+  ): Promise<Session | undefined> {
+    let unissuedSessionError: UnissuedSessionError | undefined;
+    try {
+      return await this.getOrCreateSession(sessionId, undefined, undefined, execution);
+    } catch (error) {
+      if (!(error instanceof UnissuedSessionError)) {
+        throw error;
+      }
+      unissuedSessionError = error;
+    }
+
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persistedTerminalRelease =
+      persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
+    if (persistedTerminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
+      throw new TerminalSessionError(sessionId, persistedTerminalRelease);
+    }
+    if (
+      persisted &&
+      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
+    ) {
+      return undefined;
+    }
+    throw unissuedSessionError;
+  }
+
   private async createUnseenSession(
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
@@ -684,8 +721,9 @@ export class SessionManager {
 
     // Need to create new session - assign device from pool
     if (!devicePool) {
-      throw new Error(
-        `Session ${sessionId} not found and no device pool provided for auto-assignment.`,
+      throw new UnissuedSessionError(
+        `Session ${sessionId} is not an active daemon session (not found). ` +
+          "Acquire a device with getAndroid or getApple before using its sessionUuid.",
       );
     }
 
@@ -901,6 +939,10 @@ export class SessionManager {
       this.sessions.get(session.sessionId) === session &&
       !this.terminalReleaseSnapshots.has(session.sessionId)
     );
+  }
+
+  isAdmittedForAutomation(session: Session): boolean {
+    return this.isCurrentSession(session) && !this.releasingSessions.has(session);
   }
 
   /** Whether this is the newest published, releasing, or finalized incarnation for its UUID. */

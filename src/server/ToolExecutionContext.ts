@@ -78,29 +78,37 @@ export async function createToolExecutionContext(
   devicePool: DevicePool,
   sessionOptions: SessionOptions = {},
   execution?: SessionExecutionMetadata,
+  admittedSession?: Session,
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
   }
 
+  if (admittedSession && !sessionManager.isAdmittedForAutomation(admittedSession)) {
+    throw new ActionableError(`Session ${sessionUuid} was released during setup`);
+  }
   devicePool.assertSessionReadyForAutomation(sessionUuid);
-  const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
+  const existingSession =
+    admittedSession ?? sessionManager.getSessionForNewExecution(sessionUuid, execution);
 
   // Get or create session
-  const session = await sessionManager.getOrCreateSession(
-    sessionUuid,
-    devicePool,
-    sessionOptions.platform,
-    execution,
-  );
+  const session =
+    admittedSession ??
+    (await sessionManager.getOrCreateSession(
+      sessionUuid,
+      devicePool,
+      sessionOptions.platform,
+      execution,
+    ));
 
-  if (!sessionManager.isCurrentSession(session)) {
+  if (!sessionManager.isAdmittedForAutomation(session)) {
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
 
   await sessionManager.trackSessionSetup(session, () =>
     setupSession(session, existingSession === session, sessionManager, sessionOptions),
   );
+  ensureSessionIsCurrent(session, sessionManager);
 
   return {
     sessionId: sessionUuid,
@@ -146,7 +154,7 @@ async function setupSession(
 }
 
 function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager): void {
-  if (!sessionManager.isCurrentSession(session)) {
+  if (!sessionManager.isAdmittedForAutomation(session)) {
     throw new ActionableError(`Session ${session.sessionId} was released during setup`);
   }
 }
@@ -266,7 +274,7 @@ async function ensureKeepScreenAwake(
     state = { applied: false, skipReason: "failed" };
   }
 
-  if (!sessionManager.isCurrentSession(session)) {
+  if (!sessionManager.isAdmittedForAutomation(session)) {
     if (state.applied) {
       try {
         await manager.restore(state);

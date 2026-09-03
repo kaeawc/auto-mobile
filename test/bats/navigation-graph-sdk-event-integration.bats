@@ -5,6 +5,7 @@ SCRIPT="scripts/ios/navigation-graph-sdk-event-integration.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIG_PATH="$PATH"
+  export REAL_JQ="$(command -v jq)"
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
@@ -30,6 +31,32 @@ make_mock() {
 ${body}
 SCRIPT
   chmod +x "${MOCK_BIN}/${name}"
+}
+
+@test "rejects an empty session UUID from getApple" {
+  make_mock xcrun 'exit 0'
+  make_mock curl 'exit 0'
+  make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
+printf "8765\n"
+'
+  make_mock auto-mobile '
+if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
+  printf "{\"ios\":{\"checks\":[]}}\n"
+  exit 0
+fi
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ]; then
+  printf "{\"sessionUuid\":\"\"}\n"
+  exit 0
+fi
+'
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "simulator-udid"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not acquire navigation graph session"* ]]
 }
 
 @test "renews the graph session while retrying post-bind CtrlProxy health" {
@@ -59,6 +86,9 @@ if [ "$1" = "-cn" ]; then
   exit 0
 fi
 if [ "$1" = "-er" ]; then
+  if [[ "$2" == *"sessionUuid"* ]]; then
+    exec "$REAL_JQ" "$@"
+  fi
   if [ -f "$POST_BIND_DOCTOR_FAILURE_FILE" ]; then
     exit 1
   fi
@@ -87,6 +117,10 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
     fi
   fi
   printf "{\"ios\":{\"checks\":[]}}\\n"
+  exit 0
+fi
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ] && [ "$5" = "--deviceId" ] && [ "$6" = "simulator-udid" ]; then
+  printf "{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\"}\\n"
   exit 0
 fi
 if [ "$1" = "--daemon" ] && [ "$2" = "heartbeat" ] && [ "$3" = "44600000-0000-4000-8000-000000000000" ]; then

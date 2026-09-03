@@ -1432,6 +1432,10 @@ export class DaemonMcpProxy {
     return message.includes("Session not found");
   }
 
+  private isUnadmittedDaemonSessionError(error: unknown): boolean {
+    return errorMessage(error).includes("is not an active daemon session");
+  }
+
   private isUnknownToolError(error: unknown): boolean {
     const message = errorMessage(error);
     return message.includes("Unknown tool:");
@@ -1666,6 +1670,10 @@ export class DaemonMcpProxy {
         // the result-minted session establishes a fresh binding.
         isSessionAcquisition,
       );
+      if (result?.isError) {
+        this.refreshReplayLeaseForBoundSessionResult(forwardedArgs, callReleaseEpoch);
+        return result;
+      }
       this.rememberToolSelectionProfile(name, args, result);
       if (isSessionAcquisition) {
         await this.bindResultMintedDeviceSession(name, result);
@@ -2181,10 +2189,21 @@ export class DaemonMcpProxy {
       return;
     }
     const rememberedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (rememberedSessionUuid) {
+    if (
+      rememberedSessionUuid &&
+      (rememberedSessionUuid === this.boundSessionUuid || this.toolAcceptsSessionUuid(name))
+    ) {
       this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
+  }
+
+  private toolAcceptsSessionUuid(name: string): boolean {
+    const tool =
+      this.cachedTools?.find((definition) => definition.name === name) ??
+      this.staticToolDefinitionsProvider().find((definition) => definition.name === name);
+    const properties = tool?.inputSchema.properties;
+    return typeof properties === "object" && properties !== null && "sessionUuid" in properties;
   }
 
   // Bind `sessionUuid`, refreshing the replay lease. A change to a different UUID
@@ -2221,8 +2240,10 @@ export class DaemonMcpProxy {
   ): void {
     if (
       name === "executePlan" ||
+      name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
       this.isRecoverableDaemonSessionError(error) ||
+      this.isUnadmittedDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
     ) {
       return;
@@ -2239,6 +2260,22 @@ export class DaemonMcpProxy {
     const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     if (admittedSessionUuid) {
       this.updateBoundSessionUuid(admittedSessionUuid);
+      this.startBoundSessionHeartbeat();
+    }
+  }
+
+  private refreshReplayLeaseForBoundSessionResult(
+    forwardedArgs: Record<string, unknown>,
+    callReleaseEpoch: number,
+  ): void {
+    const releaseReason = this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
+    if (releaseReason) {
+      this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
+      return;
+    }
+    const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (forwardedSessionUuid && forwardedSessionUuid === this.boundSessionUuid) {
+      this.updateBoundSessionUuid(forwardedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
   }

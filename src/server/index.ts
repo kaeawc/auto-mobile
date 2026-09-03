@@ -11,6 +11,7 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { TerminalSessionError } from "../daemon/sessionManager";
+import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
@@ -579,12 +580,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       typeof rawSessionUuid === "string" && rawSessionUuid.trim().length > 0
         ? rawSessionUuid
         : undefined;
-    if (
-      name !== SET_TOOL_ENABLED_TOOL_NAME &&
-      sessionToolBinding.bind(sessionId, providedSessionUuid)
-    ) {
-      ToolRegistry.notifyToolListChanged();
-    }
 
     // Check if tool call should be blocked due to active executePlan in this session
     const decision = planExecutionLock.evaluate({
@@ -657,6 +652,23 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       : undefined;
 
     try {
+      if (
+        daemonMode &&
+        providedSessionUuid &&
+        !tool.requiresDevice &&
+        !isDeviceSessionAcquisitionTool(name) &&
+        name !== "setActiveDevice" &&
+        name !== SET_TOOL_ENABLED_TOOL_NAME
+      ) {
+        // Plain tools can strip or ignore sessionUuid themselves. Device-aware
+        // tools carry their admitted identity into execution in ToolRegistry.
+        await DaemonState.getInstance()
+          .getSessionManager()
+          .admitIssuedSessionForAutomation(providedSessionUuid, {
+            executionId: execution.id,
+            startTime: execution.startTime,
+          });
+      }
       const result = await runWithAbortSignal(requestSignal, () =>
         runWithToolSelectionContext(
           {
@@ -684,6 +696,37 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         isDeviceSessionAcquisitionTool(name) &&
         sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
+      ) {
+        ToolRegistry.notifyToolListChanged();
+      }
+      const isRecordingIdCleanup =
+        name === "videoRecording" &&
+        parsedParams &&
+        typeof parsedParams === "object" &&
+        parsedParams.action === "stop" &&
+        typeof parsedParams.recordingId === "string";
+      const daemonSessionManager = DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getSessionManager()
+        : undefined;
+      const sessionForBinding =
+        daemonSessionManager && providedSessionUuid && !isRecordingIdCleanup
+          ? daemonSessionManager.getSessionForNewExecution(providedSessionUuid, {
+              executionId: execution.id,
+              startTime: execution.startTime,
+            })
+          : undefined;
+      if (
+        !isDeviceSessionAcquisitionTool(name) &&
+        name !== SET_TOOL_ENABLED_TOOL_NAME &&
+        !result?.isError &&
+        providedSessionUuid &&
+        !isRecordingIdCleanup &&
+        (daemonSessionManager
+          ? sessionForBinding !== null &&
+            sessionForBinding !== undefined &&
+            daemonSessionManager.isAdmittedForAutomation(sessionForBinding)
+          : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
+        sessionToolBinding.bind(sessionId, providedSessionUuid)
       ) {
         ToolRegistry.notifyToolListChanged();
       }

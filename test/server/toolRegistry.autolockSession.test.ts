@@ -160,6 +160,40 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(pool.getDevice(androidB.deviceId)?.sessionId).toBeNull();
   });
 
+  test("rejects an unknown sessionUuid for a non-device tool before its handler runs", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA]);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidA]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    let handlerCalls = 0;
+    ToolRegistry.registerDeviceAware(
+      "nonDeviceUnknownSession",
+      "nonDeviceUnknownSession",
+      schema,
+      async () => {
+        handlerCalls += 1;
+        return { success: true };
+      },
+      { shouldEnsureDevice: () => false },
+    );
+    const tool = ToolRegistry.getTool("nonDeviceUnknownSession")!;
+
+    await expect(tool.handler({ sessionUuid: "banana" })).rejects.toThrow(/not found/i);
+
+    expect(handlerCalls).toBe(0);
+    expect(daemonSessionManager.getSession("banana")).toBeNull();
+  });
+
   test("rejects a deviceId that differs from an issued session's assignment", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
 import { DeviceSessionManager, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
-import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import { ActionableError, BootedDevice, SomePlatform, toActionableError } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -14,6 +14,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { DaemonState } from "../daemon/daemonState";
+import { TerminalSessionError } from "../daemon/sessionManager";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
@@ -430,6 +431,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     // Extract platform from args, default to "either" for backward compatibility
     let platform: SomePlatform = args.platform || "either";
 
+    if (sessionUuid && !shouldResolveDevice) {
+      await this.assertSessionIssuedForNonDeviceTool(sessionUuid, execution);
+    }
+
     if (shouldResolveDevice) {
       const implicitSessionUuid = this.resolveImplicitAutolockSession(
         platform,
@@ -513,6 +518,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         throw new ActionableError(
           `Unknown session UUID ${sessionUuid}. Call getAndroid or getApple first to acquire a device.`,
         );
+      } else if (providedDeviceId && providedDeviceId !== directSession.device.deviceId) {
+        throw new ActionableError(
+          `Session ${sessionUuid} is bound to ${directSession.device.deviceId}, not ${providedDeviceId}.`,
+        );
       } else if (!providedDeviceId) {
         providedDeviceId = directSession.device.deviceId;
         logger.info(
@@ -594,6 +603,31 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       sessionUuid,
       shouldResolveDevice,
     };
+  }
+
+  private async assertSessionIssuedForNonDeviceTool(
+    sessionUuid: string,
+    execution?: import("../daemon/sessionManager").SessionExecutionMetadata,
+  ): Promise<void> {
+    if (!DaemonState.getInstance().isInitialized()) {
+      if (!resolveDirectSessionDevice(sessionUuid)) {
+        throw new ActionableError(
+          `Unknown session UUID ${sessionUuid}. Call getAndroid or getApple first to acquire a device.`,
+        );
+      }
+      return;
+    }
+
+    try {
+      await DaemonState.getInstance()
+        .getSessionManager()
+        .getOrCreateSession(sessionUuid, undefined, undefined, execution);
+    } catch (error) {
+      if (error instanceof TerminalSessionError) {
+        throw error;
+      }
+      throw toActionableError(error, `Failed to resolve session ${sessionUuid}`);
+    }
   }
 
   private async enforceSessionUuidForMultipleIos(

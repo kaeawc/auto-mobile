@@ -721,4 +721,28 @@ describe("videoRecording tool segmentation branch", () => {
     expect((stopRes.recordings as unknown[]).length).toBe(1);
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
   });
+
+  test("by-handle stop rejects an unissued sessionUuid before stopping the recording", async () => {
+    const startRes = parse(
+      await handler()(androidDevice, {
+        action: "start",
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+      }),
+    );
+    const recordingId = (startRes.recordings as Array<Record<string, unknown>>)[0]
+      .recordingId as string;
+    const tool = ToolRegistry.getTool("videoRecording");
+    expect(tool).toBeDefined();
+
+    await expect(
+      tool!.handler({
+        action: "stop",
+        recordingId,
+        sessionUuid: "fabricated-session",
+      }),
+    ).rejects.toThrow("Unknown session UUID");
+
+    expect(fakeBackend.stopCalls).toHaveLength(0);
+  });
 });

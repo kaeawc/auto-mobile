@@ -99,16 +99,54 @@ run_lane() {
 }
 
 @test "integration lane targets only requested integration paths" {
-  run_lane integration test/example.integration.test.ts
+  run_lane integration test/contracts/runAll.integration.test.ts
   [ "$status" -eq 0 ]
-  [[ "$output" == *"test/example.integration.test.ts"* ]]
+  [[ "$output" == *"test/contracts/runAll.integration.test.ts"* ]]
   [[ "$output" != *" .integration.test.ts "* ]]
 }
 
 @test "integration lane rejects a requested unit-test path" {
-  run_lane integration test/example.test.ts
+  run_lane integration test/scripts/testLaneClassification.test.ts
   [ "$status" -eq 2 ]
   [[ "$output" == *"No integration test paths were selected."* ]]
+}
+
+@test "unit lanes reject cross-lane test targets" {
+  for lane in unit changed coverage; do
+    run_lane "$lane" test/contracts/runAll.integration.test.ts
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"No unit test paths were selected."* ]]
+  done
+}
+
+@test "all partitions a targeted test path and skips empty lanes" {
+  run_lane all test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+  [[ "$output" != *"No integration test paths were selected."* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+}
+
+@test "all partitions targeted directories into their matching lane" {
+  run_lane all test/scripts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+  [[ "$output" == *"test/scripts/xcodegenDriftCheck.integration.test.ts"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 2 ]
+}
+
+@test "test-option values are not classified as positional test targets" {
+  run_lane all --test-name-pattern test/scripts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--test-name-pattern test/scripts"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+}
+
+@test "targeting a stale test path fails before invoking Bun" {
+  run_lane unit test/scripts/removed-test.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No test files found for target"* ]]
+  [ ! -s "$BUN_ARGS_FILE" ]
 }
 
 @test "stress lane is explicit" {

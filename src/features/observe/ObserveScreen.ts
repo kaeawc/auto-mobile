@@ -226,6 +226,18 @@ function isAccessibilityViewClass(foregroundActivity: string): boolean {
   );
 }
 
+/**
+ * Whether the captured hierarchy itself names the foreground activity (the
+ * accessibility-service path). When it does not — the lazy-CtrlProxy bootstrap
+ * interval, where `activeWindow` comes from the legacy `Window.getActive()`
+ * read — the tree carries no activity signal that could be correlated with the
+ * adb reads that follow it (#6088).
+ */
+function hierarchyCarriesActivitySignal(hierarchy: ObserveResult["viewHierarchy"]): boolean {
+  const foregroundActivity = hierarchy?.foregroundActivity;
+  return typeof foregroundActivity === "string" && !isAccessibilityViewClass(foregroundActivity);
+}
+
 function isActivityInPackage(activityName: string, packageName: string): boolean {
   return activityName === packageName || activityName.startsWith(`${packageName}.`);
 }
@@ -1012,39 +1024,16 @@ export class RealObserveScreen implements ObserveScreen {
     }
 
     const backStackAttribution = resolveBackStackActivityAttribution(result);
-    if (backStackAttribution && activeWindow.activityName !== backStackAttribution.activityName) {
-      // An empty `activityName` (the bootstrap `Window.getActive()` / last-resort
-      // package path) is reconciled through the SAME temporal confirmation as a
-      // stale non-empty name (#5992), never a blind backfill: the recapture
-      // re-reads the hierarchy so the adb activity is paired with a *fresh* tree.
-      // A same-app mid-flight navigation between capture and back-stack read is
-      // therefore surfaced as a mismatch/unknown rather than a confidently-wrong
-      // name, and the confirmed window keeps its correlated `layoutSeqSum` (the
-      // freshness of which is guaranteed by the `getActive(true)` bootstrap read)
-      // so tap-effect detection is not blinded by a zero sentinel (#6070).
-      const recaptured = await this.recaptureHierarchyForBackStackAttribution(
+    if (backStackAttribution) {
+      const reconciled = await this.reconcileAgainstBackStack(
         result,
+        activeWindow,
         backStackAttribution,
         signal,
       );
-      if (!recaptured) {
-        return { sampled: false, identity: undefined, activityAttributionMismatch: true };
+      if (reconciled) {
+        return reconciled;
       }
-      // Do not pair an adb activity from a later navigation with an earlier
-      // hierarchy. The forced recapture and repeated back-stack read establish
-      // that both sources still describe the same destination (#5992).
-      const reconciled = {
-        ...activeWindow,
-        appId: backStackAttribution.packageName,
-        activityName: backStackAttribution.activityName,
-      };
-      if (result.notificationPermissionDetected) {
-        reconciled.type = "notification_permission_dialog";
-      } else {
-        delete reconciled.type;
-      }
-      result.activeWindow = reconciled;
-      return { sampled: false, identity: undefined, activityAttributionMismatch: false };
     }
 
     if (activeWindow.appId === observed) {
@@ -1056,6 +1045,68 @@ export class RealObserveScreen implements ObserveScreen {
       result.activeWindow = { ...activeWindow, appId: observed, activityName: "" };
     }
     return { sampled: true, identity: confirmed, activityAttributionMismatch: false };
+  }
+
+  /**
+   * Temporal confirmation of the adb back-stack activity against a fresh
+   * hierarchy (#5992, #6070, #6088). Returns the reconciled outcome, or
+   * `undefined` when the back-stack read needs no reconciliation (the hierarchy
+   * itself named the activity and it already agrees with `activeWindow`).
+   */
+  private async reconcileAgainstBackStack(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    backStackAttribution: { packageName: string; activityName: string },
+    signal?: AbortSignal,
+  ): Promise<PostCaptureForegroundIdentity | undefined> {
+    // On the bootstrap path the hierarchy names no activity, so `activeWindow`
+    // and `backStack` are two adb reads taken AFTER the capture. Their agreeing
+    // is not evidence the tree is aligned with either: a same-app A->B
+    // navigation between the capture and those reads makes both report B while
+    // the tree still describes A, and the package-level guard (#5867) cannot
+    // tell A from B. Always confirm through the recapture there (#6088).
+    const bootstrapAttribution = !hierarchyCarriesActivitySignal(result.viewHierarchy);
+    if (!bootstrapAttribution && activeWindow.activityName === backStackAttribution.activityName) {
+      return undefined;
+    }
+    // An empty `activityName` (the bootstrap `Window.getActive()` / last-resort
+    // package path) is reconciled through the SAME temporal confirmation as a
+    // stale non-empty name (#5992), never a blind backfill: the recapture
+    // re-reads the hierarchy so the adb activity is paired with a *fresh* tree.
+    // A same-app mid-flight navigation between capture and back-stack read is
+    // therefore surfaced as a mismatch/unknown rather than a confidently-wrong
+    // name, and the confirmed window keeps its correlated `layoutSeqSum` (the
+    // freshness of which is guaranteed by the `getActive(true)` bootstrap read)
+    // so tap-effect detection is not blinded by a zero sentinel (#6070).
+    const recaptured = await this.recaptureHierarchyForBackStackAttribution(
+      result,
+      backStackAttribution,
+      signal,
+    );
+    if (!recaptured) {
+      // Unconfirmed: the bootstrap window name is a post-capture adb read that
+      // may post-date the tree, so it resolves to unknown rather than staying
+      // published against a hierarchy it was never correlated with (#6088).
+      if (bootstrapAttribution && activeWindow.activityName !== "") {
+        result.activeWindow = { ...activeWindow, activityName: "" };
+      }
+      return { sampled: false, identity: undefined, activityAttributionMismatch: true };
+    }
+    // Do not pair an adb activity from a later navigation with an earlier
+    // hierarchy. The forced recapture and repeated back-stack read establish
+    // that both sources still describe the same destination (#5992).
+    const reconciled = {
+      ...activeWindow,
+      appId: backStackAttribution.packageName,
+      activityName: backStackAttribution.activityName,
+    };
+    if (result.notificationPermissionDetected) {
+      reconciled.type = "notification_permission_dialog";
+    } else {
+      delete reconciled.type;
+    }
+    result.activeWindow = reconciled;
+    return { sampled: false, identity: undefined, activityAttributionMismatch: false };
   }
 
   /**

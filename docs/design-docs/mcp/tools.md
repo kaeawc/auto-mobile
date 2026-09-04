@@ -136,13 +136,17 @@ the exact arguments supported by your connection.
 `getAndroid` and `getApple` each accept two ways to name a target; pass one.
 
 - **`getAndroid`** — `avdName` names a configured Android Virtual Device (the
-  `name` field of `automobile:devices/images/android`) and is the identity
-  AutoMobile uses to boot an unbooted AVD and coordinate its lifecycle.
-  `deviceId` targets an _already-booted_ serial such as `emulator-5554` (the
-  `deviceId` field of `automobile:devices/booted/android`); it cannot name or
-  boot an unbooted AVD, so it is not a duplicate of `avdName` — it is a distinct
-  lifecycle path. Prefer `avdName` when you know the AVD; use `deviceId` to
-  attach to a device already running.
+  `name` field of `automobile:devices/images/android`). It is the identity
+  AutoMobile uses to boot and coordinate a named AVD: the `avdName` path passes
+  `matchExactName`, `androidAvdName`, and a `stableTarget` for exact AVD-identity
+  and lifecycle coordination. `deviceId` is the copy-paste-from-discovery
+  convenience: it accepts either an _already-booted_ serial such as
+  `emulator-5554` (the `deviceId` field of `automobile:devices/booted/android`)
+  **or** an AVD image name — if it names a defined-but-unbooted AVD, `getAndroid`
+  cold-boots that image by name. The `deviceId` path does not pass
+  `androidAvdName`/`stableTarget`, so prefer `avdName` when you specifically want
+  to boot or coordinate a named AVD; use `deviceId` to attach to a running device
+  or to boot straight from a discovered identifier.
 - **`getApple`** — `udid` is the iOS Simulator UDID. `deviceId` is an accepted
   **alias** for `udid`: a booted simulator's `deviceId` (from
   `automobile:devices/booted/ios`) _is_ its `udid`, so both fields resolve to the

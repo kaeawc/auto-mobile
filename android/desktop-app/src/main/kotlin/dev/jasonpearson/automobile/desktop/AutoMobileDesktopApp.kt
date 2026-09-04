@@ -168,6 +168,12 @@ fun AutoMobileDesktopApp(
   // user ever sees a stable Retry.
   val daemonBootstrap = graph.daemonBootstrap
   val bootstrapState by daemonBootstrap.state.collectAsState()
+  // Synchronous in-flight claim for the workspace health sheet's "Start daemon" recovery button
+  // (#6080). Flipped true on the UI thread the instant onRecoverDaemon fires and cleared when the
+  // launched ensureReady() pass finishes, it coalesces rapid clicks into a single lifecycle pass
+  // (bootstrapState's own Working phase lags behind the click, and does not report at all for a
+  // no-op inactive transport).
+  var recoveringDaemon by remember { mutableStateOf(false) }
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
@@ -520,8 +526,25 @@ fun AutoMobileDesktopApp(
                 // re-register loop self-heals the panes once the daemon is reachable. A no-op for a
                 // non-daemon (Inactive) transport, so the affordance is inert on HTTP/STDIO.
                 bootstrapState = bootstrapState,
+                recovering = recoveringDaemon,
                 onRecoverDaemon = {
-                  scope.launch(Dispatchers.IO) { daemonBootstrap.ensureReady() }
+                  // Synchronous in-flight guard (#6080): coalesce rapid clicks — and clicks landing
+                  // before the pass reports its first Working phase, or while Dispatchers.IO is
+                  // saturated — so only one ensureReady() runs at a time. DesktopDaemonLifecycle
+                  // serializes queued passes rather than coalescing them, so each extra launch
+                  // would
+                  // repeat the full startup budget. The flag flips on the UI thread before dispatch
+                  // and clears in a finally (so a no-op/inactive pass releases it too).
+                  if (!recoveringDaemon) {
+                    recoveringDaemon = true
+                    scope.launch(Dispatchers.IO) {
+                      try {
+                        daemonBootstrap.ensureReady()
+                      } finally {
+                        recoveringDaemon = false
+                      }
+                    }
+                  }
                 },
                 updateStatus = updateStatus,
                 onUpdateClick = { showUpdateDetails = true },

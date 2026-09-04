@@ -110,6 +110,12 @@ fun WorkspaceShell(
   // host runs DaemonBootstrap.ensureReady() off the main thread; the default is an inert no-op so a
   // shell composed without a daemon lifecycle stays inert.
   onRecoverDaemon: () -> Unit = {},
+  // Whether a host-owned recovery pass is already in flight. Set synchronously by the host the
+  // instant [onRecoverDaemon] fires and cleared when the launched pass completes, it disables the
+  // "Start daemon" button so rapid clicks (or clicks while Dispatchers.IO is saturated, before the
+  // pass reports its first Working phase into [bootstrapState]) can't each queue a duplicate
+  // ensureReady() — DesktopDaemonLifecycle serializes those rather than coalescing them (#6080).
+  recovering: Boolean = false,
   // Update-availability state (#5225): the top bar shows a pill only when an update is available.
   updateStatus: UpdateStatus = UpdateStatus.Idle,
   onUpdateClick: () -> Unit = {},
@@ -214,6 +220,7 @@ fun WorkspaceShell(
         status = status,
         bootstrapState = bootstrapState,
         onRecoverDaemon = onRecoverDaemon,
+        recovering = recovering,
         onDismiss = { showHealthSheet = false },
         content = healthSheetContent,
       )
@@ -384,6 +391,7 @@ private fun HealthSheetOverlay(
   status: WorkspaceStatus,
   bootstrapState: DaemonBootstrapState,
   onRecoverDaemon: () -> Unit,
+  recovering: Boolean,
   onDismiss: () -> Unit,
   content: @Composable () -> Unit,
 ) {
@@ -429,7 +437,11 @@ private fun HealthSheetOverlay(
       // device
       // picker (#6035). Green/Yellow keep the sheet purely diagnostic.
       if (status == WorkspaceStatus.Red) {
-        DaemonRecoveryHeader(bootstrapState = bootstrapState, onRecoverDaemon = onRecoverDaemon)
+        DaemonRecoveryHeader(
+          bootstrapState = bootstrapState,
+          onRecoverDaemon = onRecoverDaemon,
+          recovering = recovering,
+        )
         Spacer(Modifier.height(8.dp))
       }
       // Constrain the body to the height below the title row so a fillMaxSize() body can't overflow
@@ -444,16 +456,22 @@ private fun HealthSheetOverlay(
  * "Start daemon" Button drives the hoisted [onRecoverDaemon], which the host wires to
  * [dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap.ensureReady] — the same
  * lifecycle seam the device picker's Retry uses, not a second one-off path. While a lifecycle pass
- * is in flight ([DaemonBootstrapState.Working]) the button is disabled and narrates the phase with
- * the picker's [loadingMessage] vocabulary; a [DaemonBootstrapState.Failed] pass surfaces its
- * actionable message below the button.
+ * is in flight ([DaemonBootstrapState.Working], or the host's synchronous [recovering] claim before
+ * the pass reports that phase) the button is disabled and narrates the phase with the picker's
+ * [loadingMessage] vocabulary; a [DaemonBootstrapState.Failed] pass surfaces its actionable message
+ * below the button.
  */
 @Composable
 private fun DaemonRecoveryHeader(
   bootstrapState: DaemonBootstrapState,
   onRecoverDaemon: () -> Unit,
+  recovering: Boolean,
 ) {
   val working = bootstrapState is DaemonBootstrapState.Working
+  // Disabled while a pass is in flight — either the host's synchronous [recovering] claim (covering
+  // the window between the click and the pass's first reported phase, plus clicks while
+  // Dispatchers.IO is saturated) or a [DaemonBootstrapState.Working] phase already flowing back.
+  val busy = working || recovering
   // While a pass runs, reuse the picker's phase narration ("Starting AutoMobile …", "Installing the
   // Bun runtime …"); otherwise offer the plain start action.
   val label = if (working) loadingMessage(bootstrapState) else "Start daemon"
@@ -464,7 +482,7 @@ private fun DaemonRecoveryHeader(
       color = MaterialTheme.colorScheme.onSurface,
     )
     Spacer(Modifier.height(8.dp))
-    Button(onClick = onRecoverDaemon, enabled = !working) { Text(label) }
+    Button(onClick = onRecoverDaemon, enabled = !busy) { Text(label) }
     val failure = (bootstrapState as? DaemonBootstrapState.Failed)?.message
     if (failure != null) {
       Spacer(Modifier.height(8.dp))

@@ -912,6 +912,59 @@ class WorkspaceShellUiTest {
   }
 
   @Test
+  fun `a recovery pass already in flight disables the button`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Daemon unreachable",
+          // The host's synchronous claim before bootstrapState has reported its first Working
+          // phase.
+          recovering = true,
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    onNodeWithText("Start daemon").assertIsNotEnabled()
+  }
+
+  @Test
+  fun `a second click while a recovery pass is in flight does not re-dispatch`() =
+    runComposeUiTest {
+      // Model the host's synchronous in-flight guard: onRecoverDaemon flips `recovering` true,
+      // which
+      // disables the button so a rapid second click can't queue a duplicate ensureReady() pass.
+      val recovering = mutableStateOf(false)
+      var dispatches = 0
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = WorkspaceUiState.Empty,
+            onAction = {},
+            onOpenPicker = {},
+            status = WorkspaceStatus.Red,
+            statusDetail = "Daemon unreachable",
+            recovering = recovering.value,
+            onRecoverDaemon = {
+              dispatches++
+              recovering.value = true
+            },
+            healthSheetContent = { Text("fake-health-body") },
+          )
+        }
+      }
+      onNodeWithContentDescription("Status: Red").performClick()
+      onNodeWithText("Start daemon").performClick()
+      // The button is now disabled (recovering = true); a second click must not dispatch again.
+      onNodeWithText("Start daemon").performClick()
+      assertEquals(1, dispatches)
+    }
+
+  @Test
   fun `an in-flight bootstrap pass disables the button with the phase label`() = runComposeUiTest {
     setContent {
       MaterialTheme {

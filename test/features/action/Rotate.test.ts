@@ -202,6 +202,57 @@ describe("Rotate", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(false);
     });
 
+    test("should report achieved orientation as currentOrientation for landscape->portrait (#6057)", async () => {
+      // Device starts in landscape (user_rotation 1), rotates to portrait.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // currentOrientation must be the ACHIEVED orientation, not the stale prior value.
+      expect(result.currentOrientation).toBe("portrait");
+      // previousOrientation is legitimately the prior value.
+      expect(result.previousOrientation).toBe("landscape");
+      // The two fields must not duplicate on a performed rotation.
+      expect(result.currentOrientation).not.toBe(result.previousOrientation);
+      expect(result.message || "").toContain("Successfully rotated from landscape to portrait");
+    });
+
+    test("should report achieved orientation as currentOrientation for portrait->landscape (#6057)", async () => {
+      // Device starts in portrait (user_rotation 0), rotates to landscape.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+
+      const result = await rotate.execute("landscape");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.previousOrientation).toBe("portrait");
+      expect(result.currentOrientation).not.toBe(result.previousOrientation);
+      expect(result.message || "").toContain("Successfully rotated from portrait to landscape");
+    });
+
+    test("should coincide currentOrientation and previousOrientation when already in orientation (#6057)", async () => {
+      // Device already in portrait: no rotation performed, fields legitimately coincide.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.currentOrientation).toBe("portrait");
+      expect(result.previousOrientation).toBe("portrait");
+      expect(result.currentOrientation).toBe(result.previousOrientation);
+    });
+
     test("should get current orientation and lock status before rotation", async () => {
       // Setup: device starts in portrait, needs to rotate to landscape
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));

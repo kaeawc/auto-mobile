@@ -201,7 +201,10 @@ export class Rotate extends BaseVisualChange {
             success: true,
             orientation,
             value,
-            currentOrientation,
+            // waitForRotation(value) above already confirmed the device reached the
+            // requested orientation, so report the achieved orientation here. The local
+            // `currentOrientation` remains the legitimate prior value (see #6057).
+            currentOrientation: orientation,
             previousOrientation: currentOrientation,
             rotationPerformed: true,
             orientationLockHandled: orientationUnlocked,

@@ -235,15 +235,18 @@ export class CtrlProxyHierarchy {
         }
       }
 
-      // Wait for fresh data if requested (unless skipped or recently timed out)
+      // Wait for fresh data if requested (unless skipped or recently timed out).
+      // A rejected cache (too old for `minTimestamp`) needs a newer tree, which
+      // the sync fallback below produces as well as a push does. It therefore
+      // does NOT override `skipWaitForFresh`: a caller that skips the wait with
+      // a minTimestamp (the attribution recapture) goes straight to sync instead
+      // of burning the full wait on a static screen that pushes nothing (#6099).
       const cacheRejected =
         minTimestamp > 0 &&
         cachedHierarchy &&
         !this.evaluateMinTimestamp(cachedHierarchy, minTimestamp, true).isFresh;
       const shouldWait =
-        (waitForFresh || cacheRejected) &&
-        (!skipWaitForFresh || cacheRejected) &&
-        !this.shouldSkipWebSocketWait();
+        (waitForFresh || cacheRejected) && !skipWaitForFresh && !this.shouldSkipWebSocketWait();
       if (shouldWait) {
         throwIfAborted(signal);
         const waitMinTimestamp = minTimestamp > 0 ? minTimestamp : startTime;

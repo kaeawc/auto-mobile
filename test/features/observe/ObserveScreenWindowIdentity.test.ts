@@ -855,6 +855,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     // Temporal confirmation ran: the initial capture plus one recapture.
     expect(viewHierarchy.getCallCount()).toBe(2);
     expect(result.freshness?.verified).toBe(true);
+    // The recapture still demands a tree newer than the initial capture (the
+    // cache is rejected) but skips the WebSocket fresh wait and goes straight
+    // to sync, so a static screen does not burn the full wait (#6099).
+    expect(viewHierarchy.getCalls()[1]).toEqual({ skipWaitForFresh: true, minTimestamp: now + 1 });
   });
 
   test("does not stamp a later same-app backStack activity onto an earlier hierarchy when a recapture cannot confirm it (#6070)", async () => {

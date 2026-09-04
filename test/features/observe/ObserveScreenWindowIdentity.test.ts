@@ -1837,6 +1837,142 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     expect(result.activeWindow?.activityName).toBe("");
   });
 
+  // Issue #6091: the adb `mCurrentFocus` fallback read is not atomic with the
+  // hierarchy capture, so a shade transition inside that interval can pair a
+  // stale hierarchy with the wrong attribution. The fallback (topmost-suspect,
+  // no `isFocused` flag) therefore recaptures the hierarchy and re-classifies so
+  // the published tree and the overlay attribution are sampled together.
+  const appContentHierarchy = (now: number): any => ({
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    packageName: OCCLUDED_APP,
+    foregroundActivity: OCCLUDED_ACTIVITY,
+    // Topmost window is the app itself: the shade is gone, so classification is
+    // "none" (no overlay) with no further adb read.
+    windows: [
+      {
+        packageName: OCCLUDED_APP,
+        type: 1,
+        isFocused: true,
+        windowLayer: 200,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      },
+    ],
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [{ text: "App content", bounds: { left: 0, top: 300, right: 400, bottom: 360 } }],
+      },
+    },
+  });
+
+  test("fallback path: shade closes between capture and focus read — recapture drops the overlay and publishes the fresh app tree (#6091)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    // No isFocused flag on this API level: topmost SystemUI surface is a suspect
+    // that reaches the adb fallback. The recapture returns the app tree (the
+    // shade closed in the interval).
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+      appContentHierarchy(now + 25),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    // If the code still read mCurrentFocus against the stale shade tree, this
+    // would confirm the (already-gone) shade. It must not be trusted.
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    // The recapture ran (initial capture + one recapture).
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    // The published tree is the fresh app tree, not the stale shade.
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App content");
+    // Attribution agrees with the fresh tree: the app, not a SystemUI overlay.
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
+  });
+
+  test("fallback path: shade genuinely up — recapture yields a fresh shade tree and the overlay is mirrored (#6091)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    // Both captures are the shade; the recapture is a fresher shade tree with a
+    // distinct marker so the test can prove the published tree is the recapture.
+    const staleShade = shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]);
+    staleShade.hierarchy.node.node = [
+      { text: "Stale shade", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+    ];
+    const freshShade = shadeHierarchy(now + 25, [unfocusedShade, occludedAppWindow(false)]);
+    freshShade.hierarchy.node.node = [
+      { text: "Fresh shade", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+    ];
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([staleShade, freshShade] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    // The published shade tree is the recaptured one, paired with the overlay.
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Fresh shade");
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+    expect(result.activeWindow?.activityName).toBe("");
+  });
+
+  test("primary (isFocused) path never recaptures — the race-free signal is trusted as captured (#6091)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    // A different tree is queued as the (would-be) recapture; it must never be
+    // consumed, because the primary isFocused path takes no adb round-trip.
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [focusedShadeWindow(), occludedAppWindow(false)]),
+      appContentHierarchy(now + 25),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    // No recapture on the primary path.
+    expect(viewHierarchy.getCallCount()).toBe(1);
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+    // No adb dumpsys read either — the captured windows[] carried the flag.
+    expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
+  });
+
   test("adb fallback: a package/activity mCurrentFocus (shade collapsed) is NOT an overlay", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

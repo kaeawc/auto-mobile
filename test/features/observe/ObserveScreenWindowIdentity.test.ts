@@ -935,3 +935,347 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(viewHierarchy.getCallCount()).toBe(2);
   });
 });
+
+/**
+ * Issue #6078: while the notification shade (or another focused SystemUI
+ * surface) is open, `observe` returns the shade's hierarchy but composes
+ * `activeWindow` from the accessibility `foregroundActivity` / `getForegroundApp`
+ * — both of which name the app occluded *behind* the shade, never the focused
+ * surface. `waitFor.activeWindow.appId == <occluded app>` therefore
+ * false-positives while the shade fully covers the app, and on API 29 the single
+ * object even names two different apps.
+ *
+ * The fix reconciles against the focused window: when a SystemUI surface owns
+ * focus, `activeWindow.appId` mirrors `com.android.systemui`, `activityName` is
+ * cleared, and `systemOverlay: true` is set so callers can fail closed.
+ */
+describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () => {
+  afterEach(() => {
+    resetObserveCacheStore();
+  });
+
+  const OCCLUDED_APP = "com.google.android.settings.intelligence";
+  const OCCLUDED_ACTIVITY = `${OCCLUDED_APP}/${OCCLUDED_APP}.modules.search.SearchActivity`;
+
+  /**
+   * A full-screen expanded-shade capture: the returned hierarchy is the shade's
+   * (quick-settings tiles), while CtrlProxy still reports the occluded app in
+   * `foregroundActivity` and `packageName` — the exact incoherence #6078 hits on
+   * API 31/34/35. `windows` describes what the accessibility window list carries.
+   */
+  function shadeHierarchy(
+    now: number,
+    windows: any[],
+    overrides: { packageName?: string; foregroundActivity?: string } = {},
+  ): any {
+    return {
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: overrides.packageName ?? OCCLUDED_APP,
+      foregroundActivity: overrides.foregroundActivity ?? OCCLUDED_ACTIVITY,
+      windows,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            { text: "Silent", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+            { text: "Clear all", bounds: { left: 0, top: 200, right: 200, bottom: 260 } },
+          ],
+        },
+      },
+    };
+  }
+
+  const focusedShadeWindow = () => ({
+    packageName: "com.android.systemui",
+    type: 3,
+    isFocused: true,
+    windowLayer: 200,
+    bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+  });
+
+  const occludedAppWindow = (isFocused: boolean) => ({
+    packageName: OCCLUDED_APP,
+    type: 1,
+    isFocused,
+    windowLayer: 10,
+    bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+  });
+
+  // The status bar always exists as a SystemUI window but does not own focus
+  // when the shade is collapsed — the reviewer edge the fix must not mis-mirror.
+  const statusBarWindow = () => ({
+    packageName: "com.android.systemui",
+    type: 3,
+    isFocused: false,
+    windowLayer: 150,
+    bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+  });
+
+  function makeOverlayScreen(
+    viewHierarchy: FakeViewHierarchy,
+    fakeAdb: FakeAdbExecutor,
+    timer: FakeTimer,
+  ): RealObserveScreen {
+    return new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+  }
+
+  for (const api of [31, 34, 35]) {
+    test(`API ${api}: focused shade window mirrors com.android.systemui and sets systemOverlay`, async () => {
+      const now = 1_700_000_000_000;
+      const timer = new FakeTimer();
+      timer.setCurrentTime(now);
+
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy(
+        shadeHierarchy(now, [focusedShadeWindow(), occludedAppWindow(false)]),
+      );
+
+      const fakeAdb = new FakeAdbExecutor();
+      // dumpsys resumed/focused activity still names the occluded app.
+      fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+      const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+      const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+      // waitFor.activeWindow.appId == <occluded app> must fail closed.
+      expect(result.activeWindow?.appId).toBe("com.android.systemui");
+      expect(result.activeWindow?.appId).not.toBe(OCCLUDED_APP);
+      expect(result.activeWindow?.systemOverlay).toBe(true);
+      expect(result.activeWindow?.activityName).toBe("");
+      // The shade capture is genuine — freshness stays verified.
+      expect(result.freshness?.verified).toBe(true);
+      expect(result.freshness?.isFresh).toBe(true);
+    });
+  }
+
+  test("API 29: single activeWindow no longer names two different apps", async () => {
+    // On API 29 CtrlProxy reports foregroundActivity with the systemui package
+    // but the resumed activity behind it, so appId=systemui while activityName
+    // names Settings — one object, two apps.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(
+      shadeHierarchy(now, [focusedShadeWindow(), occludedAppWindow(false)], {
+        packageName: "com.android.systemui",
+        foregroundActivity:
+          "com.android.systemui/com.android.settings.homepage.SettingsHomepageActivity",
+      }),
+    );
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+    // Must NOT publish the occluded app's activity — no two-app object.
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.activityName).not.toContain("com.android.settings");
+  });
+
+  test("adb mCurrentFocus fallback confirms overlay when windows[] carries no focus flag", async () => {
+    // Some API levels do not populate isFocused on the accessibility window list.
+    // The topmost window is SystemUI, so a dumpsys window read confirms the shade
+    // owns focus.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+    );
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+    expect(result.activeWindow?.activityName).toBe("");
+  });
+
+  test("adb fallback: a package/activity mCurrentFocus (shade collapsed) is NOT an overlay", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+    );
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    // The app owns focus — normal attribution, no overlay flag.
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+  });
+
+  test("shade closed: a focused app window keeps normal attribution and no overlay flag", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(
+      shadeHierarchy(now, [occludedAppWindow(true), statusBarWindow()]),
+    );
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    // A focused app window must not trigger the adb ground-truth read.
+    expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
+  });
+
+  test("a thin status-bar SystemUI window with no focus flags does not trigger an adb read", async () => {
+    // Perf guard: when no window carries isFocused, the ever-present status bar
+    // (SystemUI, high layer, but thin) must NOT be treated as an occluding
+    // overlay — otherwise every observe on that API level pays a dumpsys read.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const thinStatusBar = {
+      packageName: "com.android.systemui",
+      type: 3,
+      isFocused: undefined,
+      windowLayer: 300,
+      bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+    };
+    const appWindow = { ...occludedAppWindow(false), isFocused: undefined };
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(shadeHierarchy(now, [thinStatusBar, appWindow]));
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
+  });
+
+  test("iOS: a focused TYPE_SYSTEM window never stamps an Android systemui appId", async () => {
+    // iOS reuses the ViewHierarchyWindowInfo shape. The overlay branch is an
+    // Android concept and must be platform-gated so it cannot mirror
+    // com.android.systemui onto an iOS observation.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const iosDevice: BootedDevice = {
+      deviceId: "SIM-1",
+      name: "iPhone 15",
+      platform: "ios",
+    };
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 393,
+      screenHeight: 852,
+      packageName: "com.example.iosapp",
+      windows: [{ packageName: "com.example.iosapp", type: 3, isFocused: true, windowLayer: 200 }],
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 393, bottom: 852 },
+          node: [{ text: "Home" }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    const screen = new RealObserveScreen(
+      iosDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.example.iosapp");
+    expect(result.activeWindow?.appId).not.toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+  });
+
+  test("a present-but-unfocused status bar does not mirror when the app owns focus", async () => {
+    // The status bar (SystemUI, type 3) is always present. It must never be
+    // mistaken for a focus-owning overlay when an app window is focused.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(
+      // Status bar has the higher layer but the app window carries focus.
+      shadeHierarchy(now, [statusBarWindow(), occludedAppWindow(true)]),
+    );
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
+  });
+});

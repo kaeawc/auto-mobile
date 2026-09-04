@@ -1,6 +1,7 @@
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { appendObserveError } from "../ObserveError";
+import { isFocusedSystemUiSurface } from "../Window";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { Window } from "../interfaces/Window";
 import type { BackStack } from "../interfaces/BackStack";
@@ -90,6 +91,35 @@ export class DeviceStateCollector {
       // the observation, only skip the comparison.
       logger.debug("Failed to get ground-truth foreground app:", error);
       return undefined;
+    }
+  }
+
+  /**
+   * Ground-truth check for a focused SystemUI surface (issue #6078). Reads
+   * `dumpsys window` and reports whether `mCurrentFocus` is a package-less
+   * SystemUI window (notification shade, quick settings, keyguard, status bar
+   * owning focus) — the one signal that `getForegroundApp` (resumed activity)
+   * and the accessibility `foregroundActivity` both miss. Best-effort: a failed
+   * read returns `false` (treat as "no overlay"), never fails the observation.
+   * Only invoked on the overlay-suspicion path, so it adds no cost to an
+   * ordinary app-foreground observe.
+   */
+  async collectFocusedSystemUiSurface(signal?: AbortSignal): Promise<boolean> {
+    const { adb } = this.opts;
+    try {
+      const { stdout } = await adb.executeCommand(
+        `shell "dumpsys window"`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      return isFocusedSystemUiSurface(stdout);
+    } catch (error) {
+      // Connection/read failure must not fail observe; absence of the signal is
+      // treated as "no overlay" so attribution falls back to the normal path.
+      logger.debug("Failed to read focused window surface from dumpsys:", error);
+      return false;
     }
   }
 

@@ -407,3 +407,37 @@ export function parseDumpsysWindowFocus(
 
   return null;
 }
+
+/**
+ * SystemUI focus-window names that carry no `package/activity` — they are
+ * windows, not ActivityRecords, so `mCurrentFocus` reports a bare token
+ * (`mCurrentFocus=Window{... u0 NotificationShade}`). Used to recognize when a
+ * SystemUI surface owns input focus from a raw `dumpsys window` read, the
+ * ground-truth fallback for issue #6078 when the accessibility windows[] list
+ * does not carry a focused-window flag on a given API level.
+ */
+const SYSTEM_UI_FOCUS_WINDOW_NAMES = new Set<string>([
+  "NotificationShade",
+  "StatusBar",
+  "QuickSettings",
+  "ShadeWindow",
+  "NavigationBar",
+  "Keyguard",
+  "KeyguardScrim",
+]);
+
+/**
+ * True when `dumpsys window` reports a package-less SystemUI surface owning
+ * input focus (`mCurrentFocus=Window{... <Name>}` with a bare token). Matches
+ * the AOSP focus-window names (shade, quick settings, keyguard, status bar) plus
+ * any `*Keyguard*` variant, case-insensitively. Returns false for an ordinary
+ * `package/activity` focus (an app owns focus, shade collapsed).
+ */
+export function isFocusedSystemUiSurface(stdout: string): boolean {
+  const match = stdout.match(/mCurrentFocus=Window\{[^}]*?\s+u\d+\s+([^\s}]+)\}/);
+  const token = match?.[1];
+  if (!token || token.includes("/")) {
+    return false;
+  }
+  return SYSTEM_UI_FOCUS_WINDOW_NAMES.has(token) || /keyguard/i.test(token);
+}

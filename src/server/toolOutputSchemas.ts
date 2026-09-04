@@ -114,6 +114,10 @@ export const activeWindowSchema = z
     activityName: z.string().optional(),
     layoutSeqSum: z.number().int().optional(),
     type: z.string().optional(),
+    // True when a focused SystemUI surface (notification shade, quick settings,
+    // keyguard) owns focus; `appId` then mirrors com.android.systemui so
+    // `waitFor.activeWindow.appId` fails closed for the occluded app (#6078).
+    systemOverlay: z.boolean().optional(),
   })
   .passthrough();
 

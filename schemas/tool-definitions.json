@@ -4710,6 +4710,9 @@
             },
             "type": {
               "type": "string"
+            },
+            "systemOverlay": {
+              "type": "boolean"
             }
           },
           "additionalProperties": {}
@@ -10192,6 +10195,9 @@
                     },
                     "type": {
                       "type": "string"
+                    },
+                    "systemOverlay": {
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": {}
@@ -10330,6 +10336,9 @@
                     },
                     "type": {
                       "type": "string"
+                    },
+                    "systemOverlay": {
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": {}
@@ -10414,6 +10423,9 @@
                     },
                     "type": {
                       "type": "string"
+                    },
+                    "systemOverlay": {
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": {}

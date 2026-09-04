@@ -25,6 +25,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
@@ -168,6 +169,16 @@ fun AutoMobileDesktopApp(
   // user ever sees a stable Retry.
   val daemonBootstrap = graph.daemonBootstrap
   val bootstrapState by daemonBootstrap.state.collectAsState()
+  // Coalescing launcher for the workspace health sheet's "Start daemon" recovery button (#6080): it
+  // makes a synchronous in-flight claim before dispatching ensureReady() off the main thread and
+  // drops clicks while a pass is running, so rapid clicks (or clicks before bootstrapState's own
+  // Working phase catches up) don't queue duplicate startup-budget passes. Its inFlight flag backs
+  // the button's disabled state.
+  val recoveryLauncher =
+    remember(scope, daemonBootstrap) {
+      CoalescingRecoveryLauncher(scope = scope, recover = { daemonBootstrap.ensureReady() })
+    }
+  val recoveringDaemon by recoveryLauncher.inFlight.collectAsState()
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
@@ -513,6 +524,19 @@ fun AutoMobileDesktopApp(
                 modifier = Modifier.isolatedBehindOverlay(paletteOpen),
                 status = workspaceStatus.status,
                 statusDetail = workspaceStatus.detail,
+                // Health-sheet recovery affordance (#6035): reuse the picker's DaemonBootstrap seam
+                // so the workspace red dot can start/restart the daemon. ensureReady() blocks up to
+                // the startup budget, so it runs off the main thread; its phases flow back into
+                // bootstrapState (narrating the in-flight button) and the existing session
+                // re-register loop self-heals the panes once the daemon is reachable. A no-op for a
+                // non-daemon (Inactive) transport, so the affordance is inert on HTTP/STDIO.
+                bootstrapState = bootstrapState,
+                recovering = recoveringDaemon,
+                // Delegate to the coalescing launcher (#6080) so a rapid second click can't queue a
+                // duplicate ensureReady() pass; the guard itself lives in
+                // CoalescingRecoveryLauncher
+                // where it is unit-tested.
+                onRecoverDaemon = { recoveryLauncher.launch() },
                 updateStatus = updateStatus,
                 onUpdateClick = { showUpdateDetails = true },
                 facetContent = { column, tool -> WorkspaceFacet(column, tool) },

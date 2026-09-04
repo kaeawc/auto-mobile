@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -47,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -58,6 +60,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateReadyButton
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.loadingMessage
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +100,22 @@ fun WorkspaceShell(
   status: WorkspaceStatus = WorkspaceStatus.Green,
   // A terse reason for a non-green status, shown inline next to the dot ("yellow = one line").
   statusDetail: String? = null,
+  // Daemon bootstrap/recovery state, surfaced in the health sheet as a recovery affordance when the
+  // status is Red (daemon down). Reuses the picker's DaemonBootstrap seam (#6035) rather than
+  // adding
+  // a second lifecycle path; the defaults keep the shell stateless/test-friendly and leave every
+  // existing call site unchanged.
+  bootstrapState: DaemonBootstrapState = DaemonBootstrapState.Inactive,
+  // Explicit recovery trigger for the health sheet's "Start daemon" button (Red status only). The
+  // host runs DaemonBootstrap.ensureReady() off the main thread; the default is an inert no-op so a
+  // shell composed without a daemon lifecycle stays inert.
+  onRecoverDaemon: () -> Unit = {},
+  // Whether a host-owned recovery pass is already in flight. Set synchronously by the host the
+  // instant [onRecoverDaemon] fires and cleared when the launched pass completes, it disables the
+  // "Start daemon" button so rapid clicks (or clicks while Dispatchers.IO is saturated, before the
+  // pass reports its first Working phase into [bootstrapState]) can't each queue a duplicate
+  // ensureReady() — DesktopDaemonLifecycle serializes those rather than coalescing them (#6080).
+  recovering: Boolean = false,
   // Update-availability state (#5225): the top bar shows a pill only when an update is available.
   updateStatus: UpdateStatus = UpdateStatus.Idle,
   onUpdateClick: () -> Unit = {},
@@ -198,6 +217,10 @@ fun WorkspaceShell(
     }
     if (showHealthSheet) {
       HealthSheetOverlay(
+        status = status,
+        bootstrapState = bootstrapState,
+        onRecoverDaemon = onRecoverDaemon,
+        recovering = recovering,
         onDismiss = { showHealthSheet = false },
         content = healthSheetContent,
       )
@@ -364,7 +387,14 @@ private fun TopBar(
  * overlay.
  */
 @Composable
-private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+private fun HealthSheetOverlay(
+  status: WorkspaceStatus,
+  bootstrapState: DaemonBootstrapState,
+  onRecoverDaemon: () -> Unit,
+  recovering: Boolean,
+  onDismiss: () -> Unit,
+  content: @Composable () -> Unit,
+) {
   Box(
     modifier =
       Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(
@@ -402,9 +432,68 @@ private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () ->
         )
       }
       Spacer(Modifier.height(8.dp))
+      // Recovery affordance: the only daemon-mutating control in the (otherwise read-only) health
+      // sheet, shown only when the status is Red (daemon down) — Start-daemon parity with the
+      // device picker (#6035). Green/Yellow keep the sheet purely diagnostic. Gated on a local
+      // daemon transport: a non-daemon (HTTP/STDIO) transport reports DaemonBootstrapState.Inactive
+      // and its ensureReady() is a no-op, so a Red caused by an HTTP/STDIO disconnect must NOT
+      // offer
+      // a "Start daemon" button that would silently do nothing (#6080).
+      if (status == WorkspaceStatus.Red && bootstrapState !is DaemonBootstrapState.Inactive) {
+        DaemonRecoveryHeader(
+          bootstrapState = bootstrapState,
+          onRecoverDaemon = onRecoverDaemon,
+          recovering = recovering,
+        )
+        Spacer(Modifier.height(8.dp))
+      }
       // Constrain the body to the height below the title row so a fillMaxSize() body can't overflow
       // the header out of the panel.
       Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+    }
+  }
+}
+
+/**
+ * The health sheet's daemon recovery affordance (#6035), shown only for a Red status. A single
+ * "Start daemon" Button drives the hoisted [onRecoverDaemon], which the host wires to
+ * [dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap.ensureReady] — the same
+ * lifecycle seam the device picker's Retry uses, not a second one-off path. While a lifecycle pass
+ * is in flight ([DaemonBootstrapState.Working], or the host's synchronous [recovering] claim before
+ * the pass reports that phase) the button is disabled and narrates the phase with the picker's
+ * [loadingMessage] vocabulary; a [DaemonBootstrapState.Failed] pass surfaces its actionable message
+ * below the button.
+ */
+@Composable
+private fun DaemonRecoveryHeader(
+  bootstrapState: DaemonBootstrapState,
+  onRecoverDaemon: () -> Unit,
+  recovering: Boolean,
+) {
+  val working = bootstrapState is DaemonBootstrapState.Working
+  // Disabled while a pass is in flight — either the host's synchronous [recovering] claim (covering
+  // the window between the click and the pass's first reported phase, plus clicks while
+  // Dispatchers.IO is saturated) or a [DaemonBootstrapState.Working] phase already flowing back.
+  val busy = working || recovering
+  // While a pass runs, reuse the picker's phase narration ("Starting AutoMobile …", "Installing the
+  // Bun runtime …"); otherwise offer the plain start action.
+  val label = if (working) loadingMessage(bootstrapState) else "Start daemon"
+  Column(Modifier.fillMaxWidth().semantics { contentDescription = "Daemon recovery" }) {
+    Text(
+      "AutoMobile daemon isn't available",
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onSurface,
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(onClick = onRecoverDaemon, enabled = !busy) { Text(label) }
+    val failure = (bootstrapState as? DaemonBootstrapState.Failed)?.message
+    if (failure != null) {
+      Spacer(Modifier.height(8.dp))
+      Text(
+        failure,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+      )
     }
   }
 }

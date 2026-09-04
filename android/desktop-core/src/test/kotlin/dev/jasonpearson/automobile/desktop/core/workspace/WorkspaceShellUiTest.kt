@@ -5,10 +5,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecyclePhase
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.update.ReleaseAsset
@@ -822,5 +825,218 @@ class WorkspaceShellUiTest {
     onNodeWithText("compare-body").assertExists()
     // Pane controls behind the compare scrim have left the accessibility tree.
     onNodeWithContentDescription("Close Pixel").assertDoesNotExist()
+  }
+
+  // #6035: the health sheet gains a daemon recovery affordance ("Start daemon" parity with the
+  // device picker), shown only for a Red status (daemon down) and driving the hoisted
+  // onRecoverDaemon (the host wires it to DaemonBootstrap.ensureReady()).
+
+  @Test
+  fun `red status health sheet shows the daemon recovery affordance`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Daemon unreachable",
+          // A local daemon that has not reported Ready — not Inactive, so recovery is offered.
+          bootstrapState = DaemonBootstrapState.Unknown,
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    onNodeWithContentDescription("Daemon recovery").assertIsDisplayed()
+    onNodeWithText("Start daemon").assertIsDisplayed()
+  }
+
+  @Test
+  fun `red status with an inactive (non-daemon) transport hides the recovery affordance`() =
+    runComposeUiTest {
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = WorkspaceUiState.Empty,
+            onAction = {},
+            onOpenPicker = {},
+            status = WorkspaceStatus.Red,
+            statusDetail = "Connection lost",
+            // HTTP/STDIO transport: bootstrap is Inactive and ensureReady() is a no-op, so a
+            // "Start daemon" button would silently do nothing — it must not be offered (#6080).
+            bootstrapState = DaemonBootstrapState.Inactive,
+            healthSheetContent = { Text("fake-health-body") },
+          )
+        }
+      }
+      onNodeWithContentDescription("Status: Red").performClick()
+      // The sheet still opens for diagnostics, but with no recovery affordance.
+      onNodeWithText("fake-health-body").assertIsDisplayed()
+      onNodeWithContentDescription("Daemon recovery").assertDoesNotExist()
+      onNodeWithText("Start daemon").assertDoesNotExist()
+    }
+
+  @Test
+  fun `green status health sheet hides the daemon recovery affordance`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Green,
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Green").performClick()
+    // The sheet is open (its body is visible) but the recovery affordance stays hidden for green.
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+    onNodeWithContentDescription("Daemon recovery").assertDoesNotExist()
+    onNodeWithText("Start daemon").assertDoesNotExist()
+  }
+
+  @Test
+  fun `yellow status health sheet hides the daemon recovery affordance`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Yellow,
+          statusDetail = "Daemon reconnecting",
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Yellow").performClick()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+    onNodeWithContentDescription("Daemon recovery").assertDoesNotExist()
+    onNodeWithText("Start daemon").assertDoesNotExist()
+  }
+
+  @Test
+  fun `clicking Start daemon invokes onRecoverDaemon exactly once`() = runComposeUiTest {
+    var recoveries = 0
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Daemon unreachable",
+          bootstrapState = DaemonBootstrapState.Unknown,
+          onRecoverDaemon = { recoveries++ },
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    onNodeWithText("Start daemon").performClick()
+    assertEquals(1, recoveries)
+  }
+
+  @Test
+  fun `a recovery pass already in flight disables the button`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Daemon unreachable",
+          bootstrapState = DaemonBootstrapState.Unknown,
+          // The host's synchronous claim before bootstrapState has reported its first Working
+          // phase.
+          recovering = true,
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    onNodeWithText("Start daemon").assertIsNotEnabled()
+  }
+
+  @Test
+  fun `a second click while a recovery pass is in flight does not re-dispatch`() =
+    runComposeUiTest {
+      // Model the host's synchronous in-flight guard: onRecoverDaemon flips `recovering` true,
+      // which
+      // disables the button so a rapid second click can't queue a duplicate ensureReady() pass.
+      val recovering = mutableStateOf(false)
+      var dispatches = 0
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = WorkspaceUiState.Empty,
+            onAction = {},
+            onOpenPicker = {},
+            status = WorkspaceStatus.Red,
+            statusDetail = "Daemon unreachable",
+            bootstrapState = DaemonBootstrapState.Unknown,
+            recovering = recovering.value,
+            onRecoverDaemon = {
+              dispatches++
+              recovering.value = true
+            },
+            healthSheetContent = { Text("fake-health-body") },
+          )
+        }
+      }
+      onNodeWithContentDescription("Status: Red").performClick()
+      onNodeWithText("Start daemon").performClick()
+      // The button is now disabled (recovering = true); a second click must not dispatch again.
+      onNodeWithText("Start daemon").performClick()
+      assertEquals(1, dispatches)
+    }
+
+  @Test
+  fun `an in-flight bootstrap pass disables the button with the phase label`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Daemon unreachable",
+          bootstrapState =
+            DaemonBootstrapState.Working(
+              DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67")
+            ),
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    // While a pass runs, the button narrates the picker phase and is disabled (no re-trigger).
+    onNodeWithText("Start daemon").assertDoesNotExist()
+    onNodeWithText("Starting AutoMobile 0.0.67…").assertIsDisplayed()
+    onNodeWithText("Starting AutoMobile 0.0.67…").assertIsNotEnabled()
+  }
+
+  @Test
+  fun `a failed bootstrap pass surfaces the actionable message`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Daemon unreachable",
+          bootstrapState = DaemonBootstrapState.Failed("Bun install failed: offline"),
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    // A failed pass still offers a retry via the enabled Start button, plus the failure detail.
+    onNodeWithText("Start daemon").assertIsDisplayed()
+    onNodeWithText("Bun install failed: offline").assertIsDisplayed()
   }
 }

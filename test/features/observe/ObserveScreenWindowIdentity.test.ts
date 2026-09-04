@@ -1174,6 +1174,173 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.activeWindow?.systemOverlay).toBe(true);
   });
 
+  // Issue #6100: side samples taken BEFORE the recapture (device lock, the
+  // bootstrap window's layoutSeqSum) must not be published against the
+  // replacement tree. An accepted recapture re-reads both; the non-recapture
+  // path pays no extra device reads.
+  const keyguardOverSettings = (now: number) => ({
+    ...settingsHierarchy(now + 50, "Swipe up to unlock"),
+    windows: [
+      {
+        packageName: "com.android.systemui",
+        type: 3,
+        isFocused: true,
+        windowLayer: 200,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      },
+    ],
+  });
+
+  const countingBootstrapWindow = (sequence: number[]) => {
+    const reads: number[] = [];
+    const window = {
+      getActive: async () => {
+        const layoutSeqSum = sequence[Math.min(reads.length, sequence.length - 1)] ?? 0;
+        reads.push(layoutSeqSum);
+        return {
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum,
+        };
+      },
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    } as any;
+    return { window, reads };
+  };
+
+  test("re-collects device lock state when the recapture accepts a keyguard tree (#6100)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      settingsHierarchy(now, "Sub settings"),
+      keyguardOverSettings(now),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    // Unlocked at the original capture; locked by the time the recapture lands.
+    fakeAdb.setDeviceLockSequence([
+      { locked: false, keyguardShowing: false, secure: false },
+      { locked: true, keyguardShowing: true, secure: true },
+    ]);
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 5120,
+        }),
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Swipe up to unlock");
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.deviceLock?.locked).toBe(true);
+    expect(result.deviceLock?.keyguardShowing).toBe(true);
+  });
+
+  test("pairs an accepted bootstrap recapture with a post-recapture layoutSeqSum (#6100)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(settingsHierarchy(now, "Sub settings") as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
+
+    // A same-activity layout pass completes during the recapture: the window
+    // read before it reports 5120, the one after it 5121.
+    const { window, reads } = countingBootstrapWindow([5120, 5121]);
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window,
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(reads).toEqual([5120, 5121]);
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+    expect(result.activeWindow?.layoutSeqSum).toBe(5121);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("adds no device reads on the non-recapture path (#6100)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    // The accessibility service names the activity, and it agrees with the
+    // back stack: no recapture, so no second lock read and no window read.
+    viewHierarchy.configureHierarchy({
+      ...settingsHierarchy(now, "Sub settings"),
+      foregroundActivity: "com.android.settings/.SubSettings",
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    fakeAdb.setDeviceLockSequence([
+      { locked: false, keyguardShowing: false, secure: false },
+      { locked: true, keyguardShowing: true, secure: true },
+    ]);
+
+    const { window, reads } = countingBootstrapWindow([9000]);
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window,
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(1);
+    expect(reads).toEqual([]);
+    expect(result.deviceLock?.locked).toBe(false);
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+  });
+
   test("surfaces a failed confirming back-stack read on the retracted result (#6088)", async () => {
     // The bootstrap recapture now runs on every agreeing observation, so an adb
     // hiccup on the confirming back-stack read retracts a stable observation.

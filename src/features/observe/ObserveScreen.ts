@@ -1092,6 +1092,12 @@ export class RealObserveScreen implements ObserveScreen {
       }
       return { sampled: false, identity: undefined, activityAttributionMismatch: true };
     }
+    // Pair the accepted tree with a layout sequence read after it (bootstrap
+    // path only: elsewhere `layoutSeqSum` is the accessibility-path zero).
+    const confirmedWindow = bootstrapAttribution
+      ? await this.refreshBootstrapLayoutSeqSum(result, activeWindow)
+      : activeWindow;
+    result.activeWindow = confirmedWindow;
     // The recapture replaced the tree AFTER the focused-SystemUI check ran. A
     // shade or keyguard that took focus mid-recapture keeps the occluded app's
     // package (so the package and back-stack checks accept it); re-run the
@@ -1104,7 +1110,7 @@ export class RealObserveScreen implements ObserveScreen {
     // hierarchy. The forced recapture and repeated back-stack read establish
     // that both sources still describe the same destination (#5992).
     const reconciled = {
-      ...activeWindow,
+      ...confirmedWindow,
       appId: backStackAttribution.packageName,
       activityName: backStackAttribution.activityName,
     };
@@ -1224,7 +1230,29 @@ export class RealObserveScreen implements ObserveScreen {
 
     this.applyRecapturedHierarchy(result, hierarchy);
     result.backStack = recapturedState.backStack;
+    // The lock state was sampled before the original capture. A keyguard that
+    // appeared during the recapture is in the accepted tree, so publish the
+    // lock state that goes with that tree, not the earlier sample (#6100).
+    await this.deviceStateCollector.collectDeviceLock(result, signal);
     return true;
+  }
+
+  /**
+   * On the bootstrap path `activeWindow.layoutSeqSum` came from a window read
+   * taken before the recapture. A same-activity layout pass that completed
+   * during the recapture would leave that value older than the accepted tree
+   * and make the next tap-effect comparison misreport a change, so pair the
+   * tree with a sequence read after it (#6100). A failed re-read keeps the
+   * earlier correlated value rather than a zero sentinel (#6070).
+   */
+  private async refreshBootstrapLayoutSeqSum(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+  ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
+    const refreshed: ObserveResult = { ...result, activeWindow: undefined, errors: undefined };
+    await this.deviceStateCollector.collectActiveWindow(refreshed);
+    const layoutSeqSum = refreshed.activeWindow?.layoutSeqSum ?? activeWindow.layoutSeqSum;
+    return { ...activeWindow, layoutSeqSum };
   }
 
   private isUsableAttributionRecapture(

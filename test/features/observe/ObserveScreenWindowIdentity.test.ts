@@ -1350,6 +1350,64 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("keeps the earlier correlated layoutSeqSum when the post-recapture window names a different activity (#6100)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(settingsHierarchy(now, "Sub settings") as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
+
+    // A navigation lands between the back-stack confirmation and the window
+    // re-read: the second read names the NEXT activity with a newer sequence.
+    let windowReads = 0;
+    const window = {
+      getActive: async () => {
+        windowReads += 1;
+        return windowReads === 1
+          ? {
+              appId: "com.android.settings",
+              activityName: "com.android.settings.SubSettings",
+              layoutSeqSum: 5120,
+            }
+          : {
+              appId: "com.android.settings",
+              activityName: "com.android.settings.DeviceInfoSettings",
+              layoutSeqSum: 5400,
+            };
+      },
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    } as any;
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window,
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(windowReads).toBe(2);
+    // The next screen's sequence is not grafted onto the confirmed tree.
+    expect(result.activeWindow?.layoutSeqSum).toBe(5120);
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+  });
+
   test("does not re-read the window on a non-bootstrap recapture (#6100)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

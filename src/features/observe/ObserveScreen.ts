@@ -1095,6 +1095,7 @@ export class RealObserveScreen implements ObserveScreen {
     const confirmedWindow = await this.refreshRecaptureSideSamples(
       result,
       activeWindow,
+      backStackAttribution,
       bootstrapAttribution,
       signal,
     );
@@ -1248,6 +1249,7 @@ export class RealObserveScreen implements ObserveScreen {
   private async refreshRecaptureSideSamples(
     result: ObserveResult,
     activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    expected: { packageName: string; activityName: string },
     bootstrapAttribution: boolean,
     signal?: AbortSignal,
   ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
@@ -1255,7 +1257,7 @@ export class RealObserveScreen implements ObserveScreen {
     const [confirmedWindow] = await Promise.all([
       // Elsewhere `layoutSeqSum` is the accessibility-path zero: nothing to refresh.
       bootstrapAttribution
-        ? this.refreshBootstrapLayoutSeqSum(result, activeWindow)
+        ? this.refreshBootstrapLayoutSeqSum(result, activeWindow, expected)
         : Promise.resolve(activeWindow),
       this.deviceStateCollector.collectDeviceLock(result, signal),
     ]);
@@ -1268,18 +1270,26 @@ export class RealObserveScreen implements ObserveScreen {
    * on failure; it returns a zero-sentinel record, so a missing OR zero sequence
    * keeps the earlier correlated value rather than the sentinel (#6070), and the
    * re-read's error is surfaced on the result so the kept value is diagnosable.
+   * A sequence is adopted only when the re-read names the confirmed identity: a
+   * navigation landing between the confirmation and this read would otherwise
+   * graft the next screen's sequence onto the confirmed tree.
    */
   private async refreshBootstrapLayoutSeqSum(
     result: ObserveResult,
     activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    expected: { packageName: string; activityName: string },
   ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
     const refreshed: ObserveResult = { ...result, activeWindow: undefined, errors: undefined };
     await this.deviceStateCollector.collectActiveWindow(refreshed);
     for (const error of refreshed.errors ?? []) {
       appendObserveError(result, error);
     }
-    const layoutSeqSum = refreshed.activeWindow?.layoutSeqSum;
-    return layoutSeqSum ? { ...activeWindow, layoutSeqSum } : activeWindow;
+    const reread = refreshed.activeWindow;
+    const sameIdentity =
+      reread?.appId === expected.packageName && reread.activityName === expected.activityName;
+    return sameIdentity && reread.layoutSeqSum
+      ? { ...activeWindow, layoutSeqSum: reread.layoutSeqSum }
+      : activeWindow;
   }
 
   private isUsableAttributionRecapture(

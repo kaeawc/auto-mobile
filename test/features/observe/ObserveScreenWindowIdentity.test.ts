@@ -1107,6 +1107,73 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toBeUndefined();
   });
 
+  test("mirrors a SystemUI surface that takes focus during the bootstrap recapture instead of the app beneath it (#6088)", async () => {
+    // The focused-SystemUI check (#6078) runs before the recapture. When the
+    // shade takes focus mid-recapture, the replacement tree still carries the
+    // occluded app's package, so the package and back-stack checks accept it;
+    // the overlay reconciliation must run again on the installed tree.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    const shadeOverSettings = {
+      ...settingsHierarchy(now + 50, "Notifications"),
+      windows: [
+        {
+          packageName: "com.android.systemui",
+          type: 3,
+          isFocused: true,
+          windowLayer: 200,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        },
+        {
+          packageName: "com.android.settings",
+          type: 1,
+          isFocused: false,
+          windowLayer: 10,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        },
+      ],
+    };
+    viewHierarchy.configureHierarchySequence([
+      settingsHierarchy(now, "Sub settings"),
+      shadeOverSettings,
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 5120,
+        }),
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    // The published tree is the recaptured shade tree...
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Notifications");
+    // ...and the window names the surface on top, never the occluded app's activity.
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+  });
+
   test("surfaces a failed confirming back-stack read on the retracted result (#6088)", async () => {
     // The bootstrap recapture now runs on every agreeing observation, so an adb
     // hiccup on the confirming back-stack read retracts a stable observation.

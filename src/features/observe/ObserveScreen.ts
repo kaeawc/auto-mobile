@@ -1092,6 +1092,14 @@ export class RealObserveScreen implements ObserveScreen {
       }
       return { sampled: false, identity: undefined, activityAttributionMismatch: true };
     }
+    // The recapture replaced the tree AFTER the focused-SystemUI check ran. A
+    // shade or keyguard that took focus mid-recapture keeps the occluded app's
+    // package (so the package and back-stack checks accept it); re-run the
+    // overlay reconciliation so the published window names the surface on top
+    // rather than the app beneath it (#6078, surfaced in #6088 review).
+    if (await this.applyFocusedSystemUiOverlay(result, signal)) {
+      return { sampled: false, identity: undefined, activityAttributionMismatch: false };
+    }
     // Do not pair an adb activity from a later navigation with an earlier
     // hierarchy. The forced recapture and repeated back-stack read establish
     // that both sources still describe the same destination (#5992).

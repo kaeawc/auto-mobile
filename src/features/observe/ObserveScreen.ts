@@ -1275,6 +1275,13 @@ export class RealObserveScreen implements ObserveScreen {
       return false;
     }
     this.applyRecapturedHierarchy(result, hierarchy);
+    // `deviceLock` was sampled before the original capture (collectAllData), so a
+    // keyguard that appeared during this recapture would otherwise be published
+    // as unlocked against the fresh (keyguard) tree — the #6100 seam, on the
+    // overlay recapture path. Clear first so a failed re-read yields "unknown"
+    // rather than the stale value, then re-read paired with the replacement tree.
+    delete result.deviceLock;
+    await this.deviceStateCollector.collectDeviceLock(result, signal);
     return true;
   }
 

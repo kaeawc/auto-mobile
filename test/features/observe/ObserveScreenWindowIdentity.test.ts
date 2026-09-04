@@ -1946,6 +1946,49 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     expect(result.activeWindow?.activityName).toBe("");
   });
 
+  test("fallback path: re-reads device lock when the recapture accepts a keyguard tree (#6091, #6100 seam)", async () => {
+    // A keyguard that appears during the fallback recapture must not be published
+    // with the pre-capture "unlocked" sample: the overlay recapture replaces the
+    // tree, so the lock sample is re-read paired with the replacement tree.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const keyguardTree = shadeHierarchy(now + 25, [unfocusedShade, occludedAppWindow(false)]);
+    keyguardTree.hierarchy.node.node = [
+      { text: "Swipe up to unlock", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+    ];
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+      keyguardTree,
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    // Unlocked at the original capture; locked by the time the recapture lands.
+    fakeAdb.setDeviceLockSequence([
+      { locked: false, keyguardShowing: false, secure: false },
+      { locked: true, keyguardShowing: true, secure: true },
+    ]);
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Keyguard}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+    // The lock state published is the post-recapture read, not the stale sample.
+    expect(result.deviceLock?.locked).toBe(true);
+    expect(result.deviceLock?.keyguardShowing).toBe(true);
+  });
+
   test("primary (isFocused) path never recaptures — the race-free signal is trusted as captured (#6091)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

@@ -496,12 +496,17 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         },
         execution,
         admittedSession,
-        // #6069: this is a caller-provided sessionUuid on a device tool. Require it
-        // to have been issued by this daemon (live, or persisted non-terminal for
-        // restart recovery). admitIssuedSessionForAutomation above already rejects
-        // a never-issued id on the no-active-session path; requiring issuance here
-        // closes the residual bypass where the connection already held an active
-        // session and a fabricated id reached the pool-minting fallback.
+        // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
+        // above already partitions every state (throws for a never-issued id,
+        // returns a live session so the fallback is skipped, returns undefined
+        // only for a persisted non-terminal row — restart recovery — which the
+        // createUnseenSession guard also admits), so this flag rejects nothing
+        // admit does not already reject HERE. It exists so the pool-minting
+        // primitive itself refuses to mint a never-issued id: if a future route
+        // reaches createToolExecutionContext for a caller-provided sessionUuid
+        // without going through admit, issuance is still enforced. See the PR
+        // discussion for why the reported #6069 bound-connection bypass could not
+        // be reproduced through any current public route in-harness.
         true,
       );
       if (context.deviceId && !providedDeviceId) {

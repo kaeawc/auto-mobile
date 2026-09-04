@@ -507,7 +507,7 @@ export class SessionManager {
   private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
-        (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)),
+      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)),
     );
   }
 

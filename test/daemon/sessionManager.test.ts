@@ -2034,6 +2034,142 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("network condition TTL scheduling (#6085 item 2)", () => {
+    const noopBiometric = () => ({ restore: async () => {} });
+    const makeManagerWithNetworkRestorer = (
+      timer: FakeTimer,
+      restored: Array<{ deviceId: string; profile: string }>,
+    ): SessionManager =>
+      new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (device): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restored.push({ deviceId: device.deviceId, profile });
+          },
+        }),
+      );
+
+    test("resets the device to none when the per-condition TTL elapses", async () => {
+      const timer = new FakeTimer();
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = makeManagerWithNetworkRestorer(timer, restored);
+      try {
+        await manager.createSession("net-ttl", "emulator-5554", "android");
+        manager.setNetworkCondition("net-ttl", { initialProfile: "none" });
+        manager.scheduleNetworkConditionExpiry("net-ttl", 60);
+
+        // Not yet elapsed: no restore, slot still armed.
+        timer.advanceTime(59_000);
+        expect(restored).toEqual([]);
+
+        // Elapsed: the TTL resets the device to `none`, independent of release.
+        timer.advanceTime(1_000);
+        const cleanup = manager.getPendingDeviceCleanup("emulator-5554");
+        expect(cleanup).not.toBeNull();
+        await cleanup;
+
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+        // The restore slot is cleared so a later release cannot double-restore.
+        expect(manager.getNetworkCondition("net-ttl")).toBeUndefined();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("cancels the pending TTL when the session releases before it elapses", async () => {
+      const timer = new FakeTimer();
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = makeManagerWithNetworkRestorer(timer, restored);
+      try {
+        await manager.createSession("net-ttl-release", "emulator-5554", "android");
+        manager.setNetworkCondition("net-ttl-release", { initialProfile: "none" });
+        manager.scheduleNetworkConditionExpiry("net-ttl-release", 60);
+
+        // Release before the TTL: the release-restore runs exactly once.
+        await manager.releaseSession("net-ttl-release");
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+
+        // Advancing past the TTL must NOT fire a second restore (timer cancelled).
+        timer.advanceTime(120_000);
+        expect(manager.getPendingDeviceCleanup("emulator-5554")).toBeNull();
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not double-restore when the TTL fires and then the session releases", async () => {
+      const timer = new FakeTimer();
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = makeManagerWithNetworkRestorer(timer, restored);
+      try {
+        await manager.createSession("net-ttl-first", "emulator-5554", "android");
+        manager.setNetworkCondition("net-ttl-first", { initialProfile: "none" });
+        manager.scheduleNetworkConditionExpiry("net-ttl-first", 60);
+
+        // TTL fires first and restores once.
+        timer.advanceTime(60_000);
+        await manager.getPendingDeviceCleanup("emulator-5554");
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+
+        // Release afterwards sees the cleared slot, so it does not restore again.
+        await manager.releaseSession("net-ttl-first");
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("cancels the pending TTL when the session rebinds before it elapses", async () => {
+      const timer = new FakeTimer();
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = makeManagerWithNetworkRestorer(timer, restored);
+      try {
+        await manager.createSession("net-ttl-rebind", "emulator-5554", "android");
+        manager.setNetworkCondition("net-ttl-rebind", { initialProfile: "none" });
+        manager.scheduleNetworkConditionExpiry("net-ttl-rebind", 60);
+
+        // Rebind restores the old device once and discards its cache.
+        await manager.rebindSession("net-ttl-rebind", "emulator-5556", "android");
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+
+        // The TTL for the old device must not fire after the rebind cancelled it.
+        timer.advanceTime(120_000);
+        expect(manager.getPendingDeviceCleanup("emulator-5554")).toBeNull();
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("re-scheduling a TTL cancels the prior timer so only the latest fires", async () => {
+      const timer = new FakeTimer();
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = makeManagerWithNetworkRestorer(timer, restored);
+      try {
+        await manager.createSession("net-ttl-reapply", "emulator-5554", "android");
+        manager.setNetworkCondition("net-ttl-reapply", { initialProfile: "none" });
+        manager.scheduleNetworkConditionExpiry("net-ttl-reapply", 60);
+        // Re-apply with a longer TTL: the first (60s) timer must be cancelled.
+        manager.scheduleNetworkConditionExpiry("net-ttl-reapply", 120);
+
+        timer.advanceTime(60_000);
+        expect(restored).toEqual([]);
+        expect(manager.getPendingDeviceCleanup("emulator-5554")).toBeNull();
+
+        timer.advanceTime(60_000);
+        await manager.getPendingDeviceCleanup("emulator-5554");
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   describe("statistics", () => {
     test("should return correct session statistics", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");

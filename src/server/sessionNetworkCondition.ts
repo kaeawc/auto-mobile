@@ -20,6 +20,7 @@ export async function runSessionNetworkMutation<T>(
   deviceId: string,
   registerRestore: boolean,
   mutation: () => Promise<T>,
+  expiresInSeconds?: number,
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     return await mutation();
@@ -60,6 +61,17 @@ export async function runSessionNetworkMutation<T>(
     throw new Error(
       `Cannot mutate network condition: session ${sessionUuid} began releasing before the mutation started.`,
     );
+  }
+  // Arm / cancel the standalone per-condition TTL (issue #6085 item 2). A degrade
+  // that registered a restore slot AND carries a positive TTL schedules a timer
+  // that resets the device to `none` when it elapses, independent of session
+  // lifetime; any other network mutation (a reset, or a degrade with no TTL)
+  // cancels a previously-armed timer instead, so a manual reset supersedes a
+  // pending TTL rather than racing it.
+  if (registerRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
+    sessionManager.scheduleNetworkConditionExpiry(sessionUuid, expiresInSeconds);
+  } else {
+    sessionManager.cancelNetworkConditionExpiry(sessionUuid);
   }
   return result;
 }

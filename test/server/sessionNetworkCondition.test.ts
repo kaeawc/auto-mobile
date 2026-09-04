@@ -161,6 +161,63 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("schedules a per-condition TTL for a degrade carrying expiresInSeconds (#6085)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-ttl-wire", "emulator-5554", "android");
+      await runSessionNetworkMutation(
+        manager,
+        "net-ttl-wire",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // The TTL fires after 30s and resets the device to `none`.
+      timer.advanceTime(30_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+      expect(manager.getNetworkCondition("net-ttl-wire")).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a later reset cancels a pending TTL rather than racing it (#6085)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-ttl-cancel", "emulator-5554", "android");
+      // Degrade with a TTL, then a manual reset (registerRestore=false) before it fires.
+      await runSessionNetworkMutation(
+        manager,
+        "net-ttl-cancel",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+      await runSessionNetworkMutation(
+        manager,
+        "net-ttl-cancel",
+        "emulator-5554",
+        false,
+        async () => {},
+      );
+
+      // The reset cancelled the timer, so advancing past the TTL fires no restore.
+      timer.advanceTime(60_000);
+      expect(manager.getPendingDeviceCleanup("emulator-5554")).toBeNull();
+      expect(restored).toEqual([]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

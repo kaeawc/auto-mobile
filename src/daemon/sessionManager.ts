@@ -332,6 +332,15 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /**
+   * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
+   * When a session degrades the network with an `expiresInSeconds`, a timer resets
+   * the profile to `none` when it elapses — independent of session lifetime. The
+   * timer is cancelled on release/rebind (whichever restore runs first wins) and
+   * clears the restore slot when it fires, so it can never fire against a freed
+   * device or double-restore.
+   */
+  private readonly networkConditionExpiryTimers: Map<string, NodeJS.Timeout> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
   /** Automatic device assignments that have not yet started their creation write. */
@@ -965,6 +974,10 @@ export class SessionManager {
     // against that device below, so DevicePool.releaseDevice defers idling it.
     const pendingBiometricRestoration = (await this.restoreBiometricEnrollmentBestEffort(existing))
       .pending;
+    // Rebind restores the old device to `none` here, so cancel any standalone TTL
+    // for this session — it must not later fire against the now-released old
+    // device (issue #6085 item 2).
+    this.cancelNetworkConditionExpiry(existing.sessionId);
     const pendingNetworkRestoration = existing.cacheData.networkCondition
       ? (await this.restoreNetworkConditionBestEffort(existing)).pending
       : null;
@@ -1376,6 +1389,11 @@ export class SessionManager {
     reason: ReleaseReasonState,
   ): Promise<string | null> {
     try {
+      // Release restores the device to `none` itself, so a standalone TTL is now
+      // redundant — cancel it first so the two restore paths cannot both fire
+      // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
+      // already cleared the slot) wins.
+      this.cancelNetworkConditionExpiry(sessionId);
       const setups = Array.from(this.sessionSetupPromises, (setup) =>
         setup.session === session ? setup.promise : null,
       ).filter((setup): setup is Promise<void> => setup !== null);
@@ -2027,6 +2045,85 @@ export class SessionManager {
     );
   }
 
+  /**
+   * Arm a standalone per-condition network TTL (issue #6085 item 2): when it
+   * elapses, the device is reset to `none` independent of session lifetime.
+   * Re-scheduling (a re-applied condition) cancels the prior timer first, so only
+   * the latest TTL is armed. A non-positive TTL arms nothing (and still clears any
+   * prior timer), matching the "TTL-only / neutral request applies nothing" rule.
+   */
+  scheduleNetworkConditionExpiry(sessionId: string, expiresInSeconds: number): void {
+    this.cancelNetworkConditionExpiry(sessionId);
+    if (!(expiresInSeconds > 0)) {
+      return;
+    }
+    const handle = this.timer.setTimeout(() => {
+      this.handleNetworkConditionExpiry(sessionId);
+    }, expiresInSeconds * 1000);
+    this.networkConditionExpiryTimers.set(sessionId, handle);
+  }
+
+  /**
+   * Cancel a pending network TTL. Called on release, rebind, and any subsequent
+   * non-degrading network mutation (a manual reset) so the release-restore and the
+   * TTL can never both fire. A no-op when no timer is armed.
+   */
+  cancelNetworkConditionExpiry(sessionId: string): void {
+    const handle = this.networkConditionExpiryTimers.get(sessionId);
+    if (handle !== undefined) {
+      this.timer.clearTimeout(handle);
+      this.networkConditionExpiryTimers.delete(sessionId);
+    }
+  }
+
+  /**
+   * TTL elapsed: reset the device to `none` via the shared restore path, then clear
+   * the restore slot so a later release cannot double-restore. Handles a session
+   * that was already released/rebound (its slot is gone → nothing to do), so the
+   * timer never acts on a freed device. The reset is tracked as pending device
+   * cleanup — the same channel release uses — so the pool keeps the device
+   * quarantined until it settles.
+   */
+  private handleNetworkConditionExpiry(sessionId: string): void {
+    this.networkConditionExpiryTimers.delete(sessionId);
+    // Read the raw session map rather than getSession(), so a timer fire cannot
+    // trigger a lazy-expiry release as a side effect. An absent session was
+    // already released — its release-restore handled connectivity.
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+    const target = this.networkConditionRestoreTarget(session);
+    if (!target) {
+      // Slot already cleared by a prior restore: nothing to do, no double-restore.
+      return;
+    }
+    // Clear the slot BEFORE restoring, so a release racing this fire observes no
+    // slot and does not schedule a second restore of the same device.
+    this.clearNetworkCondition(sessionId);
+    logger.info(
+      `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
+    );
+    const restore = this.restoreNetworkCondition(target).then(
+      () => undefined,
+      (error) => {
+        logger.warn(
+          `Failed to reset network condition on TTL expiry for session ${sessionId}; device ` +
+            `${target.deviceId} may hold session-modified shaping: ${error}`,
+        );
+      },
+    );
+    this.trackPendingDeviceCleanup(target.deviceId, [restore]);
+  }
+
+  /** Drop the network restore slot once a TTL reset has satisfied it (issue #6085). */
+  private clearNetworkCondition(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session?.cacheData.networkCondition) {
+      delete session.cacheData.networkCondition;
+    }
+  }
+
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
@@ -2448,6 +2545,12 @@ export class SessionManager {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+    // Cancel any armed per-condition network TTLs so a stopped manager leaves no
+    // dangling timer (issue #6085 item 2).
+    for (const handle of this.networkConditionExpiryTimers.values()) {
+      this.timer.clearTimeout(handle);
+    }
+    this.networkConditionExpiryTimers.clear();
   }
 
   // Intentionally NOT barrier-tracked: this write is `await`ed by its caller

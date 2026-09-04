@@ -156,7 +156,11 @@ const networkConditionInputSchema = z
       .number()
       .min(0)
       .optional()
-      .describe("Advisory TTL; session release/expiry restores normal connectivity."),
+      .describe(
+        "TTL in seconds. When set on a degrading request, a timer resets the device to normal " +
+          "connectivity after it elapses, independent of session lifetime; session release/expiry " +
+          "also restores connectivity, whichever comes first.",
+      ),
   })
   // Reject non-actionable / contradictory requests using the SAME classifier the
   // setter uses, so schema acceptance and runtime behavior cannot disagree
@@ -541,6 +545,7 @@ export function registerUtilityTools() {
             device.deviceId,
             registerNetworkRestore,
             () => deviceState.setState(input),
+            input.networkCondition.expiresInSeconds,
           )
         : deviceState.setState(input);
 
@@ -580,6 +585,7 @@ export function registerUtilityTools() {
         device.deviceId,
         registerNetworkRestore,
         mutation,
+        args.networkCondition.expiresInSeconds,
       );
     } else {
       result = await runSessionBiometricMutation(

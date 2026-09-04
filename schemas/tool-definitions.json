@@ -8117,7 +8117,7 @@
               "maximum": 100
             },
             "expiresInSeconds": {
-              "description": "Advisory TTL; session release/expiry restores normal connectivity.",
+              "description": "TTL in seconds. When set on a degrading request, a timer resets the device to normal connectivity after it elapses, independent of session lifetime; session release/expiry also restores connectivity, whichever comes first.",
               "type": "number",
               "minimum": 0
             }

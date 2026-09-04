@@ -8,6 +8,7 @@ import {
   networkConditionInputDegrades,
   networkConditionInputError,
   networkConditionInputIsRequest,
+  parseEmulatorNetworkStatus,
   type SetNetworkConditionInput,
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -551,6 +552,61 @@ describe("DeviceState", () => {
     expect(result.networkCondition?.verified).toBeUndefined();
     expect(result.networkCondition?.rawStatus).toContain("network status");
     expect(client.getAllCommands()).toEqual(["emu network status"]);
+  });
+
+  test("parses a full emulator network status into structured observed values (#6085)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult(
+      "emu network status",
+      [
+        "Current network status:",
+        "  download speed:   236800 bits/s (231.2 KB/s)",
+        "  upload speed:     118400 bits/s (115.6 KB/s)",
+        "  minimum latency:  80 ms",
+        "  maximum latency:  400 ms",
+      ].join("\n"),
+    );
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.getState(["networkCondition"]);
+
+    // bits/s -> kbps, delay reflects the MAX latency.
+    expect(result.networkCondition?.observedValues).toEqual({
+      downloadKbps: 237,
+      uploadKbps: 118,
+      delayMs: 400,
+    });
+    // rawStatus is still surfaced verbatim, and the read never claims verified.
+    expect(result.networkCondition?.rawStatus).toContain("download speed");
+    expect(result.networkCondition?.verified).toBeUndefined();
+  });
+
+  test("keeps rawStatus and omits observed values when the status is unparseable (#6085)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("emu network status", "network shaping: unknown legacy format\n");
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.getState(["networkCondition"]);
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition?.rawStatus).toContain("unknown legacy format");
+    // No field could be parsed, so no structured values are claimed.
+    expect(result.networkCondition?.observedValues).toBeUndefined();
+  });
+
+  test("parseEmulatorNetworkStatus extracts partial fields defensively without throwing (#6085)", () => {
+    // Only latency present (min, no max): fall back to the minimum latency.
+    expect(parseEmulatorNetworkStatus("  minimum latency:  35 ms\n")).toEqual({ delayMs: 35 });
+    // Only download speed present, comma-grouped digits tolerated.
+    expect(parseEmulatorNetworkStatus("download speed: 1,920,000 bits/s (1875 KB/s)")).toEqual({
+      downloadKbps: 1920,
+    });
+    // Empty / whitespace / non-matching all fall back to null, never throw.
+    expect(parseEmulatorNetworkStatus("")).toBeNull();
+    expect(parseEmulatorNetworkStatus("   ")).toBeNull();
+    expect(parseEmulatorNetworkStatus("OK")).toBeNull();
   });
 
   test("reports network conditioning unsupported on a physical Android device", async () => {

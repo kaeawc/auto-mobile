@@ -6,6 +6,7 @@ setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIGINAL_PATH="$PATH"
   ORIGINAL_HOME="$HOME"
+  export REAL_JQ="$(command -v jq)"
   export HOME="${MOCK_BIN}/home"
   export ADB_LOG="${MOCK_BIN}/adb.log"
   export AUTO_MOBILE_LOG="${MOCK_BIN}/auto-mobile.log"
@@ -76,6 +77,9 @@ fi
 '
   make_mock sleep 'exit 0'
   make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
 if [ "$1" = "-e" ] && [ "$2" = "--arg" ] && [ "$3" = "destination" ] &&
   grep -Fq -- "$4"; then
   exit 0
@@ -84,6 +88,18 @@ exit 1
 '
   make_mock auto-mobile '
 printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getAndroid" ]; then
+  [ -f "$DEVICE_READY_FILE" ] || {
+    echo "session acquired before rooted device was ready" >&2
+    exit 1
+  }
+  [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ] || {
+    echo "getAndroid acquired without target deviceId" >&2
+    exit 1
+  }
+  printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
+  exit 0
+fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ]; then
   case "$6" in
     launchApp)
@@ -163,6 +179,9 @@ fi
 '
   make_mock sleep 'exit 0'
   make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
 if [ "$1" = "-e" ] && [ "$2" = "--arg" ] && [ "$3" = "destination" ] &&
   grep -Fq -- "$4"; then
   exit 0
@@ -174,6 +193,10 @@ exit 1
   ln -s "${HOME}/.bun/bin/missing-auto-mobile" "${HOME}/.bun/bin/auto-mobile"
   make_executable "${GITHUB_WORKSPACE}/dist/src/index.js" '
 printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+if [ "$4" = "getAndroid" ]; then
+  printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
+  exit 0
+fi
 case "$6" in
   launchApp)
     exit 0
@@ -198,4 +221,39 @@ exit 1
   [ "$(readlink "${HOME}/.bun/bin/auto-mobile")" = "${GITHUB_WORKSPACE}/dist/src/index.js" ]
   [[ "$output" == *"linking ${HOME}/.bun/bin/auto-mobile -> ${GITHUB_WORKSPACE}/dist/src/index.js"* ]]
   grep -q -- 'getNavigationGraph --platform android --deviceId emulator-5554' "$AUTO_MOBILE_LOG"
+}
+
+# The daemon rejects never-issued session UUIDs (#6045, #6079). The script must
+# acquire the emulator via getAndroid rather than fabricate a session UUID, so an
+# empty acquisition result must abort before any session-scoped call.
+@test "aborts when getAndroid does not return a session UUID" {
+  make_mock adb '
+if [ "$1" = "devices" ]; then
+  printf "List of devices attached\nemulator-5554\tdevice\n"
+  exit 0
+fi
+exit 0
+'
+  make_mock sleep 'exit 0'
+  make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+  exec "$REAL_JQ" "$@"
+fi
+exit 1
+'
+  make_mock auto-mobile '
+printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+if [ "$4" = "getAndroid" ]; then
+  printf "{\"sessionUuid\":\"\"}\n"
+  exit 0
+fi
+echo "unexpected session-scoped call before acquisition: $*" >&2
+exit 1
+'
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not acquire navigation graph session"* ]]
+  ! grep -q -- "--session-uuid" "$AUTO_MOBILE_LOG"
 }

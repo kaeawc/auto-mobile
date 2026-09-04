@@ -241,7 +241,7 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .min(1)
       .optional()
       .describe(
-        "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android)",
+        "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
       ),
   })
   .superRefine((value, ctx) => {

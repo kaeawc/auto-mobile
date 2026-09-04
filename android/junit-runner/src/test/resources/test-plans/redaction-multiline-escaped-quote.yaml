@@ -2,9 +2,9 @@
 name: redaction-multiline-escaped-quote
 description: Multiline flow secretParameters whose first key has an escaped quote before ] (#6097)
 secretParameters: [
-  "a\"]b",
-  PASSWORD
-]
+    "a\"]b",
+    PASSWORD,
+  ]
 steps:
   - tool: launchApp
     appId: com.example.app

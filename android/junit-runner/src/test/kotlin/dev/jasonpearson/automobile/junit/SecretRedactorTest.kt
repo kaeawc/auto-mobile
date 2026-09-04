@@ -139,6 +139,40 @@ class SecretRedactorTest {
   }
 
   @Test
+  fun `trailing comment after the closing bracket is ignored`() {
+    // A comment after `]` (with or without a leading space) must be ignored and TOKEN still parsed;
+    // dropping it would leak TOKEN's value (#6097 Codex — comment after `]`).
+    val spaced = "name: P\nsecretParameters: [TOKEN] # trailing comment\nsteps:\n  - tool: observe"
+    assertEquals(setOf("TOKEN"), SecretRedactor.parsePlanSecretKeys(spaced))
+    val unspaced = "name: P\nsecretParameters: [TOKEN]#c\nsteps:\n  - tool: observe"
+    assertEquals(setOf("TOKEN"), SecretRedactor.parsePlanSecretKeys(unspaced))
+  }
+
+  @Test
+  fun `an unrecognized token is still captured as a secret key (fail-safe)`() {
+    // Fail-safe: an unusual/unrecognized token must still be treated as a secret key (over-capture)
+    // rather than dropped — dropping would fail open (#6097).
+    val yaml = "name: P\nsecretParameters: [TOKEN, @@weird@@]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("TOKEN", "@@weird@@"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `an unterminated flow sequence fails safe by capturing its tokens`() {
+    // No closing `]` (e.g. substitution truncation): still yield the tokens (over-capture), never
+    // silently drop them (#6097 fail-safe).
+    val yaml = "name: P\nsecretParameters: [\n  TOKEN,\n  PASSWORD"
+    assertEquals(setOf("TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `a double-quoted line-continuation key is captured`() {
+    // A double-quoted key using YAML line continuation (`"API\`+newline+`TOKEN"` decodes to
+    // `APITOKEN`) must be captured so its value is redacted (#6097 Codex — line continuation).
+    val yaml = "name: P\nsecretParameters: [\n  \"API\\\n  TOKEN\"\n]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("APITOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
   fun `tolerates placeholder key names and unrelated placeholder flow lists`() {
     // A full YAML load would throw on `[${LABEL}, OK]`; the scanner tolerates it and ignores it.
     val yaml =

@@ -91,27 +91,22 @@ internal object SecretRedactor {
         index++
         continue
       }
-      // Strip the value's trailing comment quote-aware: a `#` inside a quoted key is literal YAML,
-      // not a comment (#6097). `lines[index]` is the raw line and begins with the key (indent 0),
-      // so
-      // dropping the key prefix leaves the raw value.
-      val inline = stripFlowComment(lines[index].removePrefix("secretParameters:")).trim()
+      // Peek at the value with a quote-aware comment strip (a `#` inside a quoted key is literal
+      // YAML, not a comment): empty -> block sequence, `[` -> flow sequence, else bare scalar.
+      // `lines[index]` is the raw line and begins with the key (indent 0).
+      val rawValue = lines[index].removePrefix("secretParameters:")
+      val inline = stripFlowComment(rawValue).trim()
       if (inline.isNotEmpty()) {
-        // A bracketed flow value may span multiple lines: accumulate continuation lines until the
-        // matching `]` before parsing, so `secretParameters: [\n  TOKEN,\n  PASSWORD\n]` is not
-        // dropped (#6097). Quote state, YAML double-quote escaping (`\"`), quoted `#`, and `${...}`
-        // placeholders (literal text) are all honored; a full YAML load is deliberately avoided (it
-        // chokes on `${...}` flow items).
-        if (inline.startsWith("[") && !flowSequenceIsClosed(inline)) {
-          val accumulated = StringBuilder(inline)
-          index++
-          while (index < lines.size && !flowSequenceIsClosed(accumulated.toString())) {
-            accumulated.append(' ').append(stripFlowComment(lines[index]).trim())
-            index++
-          }
-          keys.addAll(parseInlineList(accumulated.toString()))
+        if (inline.startsWith("[")) {
+          // A flow value may span multiple physical lines; a single-pass scanner handles the
+          // multiline form, quoted `#`, escaped quotes, trailing comments after `]`, and line
+          // folding — and fails safe toward over-capture (#6097).
+          val (flowKeys, nextIndex) = parseSecretFlowSequence(lines, index, rawValue)
+          keys.addAll(flowKeys)
+          index = nextIndex
           continue
         }
+        // Bare inline scalar (no brackets): treat as a single key name.
         keys.addAll(parseInlineList(inline))
         index++
         continue
@@ -135,39 +130,113 @@ internal object SecretRedactor {
   }
 
   /**
-   * True once [text] contains the `]` that closes its first `[`, honoring quotes and YAML
-   * double-quote escaping so a bracket inside a quoted key — or after an escaped quote `\"`, or in
-   * a `${...}` placeholder (literal text here) — is not mistaken for the flow delimiter. Used to
-   * decide when a multiline flow sequence is complete (#6097).
+   * Scan a `secretParameters:` YAML flow sequence that may span multiple physical lines, returning
+   * the declared key names and the index of the next line to resume from. A lenient hand-rolled
+   * scanner (a full YAML load chokes on `${...}` in flow collections — issue #6029). It honors
+   * quotes; double-quote backslash escaping (`\"`, so a `]`/`,`/`"` after it stays literal); quoted
+   * `#` (a `#` inside a scalar is literal — only an unquoted `#` at line start or after whitespace
+   * begins a comment); any content after the closing `]` (ignored — including a trailing comment);
+   * and YAML newline folding inside a double-quoted scalar (a trailing `\` continues the scalar,
+   * dropping the newline; a plain newline folds to a space; continuation indentation is not part of
+   * the value).
+   *
+   * FAIL-SAFE: key-name parsing errs toward OVER-capturing for redaction, never dropping a declared
+   * key (which would leak its value). Every non-empty token is kept as a secret key, and an
+   * UNTERMINATED sequence (e.g. from substitution truncation) still yields every token seen
+   * (#6097).
    */
-  private fun flowSequenceIsClosed(text: String): Boolean {
+  private fun parseSecretFlowSequence(
+    lines: List<String>,
+    startIndex: Int,
+    firstValue: String,
+  ): Pair<List<String>, Int> {
+    val items = mutableListOf<String>()
+    val current = StringBuilder()
     var depth = 0
+    var started = false
     var activeQuote: Char? = null
     var escaped = false
-    for (character in text) {
-      if (activeQuote != null) {
-        if (activeQuote == '"') {
-          when {
-            escaped -> escaped = false
-            character == '\\' -> escaped = true
-            character == '"' -> activeQuote = null
+    var lineIndex = startIndex
+    var currentLine = firstValue
+
+    while (true) {
+      var previous: Char? = null
+      var inComment = false
+      for (character in currentLine) {
+        if (inComment) break
+        if (activeQuote != null) {
+          if (activeQuote == '"') {
+            when {
+              escaped -> {
+                current.append(character)
+                escaped = false
+              }
+              character == '\\' -> escaped = true
+              character == '"' -> activeQuote = null
+              else -> current.append(character)
+            }
+          } else if (character == '\'') {
+            activeQuote = null
+          } else {
+            current.append(character)
           }
-        } else if (character == '\'') {
-          activeQuote = null
-        }
-      } else {
-        when {
-          character == '"' || character == '\'' -> activeQuote = character
-          character == '[' -> depth++
-          character == ']' -> {
-            depth--
-            if (depth == 0) return true
+        } else if (!started) {
+          if (character == '[') {
+            started = true
+            depth = 1
           }
+        } else if (character == '#' && (previous == null || previous == ' ' || previous == '\t')) {
+          inComment = true
+        } else if (character == '"' || character == '\'') {
+          activeQuote = character
+        } else if (character == '[') {
+          depth++
+          current.append(character)
+        } else if (character == ']') {
+          depth--
+          if (depth == 0) {
+            items.add(current.toString())
+            return finalizeSecretKeys(items) to (lineIndex + 1)
+          }
+          current.append(character)
+        } else if (character == ',' && depth == 1) {
+          items.add(current.toString())
+          current.clear()
+        } else {
+          current.append(character)
         }
+        previous = character
       }
+
+      // Physical line ended. Fold per YAML: a trailing `\` inside a double-quoted scalar continues
+      // it
+      // (drop the newline); a plain newline inside a quoted scalar folds to a space; a newline
+      // between
+      // flow tokens is whitespace.
+      when {
+        activeQuote == '"' && escaped -> escaped = false
+        activeQuote != null -> current.append(' ')
+        started -> current.append(' ')
+      }
+
+      lineIndex++
+      if (lineIndex >= lines.size) {
+        // Unterminated flow: fail safe — keep every token seen so its value is still redacted.
+        items.add(current.toString())
+        return finalizeSecretKeys(items) to lineIndex
+      }
+      // Inside a quoted scalar the continuation's leading indentation is not part of the value.
+      currentLine =
+        if (activeQuote != null) lines[lineIndex].trimStart(' ', '\t') else lines[lineIndex]
     }
-    return false
   }
+
+  /**
+   * Trim and drop empties from the scanner's already-decoded flow items (quotes/escapes are
+   * resolved during scanning, so no further unquoting here).
+   */
+  private fun finalizeSecretKeys(items: List<String>): List<String> =
+    items.map { it.trim() }.filter { it.isNotEmpty() }
 
   private fun stripComments(line: String): String {
     val hash = line.indexOf('#')

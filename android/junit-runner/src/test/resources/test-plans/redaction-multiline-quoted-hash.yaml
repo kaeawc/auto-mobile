@@ -2,9 +2,9 @@
 name: redaction-multiline-quoted-hash
 description: Multiline flow secretParameters whose first key quotes a # (#6097)
 secretParameters: [
-  "API#TOKEN",
-  PASSWORD
-]
+    "API#TOKEN",
+    PASSWORD,
+  ]
 steps:
   - tool: launchApp
     appId: com.example.app

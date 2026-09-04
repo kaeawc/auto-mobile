@@ -942,6 +942,49 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["a\"]b", "PASSWORD"])
     }
 
+    func testFlowTrailingCommentAfterClosingBracketIsIgnored() {
+        // A comment after the closing `]` (with or without a leading space) must be ignored, and TOKEN
+        // still parsed. Dropping it would leak TOKEN's value (#6097 Codex — comment after `]`).
+        let spaced = "name: P\nsecretParameters: [TOKEN] # trailing comment\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: spaced), ["TOKEN"])
+        let unspaced = "name: P\nsecretParameters: [TOKEN]#c\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: unspaced), ["TOKEN"])
+    }
+
+    func testMultilineFlowClosingBracketFollowedByCommentIsIgnored() {
+        let yaml = """
+        name: P
+        secretParameters: [
+          TOKEN,
+          PASSWORD
+        ]  # both declared
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+    }
+
+    func testUnrecognizedTokenIsStillCapturedAsSecretKeyFailSafe() {
+        // Fail-safe: an unusual/unrecognized token in the block must still be treated as a secret key
+        // (over-capture) rather than dropped — dropping would fail open (#6097).
+        let yaml = "name: P\nsecretParameters: [TOKEN, @@weird@@]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "@@weird@@"])
+    }
+
+    func testUnterminatedFlowSequenceFailsSafeByCapturingTokens() {
+        // A flow sequence with no closing `]` (e.g. substitution truncation) must still yield its
+        // tokens (over-capture), never silently drop them (#6097 fail-safe).
+        let yaml = "name: P\nsecretParameters: [\n  TOKEN,\n  PASSWORD"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+    }
+
+    func testDoubleQuotedLineContinuationKeyIsCaptured() {
+        // A double-quoted key using YAML line continuation (`"API\`⏎`TOKEN"` decodes to `APITOKEN`)
+        // must be captured so its value is redacted (#6097 Codex — line continuation).
+        let yaml = "name: P\nsecretParameters: [\n  \"API\\\n  TOKEN\"\n]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
+    }
+
     func testFlushBlockStopsAtNextTopLevelKey() {
         let yaml = """
         name: P

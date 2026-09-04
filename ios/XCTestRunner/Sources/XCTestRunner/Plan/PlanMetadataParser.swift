@@ -156,27 +156,24 @@ enum PlanMetadataParser {
                 continue
             }
 
-            // Strip the value's trailing comment quote-aware: a `#` inside a quoted key is literal
-            // YAML, not a comment (#6097). `lines[index]` is the raw line and begins with the key
-            // (indent 0), so dropping the key prefix leaves the raw value.
-            let inline = stripFlowComment(String(lines[index].dropFirst("secretParameters:".count)))
-                .trimmingCharacters(in: .whitespaces)
+            // Peek at the value with a quote-aware comment strip (a `#` inside a quoted key is literal
+            // YAML, not a comment): empty -> block sequence, `[` -> flow sequence, else bare scalar.
+            // `lines[index]` is the raw line and begins with the key (indent 0).
+            let rawValue = String(lines[index].dropFirst("secretParameters:".count))
+            let inline = stripFlowComment(rawValue).trimmingCharacters(in: .whitespaces)
             if !inline.isEmpty {
-                // A bracketed flow value may span multiple lines: accumulate continuation lines until
-                // the matching `]` before parsing, so `secretParameters: [\n  TOKEN,\n  PASSWORD\n]`
-                // is not dropped (#6097). Quote state, YAML double-quote escaping (`\"`), quoted `#`,
-                // and `${...}` placeholders (literal text) are all honored; a full YAML load is
-                // deliberately avoided (it chokes on `${...}` flow items).
-                if inline.hasPrefix("[") && !flowSequenceIsClosed(inline) {
-                    var accumulated = inline
-                    index += 1
-                    while index < lines.count && !flowSequenceIsClosed(accumulated) {
-                        accumulated += " " + stripFlowComment(lines[index]).trimmingCharacters(in: .whitespaces)
-                        index += 1
-                    }
-                    keys.formUnion(parseInlineList(accumulated))
+                if inline.hasPrefix("[") {
+                    // A flow value may span multiple physical lines; a single-pass scanner handles the
+                    // multiline form, quoted `#`, escaped quotes, trailing comments after `]`, and line
+                    // folding — and fails safe toward over-capture (#6097).
+                    let (flowKeys, nextIndex) = parseSecretFlowSequence(
+                        lines: lines, startIndex: index, firstValue: rawValue
+                    )
+                    keys.formUnion(flowKeys)
+                    index = nextIndex
                     continue
                 }
+                // Bare inline scalar (no brackets): treat as a single key name.
                 keys.formUnion(parseInlineList(inline))
                 index += 1
                 continue
@@ -250,39 +247,113 @@ enum PlanMetadataParser {
             .filter { !$0.isEmpty }
     }
 
-    /// True once `text` contains the `]` that closes its first `[`, honoring quotes and YAML
-    /// double-quote escaping so a bracket inside a quoted key — or after an escaped quote `\"`, or in a
-    /// `${...}` placeholder (literal text here) — is not mistaken for the flow delimiter. Used to
-    /// decide when a multiline flow sequence is complete (#6097).
-    private static func flowSequenceIsClosed(_ text: String) -> Bool {
+    /// Scan a `secretParameters:` YAML flow sequence that may span multiple physical lines, returning
+    /// the declared key names and the index of the next line to resume from. A lenient hand-rolled
+    /// scanner (a full YAML load chokes on `${...}` in flow collections — issue #6029). It honors
+    /// quotes; double-quote backslash escaping (`\"`, so a `]`/`,`/`"` after it stays literal); quoted
+    /// `#` (a `#` inside a scalar is literal — only an unquoted `#` at line start or after whitespace
+    /// begins a comment); any content after the closing `]` (ignored — including a trailing comment);
+    /// and YAML newline folding inside a double-quoted scalar (a trailing `\` continues the scalar,
+    /// dropping the newline; a plain newline folds to a space; continuation indentation is not part of
+    /// the value).
+    ///
+    /// FAIL-SAFE: key-name parsing errs toward OVER-capturing for redaction, never dropping a declared
+    /// key (which would leak its value). Every non-empty token is kept as a secret key, and an
+    /// UNTERMINATED sequence (e.g. from substitution truncation) still yields every token seen (#6097).
+    private static func parseSecretFlowSequence(
+        lines: [String], startIndex: Int, firstValue: String
+    )
+        -> (keys: [String], nextIndex: Int)
+    {
+        var items: [String] = []
+        var current = ""
         var depth = 0
+        var started = false
         var activeQuote: Character?
         var escaped = false
-        for character in text {
-            if let quote = activeQuote {
-                if quote == "\"" {
-                    if escaped {
-                        escaped = false
-                    } else if character == "\\" {
-                        escaped = true
-                    } else if character == "\"" {
+        var lineIndex = startIndex
+        var currentLine = firstValue
+
+        while true {
+            var previous: Character?
+            var inComment = false
+            for character in currentLine {
+                if inComment { break }
+                if let quote = activeQuote {
+                    if quote == "\"" {
+                        if escaped {
+                            current.append(character)
+                            escaped = false
+                        } else if character == "\\" {
+                            escaped = true
+                        } else if character == "\"" {
+                            activeQuote = nil
+                        } else {
+                            current.append(character)
+                        }
+                    } else if character == "'" {
                         activeQuote = nil
+                    } else {
+                        current.append(character)
                     }
-                } else if character == "'" {
-                    activeQuote = nil
+                } else if !started {
+                    if character == "[" {
+                        started = true
+                        depth = 1
+                    }
+                } else if character == "#" && (previous == nil || previous == " " || previous == "\t") {
+                    inComment = true
+                } else if character == "\"" || character == "'" {
+                    activeQuote = character
+                } else if character == "[" {
+                    depth += 1
+                    current.append(character)
+                } else if character == "]" {
+                    depth -= 1
+                    if depth == 0 {
+                        items.append(current)
+                        return (finalizeSecretKeys(items), lineIndex + 1)
+                    }
+                    current.append(character)
+                } else if character == ",", depth == 1 {
+                    items.append(current)
+                    current = ""
+                } else {
+                    current.append(character)
                 }
-            } else if character == "\"" || character == "'" {
-                activeQuote = character
-            } else if character == "[" {
-                depth += 1
-            } else if character == "]" {
-                depth -= 1
-                if depth == 0 {
-                    return true
-                }
+                previous = character
             }
+
+            // Physical line ended. Fold per YAML: a trailing `\` inside a double-quoted scalar
+            // continues it (drop the newline); a plain newline inside a quoted scalar folds to a space;
+            // a newline between flow tokens is whitespace.
+            if activeQuote == "\"", escaped {
+                escaped = false
+            } else if activeQuote != nil {
+                current.append(" ")
+            } else if started {
+                current.append(" ")
+            }
+
+            lineIndex += 1
+            if lineIndex >= lines.count {
+                // Unterminated flow: fail safe — keep every token seen so its value is still redacted.
+                items.append(current)
+                return (finalizeSecretKeys(items), lineIndex)
+            }
+            // Inside a quoted scalar the continuation's leading indentation is not part of the value.
+            currentLine = activeQuote != nil
+                ? String(lines[lineIndex].drop { $0 == " " || $0 == "\t" })
+                : lines[lineIndex]
         }
-        return false
+    }
+
+    /// Trim and drop empties from the scanner's already-decoded flow items (quotes/escapes are
+    /// resolved during scanning, so no further unquoting here).
+    private static func finalizeSecretKeys(_ items: [String]) -> [String] {
+        items
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     /// Remove a trailing YAML line comment from a flow line without stripping a `#` that sits inside a

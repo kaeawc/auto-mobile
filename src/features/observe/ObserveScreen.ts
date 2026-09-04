@@ -1075,9 +1075,9 @@ export class RealObserveScreen implements ObserveScreen {
     // re-reads the hierarchy so the adb activity is paired with a *fresh* tree.
     // A same-app mid-flight navigation between capture and back-stack read is
     // therefore surfaced as a mismatch/unknown rather than a confidently-wrong
-    // name, and the confirmed window keeps its correlated `layoutSeqSum` (the
-    // freshness of which is guaranteed by the `getActive(true)` bootstrap read)
-    // so tap-effect detection is not blinded by a zero sentinel (#6070).
+    // name, and the confirmed window keeps a correlated `layoutSeqSum` (re-read
+    // after the accepted recapture, #6100) so tap-effect detection is not
+    // blinded by a zero sentinel (#6070).
     const recaptured = await this.recaptureHierarchyForBackStackAttribution(
       result,
       backStackAttribution,
@@ -1092,11 +1092,12 @@ export class RealObserveScreen implements ObserveScreen {
       }
       return { sampled: false, identity: undefined, activityAttributionMismatch: true };
     }
-    // Pair the accepted tree with a layout sequence read after it (bootstrap
-    // path only: elsewhere `layoutSeqSum` is the accessibility-path zero).
-    const confirmedWindow = bootstrapAttribution
-      ? await this.refreshBootstrapLayoutSeqSum(result, activeWindow)
-      : activeWindow;
+    const confirmedWindow = await this.refreshRecaptureSideSamples(
+      result,
+      activeWindow,
+      bootstrapAttribution,
+      signal,
+    );
     result.activeWindow = confirmedWindow;
     // The recapture replaced the tree AFTER the focused-SystemUI check ran. A
     // shade or keyguard that took focus mid-recapture keeps the occluded app's
@@ -1230,20 +1231,43 @@ export class RealObserveScreen implements ObserveScreen {
 
     this.applyRecapturedHierarchy(result, hierarchy);
     result.backStack = recapturedState.backStack;
-    // The lock state was sampled before the original capture. A keyguard that
-    // appeared during the recapture is in the accepted tree, so publish the
-    // lock state that goes with that tree, not the earlier sample (#6100).
-    await this.deviceStateCollector.collectDeviceLock(result, signal);
     return true;
   }
 
   /**
-   * On the bootstrap path `activeWindow.layoutSeqSum` came from a window read
-   * taken before the recapture. A same-activity layout pass that completed
-   * during the recapture would leave that value older than the accepted tree
-   * and make the next tap-effect comparison misreport a change, so pair the
-   * tree with a sequence read after it (#6100). A failed re-read keeps the
-   * earlier correlated value rather than a zero sentinel (#6070).
+   * Side samples taken before an accepted recapture must not be published
+   * against the replacement tree (#6100). The lock state was collected before
+   * the original capture, so a keyguard that appeared mid-recapture would be
+   * published as unlocked; it is re-read, and cleared first so a failed re-read
+   * yields "unknown" rather than the earlier wrong value. On the bootstrap path
+   * `layoutSeqSum` came from a window read taken before the recapture, so a
+   * same-activity layout pass that completed during it would make the next
+   * tap-effect comparison misreport a change; it is re-read too. The two reads
+   * are independent adb calls and run together.
+   */
+  private async refreshRecaptureSideSamples(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    bootstrapAttribution: boolean,
+    signal?: AbortSignal,
+  ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
+    delete result.deviceLock;
+    const [confirmedWindow] = await Promise.all([
+      // Elsewhere `layoutSeqSum` is the accessibility-path zero: nothing to refresh.
+      bootstrapAttribution
+        ? this.refreshBootstrapLayoutSeqSum(result, activeWindow)
+        : Promise.resolve(activeWindow),
+      this.deviceStateCollector.collectDeviceLock(result, signal),
+    ]);
+    return confirmedWindow;
+  }
+
+  /**
+   * Re-read the bootstrap window after an accepted recapture and pair the tree
+   * with its layout sequence. The production `Window.getActive` does not throw
+   * on failure; it returns a zero-sentinel record, so a missing OR zero sequence
+   * keeps the earlier correlated value rather than the sentinel (#6070), and the
+   * re-read's error is surfaced on the result so the kept value is diagnosable.
    */
   private async refreshBootstrapLayoutSeqSum(
     result: ObserveResult,
@@ -1251,8 +1275,11 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
     const refreshed: ObserveResult = { ...result, activeWindow: undefined, errors: undefined };
     await this.deviceStateCollector.collectActiveWindow(refreshed);
-    const layoutSeqSum = refreshed.activeWindow?.layoutSeqSum ?? activeWindow.layoutSeqSum;
-    return { ...activeWindow, layoutSeqSum };
+    for (const error of refreshed.errors ?? []) {
+      appendObserveError(result, error);
+    }
+    const layoutSeqSum = refreshed.activeWindow?.layoutSeqSum;
+    return layoutSeqSum ? { ...activeWindow, layoutSeqSum } : activeWindow;
   }
 
   private isUsableAttributionRecapture(

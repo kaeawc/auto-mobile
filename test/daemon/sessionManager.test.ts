@@ -351,6 +351,135 @@ describe("SessionManager", () => {
       }
     });
 
+    // #6069: with requireIssuedSession, a never-issued id must NOT be minted a
+    // pooled device just because a live device pool is in scope. Admission is
+    // decided from the registry, not from pool presence.
+    test("requireIssuedSession rejects a never-issued id instead of minting a pooled device", async () => {
+      const assignedSessionIds: string[] = [];
+      const devicePool: SessionDeviceAssigner = {
+        assignDeviceToSession: async (sessionId: string): Promise<string> => {
+          assignedSessionIds.push(sessionId);
+          const session = await sessionManager.createSession(sessionId, "device-x", "android");
+          return session.assignedDevice;
+        },
+      };
+
+      await expect(
+        sessionManager.getOrCreateSession("kumquat-D", devicePool, "android", undefined, true),
+      ).rejects.toThrow(/not an active daemon session/);
+      expect(assignedSessionIds).toEqual([]);
+      expect(sessionManager.getSession("kumquat-D")).toBeNull();
+    });
+
+    // Regression: requireIssuedSession must NOT block minting for a NEW id when
+    // requireIssuedSession is false (device-label / internal derived sessions).
+    test("still mints a fresh id when requireIssuedSession is false (default)", async () => {
+      const devicePool: SessionDeviceAssigner = {
+        assignDeviceToSession: async (sessionId: string): Promise<string> => {
+          const session = await sessionManager.createSession(sessionId, "device-y", "android");
+          return session.assignedDevice;
+        },
+      };
+
+      const session = await sessionManager.getOrCreateSession("base:B", devicePool, "android");
+      expect(session.assignedDevice).toBe("device-y");
+    });
+
+    // Regression: live-during-restart recovery — a persisted, non-terminal row is
+    // an issued identity, so requireIssuedSession still recovers it.
+    test("requireIssuedSession still recovers a persisted, non-terminal session", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-session",
+        device_id: "emulator-5560",
+        platform: "android",
+        status: "active",
+        source: null,
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-03T00:00:00.000Z",
+        updated_at: "2026-09-03T00:00:00.000Z",
+      };
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      };
+      const restarted = new SessionManager(fakeTimer, persistence);
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          await restarted.createSession(sessionId, "emulator-5560", "android");
+          return "emulator-5560";
+        },
+      };
+      try {
+        await expect(
+          restarted.getOrCreateSession("restarted-session", devicePool, "android", undefined, true),
+        ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
+      } finally {
+        restarted.stopCleanupTimer();
+      }
+    });
+
+    // Regression: a terminal persisted row keeps yielding TerminalSessionError,
+    // never a pooled assignment, under requireIssuedSession.
+    test("requireIssuedSession preserves TerminalSessionError for a terminal persisted row", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "lost-session",
+        device_id: "emulator-5554",
+        platform: "android",
+        status: "released",
+        source: null,
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "device-disconnected:emulator-5554;incident=emulator-loss-1",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-03T00:00:00.000Z",
+        updated_at: "2026-09-03T00:00:00.000Z",
+      };
+      const restarted = new SessionManager(fakeTimer, {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      });
+      const assignedSessionIds: string[] = [];
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          assignedSessionIds.push(sessionId);
+          return "emulator-5560";
+        },
+      };
+      try {
+        await expect(
+          restarted.getOrCreateSession("lost-session", devicePool, "android", undefined, true),
+        ).rejects.toThrow("terminal");
+        expect(assignedSessionIds).toEqual([]);
+      } finally {
+        restarted.stopCleanupTimer();
+      }
+    });
+
     test("allows distinct unseen session IDs to begin assignment independently", async () => {
       const assignedSessionIds: string[] = [];
       let releaseAssignments!: () => void;

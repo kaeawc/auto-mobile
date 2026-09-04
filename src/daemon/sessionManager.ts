@@ -497,6 +497,20 @@ export class SessionManager {
     return persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined;
   }
 
+  /**
+   * #6069: True when this persisted row is a non-terminal identity this daemon
+   * issued that survived a restart and may be re-materialized with a pooled
+   * device (live-during-restart recovery). Mirrors the persisted-recovery
+   * admission in {@link admitIssuedSessionForAutomation}. A missing row (never
+   * issued) is not recoverable.
+   */
+  private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
+    return Boolean(
+      persisted &&
+      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)),
+    );
+  }
+
   private terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -608,11 +622,24 @@ export class SessionManager {
     devicePool?: SessionDeviceAssigner,
     platform?: Platform,
     execution?: SessionExecutionMetadata,
+    // #6069: when true, a NEW session (no live in-memory session) may only be
+    // minted for an id this daemon already issued — i.e. a persisted, non-terminal
+    // row (live-during-restart recovery). This is set on the device-tool path so a
+    // fabricated/never-issued sessionUuid can never be auto-assigned a pooled
+    // device just because a device pool is in scope. Internal fresh mints
+    // (device-label derived sessions) leave it false and keep minting.
+    requireIssuedSession = false,
   ): Promise<Session> {
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
-      return await this.getOrCreateSession(sessionId, devicePool, platform, execution);
+      return await this.getOrCreateSession(
+        sessionId,
+        devicePool,
+        platform,
+        execution,
+        requireIssuedSession,
+      );
     }
 
     const existing = this.getSessionForNewExecution(sessionId, execution);
@@ -620,7 +647,13 @@ export class SessionManager {
       const inFlightRelease = this.releasePromises.get(sessionId);
       if (this.releasingSessions.has(existing) && inFlightRelease?.session === existing) {
         await inFlightRelease.promise;
-        return await this.getOrCreateSession(sessionId, devicePool, platform);
+        return await this.getOrCreateSession(
+          sessionId,
+          devicePool,
+          platform,
+          undefined,
+          requireIssuedSession,
+        );
       }
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
@@ -652,9 +685,34 @@ export class SessionManager {
       (currentSession === undefined || inFlightRelease.session === currentSession)
     ) {
       await inFlightRelease.promise;
-      return await this.getOrCreateSession(sessionId, devicePool, platform);
+      return await this.getOrCreateSession(
+        sessionId,
+        devicePool,
+        platform,
+        undefined,
+        requireIssuedSession,
+      );
     }
 
+    return await this.startOrJoinUnseenAssignment(
+      sessionId,
+      devicePool,
+      platform,
+      requireIssuedSession,
+    );
+  }
+
+  /**
+   * Join an in-flight assignment/creation for this id, or start a new one via
+   * {@link createUnseenSession}. Split out of getOrCreateSession to keep that
+   * method's branch count under the complexity ceiling.
+   */
+  private async startOrJoinUnseenAssignment(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner | undefined,
+    platform: Platform | undefined,
+    requireIssuedSession: boolean,
+  ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
       return await pendingAssignment;
@@ -665,7 +723,12 @@ export class SessionManager {
       return await pendingCreation.promise;
     }
 
-    const assignment = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
+    const assignment = this.createUnseenSession(
+      sessionId,
+      devicePool,
+      platform,
+      requireIssuedSession,
+    ).finally(() => {
       if (this.pendingSessionAssignments.get(sessionId) === assignment) {
         this.pendingSessionAssignments.delete(sessionId);
       }
@@ -709,12 +772,34 @@ export class SessionManager {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
+    requireIssuedSession = false,
   ): Promise<Session> {
-    const persistedTerminalRelease = await this.getPersistedTerminalRelease(sessionId);
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persistedTerminalRelease = persisted
+      ? this.terminalReleaseFromPersisted(sessionId, persisted)
+      : undefined;
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
+
+    // #6069: On the device-tool path (requireIssuedSession), admission is decided
+    // from the session registry — NOT from whether a device pool happens to be in
+    // scope. A live in-memory session is already resolved by getOrCreateSession
+    // before reaching here, so the only admissible new-session case is
+    // live-during-restart recovery: a persisted, non-terminal row. Without this,
+    // the `admittedSession ?? getOrCreateSession(uuid, realPool)` fallback in
+    // ToolExecutionContext auto-assigned a pooled device to a fabricated,
+    // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
+    // was bypassed by the call path — the ownership bypass this closes. The
+    // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
+    if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
+      throw new UnissuedSessionError(
+        `Session ${sessionId} is not an active daemon session (not found). ` +
+          "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+      );
+    }
+
     logger.info(
       `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
     );

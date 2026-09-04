@@ -1172,6 +1172,89 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
   });
 
+  test("a thin status-bar SystemUI window with no focus flags does not trigger an adb read", async () => {
+    // Perf guard: when no window carries isFocused, the ever-present status bar
+    // (SystemUI, high layer, but thin) must NOT be treated as an occluding
+    // overlay — otherwise every observe on that API level pays a dumpsys read.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const thinStatusBar = {
+      packageName: "com.android.systemui",
+      type: 3,
+      isFocused: undefined,
+      windowLayer: 300,
+      bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+    };
+    const appWindow = { ...occludedAppWindow(false), isFocused: undefined };
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(shadeHierarchy(now, [thinStatusBar, appWindow]));
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
+  });
+
+  test("iOS: a focused TYPE_SYSTEM window never stamps an Android systemui appId", async () => {
+    // iOS reuses the ViewHierarchyWindowInfo shape. The overlay branch is an
+    // Android concept and must be platform-gated so it cannot mirror
+    // com.android.systemui onto an iOS observation.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const iosDevice: BootedDevice = {
+      deviceId: "SIM-1",
+      name: "iPhone 15",
+      platform: "ios",
+    };
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 393,
+      screenHeight: 852,
+      packageName: "com.example.iosapp",
+      windows: [{ packageName: "com.example.iosapp", type: 3, isFocused: true, windowLayer: 200 }],
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 393, bottom: 852 },
+          node: [{ text: "Home" }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    const screen = new RealObserveScreen(
+      iosDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.example.iosapp");
+    expect(result.activeWindow?.appId).not.toBe("com.android.systemui");
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+  });
+
   test("a present-but-unfocused status bar does not mirror when the app owns focus", async () => {
     // The status bar (SystemUI, type 3) is always present. It must never be
     // mistaken for a focus-owning overlay when an app window is focused.

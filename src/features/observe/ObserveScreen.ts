@@ -108,6 +108,33 @@ function isSystemUiSurfaceWindow(window: ViewHierarchyWindowInfo): boolean {
 }
 
 /**
+ * Whether a SystemUI window is large enough to be an occluding surface (an
+ * expanded shade, quick settings, or keyguard) rather than the ever-present
+ * thin status bar / navigation bar. Only used to decide whether the topmost
+ * window is worth an adb `mCurrentFocus` confirmation, so a normal app screen —
+ * where the status bar can be the topmost SystemUI window when no focus flag is
+ * populated — never triggers a per-observe adb read. A window covering more than
+ * half the screen height is a shade-class surface; the status bar is a small
+ * fraction of it.
+ */
+function isOccludingSystemUiWindow(
+  window: ViewHierarchyWindowInfo,
+  screenHeight: number | undefined,
+): boolean {
+  const bounds = window.bounds;
+  if (!bounds) {
+    return false;
+  }
+  const height = bounds.bottom - bounds.top;
+  if (screenHeight && screenHeight > 0) {
+    return height > screenHeight / 2;
+  }
+  // No screen dimension to normalize against: fall back to an absolute floor
+  // that a status/navigation bar never reaches but a shade always exceeds.
+  return height > 400;
+}
+
+/**
  * Classify what the captured `windows[]` list says about a focused SystemUI
  * surface (issue #6078), the free (no-adb) primary signal:
  *
@@ -115,11 +142,12 @@ function isSystemUiSurfaceWindow(window: ViewHierarchyWindowInfo): boolean {
  *   surface. This mirrors `mCurrentFocus` directly; no adb read is needed.
  *   A focused non-SystemUI (ordinary app) window returns `none`.
  * - `topmost-suspect` — no window reports focus, but the topmost window (by
- *   `windowLayer`) is a SystemUI surface. Focus is unconfirmed on this API
- *   level, so the caller confirms with a `dumpsys window` `mCurrentFocus` read.
- * - `none` — no `windows[]`, a focused app window, or a topmost app window.
- *   The status bar always exists but is not focused and is not topmost over an
- *   expanded shade, so an ordinary app screen never lands here as a suspect.
+ *   `windowLayer`) is a large SystemUI surface (shade/quick-settings/keyguard,
+ *   not the thin status bar). Focus is unconfirmed on this API level, so the
+ *   caller confirms with a `dumpsys window` `mCurrentFocus` read.
+ * - `none` — no `windows[]`, a focused app window, or a topmost app / status-bar
+ *   window. An ordinary app screen never lands here as a suspect, so it never
+ *   pays for the adb confirmation.
  */
 function classifyFocusedSystemUiWindow(
   hierarchy: ObserveResult["viewHierarchy"],
@@ -135,7 +163,10 @@ function classifyFocusedSystemUiWindow(
   const topmost = windows.reduce((current, candidate) =>
     (candidate.windowLayer ?? 0) > (current.windowLayer ?? 0) ? candidate : current,
   );
-  return isSystemUiSurfaceWindow(topmost) ? "topmost-suspect" : "none";
+  return isSystemUiSurfaceWindow(topmost) &&
+    isOccludingSystemUiWindow(topmost, hierarchy?.screenHeight)
+    ? "topmost-suspect"
+    : "none";
 }
 
 interface PostCaptureForegroundIdentity {
@@ -1062,6 +1093,13 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     signal?: AbortSignal,
   ): Promise<boolean> {
+    // Android-only: `com.android.systemui`, the notification shade, and the
+    // `dumpsys window` fallback are Android concepts. iOS reuses the same
+    // `windows[]` shape, so without this guard an iOS window carrying
+    // `type === TYPE_SYSTEM` could stamp an Android package onto an iOS result.
+    if (this.device.platform !== "android") {
+      return false;
+    }
     const activeWindow = result.activeWindow;
     if (activeWindow === undefined || !(await this.detectFocusedSystemUiOverlay(result, signal))) {
       return false;

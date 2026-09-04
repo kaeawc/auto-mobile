@@ -93,6 +93,39 @@ class AutoMobilePlanRedactionTest {
   }
 
   @Test
+  fun `secret is redacted when secretParameters is a multiline flow sequence`() {
+    // Multiline bracketed flow sequence — valid YAML the line scanner previously dropped, silently
+    // disabling redaction and letting the secret reach the LLM recovery context (#6097 fail-open
+    // gap).
+    fakeDaemonClient.executePlanResponse =
+      buildFailureResponse(error = "timed out entering $secret into field")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-multiline-flow.yaml",
+      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured) { "recovery must receive a context" }
+    assertFalse(
+      "a multiline-flow secretParameters declaration must still redact the plan content",
+      context.planContent.contains(secret),
+    )
+    assertFalse(
+      "a multiline-flow secretParameters declaration must still redact the error string",
+      context.error.contains(secret),
+    )
+    assertTrue(
+      "the secret is replaced by the redaction placeholder",
+      context.planContent.contains(SecretRedactor.PLACEHOLDER),
+    )
+    assertTrue(
+      "non-secret substituted context is preserved",
+      context.planContent.contains(visible),
+    )
+  }
+
+  @Test
   fun `secret declared only via options secretParameterKeys is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 

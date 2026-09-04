@@ -158,6 +158,21 @@ enum PlanMetadataParser {
 
             let inline = trimmed.dropFirst("secretParameters:".count).trimmingCharacters(in: .whitespaces)
             if !inline.isEmpty {
+                // A bracketed flow value may span multiple lines: accumulate continuation lines until
+                // the matching `]` before parsing, so `secretParameters: [\n  TOKEN,\n  PASSWORD\n]`
+                // is not dropped (#6097). Quotes and `${...}` placeholders are honored exactly as the
+                // single-line path does; a full YAML load is deliberately avoided (it chokes on
+                // `${...}` flow items).
+                if inline.hasPrefix("[") && !flowSequenceIsClosed(inline) {
+                    var accumulated = inline
+                    index += 1
+                    while index < lines.count && !flowSequenceIsClosed(accumulated) {
+                        accumulated += " " + stripComments(from: lines[index]).trimmingCharacters(in: .whitespaces)
+                        index += 1
+                    }
+                    keys.formUnion(parseInlineList(accumulated))
+                    continue
+                }
                 keys.formUnion(parseInlineList(inline))
                 index += 1
                 continue
@@ -218,6 +233,31 @@ enum PlanMetadataParser {
         return items
             .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
             .filter { !$0.isEmpty }
+    }
+
+    /// True once `text` contains the `]` that closes its first `[`, honoring quotes so a bracket
+    /// inside a quoted key (or a `${...}` placeholder, which is literal text here) is not mistaken for
+    /// the flow delimiter. Used to decide when a multiline flow sequence is complete (#6097).
+    private static func flowSequenceIsClosed(_ text: String) -> Bool {
+        var depth = 0
+        var activeQuote: Character?
+        for character in text {
+            if let quote = activeQuote {
+                if character == quote {
+                    activeQuote = nil
+                }
+            } else if character == "\"" || character == "'" {
+                activeQuote = character
+            } else if character == "[" {
+                depth += 1
+            } else if character == "]" {
+                depth -= 1
+                if depth == 0 {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private static func parsePlatform(_ value: String) throws -> AutoMobilePlanExecutor.PlanPlatform {

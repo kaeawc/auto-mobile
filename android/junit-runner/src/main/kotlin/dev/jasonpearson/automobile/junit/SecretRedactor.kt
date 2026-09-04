@@ -93,6 +93,20 @@ internal object SecretRedactor {
       }
       val inline = trimmed.removePrefix("secretParameters:").trim()
       if (inline.isNotEmpty()) {
+        // A bracketed flow value may span multiple lines: accumulate continuation lines until the
+        // matching `]` before parsing, so `secretParameters: [\n  TOKEN,\n  PASSWORD\n]` is not
+        // dropped (#6097). Quotes and `${...}` placeholders are honored exactly as the single-line
+        // path does; a full YAML load is deliberately avoided (it chokes on `${...}` flow items).
+        if (inline.startsWith("[") && !flowSequenceIsClosed(inline)) {
+          val accumulated = StringBuilder(inline)
+          index++
+          while (index < lines.size && !flowSequenceIsClosed(accumulated.toString())) {
+            accumulated.append(' ').append(stripComments(lines[index]).trim())
+            index++
+          }
+          keys.addAll(parseInlineList(accumulated.toString()))
+          continue
+        }
         keys.addAll(parseInlineList(inline))
         index++
         continue
@@ -113,6 +127,28 @@ internal object SecretRedactor {
       }
     }
     return keys
+  }
+
+  /**
+   * True once [text] contains the `]` that closes its first `[`, honoring quotes so a bracket
+   * inside a quoted key (or a `${...}` placeholder, which is literal text here) is not mistaken for
+   * the flow delimiter. Used to decide when a multiline flow sequence is complete (#6097).
+   */
+  private fun flowSequenceIsClosed(text: String): Boolean {
+    var depth = 0
+    var activeQuote: Char? = null
+    for (character in text) {
+      when {
+        activeQuote != null -> if (character == activeQuote) activeQuote = null
+        character == '"' || character == '\'' -> activeQuote = character
+        character == '[' -> depth++
+        character == ']' -> {
+          depth--
+          if (depth == 0) return true
+        }
+      }
+    }
+    return false
   }
 
   private fun stripComments(line: String): String {

@@ -33,6 +33,70 @@ class SecretRedactorTest {
   }
 
   @Test
+  fun `parses multiline flow sequence with closing bracket on its own line`() {
+    // The bracketed flow value spans multiple lines with `]` alone on the last line — the form the
+    // line scanner previously dropped, silently disabling redaction (#6097 fail-open gap).
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        TOKEN,
+        PASSWORD
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `parses multiline flow sequence with trailing comma and closing bracket trailing an item`() {
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        TOKEN,
+        PASSWORD,
+        API ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("TOKEN", "PASSWORD", "API"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `multiline flow sequence tolerates quoted comma and placeholder key names`() {
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        "API,TOKEN",
+        ${'$'}{SECRET_KEY}
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("API,TOKEN", "\${SECRET_KEY}"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `empty multiline flow sequence yields an empty set`() {
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertTrue(SecretRedactor.parsePlanSecretKeys(yaml).isEmpty())
+  }
+
+  @Test
   fun `tolerates placeholder key names and unrelated placeholder flow lists`() {
     // A full YAML load would throw on `[${LABEL}, OK]`; the scanner tolerates it and ignores it.
     val yaml =

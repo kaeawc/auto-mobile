@@ -470,6 +470,45 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
+    func testSecretRedactedWhenSecretParametersIsMultilineFlowSequence() throws {
+        // Multiline bracketed flow sequence — valid YAML the iOS line scanner previously dropped,
+        // silently disabling redaction and letting the secret reach the LLM recovery context (#6097).
+        let multilinePlan = """
+        name: Redaction Plan
+        secretParameters: [
+          TOKEN
+        ]
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secret)"]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler, planText: multilinePlan)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(secret),
+            "a multiline-flow secretParameters declaration must still redact on iOS"
+        )
+    }
+
     func testSecretSubstitutedIntoToolNameIsRedacted() throws {
         let client = RecoveryMCPClient()
         // The daemon reports the failed step's tool as the substituted secret value.
@@ -737,6 +776,63 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
     func testInlineFlowListDoesNotSplitOnCommaInsideQuotes() {
         let yaml = "name: P\nsecretParameters: [\"API,TOKEN\", plain]\nsteps:\n  - tool: observe"
         XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "plain"])
+    }
+
+    // MARK: - Multiline flow sequence (#6097)
+
+    func testMultilineFlowListWithClosingBracketOnOwnLineIsParsed() {
+        // The bracketed flow value spans multiple lines with `]` alone on the last line — the form the
+        // line scanner previously dropped, silently disabling redaction (#6097 fail-open gap).
+        let yaml = """
+        name: P
+        secretParameters: [
+          TOKEN,
+          PASSWORD
+        ]
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+    }
+
+    func testMultilineFlowListWithTrailingCommaAndClosingBracketTrailingItemIsParsed() {
+        // Trailing comma after the last item, and `]` trailing the final item rather than on its own line.
+        let yaml = """
+        name: P
+        secretParameters: [
+          TOKEN,
+          PASSWORD,
+          API ]
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD", "API"])
+    }
+
+    func testMultilineFlowListToleratesQuotedCommaAndPlaceholderKeys() {
+        // Quoted comma is not a separator, and `${...}` key names stay literal (resolved later) — the
+        // multiline path must respect the same rules as the single-line inline path.
+        let yaml = """
+        name: P
+        secretParameters: [
+          "API,TOKEN",
+          ${SECRET_KEY}
+        ]
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "${SECRET_KEY}"])
+    }
+
+    func testEmptyMultilineFlowListYieldsEmptySet() {
+        let yaml = """
+        name: P
+        secretParameters: [
+        ]
+        steps:
+          - tool: observe
+        """
+        XCTAssertTrue(PlanMetadataParser.parseSecretParameterKeys(from: yaml).isEmpty)
     }
 
     func testFlushBlockStopsAtNextTopLevelKey() {

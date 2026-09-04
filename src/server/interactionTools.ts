@@ -838,6 +838,51 @@ export function formatPinchOnMessage(
   return `Pinched ${direction}`;
 }
 
+// Injection seam for the pinchOn handler (mirrors the systemTray factory seam in
+// this file). Lets a unit test exercise the registered handler wiring with a fake
+// PinchOn whose execute() returns a failure, so a revert of the handler message
+// wiring is caught by a test — not just the formatter (#6056).
+export type PinchOnLike = Pick<PinchOn, "execute">;
+
+let pinchOnFactory: (device: BootedDevice) => PinchOnLike = (device) => new PinchOn(device);
+
+export function setPinchOnFactory(factory: (device: BootedDevice) => PinchOnLike): void {
+  pinchOnFactory = factory;
+}
+
+export function resetPinchOnFactory(): void {
+  pinchOnFactory = (device) => new PinchOn(device);
+}
+
+export async function pinchOnHandler(
+  device: BootedDevice,
+  args: PinchOnArgs,
+  progress?: ProgressCallback,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const pinchOn = pinchOnFactory(device);
+  const result = await pinchOn.execute(
+    {
+      direction: args.direction,
+      distanceStart: args.distanceStart,
+      distanceEnd: args.distanceEnd,
+      scale: args.scale,
+      duration: args.duration,
+      rotationDegrees: args.rotationDegrees,
+      includeSystemInsets: args.includeSystemInsets,
+      container: args.container,
+      autoTarget: args.autoTarget,
+    },
+    progress,
+  );
+
+  return createJSONToolResponse({
+    message: formatPinchOnMessage(result, args.direction),
+    observation: result.observation,
+    ...result,
+  });
+}
+
 export function buildInputTextResultMessage(
   result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText">,
 ): string {
@@ -1344,34 +1389,8 @@ export function registerInteractionTools() {
   };
 
   // Pinch on handler
-  const pinchOnHandler = async (
-    device: BootedDevice,
-    args: PinchOnArgs,
-    progress?: ProgressCallback,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const pinchOn = new PinchOn(device);
-    const result = await pinchOn.execute(
-      {
-        direction: args.direction,
-        distanceStart: args.distanceStart,
-        distanceEnd: args.distanceEnd,
-        scale: args.scale,
-        duration: args.duration,
-        rotationDegrees: args.rotationDegrees,
-        includeSystemInsets: args.includeSystemInsets,
-        container: args.container,
-        autoTarget: args.autoTarget,
-      },
-      progress,
-    );
-
-    return createJSONToolResponse({
-      message: formatPinchOnMessage(result, args.direction),
-      observation: result.observation,
-      ...result,
-    });
-  };
+  // pinchOn handler is defined at module scope (with an injectable PinchOn
+  // factory) so a unit test can exercise the registered handler wiring (#6056).
 
   // Input text handler
   const inputTextHandler = async (

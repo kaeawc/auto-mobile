@@ -972,6 +972,44 @@ describe("DaemonManager readiness", () => {
     }
   });
 
+  test("does one final socket probe before abandoning when the scan misses a just-published peer (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const spawner = new FakeDaemonSpawner();
+    spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
+
+    // The peer publishes its socket right after the first probe: reachable only on the
+    // SECOND probe, which is the final probe taken after the (missing) scan.
+    const reachability = new FakePeerSocketReachability();
+    reachability.reachable = () => reachability.calls >= 2;
+    const manager = createRejoinManager({
+      timer: fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+      reachability,
+    });
+    // The best-effort process scan misses the peer entirely (returns empty). Without a
+    // final probe, the rejoin would abandon on this snapshot even though the winner is
+    // now accepting.
+    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+      () => new Promise<boolean>(() => {}),
+    );
+
+    try {
+      await expect(manager.start()).resolves.toBeUndefined();
+      // Two probes: the first (miss) and the final probe after the empty scan (join).
+      expect(reachability.calls).toBe(2);
+      expect(spawner.process.signals).toEqual([]);
+    } finally {
+      readySpy.mockRestore();
+      findSpy.mockRestore();
+    }
+  });
+
   test("skips the peer rejoin when the original start deadline is exhausted, so the diagnostic beats the client deadline (#6103)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

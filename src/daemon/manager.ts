@@ -1869,6 +1869,21 @@ export class DaemonManager implements DaemonManagerLike {
         nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
       }
       if (!peerProcessComingUp) {
+        // The process scan is a best-effort snapshot that can miss (or fail to inspect)
+        // a peer that published its socket right after this iteration's probe. Do ONE
+        // final observation-only socket probe before abandoning, so a just-published
+        // winner is still joined rather than surfacing the loser's exit error (#6103).
+        const finalBudget = Math.min(
+          ABANDONED_WAIT_CONFIRM_TIMEOUT_MS,
+          this.remainingTime(deadline),
+        );
+        if (
+          finalBudget > 0 &&
+          (await this.peerSocketReachability.isReachable(this.socketPath, finalBudget))
+        ) {
+          stderrLog("Reusing a peer daemon that became ready after our launch exited");
+          return true;
+        }
         return false;
       }
       const remaining = this.remainingTime(deadline);

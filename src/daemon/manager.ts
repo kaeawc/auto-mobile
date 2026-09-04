@@ -1795,16 +1795,18 @@ export class DaemonManager implements DaemonManagerLike {
         // socket inode with no listener and no backing process (#5878/#5904).
         return false;
       }
-      // Only probe once the socket inode exists. A live daemon that has not yet
-      // published its socket has nothing to connect to, and probing a missing path
-      // just burns the connect retry/backoff; the poll below re-checks liveness so
-      // a peer that dies mid-wait still ends the loop promptly. verifyDaemonConnection
-      // is non-destructive (never unlinks the socket), so a slow peer racing to bind
-      // is not torn down here.
+      // On POSIX, only probe once the socket inode exists: a live daemon that has not
+      // yet published its Unix socket has nothing to connect to, and probing a missing
+      // path just burns the connect retry/backoff; the poll below re-checks liveness so
+      // a peer that dies mid-wait still ends the loop promptly. On Windows the socket is
+      // a named pipe with no filesystem entry, so that gate would never open — probe
+      // directly there (see {@link socketPathWorthProbing}). verifyDaemonConnection is
+      // non-destructive (never unlinks the socket), so a slow peer racing to bind is not
+      // torn down here.
       const probeBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
       if (
         probeBudget > 0 &&
-        existsSync(this.socketPath) &&
+        this.socketPathWorthProbing() &&
         (await this.verifyDaemonConnection(probeBudget))
       ) {
         stderrLog("Reusing a peer daemon that became ready after our launch exited");
@@ -1837,7 +1839,34 @@ export class DaemonManager implements DaemonManagerLike {
    * unless a live daemon process backs it.
    */
   private hasComingUpPeerDaemon(): boolean {
-    return this.findLiveDaemonProcesses().length > 0;
+    try {
+      return this.findLiveDaemonProcesses().length > 0;
+    } catch (error) {
+      // Best-effort recovery probe: a transient process-table inspection failure must
+      // not REPLACE the caller's original spawn/exit diagnostic (which carries the
+      // captured startup-log excerpt). Log it and treat it as "no peer coming up" so
+      // the rejoin gives up and startUnlocked rethrows the original launch error intact
+      // (issue #6103).
+      logger.warn(
+        `[DaemonManager] peer-daemon discovery failed during post-exit rejoin; treating as no peer coming up: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Whether the daemon socket path is worth a connect probe during the post-exit
+   * rejoin. On POSIX a Unix socket has a filesystem entry, so a missing path means
+   * nothing is listening yet and we skip the probe to avoid hammering a nonexistent
+   * socket with connect/backoff cycles. On Windows the socket is a NAMED PIPE with no
+   * filesystem entry — `existsSync` is always false there (mirroring
+   * {@link DaemonClient.isAvailable}'s `platform() !== "win32"` guard) — so skip the
+   * filesystem gate and let the connect attempt itself decide reachability, or a
+   * reachable Windows peer would never be probed or joined.
+   */
+  private socketPathWorthProbing(): boolean {
+    return process.platform === "win32" || existsSync(this.socketPath);
   }
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {

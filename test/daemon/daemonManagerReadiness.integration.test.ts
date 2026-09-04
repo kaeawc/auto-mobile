@@ -988,6 +988,110 @@ describe("DaemonManager readiness", () => {
     }
   });
 
+  test("probes and joins a Windows named-pipe peer that has no filesystem socket entry (#6103)", async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      const { lockPath, pidPath, socketPath } = createPaths();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const spawner = new FakeDaemonSpawner();
+      // Our child loses the race and exits 1; the peer is a reachable Windows named
+      // pipe with NO filesystem entry (writeFileSync is never called for socketPath).
+      spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
+
+      const clients: ProbeClient[] = [];
+      const manager = new DaemonManager(
+        () => {
+          const client = new ProbeClient(true);
+          clients.push(client);
+          return client;
+        },
+        undefined,
+        fakeTimer,
+        lockPath,
+        pidPath,
+        socketPath,
+        spawner,
+      );
+      let liveCalls = 0;
+      const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
+        liveCalls++;
+        return liveCalls <= 1 ? [] : [999999];
+      });
+      const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+        () => new Promise<boolean>(() => {}),
+      );
+
+      try {
+        // No filesystem socket entry exists, yet the reachable named-pipe peer must
+        // still be probed and joined rather than waited out (the existsSync gate would
+        // be permanently false on Windows).
+        expect(existsSync(socketPath)).toBe(false);
+        await expect(manager.start()).resolves.toBeUndefined();
+        expect(clients.some((client) => client.connectCallCount > 0)).toBe(true);
+        expect(spawner.process.signals).toEqual([]);
+      } finally {
+        readySpy.mockRestore();
+        liveSpy.mockRestore();
+      }
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    }
+  });
+
+  test("preserves the original spawn-exit diagnostic when peer discovery fails during recovery (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    const spawner = new FakeDaemonSpawner();
+    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
+    spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
+
+    const manager = new DaemonManager(
+      () => new ProbeClient(false),
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+    );
+    // Pre-spawn inspection succeeds (empty, so we spawn), but the recovery-path
+    // inspection throws transiently.
+    let findCalls = 0;
+    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockImplementation(() => {
+      findCalls++;
+      if (findCalls <= 1) {
+        return [];
+      }
+      throw new Error("Failed to inspect daemon process table: ps exploded");
+    });
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+      () => new Promise<boolean>(() => {}),
+    );
+
+    try {
+      const surfaced = await manager.start().then(
+        () => {
+          throw new Error("start should have rejected");
+        },
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      // The original spawn-exit diagnostic (with its captured log excerpt) is surfaced,
+      // NOT the recovery-path inspection failure.
+      expect(surfaced).toMatch(/Daemon subprocess exited before becoming ready \(exit code 1\)/);
+      expect(surfaced).toContain("SQLITE_BUSY: database is locked");
+      expect(surfaced).not.toContain("Failed to inspect daemon process table");
+      // Recovery gave up immediately on the inspection failure — no poll armed.
+      expect(fakeTimer.getPendingSleepCount()).toBe(0);
+    } finally {
+      readySpy.mockRestore();
+      findSpy.mockRestore();
+    }
+  });
+
   test("spawn failures preserve the raw spawn error", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

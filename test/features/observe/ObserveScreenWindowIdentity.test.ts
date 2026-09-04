@@ -764,9 +764,13 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
   // Issue #6070: on the bootstrap Window.getActive() path (used when the
   // accessibility service supplies no usable foregroundActivity), a blank/stale
   // active-window record can be published with an empty activityName and a
-  // frozen layoutSeqSum. The adb-sourced backStack never drifts, so an empty
-  // activityName must be backfilled directly from backStack — without requiring
-  // an expensive hierarchy recapture — and the stale layoutSeqSum must not ride
+  // frozen layoutSeqSum. An empty activityName is reconciled from the adb-sourced
+  // backStack, but through the SAME temporal confirmation (hierarchy recapture)
+  // the stale non-empty case uses (#5992): the adb activity is only accepted once
+  // a fresh recapture agrees, never blindly stamped onto the earlier hierarchy.
+  // When the recapture cannot confirm (e.g. a same-app mid-flight navigation
+  // between capture and back-stack read), the name resolves to unknown/mismatch
+  // rather than a confidently-wrong value. The stale layoutSeqSum must not ride
   // along. System UI (#6078) is out of scope here.
   const emptyBootstrapWindow = (activeWindow: {
     appId: string;
@@ -781,14 +785,16 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       clearCache: async () => undefined,
     }) as any;
 
-  test("backfills an empty activeWindow activityName from backStack without a recapture (#6070)", async () => {
+  test("backfills an empty activeWindow activityName from a temporally-confirmed backStack (#6070)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
     // No usable foregroundActivity -> the accessibility path does not set
-    // activeWindow, so the bootstrap Window.getActive() fallback runs.
+    // activeWindow, so the bootstrap Window.getActive() fallback runs. The device
+    // is stable: the recapture re-reads the same (fresh) hierarchy and the same
+    // backStack, so the adb activity is confirmed and backfilled.
     viewHierarchy.configureHierarchy({
       updatedAt: now,
       receivedAt: now,
@@ -841,20 +847,23 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     // The stale frozen layoutSeqSum must not be published alongside the
     // corrected activity (it is reset to the unknown sentinel 0).
     expect(result.activeWindow?.layoutSeqSum).toBe(0);
-    // No hierarchy recapture is required to backfill an empty name.
-    expect(viewHierarchy.getCallCount()).toBe(1);
+    // Temporal confirmation ran: the initial capture plus one recapture.
+    expect(viewHierarchy.getCallCount()).toBe(2);
     expect(result.freshness?.verified).toBe(true);
   });
 
-  test("backfills an empty activeWindow activityName even when a recapture is unavailable (#6070)", async () => {
+  test("does not stamp a later same-app backStack activity onto an earlier hierarchy when a recapture cannot confirm it (#6070)", async () => {
+    // Temporal-skew guard: the hierarchy is captured for activity A
+    // (SettingsHomepageActivity), but the back-stack read that follows reports a
+    // *later* same-app activity B (SubSettings). Package equality cannot tell A
+    // and B apart, so a blind backfill would confidently pair B onto A's tree. A
+    // recapture that cannot confirm B (the fresh read is unusable) must leave the
+    // name unknown and flag the mismatch, never publish B against A's hierarchy.
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    // First read is the (usable) captured hierarchy; a second read (which the
-    // pre-#6070 recapture path would attempt) fails. The empty-name backfill
-    // must still succeed off backStack alone.
     viewHierarchy.configureHierarchySequence([
       {
         updatedAt: now,
@@ -866,7 +875,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
         hierarchy: {
           node: {
             bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-            node: [{ text: "Settings", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+            node: [{ text: "Settings home", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
           },
         },
       },
@@ -891,7 +900,8 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
             depth: 1,
             activities: [],
             tasks: [],
-            currentActivity: { name: "com.android.settings.Settings", taskId: 14 },
+            // The later same-app activity, read after the A hierarchy was captured.
+            currentActivity: { name: "com.android.settings.SubSettings", taskId: 14 },
             source: "adb",
           }),
         } as any,
@@ -905,11 +915,16 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const result = await screen.execute({ skipScreenshot: true });
 
-    // On pre-#6070 code the empty name stays "" because the recapture is
-    // unusable; with the fix it is backfilled from backStack.
-    expect(result.activeWindow?.activityName).toBe("com.android.settings.Settings");
-    expect(result.activeWindow?.layoutSeqSum).toBe(0);
-    // Only the initial capture is read; no recapture round-trip is made.
-    expect(viewHierarchy.getCallCount()).toBe(1);
+    // The later activity B must NOT be stamped onto A's hierarchy; the name
+    // stays unknown ("") and the divergence is surfaced as a mismatch.
+    expect(result.activeWindow?.activityName).not.toBe("com.android.settings.SubSettings");
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("disagree about the current activity");
+    // The original A hierarchy is preserved (not replaced by an unusable recapture).
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+    // Temporal confirmation was attempted: initial capture plus the recapture read.
+    expect(viewHierarchy.getCallCount()).toBe(2);
   });
 });

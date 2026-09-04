@@ -126,6 +126,60 @@ class AutoMobilePlanRedactionTest {
   }
 
   @Test
+  fun `multiline flow key with a quoted hash does not drop the following secret`() {
+    // The first key quotes a `#`; a comment strip that runs before quote state truncates it, drops
+    // the
+    // second key, and leaks the second secret to the recovery LLM (#6097 Codex P1, fail-open).
+    val secretA = "SECRETA-hash-9f1"
+    val secretB = "SECRETB-plain-2a7"
+    fakeDaemonClient.executePlanResponse =
+      buildFailureResponse(error = "boom $secretA and $secretB")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-multiline-quoted-hash.yaml",
+      mapOf("API#TOKEN" to secretA, "PASSWORD" to secretB),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the quoted-# key's value must be redacted",
+      context.error.contains(secretA),
+    )
+    assertFalse(
+      "the following key must not be dropped, so its value redacts",
+      context.error.contains(secretB),
+    )
+  }
+
+  @Test
+  fun `multiline flow key with an escaped quote before a bracket does not drop the following secret`() {
+    // The first key is a double-quoted scalar with an escaped quote before a `]`; without escape
+    // tracking the sequence terminator is found early, the second key is dropped, and its secret
+    // leaks.
+    val secretA = "SECRETA-esc-4c2"
+    val secretB = "SECRETB-plain-8e5"
+    fakeDaemonClient.executePlanResponse =
+      buildFailureResponse(error = "boom $secretA and $secretB")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-multiline-escaped-quote.yaml",
+      mapOf("a\"]b" to secretA, "PASSWORD" to secretB),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the escaped-quote key's value must be redacted",
+      context.error.contains(secretA),
+    )
+    assertFalse(
+      "the following key must not be dropped, so its value redacts",
+      context.error.contains(secretB),
+    )
+  }
+
+  @Test
   fun `secret declared only via options secretParameterKeys is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 

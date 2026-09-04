@@ -97,6 +97,48 @@ class SecretRedactorTest {
   }
 
   @Test
+  fun `multiline flow with a quoted hash key does not drop the following key`() {
+    // A `#` inside a quoted item is literal YAML, not a comment. Stripping comments line-by-line
+    // before quote state truncates `"API#TOKEN"` to `"API`, the unterminated quote swallows the
+    // rest,
+    // and PASSWORD is dropped — its secret would reach the LLM unredacted (#6097 Codex P1,
+    // fail-open).
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        "API#TOKEN",
+        PASSWORD
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("API#TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `multiline flow with an escaped quote before a bracket does not drop the following key`() {
+    // A double-quoted scalar may contain an escaped quote (\"); the `]` after it is still inside
+    // the
+    // scalar, not the sequence terminator. Without escape tracking the terminator is found early
+    // and
+    // PASSWORD is dropped — fail-open (#6097 Codex P2).
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        "a\"]b",
+        PASSWORD
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("a\"]b", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
   fun `tolerates placeholder key names and unrelated placeholder flow lists`() {
     // A full YAML load would throw on `[${LABEL}, OK]`; the scanner tolerates it and ignores it.
     val yaml =

@@ -91,17 +91,22 @@ internal object SecretRedactor {
         index++
         continue
       }
-      val inline = trimmed.removePrefix("secretParameters:").trim()
+      // Strip the value's trailing comment quote-aware: a `#` inside a quoted key is literal YAML,
+      // not a comment (#6097). `lines[index]` is the raw line and begins with the key (indent 0),
+      // so
+      // dropping the key prefix leaves the raw value.
+      val inline = stripFlowComment(lines[index].removePrefix("secretParameters:")).trim()
       if (inline.isNotEmpty()) {
         // A bracketed flow value may span multiple lines: accumulate continuation lines until the
         // matching `]` before parsing, so `secretParameters: [\n  TOKEN,\n  PASSWORD\n]` is not
-        // dropped (#6097). Quotes and `${...}` placeholders are honored exactly as the single-line
-        // path does; a full YAML load is deliberately avoided (it chokes on `${...}` flow items).
+        // dropped (#6097). Quote state, YAML double-quote escaping (`\"`), quoted `#`, and `${...}`
+        // placeholders (literal text) are all honored; a full YAML load is deliberately avoided (it
+        // chokes on `${...}` flow items).
         if (inline.startsWith("[") && !flowSequenceIsClosed(inline)) {
           val accumulated = StringBuilder(inline)
           index++
           while (index < lines.size && !flowSequenceIsClosed(accumulated.toString())) {
-            accumulated.append(' ').append(stripComments(lines[index]).trim())
+            accumulated.append(' ').append(stripFlowComment(lines[index]).trim())
             index++
           }
           keys.addAll(parseInlineList(accumulated.toString()))
@@ -130,21 +135,34 @@ internal object SecretRedactor {
   }
 
   /**
-   * True once [text] contains the `]` that closes its first `[`, honoring quotes so a bracket
-   * inside a quoted key (or a `${...}` placeholder, which is literal text here) is not mistaken for
-   * the flow delimiter. Used to decide when a multiline flow sequence is complete (#6097).
+   * True once [text] contains the `]` that closes its first `[`, honoring quotes and YAML
+   * double-quote escaping so a bracket inside a quoted key — or after an escaped quote `\"`, or in
+   * a `${...}` placeholder (literal text here) — is not mistaken for the flow delimiter. Used to
+   * decide when a multiline flow sequence is complete (#6097).
    */
   private fun flowSequenceIsClosed(text: String): Boolean {
     var depth = 0
     var activeQuote: Char? = null
+    var escaped = false
     for (character in text) {
-      when {
-        activeQuote != null -> if (character == activeQuote) activeQuote = null
-        character == '"' || character == '\'' -> activeQuote = character
-        character == '[' -> depth++
-        character == ']' -> {
-          depth--
-          if (depth == 0) return true
+      if (activeQuote != null) {
+        if (activeQuote == '"') {
+          when {
+            escaped -> escaped = false
+            character == '\\' -> escaped = true
+            character == '"' -> activeQuote = null
+          }
+        } else if (character == '\'') {
+          activeQuote = null
+        }
+      } else {
+        when {
+          character == '"' || character == '\'' -> activeQuote = character
+          character == '[' -> depth++
+          character == ']' -> {
+            depth--
+            if (depth == 0) return true
+          }
         }
       }
     }
@@ -154,6 +172,40 @@ internal object SecretRedactor {
   private fun stripComments(line: String): String {
     val hash = line.indexOf('#')
     return if (hash >= 0) line.substring(0, hash) else line
+  }
+
+  /**
+   * Remove a trailing YAML line comment from a flow line without stripping a `#` that sits inside a
+   * quoted scalar. Only an unquoted `#` at line start or preceded by whitespace begins a comment
+   * (YAML rule); double-quote backslash escaping is tracked so `\"` does not close the scalar and a
+   * following `#` stays literal (#6097).
+   */
+  private fun stripFlowComment(line: String): String {
+    val result = StringBuilder()
+    var activeQuote: Char? = null
+    var escaped = false
+    var previous: Char? = null
+    for (character in line) {
+      if (activeQuote != null) {
+        result.append(character)
+        if (activeQuote == '"') {
+          when {
+            escaped -> escaped = false
+            character == '\\' -> escaped = true
+            character == '"' -> activeQuote = null
+          }
+        } else if (character == '\'') {
+          activeQuote = null
+        }
+      } else if (character == '#' && (previous == null || previous == ' ' || previous == '\t')) {
+        break
+      } else {
+        if (character == '"' || character == '\'') activeQuote = character
+        result.append(character)
+      }
+      previous = character
+    }
+    return result.toString()
   }
 
   private fun indentationLevel(line: String): Int = line.takeWhile { it == ' ' }.length
@@ -170,32 +222,83 @@ internal object SecretRedactor {
   }
 
   /**
+   * Unquote a flow-list scalar: a single-quoted scalar is literal, a double-quoted scalar has its
+   * backslash escapes resolved (so `"a\"]b"` yields `a"]b`), matching the escape tracking used to
+   * find the sequence terminator and to split items (#6097).
+   */
+  private fun unquoteFlowScalar(value: String): String {
+    if (value.length >= 2) {
+      val first = value.first()
+      val last = value.last()
+      if (first == '"' && last == '"') {
+        return unescapeDoubleQuoted(value.substring(1, value.length - 1))
+      }
+      if (first == '\'' && last == '\'') {
+        return value.substring(1, value.length - 1)
+      }
+    }
+    return value
+  }
+
+  /**
+   * Resolve backslash escapes inside a double-quoted YAML scalar: `\` escapes the next character
+   * literally (so `\"` -> `"`, `\\` -> `\`). Sufficient for key names (#6097).
+   */
+  private fun unescapeDoubleQuoted(inner: String): String {
+    val result = StringBuilder()
+    var escaped = false
+    for (character in inner) {
+      when {
+        escaped -> {
+          result.append(character)
+          escaped = false
+        }
+        character == '\\' -> escaped = true
+        else -> result.append(character)
+      }
+    }
+    if (escaped) result.append('\\')
+    return result.toString()
+  }
+
+  /**
    * Parse a YAML flow list of scalar keys, e.g. `[apiToken, "password"]`. A comma inside a quoted
    * item is part of the key, not a separator, so `["API,TOKEN"]` yields the single key `API,TOKEN`.
+   * Double-quote escaping is honored so `\"` (and any `,`/`]` following it) stays inside the item.
    */
   private fun parseInlineList(value: String): List<String> {
     val inner = value.removePrefix("[").removeSuffix("]")
     val items = mutableListOf<String>()
     val current = StringBuilder()
     var activeQuote: Char? = null
+    var escaped = false
     for (character in inner) {
-      when {
-        activeQuote != null -> {
-          if (character == activeQuote) activeQuote = null
-          current.append(character)
+      if (activeQuote != null) {
+        current.append(character)
+        if (activeQuote == '"') {
+          when {
+            escaped -> escaped = false
+            character == '\\' -> escaped = true
+            character == '"' -> activeQuote = null
+          }
+        } else if (character == '\'') {
+          activeQuote = null
         }
-        character == '"' || character == '\'' -> {
-          activeQuote = character
-          current.append(character)
+      } else {
+        when {
+          character == '"' || character == '\'' -> {
+            activeQuote = character
+            current.append(character)
+          }
+          character == ',' -> {
+            items.add(current.toString())
+            current.clear()
+          }
+          else -> current.append(character)
         }
-        character == ',' -> {
-          items.add(current.toString())
-          current.clear()
-        }
-        else -> current.append(character)
       }
     }
     items.add(current.toString())
-    return items.map { unquote(it.trim()) }.filter { it.isNotEmpty() }
+    return items.map { unquoteFlowScalar(it.trim()) }.filter { it.isNotEmpty() }
   }
 }

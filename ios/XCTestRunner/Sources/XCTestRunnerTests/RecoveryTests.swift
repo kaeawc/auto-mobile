@@ -509,6 +509,80 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
+    func testSecretsRedactedWhenMultilineFlowKeyContainsQuotedHash() throws {
+        // Two keys, the first quoting a `#`. A comment strip that runs before quote state truncates
+        // the first item, drops the second, and leaks the second secret to the recovery LLM (#6097 P1).
+        let secretA = "SECRETA-hash-9f1"
+        let secretB = "SECRETB-plain-2a7"
+        let plan = """
+        name: Redaction Plan
+        secretParameters: [
+          "API#TOKEN",
+          PASSWORD
+        ]
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "field"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secretA) and \(secretB)"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["API#TOKEN": secretA, "PASSWORD": secretB]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        let text = requestText(request)
+        XCTAssertFalse(text.contains(secretA), "the quoted-# key's value must be redacted")
+        XCTAssertFalse(text.contains(secretB), "the following key must not be dropped, so its value redacts")
+    }
+
+    func testSecretsRedactedWhenMultilineFlowKeyContainsEscapedQuoteBeforeBracket() throws {
+        // The first key is a double-quoted scalar with an escaped quote before a `]`. Without escape
+        // tracking the sequence terminator is found early, PASSWORD is dropped, and its secret leaks.
+        let secretA = "SECRETA-esc-4c2"
+        let secretB = "SECRETB-plain-8e5"
+        let plan = """
+        name: Redaction Plan
+        secretParameters: [
+          "a\\"]b",
+          PASSWORD
+        ]
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "field"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secretA) and \(secretB)"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["a\"]b": secretA, "PASSWORD": secretB]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        let text = requestText(request)
+        XCTAssertFalse(text.contains(secretA), "the escaped-quote key's value must be redacted")
+        XCTAssertFalse(text.contains(secretB), "the following key must not be dropped, so its value redacts")
+    }
+
     func testSecretSubstitutedIntoToolNameIsRedacted() throws {
         let client = RecoveryMCPClient()
         // The daemon reports the failed step's tool as the substituted secret value.
@@ -833,6 +907,39 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
           - tool: observe
         """
         XCTAssertTrue(PlanMetadataParser.parseSecretParameterKeys(from: yaml).isEmpty)
+    }
+
+    func testMultilineFlowQuotedHashKeyDoesNotDropFollowingKey() {
+        // A `#` inside a quoted item is literal YAML, not a comment. If comments are stripped
+        // line-by-line before quote state is known, `"API#TOKEN"` is truncated to `"API`, the now
+        // unterminated quote swallows the rest of the declaration, and PASSWORD is dropped — its
+        // secret would reach the LLM unredacted (#6097 Codex P1, fail-open).
+        let yaml = """
+        name: P
+        secretParameters: [
+          "API#TOKEN",
+          PASSWORD
+        ]
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API#TOKEN", "PASSWORD"])
+    }
+
+    func testMultilineFlowEscapedQuoteBeforeBracketDoesNotDropFollowingKey() {
+        // A double-quoted scalar may contain an escaped quote (`\"`); the `]` that follows it is still
+        // inside the scalar, not the sequence terminator. Without escape tracking the terminator finder
+        // stops early and PASSWORD is dropped — fail-open (#6097 Codex P2).
+        let yaml = """
+        name: P
+        secretParameters: [
+          "a\\"]b",
+          PASSWORD
+        ]
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["a\"]b", "PASSWORD"])
     }
 
     func testFlushBlockStopsAtNextTopLevelKey() {

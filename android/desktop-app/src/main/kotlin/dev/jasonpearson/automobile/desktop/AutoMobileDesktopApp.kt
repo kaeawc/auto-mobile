@@ -513,6 +513,16 @@ fun AutoMobileDesktopApp(
                 modifier = Modifier.isolatedBehindOverlay(paletteOpen),
                 status = workspaceStatus.status,
                 statusDetail = workspaceStatus.detail,
+                // Health-sheet recovery affordance (#6035): reuse the picker's DaemonBootstrap seam
+                // so the workspace red dot can start/restart the daemon. ensureReady() blocks up to
+                // the startup budget, so it runs off the main thread; its phases flow back into
+                // bootstrapState (narrating the in-flight button) and the existing session
+                // re-register loop self-heals the panes once the daemon is reachable. A no-op for a
+                // non-daemon (Inactive) transport, so the affordance is inert on HTTP/STDIO.
+                bootstrapState = bootstrapState,
+                onRecoverDaemon = {
+                  scope.launch(Dispatchers.IO) { daemonBootstrap.ensureReady() }
+                },
                 updateStatus = updateStatus,
                 onUpdateClick = { showUpdateDetails = true },
                 facetContent = { column, tool -> WorkspaceFacet(column, tool) },

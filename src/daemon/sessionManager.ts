@@ -498,13 +498,13 @@ export class SessionManager {
   }
 
   /**
-   * #6069: True when a persisted, non-terminal session row exists for this id —
-   * i.e. an identity this daemon issued that survived a restart and may be
-   * re-materialized with a pooled device (live-during-restart recovery). Mirrors
-   * the persisted-recovery admission in {@link admitIssuedSessionForAutomation}.
+   * #6069: True when this persisted row is a non-terminal identity this daemon
+   * issued that survived a restart and may be re-materialized with a pooled
+   * device (live-during-restart recovery). Mirrors the persisted-recovery
+   * admission in {@link admitIssuedSessionForAutomation}. A missing row (never
+   * issued) is not recoverable.
    */
-  private async hasRecoverablePersistedSession(sessionId: string): Promise<boolean> {
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+  private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
         (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)),
@@ -774,7 +774,10 @@ export class SessionManager {
     platform: Platform | undefined,
     requireIssuedSession = false,
   ): Promise<Session> {
-    const persistedTerminalRelease = await this.getPersistedTerminalRelease(sessionId);
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persistedTerminalRelease = persisted
+      ? this.terminalReleaseFromPersisted(sessionId, persisted)
+      : undefined;
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
@@ -790,7 +793,7 @@ export class SessionManager {
     // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
-    if (requireIssuedSession && !(await this.hasRecoverablePersistedSession(sessionId))) {
+    if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
       throw new UnissuedSessionError(
         `Session ${sessionId} is not an active daemon session (not found). ` +
           "Acquire a device with getAndroid or getApple before using its sessionUuid.",

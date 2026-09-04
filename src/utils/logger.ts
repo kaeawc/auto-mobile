@@ -166,7 +166,24 @@ const logsDir = logSink === "stderr" ? undefined : ensureSecureLogsDirSync();
 // parallel on the same host.
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefined;
-let logStream = logFilePath ? fs.createWriteStream(logFilePath, { flags: "a" }) : undefined;
+
+// Constructing an appending WriteStream can throw synchronously — e.g. bun's
+// internal fast path occasionally races its epoll registration and throws
+// `EEXIST: ... epoll_ctl` (issue #5930 family). At module load this crashes the
+// importing process ("Unhandled error between tests" in the host-integration
+// lane). File logging is best-effort, so swallow the construction failure and
+// fall back to console-only logging rather than taking the process down.
+const openLogStream = (target: string): fs.WriteStream | undefined => {
+  try {
+    return fs.createWriteStream(target, { flags: "a" });
+  } catch (error) {
+    // Logger init is the thing failing, so it cannot log itself — warn to stderr.
+    process.stderr.write(`Failed to open log stream ${target}: ${String(error)}\n`);
+    return undefined;
+  }
+};
+
+let logStream = logFilePath ? openLogStream(logFilePath) : undefined;
 
 function fileLogPaths(): { dir: string; path: string } | undefined {
   if (!logsDir || !logFilePath) {
@@ -258,7 +275,7 @@ const checkAndRotateLog = async (): Promise<void> => {
         }
 
         // Always create a new log stream after rotation attempt
-        logStream = fs.createWriteStream(paths.path, { flags: "a" });
+        logStream = openLogStream(paths.path);
 
         // Prune old log files to stay within the cap
         await pruneOldLogFiles();
@@ -267,7 +284,7 @@ const checkAndRotateLog = async (): Promise<void> => {
   } catch (err) {
     // If rotation fails, ensure we have a valid log stream
     if (logStream?.destroyed || !logStream?.writable) {
-      logStream = fs.createWriteStream(paths.path, { flags: "a" });
+      logStream = openLogStream(paths.path);
     }
     await reportLogFailure("Log rotation failed", err);
   }

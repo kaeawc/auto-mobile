@@ -612,6 +612,35 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
+    func testSecretValueRedactedDespiteDecoyParameterMatchingUnDecodedHexKey() throws {
+        // Parameters contain BOTH the real `APITOKEN` (what YAML decodes `"API\x54OKEN"` to) and a
+        // decoy `APIx54OKEN` matching the scanner's un-decoded spelling. The fail-safe must not trust
+        // the decoy exact-match; it over-redacts so the REAL secret cannot leak (#6097 — decoy).
+        let real = "REAL-hex-secret-1a2"
+        let plan =
+            "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe\n  - tool: inputText\n    text: \"field\""
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(real)"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["APITOKEN": real, "APIx54OKEN": "DECOY-not-the-secret"]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(real),
+            "the real secret must be redacted despite the decoy exact-match"
+        )
+    }
+
     func testSecretSubstitutedIntoToolNameIsRedacted() throws {
         let client = RecoveryMCPClient()
         // The daemon reports the failed step's tool as the substituted secret value.
@@ -1030,6 +1059,13 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API", "TOKEN"])
     }
 
+    func testQuotedWhitespaceOnlyKeyIsNotDropped() {
+        // Stripping the quotes before the trim would discard `" "`; a single space is a valid quoted
+        // key and must be kept so its parameter value is redacted (#6097 Codex — quoted whitespace).
+        let yaml = "name: P\nsecretParameters: [\" \"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), [" "])
+    }
+
     func testFlushBlockStopsAtNextTopLevelKey() {
         let yaml = """
         name: P
@@ -1094,6 +1130,23 @@ final class SecretRedactionTests: XCTestCase {
             declaredKeys: ["API TOKEN"], parameters: ["apitoken": "S"]
         )
         XCTAssertEqual(values, ["S"])
+    }
+
+    func testSecretParameterValuesKeepsAQuotedWhitespaceKeysValue() {
+        let values = SecretRedaction.secretParameterValues(
+            declaredKeys: [" "], parameters: [" ": "SECRET"]
+        )
+        XCTAssertEqual(values, ["SECRET"])
+    }
+
+    func testSecretParameterValuesOverRedactsBackslashKeyDespiteDecoyExactMatch() {
+        // The un-decoded hex key `API\x54OKEN` exact-matches a DECOY parameter of the same raw
+        // spelling, while the REAL value lives under the YAML-decoded `APITOKEN`. A backslash key must
+        // not trust that coincidental match — it over-redacts so REAL is scrubbed too (#6097).
+        let values = SecretRedaction.secretParameterValues(
+            declaredKeys: ["API\\x54OKEN"], parameters: ["APITOKEN": "REAL", "APIx54OKEN": "DECOY"]
+        )
+        XCTAssertTrue(values.contains("REAL"), "the real (decoded-name) secret value must be scrubbed")
     }
 
     func testSecretParameterValuesOverRedactsWhenAKeyCannotBeResolvedFailSafe() {

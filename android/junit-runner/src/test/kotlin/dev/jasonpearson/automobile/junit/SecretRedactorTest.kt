@@ -208,6 +208,36 @@ class SecretRedactorTest {
   }
 
   @Test
+  fun `a quoted whitespace-only key is not dropped`() {
+    // Stripping the quotes before the trim would discard `" "`; a single space is a valid quoted
+    // key
+    // and must be kept so its parameter value is redacted (#6097 Codex — quoted whitespace key).
+    val yaml = "name: P\nsecretParameters: [\" \"]\nsteps:\n  - tool: observe"
+    assertEquals(setOf(" "), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `secretParameterValues keeps a quoted whitespace key's value`() {
+    val values = SecretRedactor.secretParameterValues(setOf(" "), mapOf(" " to "SECRET"))
+    assertEquals(listOf("SECRET"), values)
+  }
+
+  @Test
+  fun `secretParameterValues over-redacts a backslash key despite a decoy exact-match`() {
+    // The un-decoded hex key `API\x54OKEN` exact-matches a DECOY parameter of the same raw
+    // spelling,
+    // while the REAL value lives under the YAML-decoded `APITOKEN`. A backslash key must not trust
+    // that
+    // coincidental match — it over-redacts so REAL is scrubbed too (#6097 Codex — decoy collision).
+    val values =
+      SecretRedactor.secretParameterValues(
+        setOf("API\\x54OKEN"),
+        mapOf("APITOKEN" to "REAL", "APIx54OKEN" to "DECOY"),
+      )
+    assertTrue(values.contains("REAL"), "the real (decoded-name) secret value must be scrubbed")
+  }
+
+  @Test
   fun `secretParameterValues over-redacts when a declared key cannot be resolved (fail-safe)`() {
     // A hex-escaped key parsed as `APIx54OKEN` matches no parameter by name or normalization, so
     // every

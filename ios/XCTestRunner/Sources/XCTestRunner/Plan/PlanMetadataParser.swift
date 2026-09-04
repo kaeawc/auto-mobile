@@ -277,13 +277,29 @@ enum PlanMetadataParser {
     )
         -> (keys: [String], nextIndex: Int)
     {
-        var items: [String] = []
+        var keys: [String] = []
         var current = ""
+        var itemHasQuotedChar = false
         var depth = 0
         var started = false
         var activeQuote: Character?
         var escaped = false
         var lineIndex = startIndex
+
+        // Emit the current item: a plain token is trimmed and a genuinely-empty token (nothing between
+        // the delimiters) is dropped, but a quoted scalar whose content is only whitespace (e.g. `" "`)
+        // is a valid key and is preserved rather than trimmed away (#6097).
+        func flushItem() {
+            let trimmed = current.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty {
+                keys.append(trimmed)
+            } else if itemHasQuotedChar {
+                keys.append(current)
+            }
+            current = ""
+            itemHasQuotedChar = false
+        }
+
         // Drop a trailing CR so a CRLF-authored quoted multiline key does not embed `\r` (#6097).
         var currentLine = stripTrailingCarriageReturn(firstValue)
 
@@ -295,7 +311,17 @@ enum PlanMetadataParser {
                 if let quote = activeQuote {
                     if quote == "\"" {
                         if escaped {
-                            current.append(character)
+                            // `\"` decodes cleanly to `"`; any OTHER escape (`\xNN`, `\uNNNN`, `\n`, …)
+                            // is NOT spec-decoded here — keep the backslash so the value layer sees this
+                            // key as low-confidence and over-redacts rather than trusting a coincidental
+                            // (decoy) match (#6097).
+                            if character == "\"" {
+                                current.append("\"")
+                            } else {
+                                current.append("\\")
+                                current.append(character)
+                            }
+                            itemHasQuotedChar = true
                             escaped = false
                         } else if character == "\\" {
                             escaped = true
@@ -303,11 +329,13 @@ enum PlanMetadataParser {
                             activeQuote = nil
                         } else {
                             current.append(character)
+                            itemHasQuotedChar = true
                         }
                     } else if character == "'" {
                         activeQuote = nil
                     } else {
                         current.append(character)
+                        itemHasQuotedChar = true
                     }
                 } else if !started {
                     if character == "[" {
@@ -324,13 +352,12 @@ enum PlanMetadataParser {
                 } else if character == "]" {
                     depth -= 1
                     if depth == 0 {
-                        items.append(current)
-                        return (finalizeSecretKeys(items), lineIndex + 1)
+                        flushItem()
+                        return (keys, lineIndex + 1)
                     }
                     current.append(character)
                 } else if character == ",", depth == 1 {
-                    items.append(current)
-                    current = ""
+                    flushItem()
                 } else {
                     current.append(character)
                 }
@@ -345,16 +372,15 @@ enum PlanMetadataParser {
                 escaped = false
             } else if activeQuote != nil {
                 current.append(" ")
-            } else if started, !current.trimmingCharacters(in: .whitespaces).isEmpty {
-                items.append(current)
-                current = ""
+            } else if started {
+                flushItem()
             }
 
             lineIndex += 1
             if lineIndex >= lines.count {
                 // Unterminated flow: fail safe — keep every token seen so its value is still redacted.
-                items.append(current)
-                return (finalizeSecretKeys(items), lineIndex)
+                flushItem()
+                return (keys, lineIndex)
             }
             // Drop a trailing CR; inside a quoted scalar the continuation's leading indentation is not
             // part of the value.
@@ -363,14 +389,6 @@ enum PlanMetadataParser {
                 ? String(rawLine.drop { $0 == " " || $0 == "\t" })
                 : rawLine
         }
-    }
-
-    /// Trim and drop empties from the scanner's already-decoded flow items (quotes/escapes are
-    /// resolved during scanning, so no further unquoting here).
-    private static func finalizeSecretKeys(_ items: [String]) -> [String] {
-        items
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
     }
 
     /// Remove a trailing YAML line comment from a flow line without stripping a `#` that sits inside a

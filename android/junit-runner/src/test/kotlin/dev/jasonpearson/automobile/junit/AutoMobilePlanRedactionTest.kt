@@ -201,6 +201,29 @@ class AutoMobilePlanRedactionTest {
   }
 
   @Test
+  fun `secret value is redacted despite a decoy parameter matching the un-decoded hex key`() {
+    // Parameters contain BOTH the real `APITOKEN` (what YAML decodes `"API\x54OKEN"` to) and a
+    // decoy
+    // `APIx54OKEN` matching the scanner's un-decoded spelling. The fail-safe must not trust the
+    // decoy
+    // exact-match; it over-redacts so the REAL secret cannot leak (#6097 — decoy collision).
+    val real = "REAL-hex-secret-1a2"
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $real")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-hex-escape-key.yaml",
+      mapOf("APITOKEN" to real, "APIx54OKEN" to "DECOY-not-the-secret"),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the real secret must be redacted despite the decoy exact-match",
+      context.error.contains(real),
+    )
+  }
+
+  @Test
   fun `secret declared only via options secretParameterKeys is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 

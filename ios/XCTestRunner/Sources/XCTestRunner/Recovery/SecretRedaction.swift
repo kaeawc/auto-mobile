@@ -70,13 +70,16 @@ enum SecretRedaction {
     }
 
     /// The parameter VALUES to scrub for a set of declared secret key names, matched leniently so an
-    /// exotically-encoded key name cannot leak its value. For each declared key: an exact
-    /// `parameters[key]` is taken; failing that, any parameter whose key normalizes equal (case-folded,
-    /// with backslashes/quotes/whitespace/CR removed) is taken; and if a declared key still resolves to
-    /// nothing, EVERY parameter value is taken (over-redaction). `secretParameters` key names are
-    /// expected to be literal identifiers — this is the fail-safe backstop for YAML encodings the flow
-    /// scanner does not fully decode (`\xNN`/`\uNNNN` escapes, folding, CRLF): a declared secret's value
-    /// is always scrubbed (possibly over-redacting), never leaked (#6097). Full decoding is a follow-up.
+    /// exotically-encoded key name cannot leak its value. For each declared key: a key that still
+    /// contains a backslash (a YAML escape the scanner did not spec-decode) is low-confidence and forces
+    /// over-redaction — its raw form must not be trusted to exact-match a DECOY parameter while the real
+    /// value hides under the decoded name. Otherwise an exact `parameters[key]` is taken; failing that,
+    /// any parameter whose key normalizes equal (case-folded, with backslashes/quotes/whitespace/CR
+    /// removed) is taken; and if a declared key still resolves to nothing, EVERY parameter value is taken
+    /// (over-redaction). `secretParameters` key names are expected to be literal identifiers — this is
+    /// the fail-safe backstop for YAML encodings the flow scanner does not fully decode (`\xNN`/`\uNNNN`
+    /// escapes, folding, CRLF): a declared secret's value is always scrubbed (possibly over-redacting),
+    /// never leaked (#6097). Full decoding is a follow-up (#6141).
     static func secretParameterValues(
         declaredKeys: Set<String>,
         parameters: [String: String]
@@ -89,6 +92,14 @@ enum SecretRedaction {
         var values: [String] = []
         var hasUnresolvedKey = false
         for key in declaredKeys {
+            if key.contains("\\") {
+                // A key that still contains a backslash carries a YAML escape the flow scanner did not
+                // spec-decode (e.g. `\xNN`). Its raw form may coincidentally match a DECOY parameter
+                // while the real value lives under the decoded name — so do NOT trust any match; force
+                // over-redaction so the real value cannot leak (#6097).
+                hasUnresolvedKey = true
+                continue
+            }
             if let exact = parameters[key], !exact.isEmpty {
                 values.append(exact)
                 continue

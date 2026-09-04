@@ -72,14 +72,17 @@ internal object SecretRedactor {
 
   /**
    * The parameter VALUES to scrub for a set of declared secret key names, matched leniently so an
-   * exotically-encoded key name cannot leak its value. For each declared key: an exact
-   * `parameters[key]` is taken; failing that, any parameter whose key normalizes equal
-   * (case-folded, with backslashes/quotes/whitespace/CR removed) is taken; and if a declared key
-   * still resolves to nothing, EVERY parameter value is taken (over-redaction). `secretParameters`
-   * key names are expected to be literal identifiers — this is the fail-safe backstop for YAML
-   * encodings the flow scanner does not fully decode (`\xNN`/`\uNNNN` escapes, folding, CRLF): a
-   * declared secret's value is always scrubbed (possibly over-redacting), never leaked (#6097).
-   * Full decoding is a follow-up.
+   * exotically-encoded key name cannot leak its value. For each declared key: a key that still
+   * contains a backslash (a YAML escape the scanner did not spec-decode) is low-confidence and
+   * forces over-redaction — its raw form must not be trusted to exact-match a DECOY parameter while
+   * the real value hides under the decoded name. Otherwise an exact `parameters[key]` is taken;
+   * failing that, any parameter whose key normalizes equal (case-folded, with
+   * backslashes/quotes/whitespace/CR removed) is taken; and if a declared key still resolves to
+   * nothing, EVERY parameter value is taken (over-redaction). `secretParameters` key names are
+   * expected to be literal identifiers — this is the fail-safe backstop for YAML encodings the flow
+   * scanner does not fully decode (`\xNN`/`\uNNNN` escapes, folding, CRLF): a declared secret's
+   * value is always scrubbed (possibly over-redacting), never leaked (#6097). Full decoding is a
+   * follow-up (#6141).
    */
   fun secretParameterValues(
     declaredKeys: Set<String>,
@@ -89,6 +92,16 @@ internal object SecretRedactor {
     val values = mutableListOf<String>()
     var hasUnresolvedKey = false
     for (key in declaredKeys) {
+      if (key.contains('\\')) {
+        // A key that still contains a backslash carries a YAML escape the flow scanner did not
+        // spec-decode (e.g. `\xNN`). Its raw form may coincidentally match a DECOY parameter while
+        // the
+        // real value lives under the decoded name — so do NOT trust any match; force over-redaction
+        // so
+        // the real value cannot leak (#6097).
+        hasUnresolvedKey = true
+        continue
+      }
       val exact = parameters[key]?.let { parameterStringValue(it) }?.takeIf { it.isNotEmpty() }
       if (exact != null) {
         values.add(exact)
@@ -221,13 +234,30 @@ internal object SecretRedactor {
     startIndex: Int,
     firstValue: String,
   ): Pair<List<String>, Int> {
-    val items = mutableListOf<String>()
+    val keys = mutableListOf<String>()
     val current = StringBuilder()
+    var itemHasQuotedChar = false
     var depth = 0
     var started = false
     var activeQuote: Char? = null
     var escaped = false
     var lineIndex = startIndex
+
+    // Emit the current item: a plain token is trimmed and a genuinely-empty token (nothing between
+    // the
+    // delimiters) is dropped, but a quoted scalar whose content is only whitespace (e.g. `" "`) is
+    // a
+    // valid key and is preserved rather than trimmed away (#6097).
+    fun flushItem() {
+      val trimmed = current.toString().trim()
+      when {
+        trimmed.isNotEmpty() -> keys.add(trimmed)
+        itemHasQuotedChar -> keys.add(current.toString())
+      }
+      current.clear()
+      itemHasQuotedChar = false
+    }
+
     // Drop a trailing CR so a CRLF-authored quoted multiline key does not embed `\r` (#6097).
     var currentLine = firstValue.removeSuffix("\r")
 
@@ -240,17 +270,27 @@ internal object SecretRedactor {
           if (activeQuote == '"') {
             when {
               escaped -> {
-                current.append(character)
+                // `\"` decodes cleanly to `"`; any OTHER escape (`\xNN`, `\uNNNN`, `\n`, …) is NOT
+                // spec-decoded here — keep the backslash so the value layer sees this key as
+                // low-confidence and over-redacts rather than trusting a coincidental (decoy) match
+                // (#6097).
+                if (character == '"') current.append('"')
+                else current.append('\\').append(character)
+                itemHasQuotedChar = true
                 escaped = false
               }
               character == '\\' -> escaped = true
               character == '"' -> activeQuote = null
-              else -> current.append(character)
+              else -> {
+                current.append(character)
+                itemHasQuotedChar = true
+              }
             }
           } else if (character == '\'') {
             activeQuote = null
           } else {
             current.append(character)
+            itemHasQuotedChar = true
           }
         } else if (!started) {
           if (character == '[') {
@@ -267,13 +307,12 @@ internal object SecretRedactor {
         } else if (character == ']') {
           depth--
           if (depth == 0) {
-            items.add(current.toString())
-            return finalizeSecretKeys(items) to (lineIndex + 1)
+            flushItem()
+            return keys.toList() to (lineIndex + 1)
           }
           current.append(character)
         } else if (character == ',' && depth == 1) {
-          items.add(current.toString())
-          current.clear()
+          flushItem()
         } else {
           current.append(character)
         }
@@ -289,17 +328,14 @@ internal object SecretRedactor {
       when {
         activeQuote == '"' && escaped -> escaped = false
         activeQuote != null -> current.append(' ')
-        started && current.toString().trim().isNotEmpty() -> {
-          items.add(current.toString())
-          current.clear()
-        }
+        started -> flushItem()
       }
 
       lineIndex++
       if (lineIndex >= lines.size) {
         // Unterminated flow: fail safe — keep every token seen so its value is still redacted.
-        items.add(current.toString())
-        return finalizeSecretKeys(items) to lineIndex
+        flushItem()
+        return keys.toList() to lineIndex
       }
       // Drop a trailing CR; inside a quoted scalar the continuation's leading indentation is not
       // part
@@ -308,13 +344,6 @@ internal object SecretRedactor {
       currentLine = if (activeQuote != null) rawLine.trimStart(' ', '\t') else rawLine
     }
   }
-
-  /**
-   * Trim and drop empties from the scanner's already-decoded flow items (quotes/escapes are
-   * resolved during scanning, so no further unquoting here).
-   */
-  private fun finalizeSecretKeys(items: List<String>): List<String> =
-    items.map { it.trim() }.filter { it.isNotEmpty() }
 
   private fun stripComments(line: String): String {
     val hash = line.indexOf('#')

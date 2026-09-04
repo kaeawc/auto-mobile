@@ -27,6 +27,21 @@ describe("PlanNormalizer", () => {
     expect(normalized.label).toBe("Tap button");
   });
 
+  test("params.networkCondition wins over an inline networkCondition (#6090 review)", () => {
+    const normalized = PlanNormalizer.normalizeStep(
+      {
+        tool: "setDeviceState",
+        networkCondition: { profile: "offline", delayMs: 500 },
+        params: { networkCondition: { profile: "none" } },
+      },
+      0,
+    );
+
+    // The inline value is fully discarded — the step executes as the valid reset,
+    // which is why the schema must not false-reject the overridden inline form.
+    expect(normalized.params).toEqual({ networkCondition: { profile: "none" } });
+  });
+
   test("promotes optional flag to the step, not into tool params", () => {
     const normalized = PlanNormalizer.normalizeStep(
       { tool: "tapOn", text: "Not Now", optional: true },

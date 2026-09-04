@@ -79,6 +79,86 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    // #6090: the plan schema must encode the same offline+override rule as the
+    // live Zod refinement, so a plan that PlanSchemaValidator accepts also passes
+    // at execution — and never false-rejects a valid cancel-reset.
+    it("should accept a valid setDeviceState networkCondition (offline)", () => {
+      const yaml = `
+name: net-offline
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: offline
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+    });
+
+    it("should accept an offline networkCondition override when cancel/reset is set", () => {
+      const cancel = `
+name: net-offline-cancel
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: offline
+      delayMs: 500
+      cancel: true
+`;
+      expect(validator.validateYaml(cancel).valid).toBe(true);
+      const reset = `
+name: net-offline-reset
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: offline
+      delayMs: 500
+      reset: true
+`;
+      expect(validator.validateYaml(reset).valid).toBe(true);
+    });
+
+    it("should accept `none` with neutral (zero) overrides as a reset", () => {
+      const yaml = `
+name: net-none-neutral
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: none
+      delayMs: 0
+      downloadKbps: 0
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+    });
+
+    it("should accept an inline networkCondition that params.networkCondition overrides (#6090 review)", () => {
+      // PlanNormalizer gives params precedence, so at execution this step receives
+      // ONLY the valid params reset — the inline `{delayMs:0}` is discarded. Schema
+      // validation must not false-reject the discarded inline form.
+      const neutral = `
+name: net-inline-overridden-neutral
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      delayMs: 0
+    params:
+      networkCondition:
+        profile: none
+`;
+      expect(validator.validateYaml(neutral).valid).toBe(true);
+      // Same for an inline offline+override overridden by a valid params reset.
+      const offline = `
+name: net-inline-overridden-offline
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: offline
+      delayMs: 500
+    params:
+      networkCondition:
+        cancel: true
+`;
+      expect(validator.validateYaml(offline).valid).toBe(true);
+    });
+
     it("should validate cross-platform permission / appop steps in sequence", () => {
       const yaml = `
 name: grant-explicit
@@ -224,6 +304,33 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
+    });
+
+    it("should reject offline + a shaping override with no cancel/reset (#6090)", () => {
+      const yaml = `
+name: network-condition-offline-override
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: offline
+      delayMs: 500
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should still reject a standalone inline neutral-only networkCondition (no params override) (#6090)", () => {
+      // Guards against weakening the standalone-inline validation: with no
+      // overriding params.networkCondition, a bare zero override is a no-op the
+      // schema must still reject (matching the runtime `empty`).
+      const yaml = `
+name: network-condition-inline-neutral
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      delayMs: 0
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(false);
     });
 
     it("should validate iOS simulator permissions through cross-platform permission tools", () => {

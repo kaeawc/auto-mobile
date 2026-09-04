@@ -191,21 +191,38 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
 // setting a top-level `anyOf` collapses the object under `flattenTopLevelUnion`.)
 // cancel/reset count only when `true` (a falsy value is not a request), so their
 // branches pin `const: true` to match the runtime classifier (issue #6012 audit).
+// A bare zero override is the documented no-op, not a request, so its anyOf
+// branch requires a NON-NEUTRAL value — mirroring the runtime classifier, which
+// treats `{delayMs:0}` as `empty` (issue #6090). `{profile:"none", delayMs:0}`
+// still satisfies the `profile` branch and classifies as a reset.
 const NETWORK_CONDITION_REQUIRED_ANY_OF = [
   { required: ["profile"] },
   { required: ["cancel"], properties: { cancel: { const: true } } },
   { required: ["reset"], properties: { reset: { const: true } } },
-  { required: ["delayMs"] },
-  { required: ["downloadKbps"] },
-  { required: ["uploadKbps"] },
-  { required: ["packetLossPercent"] },
+  { required: ["delayMs"], properties: { delayMs: { not: { const: 0 } } } },
+  { required: ["downloadKbps"], properties: { downloadKbps: { not: { const: 0 } } } },
+  { required: ["uploadKbps"], properties: { uploadKbps: { not: { const: 0 } } } },
+  { required: ["packetLossPercent"], properties: { packetLossPercent: { not: { const: 0 } } } },
 ];
 
 // `offline` cuts the link, so a shaping override cannot apply — mirror the
 // runtime `invalid` rejection in JSON schema so tools/list matches invocation
 // (issue #6012 review): if profile is offline, forbid delayMs/downloadKbps/uploadKbps.
+// The rejection is cancel/reset-aware (issue #6090): `cancel`/`reset` win at the
+// runtime classifier ("make it clean"), so an offline+override request that also
+// carries a true cancel/reset is a valid reset and must NOT be false-rejected —
+// the `if` therefore only fires when NO true cancel/reset is present.
 const NETWORK_CONDITION_OFFLINE_NO_OVERRIDE = {
-  if: { properties: { profile: { const: "offline" } }, required: ["profile"] },
+  if: {
+    required: ["profile"],
+    properties: { profile: { const: "offline" } },
+    not: {
+      anyOf: [
+        { required: ["cancel"], properties: { cancel: { const: true } } },
+        { required: ["reset"], properties: { reset: { const: true } } },
+      ],
+    },
+  },
   then: {
     not: {
       anyOf: [

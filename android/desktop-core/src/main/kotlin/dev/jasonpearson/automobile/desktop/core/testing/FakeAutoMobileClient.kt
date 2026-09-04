@@ -75,6 +75,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   var observeResult: ObserveResult = ObserveResult()
   var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
   var getDaemonStatusResult: DaemonStatusResponse = DaemonStatusResponse()
+  // When set, getDaemonStatus throws it instead of returning — models a wedged daemon whose
+  // ide/status hang ceiling closed the socket, so the health probe reads UNHEALTHY (#6082).
+  var getDaemonStatusError: Throwable? = null
   var updateServiceResult: UpdateServiceResult = UpdateServiceResult(success = true)
   var inputTapResult: InputActionResult = InputActionResult(action = "input/tap", success = true)
   var inputSwipeResult: InputActionResult =
@@ -356,6 +359,7 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun getDaemonStatus(): DaemonStatusResponse {
     calls.add("getDaemonStatus")
+    getDaemonStatusError?.let { throw it }
     return getDaemonStatusResult
   }
 

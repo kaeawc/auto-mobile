@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.di
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory
+import dev.jasonpearson.automobile.desktop.core.daemon.healthProbeFor
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.platform.PackagedVersionSource
 import dev.jasonpearson.automobile.desktop.core.platform.RuntimeAppVersionProvider
@@ -33,7 +34,13 @@ interface ApplicationModule {
     fun provideAutoMobileClient(daemonBootstrap: DaemonBootstrap): AutoMobileClient {
       // Shares the bootstrap's lifecycle with the daemon client so install/start progress from any
       // trigger (startup bootstrap or a request preflight) reaches the launch surfaces.
-      return McpClientFactory.createPreferred(daemonBootstrap)
+      val client = McpClientFactory.createPreferred(daemonBootstrap)
+      // Teach recovery to tell a wedged daemon from a reachable one, using the client's own
+      // `ide/status` call — the same bounded probe that drives the Red status dot (#6082). Wired
+      // here (not in the lifecycle constructor) because the probe needs the very client that is
+      // built around the bootstrap's lifecycle. A no-op on an inactive (non-daemon) bootstrap.
+      daemonBootstrap.attachHealthProbe(healthProbeFor(client))
+      return client
     }
 
     @Provides

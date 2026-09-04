@@ -122,13 +122,56 @@ const biometricStateInputSchema = z.object({
     .describe("Set iOS Simulator biometric enrollment state."),
 });
 
+const networkConditionInputSchema = z
+  .object({
+    profile: z
+      .enum(["none", "offline", "veryBad", "2g", "3g", "4g", "5g"])
+      .optional()
+      .describe(
+        "Device-wide network profile. Documented values: none=unshaped, offline=no data, " +
+          "veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), " +
+          "4g≈LTE, 5g=unlimited. Android emulator only.",
+      ),
+    cancel: z.boolean().optional().describe("Reset to normal connectivity (same as profile=none)."),
+    reset: z.boolean().optional().describe("Alias of cancel."),
+    delayMs: z.number().min(0).optional().describe("Override added latency in milliseconds."),
+    downloadKbps: z
+      .number()
+      .min(0)
+      .optional()
+      .describe("Override download cap in kbps (0=unlimited)."),
+    uploadKbps: z.number().min(0).optional().describe("Override upload cap in kbps (0=unlimited)."),
+    packetLossPercent: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe("Documented target packet loss; the emulator console cannot enforce partial loss."),
+    expiresInSeconds: z
+      .number()
+      .min(0)
+      .optional()
+      .describe("Advisory TTL; session release/expiry restores normal connectivity."),
+  })
+  .refine(
+    (values) =>
+      values.profile !== undefined ||
+      values.cancel !== undefined ||
+      values.reset !== undefined ||
+      values.delayMs !== undefined ||
+      values.downloadKbps !== undefined ||
+      values.uploadKbps !== undefined ||
+      values.packetLossPercent !== undefined,
+    { message: "Provide profile, cancel/reset, or an explicit override for networkCondition" },
+  );
+
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
     include: z
-      .array(z.enum(["doNotDisturb", "biometrics"]))
+      .array(z.enum(["doNotDisturb", "biometrics", "networkCondition"]))
       .min(1)
       .optional()
-      .describe("State fields to read; supports doNotDisturb and biometrics"),
+      .describe("State fields to read; supports doNotDisturb, biometrics, and networkCondition"),
   }),
 );
 
@@ -140,10 +183,19 @@ export const setDeviceStateSchema = addDeviceTargetingToSchema(
     biometrics: biometricStateInputSchema
       .optional()
       .describe("iOS Simulator biometric enrollment state to apply."),
+    networkCondition: networkConditionInputSchema
+      .optional()
+      .describe("Device-wide network condition to apply (Android emulator only)."),
   }),
-).refine((values) => values.doNotDisturb !== undefined || values.biometrics !== undefined, {
-  message: "At least one device state field must be provided",
-});
+).refine(
+  (values) =>
+    values.doNotDisturb !== undefined ||
+    values.biometrics !== undefined ||
+    values.networkCondition !== undefined,
+  {
+    message: "At least one device state field must be provided",
+  },
+);
 
 // Export interfaces for type safety
 export interface SetActiveDeviceArgs {
@@ -406,6 +458,22 @@ export function registerUtilityTools() {
         ...result,
       });
     }
+    // Register the network-condition slot so session release/expiry restores
+    // normal connectivity and never leaves a device impaired (issue #6012).
+    // Only a degrading condition needs restoring; cancel/reset/none do not.
+    if (
+      args.networkCondition &&
+      !args.networkCondition.cancel &&
+      !args.networkCondition.reset &&
+      (args.networkCondition.profile ?? "none") !== "none" &&
+      args.sessionUuid &&
+      DaemonState.getInstance().isInitialized()
+    ) {
+      DaemonState.getInstance()
+        .getSessionManager()
+        .setNetworkCondition(args.sessionUuid, { initialProfile: "none" });
+    }
+
     const result = await runSessionBiometricMutation(
       capture.sessionManager,
       args.sessionUuid,
@@ -415,6 +483,7 @@ export function registerUtilityTools() {
         deviceState.setState({
           doNotDisturb: args.doNotDisturb,
           biometrics: args.biometrics,
+          networkCondition: args.networkCondition,
         }),
     );
 
@@ -445,7 +514,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state such as Do Not Disturb and iOS Simulator biometric enrollment",
+    "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
     getDeviceStateSchema,
     getDeviceStateHandler,
     { defaultEnabled: false },
@@ -453,7 +522,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb and iOS Simulator biometric enrollment.",
+    "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition (offline/2g/3g/4g degraded connectivity; Android emulator only).",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../../src/models";
 import {
   DeviceState,
   EMPTY_STATE_SELECTION_ERROR,
+  NETWORK_CONDITION_PROFILES,
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -341,6 +342,167 @@ describe("DeviceState", () => {
     expect(result.error).toContain("Focus Filter API");
     // Early return: no simctl/notifyutil command was ever issued.
     expect(simctl.getMethodCalls("executeCommand")).toEqual([]);
+  });
+
+  test("applies a documented degraded profile via the emulator console (3g)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      capability: "full",
+      method: "android_emulator_console",
+      requestedProfile: "3g",
+      appliedProfile: "3g",
+      verified: true,
+      values: NETWORK_CONDITION_PROFILES["3g"],
+    });
+    expect(client.getAllCommands()).toEqual([
+      "emu gsm data on",
+      "emu network delay umts",
+      "emu network speed umts",
+    ]);
+  });
+
+  test("takes the device offline by turning the data radio off", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "offline" } });
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      appliedProfile: "offline",
+      verified: true,
+    });
+    expect(client.getAllCommands()).toEqual(["emu gsm data off"]);
+  });
+
+  test("cancels/resets a network condition back to normal connectivity", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { cancel: true } });
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      appliedProfile: "none",
+      verified: true,
+    });
+    expect(client.getAllCommands()).toEqual([
+      "emu network delay none",
+      "emu network speed full",
+      "emu gsm data on",
+    ]);
+  });
+
+  test("honors explicit numeric overrides over the profile's named specs", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({
+      networkCondition: { profile: "3g", delayMs: 250, downloadKbps: 1000, uploadKbps: 400 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition?.values).toMatchObject({
+      delayMs: 250,
+      downloadKbps: 1000,
+      uploadKbps: 400,
+    });
+    expect(client.getAllCommands()).toEqual([
+      "emu gsm data on",
+      "emu network delay 250:250",
+      "emu network speed 400:1000",
+    ]);
+  });
+
+  test("reports a failed emulator console command as unverified", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("emu network delay umts", "", "KO: bad delay");
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
+
+    expect(result.success).toBe(false);
+    expect(result.networkCondition?.supported).toBe(true);
+    expect(result.networkCondition?.error).toContain("KO");
+  });
+
+  test("reads back the emulator network status for the selected device", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult(
+      "emu network status",
+      "Current network status:\n  download speed: 0 bits/s\n",
+    );
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.getState(["networkCondition"]);
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      capability: "full",
+      method: "android_emulator_console",
+      verified: true,
+    });
+    expect(result.networkCondition?.rawStatus).toContain("network status");
+    expect(client.getAllCommands()).toEqual(["emu network status"]);
+  });
+
+  test("reports network conditioning unsupported on a physical Android device", async () => {
+    const physicalAndroid: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "38290DLJG000XY",
+    };
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(physicalAndroid, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
+
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedProfile: "3g",
+      verified: false,
+    });
+    expect(result.networkCondition?.error).toContain("emulator");
+    // No emulator console command is ever issued on a physical device.
+    expect(client.getAllCommands()).toEqual([]);
+  });
+
+  test("reports network conditioning unsupported on an iOS simulator", async () => {
+    const simctl = new FakeSimCtlClient();
+    const deviceState = new DeviceState(iosSimulator, { simctl });
+
+    const set = await deviceState.setState({ networkCondition: { profile: "3g" } });
+    const get = await deviceState.getState(["networkCondition"]);
+
+    expect(set.success).toBe(false);
+    expect(set.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedProfile: "3g",
+      verified: false,
+    });
+    expect(get.networkCondition).toMatchObject({ supported: false, capability: "unsupported" });
+    expect(set.networkCondition?.error).toContain("iOS");
+    // No simctl command is issued for an unsupported concern.
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 
   test("rejects an empty state selection instead of reporting a no-op success", async () => {

@@ -59,6 +59,49 @@ describe("device state tools", () => {
       }),
     ).not.toThrow();
     expect(() => setTool!.schema.parse({})).toThrow();
+
+    // #6012: networkCondition is a first-class device-state field.
+    expect(() => getTool!.schema.parse({ include: ["networkCondition"] })).not.toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { profile: "3g" } })).not.toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { cancel: true } })).not.toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { profile: "offline" } })).not.toThrow();
+    // An empty networkCondition sub-object is not a request.
+    expect(() => setTool!.schema.parse({ networkCondition: {} })).toThrow();
+  });
+
+  test("threads networkCondition through the setDeviceState handler", async () => {
+    // A physical Android device short-circuits to an unsupported result before
+    // any adb call, so this proves the handler forwards networkCondition into
+    // DeviceState.setState without needing a real device.
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const physicalAndroid = createBootedDevice("38290DLJG000XY", "android", "Pixel 8");
+
+    const response = await setTool!.deviceAwareHandler!(physicalAndroid, {
+      networkCondition: { profile: "3g" },
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedProfile: "3g",
+    });
+  });
+
+  test("reads networkCondition through the getDeviceState handler on iOS", async () => {
+    const getTool = ToolRegistry.getTool("getDeviceState");
+    const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");
+
+    const response = await getTool!.deviceAwareHandler!(iosSim, {
+      include: ["networkCondition"],
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+    });
   });
 
   test("setActiveDevice binds a refreshed session device in the pool", async () => {

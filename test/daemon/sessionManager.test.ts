@@ -3,6 +3,7 @@ import {
   SessionManager,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
+  type NetworkConditionRestorer,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -1781,6 +1782,130 @@ describe("SessionManager", () => {
         // The retry targets the OLD simulator even though the session has
         // already been reassigned to the new one.
         expect(attempts).toEqual(["sim-old", "sim-old"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
+  describe("network condition restoration (#6012)", () => {
+    const noopBiometric = () => ({ restore: async () => {} });
+
+    test("restores normal connectivity when a session that degraded the network releases", async () => {
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (device): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restored.push({ deviceId: device.deviceId, profile });
+          },
+        }),
+      );
+      try {
+        await manager.createSession("net-1", "emulator-5554", "android");
+        // Write-once: the first captured baseline wins over a later change.
+        manager.setNetworkCondition("net-1", { initialProfile: "none" });
+        manager.setNetworkCondition("net-1", { initialProfile: "3g" });
+
+        await manager.releaseSession("net-1");
+
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not attempt a network restore for a session that never degraded it", async () => {
+      const restored: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restored.push(profile);
+          },
+        }),
+      );
+      try {
+        await manager.createSession("net-clean", "emulator-5554", "android");
+        await manager.releaseSession("net-clean");
+        expect(restored).toEqual([]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("restores normal connectivity on lazy expiry, keeping the device quarantined", async () => {
+      let finishRestore!: () => void;
+      const restoration = new Promise<void>((resolve) => {
+        finishRestore = resolve;
+      });
+      let restoreStarted!: () => void;
+      const restorationStarted = new Promise<void>((resolve) => {
+        restoreStarted = resolve;
+      });
+      const restored: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restored.push(profile);
+            restoreStarted();
+            await restoration;
+          },
+        }),
+      );
+      try {
+        await manager.createSession("net-expiry", "emulator-5554", "android", 1);
+        manager.setNetworkCondition("net-expiry", { initialProfile: "none" });
+        fakeTimer.advanceTime(2);
+
+        // Accessing the expired session triggers lazy expiry -> release.
+        expect(manager.getSession("net-expiry")).toBeNull();
+        await restorationStarted;
+        expect(restored).toEqual(["none"]);
+
+        finishRestore();
+        await manager.waitForSessionRelease("net-expiry");
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("restores the old emulator before a session rebinds to a new device", async () => {
+      const restored: Array<{ deviceId: string; profile: string }> = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (device): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restored.push({ deviceId: device.deviceId, profile });
+          },
+        }),
+      );
+      try {
+        await manager.createSession("net-rebind", "emulator-5554", "android");
+        // Baseline recorded before the session degraded the network.
+        manager.setNetworkCondition("net-rebind", { initialProfile: "none" });
+
+        await manager.rebindSession("net-rebind", "emulator-5556", "android");
+
+        expect(restored).toEqual([{ deviceId: "emulator-5554", profile: "none" }]);
+        expect(manager.getNetworkCondition("net-rebind")).toBeUndefined();
       } finally {
         manager.stopCleanupTimer();
       }

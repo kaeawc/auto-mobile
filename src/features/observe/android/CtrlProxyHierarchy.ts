@@ -473,7 +473,11 @@ export class CtrlProxyHierarchy {
             androidPerfTiming = syncResult.perfTiming;
           }
           frameContext = syncResult.frameContext;
-          isFresh = true;
+          // The sync wait correlates on host receipt time, so a late push of a
+          // tree captured BEFORE `minTimestamp` can land in its window. Honor the
+          // caller's device-timestamp floor here rather than reporting such a
+          // tree fresh (#6099).
+          isFresh = this.satisfiesMinTimestamp(hierarchyData.updatedAt, minTimestamp);
           receivedAt = this.context.timer.now();
           if (hierarchyData.packageName) {
             this.lastKnownPackageName = hierarchyData.packageName;
@@ -775,6 +779,23 @@ export class CtrlProxyHierarchy {
     }
     const timeSinceTimeout = this.context.timer.now() - lastTimeout;
     return timeSinceTimeout < WEBSOCKET_TIMEOUT_COOLDOWN_MS;
+  }
+
+  /**
+   * Whether a device-stamped tree satisfies a caller's `minTimestamp` floor. A
+   * caller with no floor, or a tree with no numeric stamp, is satisfied.
+   */
+  private satisfiesMinTimestamp(updatedAt: unknown, minTimestamp: number): boolean {
+    if (minTimestamp <= 0 || typeof updatedAt !== "number" || Number.isNaN(updatedAt)) {
+      return true;
+    }
+    if (updatedAt >= minTimestamp) {
+      return true;
+    }
+    logger.warn(
+      `[CTRL_PROXY] Sync returned a tree older than minTimestamp (updatedAt=${updatedAt}, minTimestamp=${minTimestamp}); reporting it stale`,
+    );
+    return false;
   }
 
   /**

@@ -41,6 +41,8 @@ interface Harness {
   hierarchy: CtrlProxyHierarchy;
   timer: FakeTimer;
   waitCalls: number[];
+  /** Tree the (stubbed) sync returns; swap it to model a late, older push. */
+  syncTree: CachedHierarchy["hierarchy"];
   syncCalls: () => number;
   cooldownSet: () => boolean;
   restore: () => void;
@@ -89,17 +91,24 @@ function createHarness(): Harness {
     timer.advanceTime(timeoutMs);
     return null;
   }) as never);
-  // The sync produces the genuinely fresh tree.
+  // The sync produces the genuinely fresh tree by default; a test may swap it.
   let syncCalls = 0;
+  const harness = { syncTree: tree(T + 20, "synced") };
   const syncSpy = spyOn(hierarchy, "requestHierarchySync").mockImplementation(async () => {
     syncCalls += 1;
-    return { hierarchy: tree(T + 20, "synced") };
+    return { hierarchy: harness.syncTree };
   });
 
   return {
     hierarchy,
     timer,
     waitCalls,
+    get syncTree() {
+      return harness.syncTree;
+    },
+    set syncTree(value: CachedHierarchy["hierarchy"]) {
+      harness.syncTree = value;
+    },
     syncCalls: () => syncCalls,
     cooldownSet: () => cooldownSet,
     restore: () => {
@@ -138,6 +147,27 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
     // The cache was still rejected: the returned tree is the synced one, fresh.
     expect(result?.fresh).toBe(true);
     expect(result?.updatedAt).toBe(T + 20);
+  });
+
+  test("a sync that returns a tree older than minTimestamp is reported stale, not fresh", async () => {
+    h = createHarness();
+    // A late push of the pre-navigation tree lands in the sync window: its
+    // device stamp is the initial capture's, below the caller's floor.
+    h.syncTree = tree(T, "late pre-navigation push");
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(
+      undefined,
+      undefined,
+      true,
+      T + 1,
+      false,
+      undefined,
+    );
+
+    expect(h.waitCalls).toEqual([]);
+    expect(h.syncCalls()).toBe(1);
+    expect(result?.fresh).toBe(false);
+    expect(result?.updatedAt).toBe(T);
   });
 
   test("a read that does not skip the wait still waits for a push before syncing", async () => {

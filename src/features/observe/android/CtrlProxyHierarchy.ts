@@ -236,8 +236,10 @@ export class CtrlProxyHierarchy {
       }
 
       // Wait for fresh data if requested (unless skipped or recently timed out).
-      // A rejected cache (too old for `minTimestamp`) needs a newer tree, which
-      // the sync fallback below produces as well as a push does. It therefore
+      // A rejected cache (too old for `minTimestamp`) needs a newer tree. The
+      // sync fallback below re-extracts one on the runner (a fresh `updatedAt`)
+      // just as a push would; note the sync result is reported fresh without a
+      // `minTimestamp` re-check, as it always was. It therefore
       // does NOT override `skipWaitForFresh`: a caller that skips the wait with
       // a minTimestamp (the attribution recapture) goes straight to sync instead
       // of burning the full wait on a static screen that pushes nothing (#6099).

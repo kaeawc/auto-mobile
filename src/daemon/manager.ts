@@ -748,6 +748,15 @@ export class DaemonManager implements DaemonManagerLike {
    * Internal start implementation (caller must hold lock).
    */
   private async startUnlocked(options: DaemonOptions): Promise<void> {
+    // The overall start budget, captured before any work so the post-exit peer
+    // rejoin (issue #6103) can only ever spend time the caller still has. The
+    // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait
+    // may consume all of it (plus the time spent stopping a timed-out child), so a
+    // rejoin bounded by a FRESH reachability budget could push the actionable
+    // diagnostic past the client deadline — the exact failure #5878/#5904 exist to
+    // prevent. Bounding the rejoin by the time REMAINING under this deadline keeps
+    // the error deliverable.
+    const startDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
     const status = await this.status();
     if (status.running) {
       stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
@@ -899,7 +908,17 @@ export class DaemonManager implements DaemonManagerLike {
       // race (issue #6103). Rejoin that peer within a bounded, candidate-gated wait
       // instead of surfacing our child's exit as terminal; a genuine start failure
       // (no peer coming up) still fails promptly (issue #5878).
-      if (await this.tryJoinPeerDaemonAfterSpawnExit()) {
+      //
+      // Bound the rejoin by the time REMAINING under the original start deadline, not
+      // a fresh reachability budget: if launchAndWait already consumed the client's
+      // ~30s budget (a startup timeout, plus stopping the timed-out child), skip the
+      // rejoin entirely and rethrow now, so the actionable diagnostic still beats the
+      // client deadline (issue #5878/#5904).
+      const rejoinBudget = Math.min(
+        DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
+        this.remainingTime(startDeadline),
+      );
+      if (rejoinBudget > 0 && (await this.tryJoinPeerDaemonAfterSpawnExit(rejoinBudget))) {
         stderrLog(
           "A peer daemon became ready on the shared socket after our launch exited; joining it",
         );
@@ -1755,17 +1774,19 @@ export class DaemonManager implements DaemonManagerLike {
    * {@link hasComingUpPeerDaemon}) and gives up the instant none remains, so a
    * GENUINE start failure — nothing coming up, or only an orphaned socket inode with
    * no listener and no backing process — still fails immediately rather than burning
-   * the client's ~30s `tools/list` budget. When a live daemon is present the wait is
-   * capped at {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS} — the same bounded
-   * reachability budget {@link startUnlocked} already uses for an existing live
-   * daemon, deliberately held below the client deadline. It NEVER spawns — it only
-   * probes and joins, so it cannot double-spawn — and it joins only a daemon that
-   * answers the same non-destructive readiness probe every other reuse path trusts
-   * ({@link verifyDaemonConnection}, which never unlinks the socket); daemon version
-   * compatibility is enforced separately by the proxy handshake.
+   * the client's ~30s `tools/list` budget. `budgetMs` is the time REMAINING under the
+   * caller's original start deadline (already capped at
+   * {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}), so when launchAndWait already
+   * consumed the client budget the caller passes a non-positive value and skips this
+   * wait entirely — the rejoin can only ever spend time the caller still has. It
+   * NEVER spawns — it only probes and joins, so it cannot double-spawn — and it joins
+   * only a daemon that answers the same non-destructive readiness probe every other
+   * reuse path trusts ({@link verifyDaemonConnection}, which never unlinks the
+   * socket); daemon version compatibility is enforced separately by the proxy
+   * handshake.
    */
-  private async tryJoinPeerDaemonAfterSpawnExit(): Promise<boolean> {
-    const deadline = this.timer.now() + DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS;
+  private async tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean> {
+    const deadline = this.timer.now() + budgetMs;
 
     while (this.remainingTime(deadline) > 0) {
       if (!this.hasComingUpPeerDaemon()) {

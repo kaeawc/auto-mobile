@@ -6,7 +6,10 @@ import { writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
-import { READINESS_PROBE_MAX_ATTEMPTS } from "../../src/daemon/constants";
+import {
+  DAEMON_STARTUP_TIMEOUT_MS,
+  READINESS_PROBE_MAX_ATTEMPTS,
+} from "../../src/daemon/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -927,6 +930,61 @@ describe("DaemonManager readiness", () => {
     } finally {
       readySpy.mockRestore();
       findSpy.mockRestore();
+    }
+  });
+
+  test("skips the peer rejoin when the original start deadline is exhausted, so the diagnostic beats the client deadline (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const spawner = new FakeDaemonSpawner();
+    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
+    // A socket inode and a live peer process both remain after our launch, so the
+    // rejoin's own gate would let it run — a FRESH-budget rejoin would probe the
+    // socket (populating `clients`). The ONLY reason nothing gets probed must be the
+    // exhausted deadline.
+    spawner.onSpawn = () => {
+      writeFileSync(socketPath, "peer socket placeholder");
+    };
+
+    const clients: ProbeClient[] = [];
+    const manager = new DaemonManager(
+      () => {
+        // Never becomes ready, so start() still rejects; whether it is even
+        // constructed is the discriminator for "did the rejoin run".
+        const client = new ProbeClient(false);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+    );
+    // A live peer daemon process remains present after our launch.
+    let liveCalls = 0;
+    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
+      liveCalls++;
+      return liveCalls <= 1 ? [] : [999999];
+    });
+    // Our own launch burns the entire client-facing startup budget, then times out.
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(async () => {
+      await fakeTimer.sleep(DAEMON_STARTUP_TIMEOUT_MS + 1);
+      return false;
+    });
+
+    try {
+      await expect(manager.start()).rejects.toThrow(/Daemon failed to start within \d+ms/);
+      // Rejoin skipped: no readiness probe ran, so no fresh reachability wait was
+      // armed after the budget was already spent — the diagnostic is not pushed past
+      // the client deadline (#5878/#5904).
+      expect(clients).toHaveLength(0);
+      expect(spawner.process.signals).toEqual(["SIGTERM"]);
+    } finally {
+      readySpy.mockRestore();
+      liveSpy.mockRestore();
     }
   });
 

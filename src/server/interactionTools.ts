@@ -25,6 +25,7 @@ import {
   BootedDevice,
   ClipboardResult,
   OpenURLResult,
+  PinchOnResult,
   SendTextResult,
   SwipeOnToolPayload,
   type TapOnSelectedElement,
@@ -824,6 +825,19 @@ export function formatSwipeOnMessage(
     : `Swiped ${direction}`;
 }
 
+export function formatPinchOnMessage(
+  result: Pick<PinchOnResult, "success" | "error">,
+  direction: string,
+): string {
+  if (!result.success) {
+    // `||` not `??`: an empty-string error (`error: ""`) must still yield the
+    // non-empty fallback, mirroring formatSwipeOnMessage (#4183 P4). Without this
+    // a validation failure (e.g. scale:0) reported a success-shaped message (#6056).
+    return result.error || `Pinch ${direction} failed`;
+  }
+  return `Pinched ${direction}`;
+}
+
 export function buildInputTextResultMessage(
   result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText">,
 ): string {
@@ -1353,7 +1367,7 @@ export function registerInteractionTools() {
     );
 
     return createJSONToolResponse({
-      message: `Pinched ${args.direction}`,
+      message: formatPinchOnMessage(result, args.direction),
       observation: result.observation,
       ...result,
     });

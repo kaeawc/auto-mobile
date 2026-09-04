@@ -85,3 +85,73 @@ describe("isCliToolFailure (issue #6017)", () => {
     expect(errorMessages).toEqual([["MCP error -32001: Request timed out"]]);
   });
 });
+
+describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
+  const originalProcessExit = process.exit;
+  const originalConsoleError = console.error;
+  const originalConsoleLog = console.log;
+
+  afterEach(() => {
+    process.exit = originalProcessExit;
+    console.error = originalConsoleError;
+    console.log = originalConsoleLog;
+    resetDaemonProxyFactoryForTesting();
+  });
+
+  function runWithEnvelope(envelope: unknown): {
+    exitCodes: number[];
+    errorMessages: unknown[][];
+  } {
+    const exitCodes: number[] = [];
+    const errorMessages: unknown[][] = [];
+    process.exit = ((code?: number) => {
+      exitCodes.push(code ?? 0);
+    }) as typeof process.exit;
+    console.error = ((...args: unknown[]) => {
+      errorMessages.push(args);
+    }) as typeof console.error;
+    console.log = (() => {
+      // silence structured stdout dump
+    }) as typeof console.log;
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async () => envelope,
+      close: async (): Promise<void> => {
+        // no-op fake
+      },
+    }));
+    return { exitCodes, errorMessages };
+  }
+
+  test("isError envelope with JSON-null payload surfaces the payload, not a TypeError", async () => {
+    const { exitCodes, errorMessages } = runWithEnvelope({
+      content: [{ type: "text", text: "null" }],
+      isError: true,
+    });
+
+    await runCliCommand(["someTool"]);
+
+    expect(exitCodes).toEqual([1]);
+    expect(errorMessages).toEqual([["null"]]);
+  });
+
+  test("isError envelope with a JSON-primitive payload does not crash and exits non-zero", async () => {
+    const { exitCodes, errorMessages } = runWithEnvelope({
+      content: [{ type: "text", text: "42" }],
+      isError: true,
+    });
+
+    await runCliCommand(["someTool"]);
+
+    expect(exitCodes).toEqual([1]);
+    expect(errorMessages).toEqual([["42"]]);
+  });
+
+  test("isError envelope with a missing content payload exits non-zero without throwing", async () => {
+    const { exitCodes, errorMessages } = runWithEnvelope({ isError: true });
+
+    await runCliCommand(["someTool"]);
+
+    expect(exitCodes).toEqual([1]);
+    expect(errorMessages).toEqual([]);
+  });
+});

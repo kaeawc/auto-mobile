@@ -571,8 +571,10 @@ function handleToolResult(result: any, toolName: string): void {
   const actualResult = cliToolResultPayload(result);
 
   if (isCliToolFailure(result)) {
-    // Write error message to STDERR
-    if (actualResult.error) {
+    // Write error message to STDERR. Guard the payload access: a failure
+    // envelope's text payload may parse to `null`/a primitive (the CLI accepts
+    // the daemon result as `any`), so only dereference `.error` on an object.
+    if (actualResult && typeof actualResult === "object" && actualResult.error) {
       console.error(actualResult.error);
     } else if (
       result?.isError === true &&
@@ -585,6 +587,8 @@ function handleToolResult(result: any, toolName: string): void {
     // Plan progress is only available in structured executePlan failures.
     if (
       toolName === "executePlan" &&
+      actualResult &&
+      typeof actualResult === "object" &&
       typeof actualResult.executedSteps === "number" &&
       typeof actualResult.totalSteps === "number"
     ) {

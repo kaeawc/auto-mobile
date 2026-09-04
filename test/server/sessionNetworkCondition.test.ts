@@ -161,6 +161,114 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("schedules a per-condition TTL for a degrade carrying expiresInSeconds (#6085)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-ttl-wire", "emulator-5554", "android");
+      await runSessionNetworkMutation(
+        manager,
+        "net-ttl-wire",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // The TTL fires after 30s and resets the device to `none`.
+      timer.advanceTime(30_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+      expect(manager.getNetworkCondition("net-ttl-wire")).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a later reset cancels a pending TTL rather than racing it (#6085)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-ttl-cancel", "emulator-5554", "android");
+      // Degrade with a TTL, then a manual reset (registerRestore=false) before it fires.
+      await runSessionNetworkMutation(
+        manager,
+        "net-ttl-cancel",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+      await runSessionNetworkMutation(
+        manager,
+        "net-ttl-cancel",
+        "emulator-5554",
+        false,
+        async () => {},
+      );
+
+      // The reset cancelled the timer, so advancing past the TTL fires no restore.
+      timer.advanceTime(60_000);
+      expect(manager.getPendingDeviceCleanup("emulator-5554")).toBeNull();
+      expect(restored).toEqual([]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("cancels the prior TTL before a slow re-apply so it cannot clear the freshly-shaped slot (#6085 review)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const started = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-reapply", "emulator-5554", "android");
+      // First apply arms a 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-reapply",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // A slow re-apply begins; its tracked mutation blocks partway through.
+      const reapply = runSessionNetworkMutation(
+        manager,
+        "net-reapply",
+        "emulator-5554",
+        true,
+        async () => {
+          started.resolve();
+          await finished.promise;
+        },
+        30,
+      );
+      await started.promise;
+
+      // The prior TTL was cancelled BEFORE the mutation ran, so advancing past its
+      // original deadline while the re-apply is still in flight fires NO restore —
+      // the freshly-published slot is not cleared out from under the re-apply.
+      timer.advanceTime(60_000);
+      expect(restored).toEqual([]);
+      expect(manager.getNetworkCondition("net-reapply")).toEqual({ initialProfile: "none" });
+
+      finished.resolve();
+      await reapply;
+
+      // The new TTL is armed only after the mutation settled, and fires on its own clock.
+      timer.advanceTime(30_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

@@ -4,6 +4,7 @@ import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
   DeviceState,
+  MAX_NETWORK_CONDITION_TTL_SECONDS,
   networkConditionInputDegrades,
   networkConditionInputError,
   type BiometricEnrollment,
@@ -126,6 +127,47 @@ const biometricStateInputSchema = z.object({
     .describe("Set iOS Simulator biometric enrollment state."),
 });
 
+// In direct/sessionless mode there is no session lifecycle owner to enforce a
+// networkCondition TTL, so accepting `expiresInSeconds` there would echo a TTL we
+// will never honor and leave the emulator shaped indefinitely (issue #6085 review
+// item 3). Reject it up front rather than make a false promise.
+const NETWORK_CONDITION_TTL_UNENFORCEABLE_ERROR =
+  "networkCondition.expiresInSeconds cannot be honored in direct/sessionless mode: there is no " +
+  "session lifecycle owner to enforce the TTL, so the device would stay shaped indefinitely. " +
+  "Omit expiresInSeconds (and reset the condition yourself when done), or run within a session.";
+
+/**
+ * A networkCondition mutation needs a session restore slot only when it degrades
+ * the link on an Android emulator (issue #6012) — the single decision shared by
+ * the restore-slot registration and the TTL-enforceability check.
+ */
+function shouldRegisterNetworkRestore(device: BootedDevice, args: SetDeviceStateArgs): boolean {
+  return (
+    args.networkCondition !== undefined &&
+    networkConditionInputDegrades(args.networkCondition) &&
+    device.platform === "android" &&
+    device.deviceId.startsWith("emulator-")
+  );
+}
+
+/**
+ * True when a request carries a networkCondition TTL that WOULD shape an emulator
+ * (`registerNetworkRestore`) but has no session lifecycle owner to enforce it —
+ * the case that must be rejected rather than shaped indefinitely (issue #6085).
+ */
+function networkConditionTtlIsUnenforceable(
+  expiresInSeconds: number | undefined,
+  registerNetworkRestore: boolean,
+  hasLifecycleOwner: boolean,
+): boolean {
+  return (
+    registerNetworkRestore &&
+    expiresInSeconds !== undefined &&
+    expiresInSeconds > 0 &&
+    !hasLifecycleOwner
+  );
+}
+
 const networkConditionInputSchema = z
   .object({
     profile: z
@@ -155,8 +197,14 @@ const networkConditionInputSchema = z
     expiresInSeconds: z
       .number()
       .min(0)
+      .max(MAX_NETWORK_CONDITION_TTL_SECONDS)
       .optional()
-      .describe("Advisory TTL; session release/expiry restores normal connectivity."),
+      .describe(
+        "TTL in seconds. When set on a degrading request, a timer resets the device to normal " +
+          "connectivity after it elapses, independent of session lifetime; session release/expiry " +
+          "also restores connectivity, whichever comes first. Capped at " +
+          `${MAX_NETWORK_CONDITION_TTL_SECONDS}s (~24.8 days) to fit the timer's 32-bit limit.`,
+      ),
   })
   // Reject non-actionable / contradictory requests using the SAME classifier the
   // setter uses, so schema acceptance and runtime behavior cannot disagree
@@ -522,11 +570,28 @@ export function registerUtilityTools() {
         : undefined;
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).
-    const registerNetworkRestore =
-      args.networkCondition !== undefined &&
-      networkConditionInputDegrades(args.networkCondition) &&
-      device.platform === "android" &&
-      device.deviceId.startsWith("emulator-");
+    const registerNetworkRestore = shouldRegisterNetworkRestore(device, args);
+
+    // A degrade that WOULD shape an emulator but carries a TTL with no lifecycle
+    // owner to enforce it must be rejected, not applied — otherwise the device is
+    // shaped indefinitely while the result falsely echoes a TTL (issue #6085
+    // review item 3).
+    const hasLifecycleOwner = Boolean(sessionManager && args.sessionUuid);
+    if (
+      networkConditionTtlIsUnenforceable(
+        args.networkCondition?.expiresInSeconds,
+        registerNetworkRestore,
+        hasLifecycleOwner,
+      )
+    ) {
+      return createJSONToolResponse({
+        message: NETWORK_CONDITION_TTL_UNENFORCEABLE_ERROR,
+        success: false,
+        deviceId: device.deviceId,
+        platform: device.platform,
+        error: NETWORK_CONDITION_TTL_UNENFORCEABLE_ERROR,
+      });
+    }
 
     // A setter that routes ANY networkCondition-bearing mutation through
     // runSessionNetworkMutation, so the restore slot is registered before the
@@ -541,6 +606,7 @@ export function registerUtilityTools() {
             device.deviceId,
             registerNetworkRestore,
             () => deviceState.setState(input),
+            input.networkCondition.expiresInSeconds,
           )
         : deviceState.setState(input);
 
@@ -580,6 +646,7 @@ export function registerUtilityTools() {
         device.deviceId,
         registerNetworkRestore,
         mutation,
+        args.networkCondition.expiresInSeconds,
       );
     } else {
       result = await runSessionBiometricMutation(

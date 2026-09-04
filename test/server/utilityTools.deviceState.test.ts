@@ -82,7 +82,11 @@ describe("device state tools", () => {
     expect(() =>
       setTool!.schema.parse({ networkCondition: { delayMs: 400, expiresInSeconds: 5 } }),
     ).not.toThrow();
-    // #6012 final: offline + a shaping override is contradictory → rejected.
+    // #6085 item 4: an expiresInSeconds above the 32-bit setTimeout ceiling is
+    // rejected by the schema so the ms product cannot overflow.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { profile: "3g", expiresInSeconds: 2_147_484 } }),
+    ).toThrow();
     expect(() =>
       setTool!.schema.parse({ networkCondition: { profile: "offline", delayMs: 500 } }),
     ).toThrow();
@@ -153,6 +157,24 @@ describe("device state tools", () => {
       capability: "unsupported",
       requestedProfile: "3g",
     });
+  });
+
+  test("rejects networkCondition.expiresInSeconds in sessionless mode where no lifecycle owner can enforce it (#6085)", async () => {
+    // Direct/sessionless mode: DaemonState is uninitialized, so the handler has no
+    // SessionManager to schedule a TTL. A degrade that WOULD shape an emulator with
+    // a TTL must be rejected rather than shape the device indefinitely while falsely
+    // echoing the TTL.
+    DaemonState.getInstance().reset();
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const emulator = createBootedDevice("emulator-5554", "android", "Pixel");
+
+    const response = await setTool!.deviceAwareHandler!(emulator, {
+      networkCondition: { profile: "3g", expiresInSeconds: 30 },
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("cannot be honored in direct/sessionless mode");
   });
 
   test("does not register a network restore slot for an unsupported (iOS) platform", async () => {

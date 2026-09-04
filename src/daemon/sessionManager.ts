@@ -13,6 +13,7 @@ import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import {
   DeviceState,
+  MAX_NETWORK_CONDITION_TTL_SECONDS,
   type BiometricEnrollment,
   type NetworkConditionProfile,
 } from "../features/utility/DeviceState";
@@ -332,6 +333,18 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /**
+   * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
+   * When a session degrades the network with an `expiresInSeconds`, a timer resets
+   * the profile to `none` when it elapses — independent of session lifetime. The
+   * timer is cancelled on release/rebind (whichever restore runs first wins) and
+   * clears the restore slot when it fires, so it can never fire against a freed
+   * device or double-restore.
+   */
+  private readonly networkConditionExpiryTimers: Map<
+    string,
+    { handle: NodeJS.Timeout; session: Session }
+  > = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
   /** Automatic device assignments that have not yet started their creation write. */
@@ -965,6 +978,10 @@ export class SessionManager {
     // against that device below, so DevicePool.releaseDevice defers idling it.
     const pendingBiometricRestoration = (await this.restoreBiometricEnrollmentBestEffort(existing))
       .pending;
+    // Rebind restores the old device to `none` here, so cancel any standalone TTL
+    // for this session — it must not later fire against the now-released old
+    // device (issue #6085 item 2).
+    this.cancelNetworkConditionExpiry(existing.sessionId);
     const pendingNetworkRestoration = existing.cacheData.networkCondition
       ? (await this.restoreNetworkConditionBestEffort(existing)).pending
       : null;
@@ -1376,6 +1393,11 @@ export class SessionManager {
     reason: ReleaseReasonState,
   ): Promise<string | null> {
     try {
+      // Release restores the device to `none` itself, so a standalone TTL is now
+      // redundant — cancel it first so the two restore paths cannot both fire
+      // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
+      // already cleared the slot) wins.
+      this.cancelNetworkConditionExpiry(sessionId);
       const setups = Array.from(this.sessionSetupPromises, (setup) =>
         setup.session === session ? setup.promise : null,
       ).filter((setup): setup is Promise<void> => setup !== null);
@@ -2003,6 +2025,19 @@ export class SessionManager {
     target: NetworkConditionRestoreTarget,
     initialError: unknown,
   ): Promise<void> {
+    await this.retryNetworkConditionRestoreUntilSuccess(target, initialError);
+  }
+
+  /**
+   * Bounded restore retries after an initial failure. Returns `true` if any retry
+   * succeeded, `false` once the attempts are exhausted. The boolean lets the TTL
+   * path decide whether it may release restoration ownership (clear the slot),
+   * while the release path (which discards the session anyway) ignores it.
+   */
+  private async retryNetworkConditionRestoreUntilSuccess(
+    target: NetworkConditionRestoreTarget,
+    initialError: unknown,
+  ): Promise<boolean> {
     let lastError = initialError;
     for (let attempt = 1; attempt <= NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS; attempt++) {
       await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
@@ -2011,7 +2046,7 @@ export class SessionManager {
         logger.info(
           `Restored network condition for session ${target.sessionId} on retry ${attempt}`,
         );
-        return;
+        return true;
       } catch (error) {
         // Teardown is best-effort: keep retrying, then report the last failure.
         lastError = error;
@@ -2025,6 +2060,139 @@ export class SessionManager {
         `${NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
         `may hold session-modified shaping: ${lastError}`,
     );
+    return false;
+  }
+
+  /**
+   * Arm a standalone per-condition network TTL (issue #6085 item 2): when it
+   * elapses, the device is reset to `none` independent of session lifetime.
+   * Re-scheduling (a re-applied condition) cancels the prior timer first, so only
+   * the latest TTL is armed. A non-positive TTL arms nothing (and still clears any
+   * prior timer), matching the "TTL-only / neutral request applies nothing" rule.
+   *
+   * Keyed by session id but IDENTITY-GUARDED by the captured `Session` instance
+   * (issue #6085 review): the caller passes the exact session it just mutated, and
+   * the timer fires against that instance only — so a stale schedule from a
+   * timed-out setup cannot arm or fire a TTL against a same-UUID REPLACEMENT
+   * session. The TTL is clamped to `MAX_NETWORK_CONDITION_TTL_SECONDS` so the
+   * millisecond product cannot overflow `setTimeout`'s signed 32-bit delay (item 4).
+   */
+  scheduleNetworkConditionExpiry(session: Session, expiresInSeconds: number): void {
+    const sessionId = session.sessionId;
+    this.cancelNetworkConditionExpiry(sessionId);
+    if (!(expiresInSeconds > 0)) {
+      return;
+    }
+    // A stale schedule (e.g. a setup that finished after this session was released
+    // and replaced) must not arm a timer against the replacement — bail unless the
+    // captured instance is still the live session.
+    if (this.sessions.get(sessionId) !== session) {
+      return;
+    }
+    const effectiveSeconds = Math.min(expiresInSeconds, MAX_NETWORK_CONDITION_TTL_SECONDS);
+    if (effectiveSeconds < expiresInSeconds) {
+      logger.warn(
+        `networkCondition TTL of ${expiresInSeconds}s exceeds the ${MAX_NETWORK_CONDITION_TTL_SECONDS}s ` +
+          `setTimeout limit for session ${sessionId}; clamping to ${effectiveSeconds}s`,
+      );
+    }
+    const handle = this.timer.setTimeout(() => {
+      this.handleNetworkConditionExpiry(session);
+    }, effectiveSeconds * 1000);
+    this.networkConditionExpiryTimers.set(sessionId, { handle, session });
+  }
+
+  /**
+   * Cancel a pending network TTL. Called on release, rebind, and any subsequent
+   * network mutation (a manual reset, or a re-apply BEFORE it re-arms) so the
+   * release-restore and the TTL can never both fire. A no-op when no timer is armed.
+   */
+  cancelNetworkConditionExpiry(sessionId: string): void {
+    const entry = this.networkConditionExpiryTimers.get(sessionId);
+    if (entry !== undefined) {
+      this.timer.clearTimeout(entry.handle);
+      this.networkConditionExpiryTimers.delete(sessionId);
+    }
+  }
+
+  /**
+   * TTL elapsed: reset the device to `none` via the SAME bounded restore/retry the
+   * session-release path uses, and RETAIN restoration ownership — keep the restore
+   * slot and the device quarantined — until the reset actually SUCCEEDS (issue
+   * #6085 review). A transient emulator-console rejection therefore does not end
+   * quarantine and hand a still-shaped device back to the pool: it retries, and if
+   * every attempt is exhausted the slot is left in place so a later release still
+   * retries. Only on success is the slot cleared, so a subsequent release cannot
+   * double-restore.
+   *
+   * Identity-guarded on the captured `Session`: a fire against a same-UUID
+   * REPLACEMENT session (or an already-released one) is a no-op, so it never acts
+   * on a freed or replaced device.
+   */
+  private handleNetworkConditionExpiry(session: Session): void {
+    const sessionId = session.sessionId;
+    const entry = this.networkConditionExpiryTimers.get(sessionId);
+    if (entry && entry.session === session) {
+      this.networkConditionExpiryTimers.delete(sessionId);
+    }
+    // Read the raw session map rather than getSession(), so a timer fire cannot
+    // trigger a lazy-expiry release as a side effect. A missing or replaced
+    // session was already released — its release-restore handled connectivity.
+    if (this.sessions.get(sessionId) !== session) {
+      return;
+    }
+    const target = this.networkConditionRestoreTarget(session);
+    if (!target) {
+      // Slot already cleared by a prior restore: nothing to do, no double-restore.
+      return;
+    }
+    logger.info(
+      `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
+    );
+    this.trackPendingDeviceCleanup(target.deviceId, [
+      this.restoreNetworkConditionOnExpiry(session, target),
+    ]);
+  }
+
+  /**
+   * Reset the device on TTL expiry, then bounded-retry on failure — the same
+   * machinery `restoreNetworkConditionBestEffort` uses on release. The restore slot
+   * is cleared only after a definitive success, so ownership (and quarantine) is
+   * retained until the device is actually clean.
+   */
+  private async restoreNetworkConditionOnExpiry(
+    session: Session,
+    target: NetworkConditionRestoreTarget,
+  ): Promise<void> {
+    try {
+      await this.restoreNetworkCondition(target);
+      this.clearNetworkConditionIfOwned(session);
+      return;
+    } catch (error) {
+      logger.warn(
+        `Failed to reset network condition on TTL expiry for session ${session.sessionId}; ` +
+          `device ${target.deviceId} may hold session-modified shaping, retrying: ${error}`,
+      );
+      const succeeded = await this.retryNetworkConditionRestoreUntilSuccess(target, error);
+      if (succeeded) {
+        this.clearNetworkConditionIfOwned(session);
+      }
+      // On exhaustion the slot is intentionally retained so a later release retries.
+    }
+  }
+
+  /**
+   * Drop the network restore slot once a reset has satisfied it (issue #6085),
+   * but ONLY while the captured session is still the live one — a same-UUID
+   * replacement must keep its own freshly-published slot.
+   */
+  private clearNetworkConditionIfOwned(session: Session): void {
+    if (this.sessions.get(session.sessionId) !== session) {
+      return;
+    }
+    if (session.cacheData.networkCondition) {
+      delete session.cacheData.networkCondition;
+    }
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
@@ -2448,6 +2616,12 @@ export class SessionManager {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+    // Cancel any armed per-condition network TTLs so a stopped manager leaves no
+    // dangling timer (issue #6085 item 2).
+    for (const entry of this.networkConditionExpiryTimers.values()) {
+      this.timer.clearTimeout(entry.handle);
+    }
+    this.networkConditionExpiryTimers.clear();
   }
 
   // Intentionally NOT barrier-tracked: this write is `await`ed by its caller

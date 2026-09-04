@@ -20,6 +20,7 @@ export async function runSessionNetworkMutation<T>(
   deviceId: string,
   registerRestore: boolean,
   mutation: () => Promise<T>,
+  expiresInSeconds?: number,
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     return await mutation();
@@ -50,6 +51,13 @@ export async function runSessionNetworkMutation<T>(
     sessionManager.setNetworkCondition(sessionUuid, { initialProfile: "none" });
   }
 
+  // Cancel any prior TTL BEFORE the mutation, not after (issue #6085 review): a
+  // slow re-apply would otherwise leave the OLD timer armed, and it could fire
+  // mid-mutation, reset the just-shaped device, and clear the freshly-published
+  // restore slot. Cancelling up front closes that overlap window; the new TTL (if
+  // any) is armed only after the mutation settles, below.
+  sessionManager.cancelNetworkConditionExpiry(sessionUuid);
+
   let completed = false;
   let result!: T;
   await sessionManager.trackSessionSetup(session, async () => {
@@ -60,6 +68,16 @@ export async function runSessionNetworkMutation<T>(
     throw new Error(
       `Cannot mutate network condition: session ${sessionUuid} began releasing before the mutation started.`,
     );
+  }
+  // Arm the standalone per-condition TTL (issue #6085 item 2) for a degrade that
+  // registered a restore slot AND carries a positive TTL. Pass the CAPTURED
+  // `session` instance so a stale re-apply — one whose tracked setup finished only
+  // after this session was released and replaced under the same UUID — cannot arm
+  // a TTL against the replacement (scheduleNetworkConditionExpiry identity-guards
+  // on it). A reset, or a degrade with no TTL, arms nothing; the pre-mutation
+  // cancel above already cleared any prior timer.
+  if (registerRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
+    sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds);
   }
   return result;
 }

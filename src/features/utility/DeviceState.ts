@@ -191,6 +191,15 @@ export const NETWORK_CONDITION_PROFILES: Record<NetworkConditionProfile, Network
     ),
   ) as Record<NetworkConditionProfile, NetworkConditionValues>;
 
+/**
+ * Upper bound for `expiresInSeconds` (issue #6085 item 4). A single
+ * `setTimeout(ms)` in Node/Bun truncates its delay to a signed 32-bit int, so any
+ * value above `2_147_483_647` ms (~24.85 days) wraps to a tiny delay and would
+ * reset the network almost immediately. Cap the accepted TTL at
+ * `floor(2_147_483_647 / 1000)` seconds so the millisecond product always fits.
+ */
+export const MAX_NETWORK_CONDITION_TTL_SECONDS = Math.floor(2_147_483_647 / 1000);
+
 export interface NetworkConditionState {
   supported: boolean;
   capability?: NetworkConditionCapability;
@@ -202,10 +211,23 @@ export interface NetworkConditionState {
   /** Explicit documented values applied (may reflect caller overrides). */
   values?: NetworkConditionValues;
   verified?: boolean;
-  /** Advisory TTL echoed back; enforced by the session layer on release/expiry. */
+  /**
+   * TTL echoed back. Enforced by the session layer: a per-condition timer resets
+   * the device to `none` when it elapses (issue #6085 item 2), and session
+   * release/expiry also restores connectivity — whichever comes first.
+   */
   expiresInSeconds?: number;
   /** Best-effort emulator `network status` readback (reads only). */
   rawStatus?: string;
+  /**
+   * Best-effort structured parse of the emulator `network status` readback (reads
+   * only, issue #6085 item 3). Only the fields the free-text output could be
+   * parsed into are present; an unparseable or absent field is omitted, and the
+   * verbatim `rawStatus` is always kept alongside. It is deliberately NOT used to
+   * claim `verified` at the read layer — the read carries no requested profile to
+   * compare against — so it is a diagnostic signal, not a verification verdict.
+   */
+  observedValues?: Partial<NetworkConditionValues>;
   warning?: string;
   error?: string;
 }
@@ -229,7 +251,11 @@ export interface SetNetworkConditionInput {
   downloadKbps?: number;
   uploadKbps?: number;
   packetLossPercent?: number;
-  /** Advisory TTL; session release/expiry restores normal connectivity. */
+  /**
+   * TTL in seconds. When set on a degrade, the session layer schedules a timer
+   * that resets the device to `none` when it elapses (issue #6085 item 2);
+   * session release/expiry also restores connectivity, whichever comes first.
+   */
   expiresInSeconds?: number;
 }
 
@@ -350,6 +376,62 @@ function emulatorConsoleReportsFailure(stdout: string, stderr: string): boolean 
     return true;
   }
   return outputLooksLikeShellFailure(stdout, stderr);
+}
+
+/**
+ * Best-effort parse of the emulator console `network status` free text into the
+ * structured applied values (issue #6085 item 3). The output — per the Android
+ * emulator console — is roughly:
+ *
+ *   Current network status:
+ *     download speed:   236800 bits/s (231.2 KB/s)
+ *     upload speed:     118400 bits/s (115.6 KB/s)
+ *     minimum latency:  80 ms
+ *     maximum latency:  400 ms
+ *
+ * The exact shape varies by emulator version, so this is DELIBERATELY DEFENSIVE:
+ * every field is optional, an absent or unparseable field is simply omitted, and
+ * it never throws. It returns only the subset it could extract, or `null` when
+ * nothing parsed — callers then fall back to surfacing `rawStatus` verbatim
+ * without claiming any structured value they could not actually read.
+ *
+ * `download/uploadKbps` are converted from the reported bits/s to kbps (the
+ * vocabulary the `network speed` setter uses); `delayMs` reflects the MAXIMUM
+ * latency (a profile's documented delay is its max), falling back to the minimum
+ * latency when only that is present. `packetLossPercent` is never derived — the
+ * console has no loss verb, so the status output carries none.
+ */
+export function parseEmulatorNetworkStatus(raw: string): Partial<NetworkConditionValues> | null {
+  if (!raw) {
+    return null;
+  }
+  const parsed: Partial<NetworkConditionValues> = {};
+  const bitsPerSecToKbps = (match: RegExpMatchArray | null): number | undefined => {
+    if (!match) {
+      return undefined;
+    }
+    const bits = Number.parseInt(match[1].replace(/,/g, ""), 10);
+    return Number.isFinite(bits) ? Math.round(bits / 1000) : undefined;
+  };
+  const download = bitsPerSecToKbps(raw.match(/download speed:\s*([\d,]+)\s*bits\/s/i));
+  if (download !== undefined) {
+    parsed.downloadKbps = download;
+  }
+  const upload = bitsPerSecToKbps(raw.match(/upload speed:\s*([\d,]+)\s*bits\/s/i));
+  if (upload !== undefined) {
+    parsed.uploadKbps = upload;
+  }
+  // Prefer the max latency (matches a profile's documented delay); fall back to
+  // the min when only that is reported.
+  const latencyMatch =
+    raw.match(/maximum latency:\s*(\d+)\s*ms/i) ?? raw.match(/minimum latency:\s*(\d+)\s*ms/i);
+  if (latencyMatch) {
+    const ms = Number.parseInt(latencyMatch[1], 10);
+    if (Number.isFinite(ms)) {
+      parsed.delayMs = ms;
+    }
+  }
+  return Object.keys(parsed).length > 0 ? parsed : null;
 }
 
 /**
@@ -1036,11 +1118,18 @@ export class DeviceState {
           error: `${stdout}\n${stderr}`.trim() || "emu network status reported an error",
         };
       }
+      // Best-effort structured readback (issue #6085 item 3): parse the free-text
+      // status into applied delay/speed when the format allows, keeping rawStatus
+      // verbatim as the fallback. A parse failure is silent — no structured field
+      // is claimed and rawStatus still carries the raw signal.
+      const trimmed = stdout.trim();
+      const observedValues = trimmed ? parseEmulatorNetworkStatus(trimmed) : null;
       return {
         supported: true,
         capability: "full",
         method: "android_emulator_console",
-        ...(stdout.trim() ? { rawStatus: stdout.trim() } : {}),
+        ...(trimmed ? { rawStatus: trimmed } : {}),
+        ...(observedValues ? { observedValues } : {}),
       };
     } catch (error) {
       return {

@@ -4,6 +4,7 @@ import {
   DeviceState,
   EMPTY_STATE_SELECTION_ERROR,
   NETWORK_CONDITION_PROFILES,
+  networkConditionInputDegrades,
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -503,6 +504,38 @@ describe("DeviceState", () => {
     expect(set.networkCondition?.error).toContain("iOS");
     // No simctl command is issued for an unsupported concern.
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+  });
+
+  test("networkConditionInputDegrades distinguishes shaping from resets and no-ops", () => {
+    // A real profile degrades.
+    expect(networkConditionInputDegrades({ profile: "3g" })).toBe(true);
+    // A shaping override over the `none` baseline degrades even with no profile,
+    // so the session layer records a restore slot (issue #6012 leak guard).
+    expect(networkConditionInputDegrades({ delayMs: 500 })).toBe(true);
+    expect(networkConditionInputDegrades({ profile: "none", downloadKbps: 100 })).toBe(true);
+    // Resets and plain `none` do not.
+    expect(networkConditionInputDegrades({ cancel: true })).toBe(false);
+    expect(networkConditionInputDegrades({ reset: true, profile: "3g" })).toBe(false);
+    expect(networkConditionInputDegrades({ profile: "none" })).toBe(false);
+    // Packet loss alone is not appliable by the emulator console, so it is not a
+    // degrade for restore purposes.
+    expect(networkConditionInputDegrades({ packetLossPercent: 20 })).toBe(false);
+  });
+
+  test("applies a shaping override with no profile (override-only degrade)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { delayMs: 500 } });
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition?.values).toMatchObject({ delayMs: 500 });
+    expect(client.getAllCommands()).toEqual([
+      "emu network delay 500:500",
+      "emu network speed 0:0",
+      "emu gsm data on",
+    ]);
   });
 
   test("rejects an empty state selection instead of reporting a no-op success", async () => {

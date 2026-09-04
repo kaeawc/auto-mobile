@@ -348,6 +348,31 @@ function resolveNetworkValues(
 }
 
 /**
+ * True when a `networkCondition` request actually degrades the link — a real
+ * profile, or a shaping override (`delayMs`/`downloadKbps`/`uploadKbps`) applied
+ * over the `none` baseline. `cancel`/`reset` and a `packetLossPercent`-only
+ * request (the emulator console cannot apply partial loss) do NOT degrade.
+ *
+ * The session layer uses this to decide whether to record a restore baseline, so
+ * an override-only request cannot leave a device shaped with no restore slot
+ * (issue #6012). Kept next to `buildEmulatorNetworkCommands` — its `hasOverride`
+ * test — so the two stay in agreement.
+ */
+export function networkConditionInputDegrades(input: SetNetworkConditionInput): boolean {
+  if (input.cancel || input.reset) {
+    return false;
+  }
+  if (resolveNetworkProfile(input) !== "none") {
+    return true;
+  }
+  return (
+    input.delayMs !== undefined ||
+    input.downloadKbps !== undefined ||
+    input.uploadKbps !== undefined
+  );
+}
+
+/**
  * Build the emulator console commands (in dispatch order) that apply a profile.
  * Explicit numeric overrides replace the profile's named specs with
  * `<min>:<max>` delay and `<up>:<down>` speed specs the emulator also accepts.

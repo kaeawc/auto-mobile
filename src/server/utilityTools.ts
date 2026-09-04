@@ -4,6 +4,7 @@ import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
   DeviceState,
+  networkConditionInputDegrades,
   type BiometricEnrollment,
   type DeviceStateResult,
 } from "../features/utility/DeviceState";
@@ -459,13 +460,17 @@ export function registerUtilityTools() {
       });
     }
     // Register the network-condition slot so session release/expiry restores
-    // normal connectivity and never leaves a device impaired (issue #6012).
-    // Only a degrading condition needs restoring; cancel/reset/none do not.
+    // normal connectivity and never leaves a device impaired (issue #6012). Only
+    // a request that actually degrades the link needs restoring (a real profile
+    // OR a shaping override over the `none` baseline — cancel/reset/none do not),
+    // and only on an Android emulator, the sole platform where setState applies
+    // anything. Guarding on the emulator serial keeps the restore slot's presence
+    // authoritative evidence a device was shaped.
     if (
       args.networkCondition &&
-      !args.networkCondition.cancel &&
-      !args.networkCondition.reset &&
-      (args.networkCondition.profile ?? "none") !== "none" &&
+      networkConditionInputDegrades(args.networkCondition) &&
+      device.platform === "android" &&
+      device.deviceId.startsWith("emulator-") &&
       args.sessionUuid &&
       DaemonState.getInstance().isInitialized()
     ) {

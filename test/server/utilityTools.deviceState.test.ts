@@ -89,6 +89,33 @@ describe("device state tools", () => {
     });
   });
 
+  test("does not register a network restore slot for an unsupported (iOS) platform", async () => {
+    // #6012 (review #2): the slot's presence is authoritative evidence a device
+    // was shaped, so an unsupported platform — where setState applies nothing —
+    // must not register one.
+    const fakeTimer = new FakeTimer();
+    const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+    const devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      new FakeInstalledAppsRepository(),
+      new FakeDeviceManager([], []),
+      new DefaultRetryExecutor(fakeTimer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("ios-session", "sim-ios-1", "ios");
+
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    await setTool!.deviceAwareHandler!(createBootedDevice("sim-ios-1", "ios", "iPhone 16"), {
+      networkCondition: { profile: "3g" },
+      sessionUuid: "ios-session",
+    });
+
+    expect(sessionManager.getNetworkCondition("ios-session")).toBeUndefined();
+    sessionManager.stopCleanupTimer();
+  });
+
   test("reads networkCondition through the getDeviceState handler on iOS", async () => {
     const getTool = ToolRegistry.getTool("getDeviceState");
     const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");

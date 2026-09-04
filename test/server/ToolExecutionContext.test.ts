@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { DeviceSession } from "../../src/db/types";
 
 describe("ToolExecutionContext", () => {
   let sessionManager: SessionManager;
@@ -499,5 +500,172 @@ describe("ToolExecutionContext", () => {
     } finally {
       boundedSessionManager.stopCleanupTimer();
     }
+  });
+
+  // #6069: A never-issued sessionUuid reaching the device-tool path must be
+  // rejected even when the caller's connection already holds a live session —
+  // the residual of #6019 that #6045 left open. `requireIssuedSession` is the
+  // flag toolRegistry sets for exactly this (caller-provided) path.
+  describe("rejects an unissued sessionUuid on the device-tool path (#6069)", () => {
+    const nonTerminalPersisted = (sessionUuid: string, deviceId: string): DeviceSession => ({
+      session_uuid: sessionUuid,
+      device_id: deviceId,
+      platform: "android",
+      status: "active",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 10,
+      heartbeat_timeout_ms: 5,
+      has_received_heartbeat: 1,
+      created_at: "2026-09-03T00:00:00.000Z",
+      updated_at: "2026-09-03T00:00:00.000Z",
+    });
+
+    test("rejects a fabricated UUID and never assigns a pooled device while a session is active", async () => {
+      let setupCalls = 0;
+      AndroidCtrlProxyManager.getInstance = () =>
+        ({
+          resetSetupState: () => {},
+          setup: async () => {
+            setupCalls += 1;
+            return { success: true, message: "ok" };
+          },
+        }) as any;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        waitForConnection: async () => true,
+        close: async () => {},
+      })) as any;
+
+      // The connection already holds a live, issued session on device-1.
+      await devicePool.assignDeviceToSession("issued-session", "android");
+      expect(sessionManager.getSession("issued-session")?.assignedDevice).toBe("device-1");
+
+      const assignSpy = spyOn(devicePool, "assignDeviceToSession");
+
+      await expect(
+        createToolExecutionContext(
+          "kumquat-D",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+          undefined,
+          undefined,
+          true, // requireIssuedSession — the device-tool boundary
+        ),
+      ).rejects.toThrow(/not an active daemon session/);
+
+      // No pooled device was minted for the fabricated id, and the caller's own
+      // live session is untouched.
+      expect(assignSpy).not.toHaveBeenCalled();
+      expect(sessionManager.getSession("kumquat-D")).toBeNull();
+      expect(sessionManager.getSession("issued-session")?.assignedDevice).toBe("device-1");
+      expect(setupCalls).toBe(0);
+      assignSpy.mockRestore();
+    });
+
+    test("still recovers a persisted, non-terminal session (live-during-restart)", async () => {
+      AndroidCtrlProxyManager.getInstance = () =>
+        ({
+          resetSetupState: () => {},
+          setup: async () => ({ success: true, message: "ok" }),
+        }) as any;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        waitForConnection: async () => true,
+        close: async () => {},
+      })) as any;
+
+      const persisted = nonTerminalPersisted("restarted-session", "device-1");
+      const recoveryManager = new SessionManager(fakeTimer, {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      });
+      const recoveryPool = new DevicePool(
+        recoveryManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+      );
+      await recoveryPool.initializeWithDevices([createBootedDevice("device-1")]);
+
+      try {
+        const context = await createToolExecutionContext(
+          "restarted-session",
+          recoveryManager,
+          recoveryPool,
+          sessionOptions,
+          undefined,
+          undefined,
+          true, // requireIssuedSession must NOT block restart recovery
+        );
+        expect(context.deviceId).toBe("device-1");
+        expect(recoveryManager.getSession("restarted-session")?.assignedDevice).toBe("device-1");
+      } finally {
+        recoveryManager.stopCleanupTimer();
+      }
+    });
+
+    test("the caller's own issued session still resolves without a new assignment", async () => {
+      AndroidCtrlProxyManager.getInstance = () =>
+        ({
+          resetSetupState: () => {},
+          setup: async () => ({ success: true, message: "ok" }),
+        }) as any;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        waitForConnection: async () => true,
+        close: async () => {},
+      })) as any;
+
+      await sessionManager.createSession("mine", "device-1", "android");
+      const assignSpy = spyOn(devicePool, "assignDeviceToSession");
+
+      const context = await createToolExecutionContext(
+        "mine",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        undefined,
+        undefined,
+        true,
+      );
+
+      expect(context.deviceId).toBe("device-1");
+      expect(assignSpy).not.toHaveBeenCalled();
+      assignSpy.mockRestore();
+    });
+
+    test("device-label / internal fresh mint is unaffected (requireIssuedSession defaults false)", async () => {
+      AndroidCtrlProxyManager.getInstance = () =>
+        ({
+          resetSetupState: () => {},
+          setup: async () => ({ success: true, message: "ok" }),
+        }) as any;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        waitForConnection: async () => true,
+        close: async () => {},
+      })) as any;
+
+      // Mirrors deviceLabelMapping.registerDeviceLabelMap, which mints a fresh
+      // derived session without passing requireIssuedSession.
+      const context = await createToolExecutionContext(
+        "base:B",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(context.deviceId).toBe("device-1");
+      expect(sessionManager.getSession("base:B")?.assignedDevice).toBe("device-1");
+    });
   });
 });

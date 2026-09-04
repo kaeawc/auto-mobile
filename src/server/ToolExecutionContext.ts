@@ -79,6 +79,12 @@ export async function createToolExecutionContext(
   sessionOptions: SessionOptions = {},
   execution?: SessionExecutionMetadata,
   admittedSession?: Session,
+  // #6069: set by the device-tool path so the getOrCreateSession fallback below
+  // cannot mint a brand-new pooled session for a never-issued sessionUuid. Only a
+  // live session (resolved via admittedSession / getSessionForNewExecution) or a
+  // persisted, non-terminal row (restart recovery) is admissible. Internal callers
+  // that intentionally mint fresh derived sessions (device labels) leave it false.
+  requireIssuedSession = false,
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
@@ -99,6 +105,7 @@ export async function createToolExecutionContext(
       devicePool,
       sessionOptions.platform,
       execution,
+      requireIssuedSession,
     ));
 
   if (!sessionManager.isAdmittedForAutomation(session)) {

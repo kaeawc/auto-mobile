@@ -131,6 +131,84 @@ class AutoMobilePlanRedactionTest {
     )
   }
 
+  @Test
+  fun `scrubs exactly what the executor substitution produced`() {
+    // Sorted-key single pass: ${SECRET_TOKEN} -> sec-${AA}-zeta (AA resolved before TOKEN inserts
+    // it,
+    // ZZ after) — neither the raw value nor a fully-resolved fixpoint (#6029 review 695).
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-plan.yaml",
+      mapOf("SECRET_TOKEN" to "sec-\${AA}-\${ZZ}", "AA" to "alpha", "ZZ" to "zeta"),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the actual substituted secret must be scrubbed",
+      context.planContent.contains("sec-"),
+    )
+  }
+
+  @Test
+  fun `self referential secret terminates and is redacted`() {
+    // No fixpoint: the executor's single pass turns ${SECRET_TOKEN} into marker-${SECRET_TOKEN}
+    // once,
+    // so there is no unbounded expansion (#6029 review 701).
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-plan.yaml",
+      mapOf("SECRET_TOKEN" to "marker-\${SECRET_TOKEN}"),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the self-referential secret must be redacted",
+      context.planContent.contains("marker-"),
+    )
+  }
+
+  @Test
+  fun `parameterized secret key name is redacted`() {
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-parameterized-key.yaml",
+      mapOf("SECRET_KEY" to "apiToken", "apiToken" to secret),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "a parameterized secret key name must resolve and redact",
+      context.planContent.contains(secret),
+    )
+  }
+
+  @Test
+  fun `debug mode does not print substituted secret values in the plan content`() {
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
+    val originalOut = System.out
+    val captured = java.io.ByteArrayOutputStream()
+    System.setOut(java.io.PrintStream(captured, true, "UTF-8"))
+    try {
+      AutoMobilePlanExecutor.execute(
+        "test-plans/redaction-plan.yaml",
+        mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554", debugMode = true),
+      )
+    } finally {
+      System.setOut(originalOut)
+    }
+    assertFalse(
+      "debugMode must not emit the substituted secret to logcat",
+      captured.toString("UTF-8").contains(secret),
+    )
+  }
+
   private fun decodeDaemonPlanContent(): String? {
     val raw =
       fakeDaemonClient.executePlanArguments?.get("planContent")?.jsonPrimitive?.content

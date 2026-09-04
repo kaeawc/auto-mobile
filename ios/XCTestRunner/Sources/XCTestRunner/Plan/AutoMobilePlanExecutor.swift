@@ -180,16 +180,14 @@ public final class AutoMobilePlanExecutor {
         }
 
         // Values to redact from any recovery context that leaves the process for the LLM provider
-        // (issue #6029). Union the plan-declared secret keys with the caller-configured ones, resolve
-        // any parameterized key names, then collect the concrete values to scrub. The `substituted`
-        // string below keeps the real values — the daemon needs them to run the plan.
-        let secretKeys = SecretRedaction.resolveKeyNames(
-            configuration.secretParameterKeys.union(planMetadata.secretParameterKeys),
-            parameters: configuration.parameters
-        )
+        // (issue #6029). Parse the declared secret keys from the RAW plan (tolerant of `${...}` and
+        // immune to substitution truncation), union the caller-configured ones, and resolve any
+        // `${...}` inside the key names. The concrete strings to scrub are derived from THIS executor's
+        // own substitution — the single source of truth for what actually landed — so the scrub target
+        // always equals the recovery context. The `substituted` string keeps the real values for the
+        // daemon.
         let secretValues = SecretRedaction.secretValues(
-            keys: secretKeys,
-            parameters: configuration.parameters
+            resolveSecretValues(rawPlan: planContent)
         )
         PerfTimer
             .log(
@@ -434,10 +432,43 @@ public final class AutoMobilePlanExecutor {
             return content
         }
         var substituted = content
-        for (key, value) in parameters {
+        // Deterministic (sorted) order so the single ordered pass produces a reproducible result — the
+        // redaction path re-runs this same function to derive exactly what landed (issue #6029), and a
+        // hash-ordered pass would make that mapping (and the daemon payload) non-reproducible. Kept in
+        // sync with Android's sorted substitution.
+        for (key, value) in parameters.sorted(by: { $0.key < $1.key }) {
             substituted = substituted.replacingOccurrences(of: "${\(key)}", with: value)
         }
         return substituted
+    }
+
+    /// The concrete secret strings to scrub, derived entirely from THIS executor's substitution so
+    /// they always equal what landed in the recovery context (issue #6029). Secret keys come from the
+    /// caller config plus the RAW plan's `secretParameters:` (parsed placeholder-tolerantly); any
+    /// `${...}` inside a key name is resolved with the same substitution; and for each key both its raw
+    /// parameter value and its actual substituted value (`substituteParameters` applied to the bare
+    /// `${key}`, matching the ordered single pass exactly) are collected.
+    private func resolveSecretValues(rawPlan: String) -> [String] {
+        let declaredKeys = configuration.secretParameterKeys
+            .union(PlanMetadataParser.parseSecretParameterKeys(from: rawPlan))
+        guard !declaredKeys.isEmpty else {
+            return []
+        }
+        let params = configuration.parameters
+        let resolvedKeys = Set(declaredKeys.map { substituteParameters(in: $0, parameters: params) })
+
+        var values: [String] = []
+        for key in resolvedKeys {
+            if let raw = params[key], !raw.isEmpty {
+                values.append(raw)
+            }
+            let placeholder = "${\(key)}"
+            let landed = substituteParameters(in: placeholder, parameters: params)
+            if landed != placeholder, !landed.isEmpty {
+                values.append(landed)
+            }
+        }
+        return values
     }
 
     private func decodeExecutePlanResult(from text: String) throws -> ExecutePlanResult {

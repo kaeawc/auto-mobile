@@ -1,0 +1,12 @@
+---
+name: redaction-parameterized-key
+description: Declares its secret key name via a ${...} placeholder (issue #6029 review)
+secretParameters:
+  - ${SECRET_KEY}
+steps:
+  - tool: launchApp
+    appId: com.example.app
+    label: Launch app
+  - tool: inputText
+    text: "${apiToken}"
+    label: Enter the secret token

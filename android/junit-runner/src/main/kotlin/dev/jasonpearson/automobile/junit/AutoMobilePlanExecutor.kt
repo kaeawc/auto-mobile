@@ -184,18 +184,18 @@ internal object AutoMobilePlanExecutor {
         )
       }
 
-      // Read the RAW plan once. Parse the declared secret keys from the raw (pre-substitution)
-      // text:
-      // a substituted value containing YAML-breaking characters could make the substituted content
-      // unparseable and silently drop the declared keys, defeating redaction (#6029). Key NAMES are
-      // literals unaffected by substitution, so the raw plan is the safe source.
+      // Read the RAW plan once. Derive the effective secret keys and the concrete strings to scrub
+      // from THIS executor's own substitution — the single source of truth for what actually landed
+      // in
+      // the plan (#6029). Key names come from the RAW plan (placeholder-tolerant, immune to
+      // substitution truncation) plus the caller config, with any `${...}` in the names resolved.
       val rawPlanContent = File(resolvedPlanPath).readText()
       val secretKeys =
-        SecretRedactor.resolveKeyNames(
-          options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(rawPlanContent),
-          parameters,
-        )
-      val secretValues = SecretRedactor.secretValues(secretKeys, parameters)
+        (options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(rawPlanContent))
+          .map { substituteParameters(it, parameters) }
+          .toSet()
+      val secretValues =
+        SecretRedactor.secretValues(resolveSecretConcreteValues(secretKeys, parameters))
 
       // Load and process the plan with parameter substitution
       val processedPlanContent = loadAndProcessPlan(rawPlanContent, parameters)
@@ -203,7 +203,12 @@ internal object AutoMobilePlanExecutor {
       if (options.debugMode) {
         println("Executing AutoMobile plan: $planPath")
         println("Parameters: ${SecretRedactor.redactParameters(parameters, secretKeys)}")
-        println("Processed plan content:\n$processedPlanContent")
+        // Redact substituted secret values out of the plan-content debug print too (#6029) —
+        // otherwise
+        // debugMode leaks them to logcat even though the LLM path is masked.
+        println(
+          "Processed plan content:\n${SecretRedactor.redact(processedPlanContent, secretValues)}"
+        )
       }
 
       // Execute the processed plan
@@ -253,15 +258,7 @@ internal object AutoMobilePlanExecutor {
   }
 
   private fun loadAndProcessPlan(planContent: String, parameters: Map<String, Any>): String {
-    // Perform parameter substitution using template syntax ${parameter_name}
-    var processedContent = planContent
-    if (parameters.isNotEmpty()) {
-      parameters.forEach { (key, value) ->
-        val placeholder = "\${$key}"
-        processedContent =
-          processedContent.replace(placeholder, SecretRedactor.parameterStringValue(value))
-      }
-    }
+    val processedContent = substituteParameters(planContent, parameters)
 
     // Validate YAML schema after parameter substitution
     val validationResult = PlanSchemaValidator.validateYaml(processedContent)
@@ -279,6 +276,49 @@ internal object AutoMobilePlanExecutor {
     }
 
     return processedContent
+  }
+
+  /**
+   * Substitute `${key}` placeholders with parameter values in a single ordered pass. Deterministic
+   * (sorted) key order so the result is reproducible — the redaction path re-runs this same
+   * function to derive exactly what landed (#6029), and a hash-ordered pass would make that mapping
+   * (and the daemon payload) non-reproducible. Kept in sync with the iOS executor's sorted
+   * substitution.
+   */
+  private fun substituteParameters(content: String, parameters: Map<String, Any>): String {
+    if (parameters.isEmpty()) return content
+    var result = content
+    for ((key, value) in parameters.entries.sortedBy { it.key }) {
+      result = result.replace("\${$key}", SecretRedactor.parameterStringValue(value))
+    }
+    return result
+  }
+
+  /**
+   * The concrete secret strings to scrub, derived entirely from THIS executor's substitution so
+   * they always equal what landed in the recovery context (#6029). For each secret key: its raw
+   * parameter value and its actual substituted value (`substituteParameters` applied to the bare
+   * `${key}`, matching the ordered single pass exactly — no independent fixpoint, so a
+   * self-referential value cannot blow up). Blank/unchanged results are dropped.
+   */
+  private fun resolveSecretConcreteValues(
+    secretKeys: Set<String>,
+    parameters: Map<String, Any>,
+  ): List<String> {
+    if (secretKeys.isEmpty()) return emptyList()
+    val values = mutableListOf<String>()
+    for (key in secretKeys) {
+      parameters[key]
+        ?.let { SecretRedactor.parameterStringValue(it) }
+        ?.takeIf { it.isNotEmpty() }
+        ?.let {
+          values.add(it)
+        }
+      val placeholder = "\${$key}"
+      val landed = substituteParameters(placeholder, parameters)
+      if (landed != placeholder && landed.isNotEmpty()) values.add(landed)
+    }
+    return values
   }
 
   // ── Plan execution with recovery ──────────────────────────────────────────

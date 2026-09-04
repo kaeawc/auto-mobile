@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.junit
 
 import java.text.Normalizer
-import org.yaml.snakeyaml.Yaml
 
 /**
  * Redacts sensitive plan-parameter values from any recovery context that leaves the process for a
@@ -9,38 +8,32 @@ import org.yaml.snakeyaml.Yaml
  * LOCAL daemon is intentionally NOT routed through here — the daemon needs the real values to run
  * the plan, and it is not the egress boundary.
  *
- * The redactor works on the concrete secret VALUES (not the `${key}` templates): once a plan is
- * substituted, a secret's value can appear in the plan YAML, the failure error, and a substituted
- * tool name, so replacing every occurrence of each value covers those channels uniformly.
- * `internal` — only [AutoMobilePlanExecutor] consumes it. Mirrors the iOS `SecretRedaction`.
+ * This object does NOT resolve `${...}` placeholders: substitution is owned by
+ * [AutoMobilePlanExecutor], the single source of truth for what actually landed in the plan
+ * (issue #6029 review — an independent fixpoint could mismatch the executor's single ordered pass,
+ * or blow up on a self-referential value). The executor hands over the concrete substituted secret
+ * strings; this object expands each into its Unicode NFC/NFD forms and scrubs every occurrence. It
+ * also scans the RAW plan for the declared secret key names with a placeholder-tolerant line
+ * scanner (a full YAML load chokes on `${...}` in flow collections). `internal` — its only consumer
+ * is the executor, and `SecretRedactorTest` unit-tests it. Mirrors the iOS `SecretRedaction` /
+ * `PlanMetadataParser.parseSecretParameterKeys`.
  */
 internal object SecretRedactor {
   const val PLACEHOLDER: String = "***REDACTED***"
 
   /**
-   * Resolve `${...}` references inside declared secret key NAMES against [parameters], so a plan
-   * may parameterize the key it declares (`secretParameters: [${SECRET_KEY}]`). A literal key
-   * resolves to itself. Keeps iOS and Android agreeing on the effective key set.
+   * Expand the executor-supplied concrete secret strings into the exact forms to scrub: each value
+   * in its NFC and NFD Unicode forms, so a decomposed on-screen/error occurrence still matches a
+   * composed value (and vice versa). Blank inputs are dropped; the result is deduped preserving
+   * order.
    */
-  fun resolveKeyNames(keys: Set<String>, parameters: Map<String, Any>): Set<String> =
-    keys.map { resolve(it, parameters) }.toSet()
-
-  /**
-   * The concrete strings to scrub for the given (already key-name-resolved) secret keys. For each
-   * key we scrub BOTH its raw parameter value AND its fully-resolved value (a secret whose value
-   * embeds another `${param}` lands in the plan as the resolved form), each in its NFC and NFD
-   * Unicode forms so a decomposed on-screen/error occurrence still matches. Blank values contribute
-   * nothing. The value is stringified the same way parameter substitution stringifies it.
-   */
-  fun secretValues(keys: Set<String>, parameters: Map<String, Any>): List<String> {
+  fun secretValues(concreteValues: List<String>): List<String> {
     val values = LinkedHashSet<String>()
-    for (key in keys) {
-      val raw = parameters[key]?.let { parameterStringValue(it) } ?: continue
-      if (raw.isEmpty()) continue
-      val resolved = resolve(raw, parameters)
-      for (base in listOf(raw, resolved)) {
-        if (base.isNotEmpty()) values.addAll(normalizationForms(base))
-      }
+    for (value in concreteValues) {
+      if (value.isEmpty()) continue
+      values.add(value)
+      values.add(Normalizer.normalize(value, Normalizer.Form.NFC))
+      values.add(Normalizer.normalize(value, Normalizer.Form.NFD))
     }
     return values.toList()
   }
@@ -78,48 +71,95 @@ internal object SecretRedactor {
     else parameters.mapValues { (key, value) -> if (key in secretKeys) PLACEHOLDER else value }
 
   /**
-   * Parameter keys a plan declares sensitive via its top-level `secretParameters:` list. Unioned
-   * with [AutoMobilePlanExecutionOptions.secretParameterKeys] by the executor. Parsing failures
-   * yield an empty set — declaring secrets is best-effort metadata, never a hard execution
-   * dependency.
+   * Scan a plan's top-level `secretParameters:` declaration for the sensitive key names, tolerating
+   * `${...}` placeholders anywhere (they are literal text to the scanner). MUST run on the RAW,
+   * pre-substitution plan: a substituted value can inject a newline that truncates the declaration,
+   * and a full YAML load throws on unquoted placeholders in flow collections (issue #6029 review).
+   * Non-throwing. Only the `secretParameters:` block is scanned, so unrelated `${...}` lists are
+   * ignored. Mirrors iOS `PlanMetadataParser.parseSecretParameterKeys`.
    */
-  fun parsePlanSecretKeys(planContent: String): Set<String> =
-    try {
-      val root = Yaml().load<Any?>(planContent)
-      val list = (root as? Map<*, *>)?.get("secretParameters") as? List<*> ?: return emptySet()
-      list.mapNotNull { it?.toString()?.takeIf { key -> key.isNotBlank() } }.toSet()
-    } catch (e: Exception) {
-      // A malformed plan is caught and reported by PlanSchemaValidator on the substituted content;
-      // here we only need the secret-key hints, so swallow and fall back to the configured set.
-      println("Warning: failed to parse secretParameters from plan: ${e.message}")
-      emptySet()
-    }
-
-  /**
-   * Fully resolve `${key}` references in [value] against [parameters], iterating to a fixpoint so a
-   * value that embeds another parameter (which itself embeds another) resolves completely. Bounded
-   * by the parameter count so a reference cycle terminates instead of looping.
-   */
-  private fun resolve(value: String, parameters: Map<String, Any>): String {
-    if (!value.contains("\${")) return value
-    var current = value
-    repeat(parameters.size + 1) {
-      var next = current
-      for ((key, replacement) in parameters) {
-        next = next.replace("\${$key}", parameterStringValue(replacement))
+  fun parsePlanSecretKeys(planContent: String): Set<String> {
+    val lines = planContent.split('\n')
+    val keys = LinkedHashSet<String>()
+    var index = 0
+    while (index < lines.size) {
+      val trimmed = stripComments(lines[index]).trim()
+      if (
+        indentationLevel(stripComments(lines[index])) != 0 ||
+          !trimmed.startsWith("secretParameters:")
+      ) {
+        index++
+        continue
       }
-      if (next == current) return current
-      current = next
+      val inline = trimmed.removePrefix("secretParameters:").trim()
+      if (inline.isNotEmpty()) {
+        keys.addAll(parseInlineList(inline))
+        index++
+        continue
+      }
+      index++
+      // Block sequence: `-` items at ANY indent (flush with the parent key is valid YAML) until the
+      // next non-list line, i.e. the next top-level key.
+      while (index < lines.size) {
+        val itemTrimmed = stripComments(lines[index]).trim()
+        if (itemTrimmed.isEmpty()) {
+          index++
+          continue
+        }
+        if (!itemTrimmed.startsWith("-")) break
+        val item = unquote(itemTrimmed.removePrefix("-").trim())
+        if (item.isNotEmpty()) keys.add(item)
+        index++
+      }
     }
-    return current
+    return keys
   }
 
-  /** [value] plus its canonical NFC and NFD forms (deduped). */
-  private fun normalizationForms(value: String): List<String> =
-    linkedSetOf(
-        value,
-        Normalizer.normalize(value, Normalizer.Form.NFC),
-        Normalizer.normalize(value, Normalizer.Form.NFD),
-      )
-      .toList()
+  private fun stripComments(line: String): String {
+    val hash = line.indexOf('#')
+    return if (hash >= 0) line.substring(0, hash) else line
+  }
+
+  private fun indentationLevel(line: String): Int = line.takeWhile { it == ' ' }.length
+
+  private fun unquote(value: String): String {
+    if (value.length >= 2) {
+      val first = value.first()
+      val last = value.last()
+      if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+        return value.substring(1, value.length - 1)
+      }
+    }
+    return value
+  }
+
+  /**
+   * Parse a YAML flow list of scalar keys, e.g. `[apiToken, "password"]`. A comma inside a quoted
+   * item is part of the key, not a separator, so `["API,TOKEN"]` yields the single key `API,TOKEN`.
+   */
+  private fun parseInlineList(value: String): List<String> {
+    val inner = value.removePrefix("[").removeSuffix("]")
+    val items = mutableListOf<String>()
+    val current = StringBuilder()
+    var activeQuote: Char? = null
+    for (character in inner) {
+      when {
+        activeQuote != null -> {
+          if (character == activeQuote) activeQuote = null
+          current.append(character)
+        }
+        character == '"' || character == '\'' -> {
+          activeQuote = character
+          current.append(character)
+        }
+        character == ',' -> {
+          items.add(current.toString())
+          current.clear()
+        }
+        else -> current.append(character)
+      }
+    }
+    items.add(current.toString())
+    return items.map { unquote(it.trim()) }.filter { it.isNotEmpty() }
+  }
 }

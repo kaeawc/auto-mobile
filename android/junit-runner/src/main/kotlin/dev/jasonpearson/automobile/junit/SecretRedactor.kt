@@ -50,6 +50,15 @@ object SecretRedactor {
   }
 
   /**
+   * A display copy of [parameters] with the values of [secretKeys] masked. Used for debug logging
+   * so a secret value is not written to logcat in plaintext (outside #6029's strict LLM-egress
+   * scope, but consistent with it).
+   */
+  fun redactParameters(parameters: Map<String, Any>, secretKeys: Set<String>): Map<String, Any> =
+    if (secretKeys.isEmpty()) parameters
+    else parameters.mapValues { (key, value) -> if (key in secretKeys) PLACEHOLDER else value }
+
+  /**
    * Parameter keys a plan declares sensitive via its top-level `secretParameters:` list. Unioned
    * with [AutoMobilePlanExecutionOptions.secretParameterKeys] by the executor. Parsing failures
    * yield an empty set — declaring secrets is best-effort metadata, never a hard execution

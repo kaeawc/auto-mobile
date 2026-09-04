@@ -410,8 +410,21 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             logger: SilentLogger(),
             responderFactory: { _ in captor }
         )
-        // Declare the secret ONLY through Configuration.secretParameterKeys, not the plan.
-        let executor = makeExecutor(client: client, handler: handler, planSecretKeys: [], configSecretKeys: ["TOKEN"])
+        // Declare the secret ONLY through Configuration.secretParameterKeys — the plan here does NOT
+        // list `secretParameters`, isolating the Configuration path.
+        let planWithoutSecretDecl = """
+        name: Redaction Plan
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let executor = makeExecutor(
+            client: client,
+            handler: handler,
+            planText: planWithoutSecretDecl,
+            configSecretKeys: ["TOKEN"]
+        )
 
         _ = try executor.execute(testMetadata: nil)
 
@@ -419,18 +432,56 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         XCTAssertFalse(requestText(request).contains(secret), "config-declared secret must also be redacted")
     }
 
+    func testSecretRedactedWhenSecretParametersIsFlushZeroIndentBlockSequence() throws {
+        // Flush (zero-indent) block sequence — valid YAML that the iOS line parser previously dropped,
+        // silently disabling redaction on iOS while Android (snakeyaml) still redacted (#6029).
+        let flushPlan = """
+        name: Redaction Plan
+        secretParameters:
+        - TOKEN
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secret)"]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler, planText: flushPlan)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(secret),
+            "a flush-form secretParameters declaration must still redact on iOS"
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeExecutor(
         client: RecoveryMCPClient,
         handler: PlanRecoveryHandler,
-        planSecretKeys _: Set<String> = ["TOKEN"],
+        planText: String? = nil,
         configSecretKeys: Set<String> = []
     )
         -> AutoMobilePlanExecutor
     {
-        // planSecretKeys unused directly — the plan text already declares `secretParameters: [TOKEN]`;
-        // the flag documents intent. configSecretKeys exercises the Configuration path.
+        // The default plan text declares `secretParameters:` itself; configSecretKeys exercises the
+        // Configuration path, and planText lets a test swap in a different declaration form.
         let config = AutoMobilePlanExecutor.Configuration(
             transport: .daemonUnixSocket(path: "/tmp/xctestrunner-redaction-test.sock"),
             planPath: "redaction-plan.yaml",
@@ -444,7 +495,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
         return AutoMobilePlanExecutor(
             configuration: config,
-            planLoader: StubPlanLoader(content: plan),
+            planLoader: StubPlanLoader(content: planText ?? plan),
             mcpClient: client,
             timer: FakeTimer(),
             logger: SilentLogger(),
@@ -497,6 +548,58 @@ private final class CapturingModelResponder: ModelResponding, @unchecked Sendabl
     func respond(_ request: ModelRequest) async throws -> ModelResponse {
         captured.append(request)
         return ModelResponse(id: "resp", content: [.outputText("done")])
+    }
+}
+
+/// Direct tests of `PlanMetadataParser`'s `secretParameters:` parsing (#6029). Parity note: these
+/// forms must all parse the same set of keys snakeyaml gives the Android runner.
+final class PlanMetadataSecretParametersParsingTests: XCTestCase {
+    func testFlushZeroIndentBlockSequenceIsParsed() throws {
+        let yaml = """
+        name: P
+        secretParameters:
+        - TOKEN
+        - PASSWORD
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(try PlanMetadataParser.parse(from: yaml).secretParameterKeys, ["TOKEN", "PASSWORD"])
+    }
+
+    func testIndentedBlockSequenceIsParsed() throws {
+        let yaml = """
+        name: P
+        secretParameters:
+          - TOKEN
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(try PlanMetadataParser.parse(from: yaml).secretParameterKeys, ["TOKEN"])
+    }
+
+    func testInlineFlowListIsParsed() throws {
+        let yaml = "name: P\nsecretParameters: [TOKEN, \"PASSWORD\"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(try PlanMetadataParser.parse(from: yaml).secretParameterKeys, ["TOKEN", "PASSWORD"])
+    }
+
+    func testFlushBlockStopsAtNextTopLevelKeyAndDoesNotSwallowIt() throws {
+        // A flush block sequence must end at the next top-level key, which must still parse.
+        let yaml = """
+        name: P
+        secretParameters:
+        - TOKEN
+        platform: ios
+        steps:
+          - tool: observe
+        """
+        let metadata = try PlanMetadataParser.parse(from: yaml)
+        XCTAssertEqual(metadata.secretParameterKeys, ["TOKEN"])
+        XCTAssertEqual(metadata.platform, .ios)
+    }
+
+    func testNoSecretParametersYieldsEmptySet() throws {
+        let yaml = "name: P\nsteps:\n  - tool: observe"
+        XCTAssertTrue(try PlanMetadataParser.parse(from: yaml).secretParameterKeys.isEmpty)
     }
 }
 

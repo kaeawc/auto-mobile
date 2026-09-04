@@ -36,7 +36,11 @@ enum PlanMetadataParser {
                         index += 1
                         continue
                     }
-                    if indentationLevel(raw) == 0 || !rawTrimmed.hasPrefix("-") {
+                    // A block sequence's `-` items may sit at ANY indent, including flush with the
+                    // parent key (indent 0) — valid YAML that snakeyaml (Android) accepts. Only a
+                    // non-list line ends the sequence, i.e. the next top-level key. Breaking on
+                    // indent 0 dropped every key of a flush list and silently disabled redaction.
+                    if !rawTrimmed.hasPrefix("-") {
                         break
                     }
                     let item = unquote(rawTrimmed.dropFirst().trimmingCharacters(in: .whitespaces))

@@ -184,19 +184,22 @@ internal object AutoMobilePlanExecutor {
         )
       }
 
-      // Load and process the plan with parameter substitution
-      val processedPlanContent = loadAndProcessPlan(resolvedPlanPath, parameters)
-
-      // Values to redact from any recovery context that leaves the process for the LLM provider
-      // (issue #6029). Union the plan-declared secret keys with the caller-configured ones. The
-      // processedPlanContent below keeps the real values — the daemon needs them to run the plan.
+      // Read the RAW plan once. Parse the declared secret keys from the raw (pre-substitution)
+      // text:
+      // a substituted value containing YAML-breaking characters could make the substituted content
+      // unparseable and silently drop the declared keys, defeating redaction (#6029). Key NAMES are
+      // literals unaffected by substitution, so the raw plan is the safe source.
+      val rawPlanContent = File(resolvedPlanPath).readText()
       val secretKeys =
-        options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(processedPlanContent)
+        options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(rawPlanContent)
       val secretValues = SecretRedactor.secretValues(secretKeys, parameters)
+
+      // Load and process the plan with parameter substitution
+      val processedPlanContent = loadAndProcessPlan(rawPlanContent, parameters)
 
       if (options.debugMode) {
         println("Executing AutoMobile plan: $planPath")
-        println("Parameters: $parameters")
+        println("Parameters: ${SecretRedactor.redactParameters(parameters, secretKeys)}")
         println("Processed plan content:\n$processedPlanContent")
       }
 
@@ -246,9 +249,7 @@ internal object AutoMobilePlanExecutor {
     throw IllegalArgumentException("YAML plan not found: $planPath")
   }
 
-  private fun loadAndProcessPlan(planPath: String, parameters: Map<String, Any>): String {
-    val planContent = File(planPath).readText()
-
+  private fun loadAndProcessPlan(planContent: String, parameters: Map<String, Any>): String {
     // Perform parameter substitution using template syntax ${parameter_name}
     var processedContent = planContent
     if (parameters.isNotEmpty()) {

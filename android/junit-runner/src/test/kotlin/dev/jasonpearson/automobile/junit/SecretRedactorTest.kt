@@ -64,9 +64,14 @@ class SecretRedactorTest {
   }
 
   @Test
-  fun `redacts longer secrets first`() {
+  fun `shorter secret substring of longer is fully redacted without residue`() {
+    // "ab" is a substring of "abcdef"; longest-first replacement masks the whole "abcdef" rather
+    // than
+    // leaving a "cdef" residue (which shortest-first would).
     val values = SecretRedactor.secretValues(listOf("ab", "abcdef"))
-    assertEquals("x ${SecretRedactor.PLACEHOLDER} y", SecretRedactor.redact("x abcdef y", values))
+    val result = SecretRedactor.redact("x abcdef y", values)
+    assertEquals("x ${SecretRedactor.PLACEHOLDER} y", result)
+    assertFalse(result.contains("cdef"), "no substring residue may remain")
   }
 
   @Test

@@ -31,16 +31,18 @@ enum SecretRedaction {
         return result
     }
 
-    /// Replace every occurrence of each secret value in `text` with the redaction placeholder. Longer
-    /// values are replaced first so a secret that contains a shorter one as a substring is fully
-    /// masked. Matching is `.literal` (exact code units) because `secretValues` already supplies the
-    /// NFC/NFD variants to match.
+    /// Replace every occurrence of each secret value in `text` with the redaction placeholder. Values
+    /// are replaced longest-first — by UTF-16 code-unit length, so a decomposed form (more code units
+    /// than its composed twin) and any shorter secret that is a substring of a longer one are masked
+    /// whole, with no combining-mark or substring residue. Matching is `.literal` (exact code units)
+    /// because `secretValues` already supplies the NFC/NFD variants. Matches Android's `length`-desc
+    /// ordering (Kotlin `String.length` is a UTF-16 count).
     static func redact(_ text: String, secretValues: [String]) -> String {
         guard !secretValues.isEmpty else {
             return text
         }
         var redacted = text
-        for value in secretValues.sorted(by: { $0.count > $1.count }) where !value.isEmpty {
+        for value in secretValues.sorted(by: { $0.utf16.count > $1.utf16.count }) where !value.isEmpty {
             redacted = redacted.replacingOccurrences(of: value, with: placeholder, options: [.literal])
         }
         return redacted

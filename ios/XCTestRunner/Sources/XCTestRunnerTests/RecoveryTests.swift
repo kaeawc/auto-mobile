@@ -528,7 +528,11 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         _ = try executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
-        XCTAssertFalse(requestText(request).contains("sec-"), "the actual substituted secret must be scrubbed")
+        let text = requestText(request)
+        XCTAssertFalse(text.contains("sec-"), "the actual substituted secret must be scrubbed")
+        // Positive assertions so the test can't pass on an empty/malformed request.
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
     }
 
     /// #6029 review (701): a self-referential secret must not blow up (no fixpoint expansion) and must
@@ -559,7 +563,10 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         _ = try executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
-        XCTAssertFalse(requestText(request).contains("marker-"), "the self-referential secret must be redacted")
+        let text = requestText(request)
+        XCTAssertFalse(text.contains("marker-"), "the self-referential secret must be redacted")
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
     }
 
     /// #6029 review: a plan may parameterize the declared key name (`secretParameters: [${SECRET_KEY}]`)
@@ -590,7 +597,10 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         _ = try executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
-        XCTAssertFalse(requestText(request).contains(secret), "a parameterized secret key name must resolve and redact")
+        let text = requestText(request)
+        XCTAssertFalse(text.contains(secret), "a parameterized secret key name must resolve and redact")
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
     }
 
     // MARK: - Helpers
@@ -793,9 +803,13 @@ final class SecretRedactionTests: XCTestCase {
         )
     }
 
-    func testLongerSecretsAreScrubbedFirst() {
+    func testShorterSecretSubstringOfLongerIsFullyRedactedWithoutResidue() {
+        // "ab" is a substring of "abcdef"; longest-first replacement must mask the whole "abcdef"
+        // rather than leaving a "cdef" residue (which shortest-first would).
         let values = SecretRedaction.secretValues(["ab", "abcdef"])
-        XCTAssertEqual(SecretRedaction.redact("x abcdef y", secretValues: values), "x \(SecretRedaction.placeholder) y")
+        let result = SecretRedaction.redact("x abcdef y", secretValues: values)
+        XCTAssertEqual(result, "x \(SecretRedaction.placeholder) y")
+        XCTAssertFalse(result.contains("cdef"), "no substring residue may remain")
     }
 
     func testEmptyValuesAreIgnored() {

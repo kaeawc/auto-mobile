@@ -149,6 +149,15 @@ class AutoMobilePlanRedactionTest {
       "the actual substituted secret must be scrubbed",
       context.planContent.contains("sec-"),
     )
+    // Positive assertions so the test can't pass on an empty/malformed context.
+    assertTrue(
+      "the secret must be replaced by the placeholder",
+      context.planContent.contains(SecretRedactor.PLACEHOLDER),
+    )
+    assertTrue(
+      "non-secret plan structure must be preserved",
+      context.planContent.contains("launchApp"),
+    )
   }
 
   @Test
@@ -169,6 +178,14 @@ class AutoMobilePlanRedactionTest {
       "the self-referential secret must be redacted",
       context.planContent.contains("marker-"),
     )
+    assertTrue(
+      "the secret must be replaced by the placeholder",
+      context.planContent.contains(SecretRedactor.PLACEHOLDER),
+    )
+    assertTrue(
+      "non-secret plan structure must be preserved",
+      context.planContent.contains("launchApp"),
+    )
   }
 
   @Test
@@ -185,6 +202,14 @@ class AutoMobilePlanRedactionTest {
     assertFalse(
       "a parameterized secret key name must resolve and redact",
       context.planContent.contains(secret),
+    )
+    assertTrue(
+      "the secret must be replaced by the placeholder",
+      context.planContent.contains(SecretRedactor.PLACEHOLDER),
+    )
+    assertTrue(
+      "non-secret plan structure must be preserved",
+      context.planContent.contains("launchApp"),
     )
   }
 

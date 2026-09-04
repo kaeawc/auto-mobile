@@ -180,6 +180,27 @@ class AutoMobilePlanRedactionTest {
   }
 
   @Test
+  fun `secret value is redacted when the key uses a hex escape (fail-safe)`() {
+    // The key `"API\x54OKEN"` is not spec-decoded by the scanner, so it can't be matched to the
+    // parameter `APITOKEN` by name; the strengthened value-layer fail-safe over-redacts so the
+    // secret
+    // still cannot leak to the recovery LLM (#6097 — the important security assertion).
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-hex-escape-key.yaml",
+      mapOf("APITOKEN" to secret),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "a hex-escaped secret key's value must still be redacted via the fail-safe",
+      context.error.contains(secret),
+    )
+  }
+
+  @Test
   fun `secret declared only via options secretParameterKeys is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 

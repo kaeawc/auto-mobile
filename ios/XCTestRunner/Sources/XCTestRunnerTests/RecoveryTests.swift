@@ -583,6 +583,35 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         XCTAssertFalse(text.contains(secretB), "the following key must not be dropped, so its value redacts")
     }
 
+    func testSecretValueRedactedWhenKeyUsesHexEscapeViaFailSafe() throws {
+        // The key `"API\x54OKEN"` is not spec-decoded by the scanner, so it can't be matched to the
+        // parameter `APITOKEN` by name; the strengthened value-layer fail-safe over-redacts so the
+        // secret still cannot leak (#6097 — the important security assertion).
+        let secret = "SECRET-hex-7b3"
+        let plan =
+            "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe\n  - tool: inputText\n    text: \"field\""
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secret)"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["APITOKEN": secret]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(secret),
+            "a hex-escaped secret key's value must still be redacted via the fail-safe"
+        )
+    }
+
     func testSecretSubstitutedIntoToolNameIsRedacted() throws {
         let client = RecoveryMCPClient()
         // The daemon reports the failed step's tool as the substituted secret value.
@@ -985,6 +1014,22 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
     }
 
+    func testCRLFAuthoredQuotedMultilineKeyHasNoCarriageReturn() {
+        // A CRLF-authored quoted multiline key must not embed `\r` (#6097 Codex — CRLF). The quoted
+        // scalar folds to `API TOKEN`.
+        let yaml = "name: P\r\nsecretParameters: [\r\n  \"API\r\n  TOKEN\"\r\n]\r\nsteps:\r\n  - tool: observe"
+        let keys = PlanMetadataParser.parseSecretParameterKeys(from: yaml)
+        XCTAssertEqual(keys, ["API TOKEN"])
+        XCTAssertFalse(keys.contains { $0.contains("\r") }, "no key may contain a carriage return")
+    }
+
+    func testPlainMultilineFlowScalarCapturesEachLinesTokenFailSafe() {
+        // A plain (unquoted) scalar spanning lines is captured token-per-line so both are redacted,
+        // rather than blended into one mis-named key (#6097 Codex — plain-scalar folding).
+        let yaml = "name: P\nsecretParameters: [\n  API\n  TOKEN\n]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API", "TOKEN"])
+    }
+
     func testFlushBlockStopsAtNextTopLevelKey() {
         let yaml = """
         name: P
@@ -1036,6 +1081,30 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
 /// Direct redaction tests for `SecretRedaction` — the type now only expands Unicode forms and scrubs;
 /// resolution/substitution is the executor's job (tested end-to-end below). (#6029 convergence)
 final class SecretRedactionTests: XCTestCase {
+    func testSecretParameterValuesMatchesExactlyAndDoesNotOverRedact() {
+        let values = SecretRedaction.secretParameterValues(
+            declaredKeys: ["TOKEN"], parameters: ["TOKEN": "S", "VIS": "v"]
+        )
+        XCTAssertEqual(values, ["S"])
+    }
+
+    func testSecretParameterValuesMatchesLenientlyAcrossWhitespaceAndCase() {
+        // A folded/whitespaced key still resolves to the parameter by normalized identity (#6097).
+        let values = SecretRedaction.secretParameterValues(
+            declaredKeys: ["API TOKEN"], parameters: ["apitoken": "S"]
+        )
+        XCTAssertEqual(values, ["S"])
+    }
+
+    func testSecretParameterValuesOverRedactsWhenAKeyCannotBeResolvedFailSafe() {
+        // A hex-escaped key parsed as `APIx54OKEN` matches no parameter by name or normalization, so
+        // every parameter value is scrubbed — the secret cannot leak (#6097 fail-safe).
+        let values = SecretRedaction.secretParameterValues(
+            declaredKeys: ["APIx54OKEN"], parameters: ["APITOKEN": "SECRETV", "VIS": "visible"]
+        )
+        XCTAssertTrue(values.contains("SECRETV"), "the real secret value must be scrubbed")
+    }
+
     func testRedactsSecretRegardlessOfUnicodeNormalization() {
         let composedValue = "caf\u{00E9}-token" // NFC form
         let values = SecretRedaction.secretValues([composedValue])

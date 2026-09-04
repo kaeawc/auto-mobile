@@ -173,6 +173,54 @@ class SecretRedactorTest {
   }
 
   @Test
+  fun `a CRLF-authored quoted multiline key is parsed without a carriage return`() {
+    // With CRLF line endings, split('\n') leaves a trailing `\r`; it must be stripped so the key
+    // isn't
+    // corrupted (#6097 Codex — CRLF). The quoted scalar folds to `API TOKEN`.
+    val yaml =
+      "name: P\r\nsecretParameters: [\r\n  \"API\r\n  TOKEN\"\r\n]\r\nsteps:\r\n  - tool: observe"
+    val keys = SecretRedactor.parsePlanSecretKeys(yaml)
+    assertEquals(setOf("API TOKEN"), keys)
+    assertFalse(keys.any { it.contains('\r') }, "no key may contain a carriage return")
+  }
+
+  @Test
+  fun `a plain multiline flow scalar captures each line's token (fail-safe over-capture)`() {
+    // A plain (unquoted) scalar spanning lines is captured token-per-line so both are redacted,
+    // rather
+    // than blended into one mis-named key (#6097 Codex — plain-scalar folding).
+    val yaml = "name: P\nsecretParameters: [\n  API\n  TOKEN\n]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("API", "TOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `secretParameterValues matches exactly and does not over-redact`() {
+    val values =
+      SecretRedactor.secretParameterValues(setOf("TOKEN"), mapOf("TOKEN" to "S", "VIS" to "v"))
+    assertEquals(listOf("S"), values)
+  }
+
+  @Test
+  fun `secretParameterValues matches leniently across whitespace and case`() {
+    // A folded/whitespaced key still resolves to the parameter by normalized identity (#6097).
+    val values = SecretRedactor.secretParameterValues(setOf("API TOKEN"), mapOf("apitoken" to "S"))
+    assertEquals(listOf("S"), values)
+  }
+
+  @Test
+  fun `secretParameterValues over-redacts when a declared key cannot be resolved (fail-safe)`() {
+    // A hex-escaped key parsed as `APIx54OKEN` matches no parameter by name or normalization, so
+    // every
+    // parameter value is scrubbed — the secret cannot leak (#6097 fail-safe).
+    val values =
+      SecretRedactor.secretParameterValues(
+        setOf("APIx54OKEN"),
+        mapOf("APITOKEN" to "SECRETV", "VIS" to "visible"),
+      )
+    assertTrue(values.contains("SECRETV"), "the real secret value must be scrubbed")
+  }
+
+  @Test
   fun `tolerates placeholder key names and unrelated placeholder flow lists`() {
     // A full YAML load would throw on `[${LABEL}, OK]`; the scanner tolerates it and ignores it.
     val yaml =

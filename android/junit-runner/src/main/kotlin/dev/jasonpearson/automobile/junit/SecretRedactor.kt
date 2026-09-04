@@ -71,6 +71,69 @@ internal object SecretRedactor {
     else parameters.mapValues { (key, value) -> if (key in secretKeys) PLACEHOLDER else value }
 
   /**
+   * The parameter VALUES to scrub for a set of declared secret key names, matched leniently so an
+   * exotically-encoded key name cannot leak its value. For each declared key: an exact
+   * `parameters[key]` is taken; failing that, any parameter whose key normalizes equal
+   * (case-folded, with backslashes/quotes/whitespace/CR removed) is taken; and if a declared key
+   * still resolves to nothing, EVERY parameter value is taken (over-redaction). `secretParameters`
+   * key names are expected to be literal identifiers — this is the fail-safe backstop for YAML
+   * encodings the flow scanner does not fully decode (`\xNN`/`\uNNNN` escapes, folding, CRLF): a
+   * declared secret's value is always scrubbed (possibly over-redacting), never leaked (#6097).
+   * Full decoding is a follow-up.
+   */
+  fun secretParameterValues(
+    declaredKeys: Set<String>,
+    parameters: Map<String, Any>,
+  ): List<String> {
+    if (declaredKeys.isEmpty()) return emptyList()
+    val values = mutableListOf<String>()
+    var hasUnresolvedKey = false
+    for (key in declaredKeys) {
+      val exact = parameters[key]?.let { parameterStringValue(it) }?.takeIf { it.isNotEmpty() }
+      if (exact != null) {
+        values.add(exact)
+        continue
+      }
+      val target = normalizeKey(key)
+      var matched = false
+      for ((paramKey, paramValue) in parameters) {
+        if (normalizeKey(paramKey) == target) {
+          parameterStringValue(paramValue).takeIf { it.isNotEmpty() }?.let { values.add(it) }
+          matched = true
+        }
+      }
+      if (!matched) hasUnresolvedKey = true
+    }
+    if (hasUnresolvedKey) {
+      // A declared secret could not be located even leniently (e.g. a `\xNN` hex-escaped key the
+      // scanner did not spec-decode). Over-redact every parameter value so it cannot leak (#6097).
+      for (value in parameters.values) {
+        parameterStringValue(value).takeIf { it.isNotEmpty() }?.let { values.add(it) }
+      }
+    }
+    return values
+  }
+
+  /**
+   * Case-folded key with backslashes, quotes, and whitespace/CR removed — the lenient key-identity
+   * used to match a mis-encoded declared secret key to a parameter (#6097).
+   */
+  private fun normalizeKey(key: String): String = buildString {
+    for (character in key.lowercase()) {
+      when (character) {
+        '\\',
+        '"',
+        '\'',
+        ' ',
+        '\t',
+        '\r',
+        '\n' -> Unit
+        else -> append(character)
+      }
+    }
+  }
+
+  /**
    * Scan a plan's top-level `secretParameters:` declaration for the sensitive key names, tolerating
    * `${...}` placeholders anywhere (they are literal text to the scanner). MUST run on the RAW,
    * pre-substitution plan: a substituted value can inject a newline that truncates the declaration,
@@ -140,6 +203,14 @@ internal object SecretRedactor {
    * dropping the newline; a plain newline folds to a space; continuation indentation is not part of
    * the value).
    *
+   * `secretParameters` key names are expected to be literal, simple identifiers. Exotic YAML
+   * encodings (`\xNN`/`\uNNNN` hex/unicode escapes, plain-scalar line folding, CRLF-in-quoted
+   * multiline keys) are handled best-effort here, NOT with full YAML-spec decoding — so a key may
+   * be mis-named. That is made safe at the value layer: [secretParameterValues] matches leniently
+   * and, if a declared key still cannot be resolved, over-redacts, so a declared secret's VALUE is
+   * always scrubbed (possibly over-redacting), never leaked. Full decoding is tracked as a
+   * follow-up to #6097.
+   *
    * FAIL-SAFE: key-name parsing errs toward OVER-capturing for redaction, never dropping a declared
    * key (which would leak its value). Every non-empty token is kept as a secret key, and an
    * UNTERMINATED sequence (e.g. from substitution truncation) still yields every token seen
@@ -157,7 +228,8 @@ internal object SecretRedactor {
     var activeQuote: Char? = null
     var escaped = false
     var lineIndex = startIndex
-    var currentLine = firstValue
+    // Drop a trailing CR so a CRLF-authored quoted multiline key does not embed `\r` (#6097).
+    var currentLine = firstValue.removeSuffix("\r")
 
     while (true) {
       var previous: Char? = null
@@ -208,15 +280,19 @@ internal object SecretRedactor {
         previous = character
       }
 
-      // Physical line ended. Fold per YAML: a trailing `\` inside a double-quoted scalar continues
+      // Physical line ended. Fold per YAML inside a double-quoted scalar: a trailing `\` continues
       // it
-      // (drop the newline); a plain newline inside a quoted scalar folds to a space; a newline
-      // between
-      // flow tokens is whitespace.
+      // (drop the newline); a plain newline folds to a space. Outside a quote, a plain scalar
+      // spanning
+      // lines is captured token-per-line (over-capture, fail-safe) instead of blending into one
+      // key.
       when {
         activeQuote == '"' && escaped -> escaped = false
         activeQuote != null -> current.append(' ')
-        started -> current.append(' ')
+        started && current.toString().trim().isNotEmpty() -> {
+          items.add(current.toString())
+          current.clear()
+        }
       }
 
       lineIndex++
@@ -225,9 +301,11 @@ internal object SecretRedactor {
         items.add(current.toString())
         return finalizeSecretKeys(items) to lineIndex
       }
-      // Inside a quoted scalar the continuation's leading indentation is not part of the value.
-      currentLine =
-        if (activeQuote != null) lines[lineIndex].trimStart(' ', '\t') else lines[lineIndex]
+      // Drop a trailing CR; inside a quoted scalar the continuation's leading indentation is not
+      // part
+      // of the value.
+      val rawLine = lines[lineIndex].removeSuffix("\r")
+      currentLine = if (activeQuote != null) rawLine.trimStart(' ', '\t') else rawLine
     }
   }
 

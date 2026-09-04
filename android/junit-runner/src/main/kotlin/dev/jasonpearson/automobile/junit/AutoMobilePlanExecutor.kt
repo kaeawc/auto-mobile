@@ -306,14 +306,11 @@ internal object AutoMobilePlanExecutor {
     parameters: Map<String, Any>,
   ): List<String> {
     if (secretKeys.isEmpty()) return emptyList()
-    val values = mutableListOf<String>()
+    // Raw parameter values via the lenient/fail-safe matcher (so an exotically-encoded key name
+    // cannot
+    // leak), plus each key's actual substituted value from this executor's ordered pass.
+    val values = SecretRedactor.secretParameterValues(secretKeys, parameters).toMutableList()
     for (key in secretKeys) {
-      parameters[key]
-        ?.let { SecretRedactor.parameterStringValue(it) }
-        ?.takeIf { it.isNotEmpty() }
-        ?.let {
-          values.add(it)
-        }
       val placeholder = "\${$key}"
       val landed = substituteParameters(placeholder, parameters)
       if (landed != placeholder && landed.isNotEmpty()) values.add(landed)

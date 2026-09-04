@@ -247,6 +247,10 @@ enum PlanMetadataParser {
             .filter { !$0.isEmpty }
     }
 
+    private static func stripTrailingCarriageReturn(_ line: String) -> String {
+        line.hasSuffix("\r") ? String(line.dropLast()) : line
+    }
+
     /// Scan a `secretParameters:` YAML flow sequence that may span multiple physical lines, returning
     /// the declared key names and the index of the next line to resume from. A lenient hand-rolled
     /// scanner (a full YAML load chokes on `${...}` in flow collections — issue #6029). It honors
@@ -256,6 +260,14 @@ enum PlanMetadataParser {
     /// and YAML newline folding inside a double-quoted scalar (a trailing `\` continues the scalar,
     /// dropping the newline; a plain newline folds to a space; continuation indentation is not part of
     /// the value).
+    ///
+    /// `secretParameters` key names are expected to be literal, simple identifiers. Exotic YAML
+    /// encodings (`\xNN`/`\uNNNN` hex/unicode escapes, plain-scalar line folding, CRLF-in-quoted
+    /// multiline keys) are handled best-effort here, NOT with full YAML-spec decoding — so a key may be
+    /// mis-named. That is made safe at the value layer: `SecretRedaction.secretParameterValues` matches
+    /// leniently and, if a declared key still cannot be resolved, over-redacts, so a declared secret's
+    /// VALUE is always scrubbed (possibly over-redacting), never leaked. Full decoding is tracked as a
+    /// follow-up to #6097.
     ///
     /// FAIL-SAFE: key-name parsing errs toward OVER-capturing for redaction, never dropping a declared
     /// key (which would leak its value). Every non-empty token is kept as a secret key, and an
@@ -272,7 +284,8 @@ enum PlanMetadataParser {
         var activeQuote: Character?
         var escaped = false
         var lineIndex = startIndex
-        var currentLine = firstValue
+        // Drop a trailing CR so a CRLF-authored quoted multiline key does not embed `\r` (#6097).
+        var currentLine = stripTrailingCarriageReturn(firstValue)
 
         while true {
             var previous: Character?
@@ -324,15 +337,17 @@ enum PlanMetadataParser {
                 previous = character
             }
 
-            // Physical line ended. Fold per YAML: a trailing `\` inside a double-quoted scalar
-            // continues it (drop the newline); a plain newline inside a quoted scalar folds to a space;
-            // a newline between flow tokens is whitespace.
+            // Physical line ended. Fold per YAML inside a double-quoted scalar: a trailing `\`
+            // continues it (drop the newline); a plain newline folds to a space. Outside a quote, a
+            // plain scalar spanning lines is captured token-per-line (over-capture, fail-safe) instead
+            // of blending into one key.
             if activeQuote == "\"", escaped {
                 escaped = false
             } else if activeQuote != nil {
                 current.append(" ")
-            } else if started {
-                current.append(" ")
+            } else if started, !current.trimmingCharacters(in: .whitespaces).isEmpty {
+                items.append(current)
+                current = ""
             }
 
             lineIndex += 1
@@ -341,10 +356,12 @@ enum PlanMetadataParser {
                 items.append(current)
                 return (finalizeSecretKeys(items), lineIndex)
             }
-            // Inside a quoted scalar the continuation's leading indentation is not part of the value.
+            // Drop a trailing CR; inside a quoted scalar the continuation's leading indentation is not
+            // part of the value.
+            let rawLine = stripTrailingCarriageReturn(lines[lineIndex])
             currentLine = activeQuote != nil
-                ? String(lines[lineIndex].drop { $0 == " " || $0 == "\t" })
-                : lines[lineIndex]
+                ? String(rawLine.drop { $0 == " " || $0 == "\t" })
+                : rawLine
         }
     }
 

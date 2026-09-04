@@ -1883,6 +1883,54 @@ describe("SessionManager", () => {
       }
     });
 
+    test("waits for a tracked network setup before restoring none on release (#6012 review P1)", async () => {
+      const timer = new FakeTimer();
+      const restored: string[] = [];
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restored.push(profile);
+          },
+        }),
+      );
+      const started = Promise.withResolvers<void>();
+      const finished = Promise.withResolvers<void>();
+      try {
+        const session = await manager.createSession("net-seq", "emulator-5554", "android");
+        manager.setNetworkCondition("net-seq", { initialProfile: "none" });
+        // A tracked mutation that outlives the setup-drain timeout.
+        const setup = manager.trackSessionSetup(session, async () => {
+          started.resolve();
+          await finished.promise;
+        });
+        await started.promise;
+
+        const release = manager.releaseSession("net-seq");
+        // Drain timeout elapses; the still-running setup is handed off as pending.
+        await timer.advanceTimeAsync(1000);
+        const cleanup = manager.getPendingDeviceCleanup("emulator-5554");
+        expect(cleanup).not.toBeNull();
+        // Critically: the `none` restore has NOT run while the mutation may still
+        // issue delay/speed commands.
+        expect(restored).toEqual([]);
+
+        finished.resolve();
+        await setup;
+        await release;
+        await cleanup;
+
+        // Only after the tracked mutation settles does the restore run.
+        expect(restored).toEqual(["none"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("keeps the device quarantined and retries when the network restore fails (#6012 review)", async () => {
       const timer = new FakeTimer();
       let attempts = 0;

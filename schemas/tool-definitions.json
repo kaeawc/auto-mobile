@@ -8125,10 +8125,20 @@
               "required": ["profile"]
             },
             {
-              "required": ["cancel"]
+              "required": ["cancel"],
+              "properties": {
+                "cancel": {
+                  "const": true
+                }
+              }
             },
             {
-              "required": ["reset"]
+              "required": ["reset"],
+              "properties": {
+                "reset": {
+                  "const": true
+                }
+              }
             },
             {
               "required": ["delayMs"]

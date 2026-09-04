@@ -374,24 +374,59 @@ function resolveNetworkValues(
 }
 
 /**
- * True when a `networkCondition` request actually degrades the link — a real
- * profile, or a shaping override (`delayMs`/`downloadKbps`/`uploadKbps`) applied
- * over the `none` baseline. `cancel`/`reset` and a `packetLossPercent`-only
- * request (the emulator console cannot apply partial loss) do NOT degrade.
+ * How a `networkCondition` request is interpreted. This is the SINGLE SOURCE OF
+ * TRUTH shared by the zod schema refinement (a request must not be `empty`), the
+ * session-slot decision (only a `degrade` registers a restore baseline), and the
+ * Android setter (capability/verified/wifi all follow the kind) — so those three
+ * can never disagree (issue #6012 convergence audit).
  *
- * The session layer uses this to decide whether to record a restore baseline, so
- * an override-only request cannot leave a device shaped with no restore slot
- * (issue #6012). Kept next to `buildEmulatorNetworkCommands` — its `hasOverride`
- * test — so the two stay in agreement.
+ * - `empty`:     no actionable field — `{}`, `{cancel:false}`, `{reset:false}`,
+ *                `{expiresInSeconds}`, or any falsy-only combination. Rejected.
+ * - `reset`:     `cancel===true`, `reset===true`, or an explicit `profile:"none"`
+ *                with no shaping override. Restores normal connectivity.
+ * - `degrade`:   a real profile, or a bandwidth/latency override over `none`.
+ * - `loss-only`: ONLY `packetLossPercent` (which the emulator console cannot
+ *                enforce) — an unsupported no-op, never reported verified.
+ */
+export type NetworkConditionRequestKind = "empty" | "reset" | "degrade" | "loss-only";
+
+export function classifyNetworkConditionRequest(
+  input: SetNetworkConditionInput,
+): NetworkConditionRequestKind {
+  // cancel/reset are reset signals only when strictly true; `{cancel:false}` is
+  // not a request (issue #6012 review P2).
+  if (input.cancel === true || input.reset === true) {
+    return "reset";
+  }
+  if (input.profile !== undefined && input.profile !== "none") {
+    return "degrade";
+  }
+  if (hasShapingOverride(input)) {
+    return "degrade";
+  }
+  if (input.packetLossPercent !== undefined) {
+    return "loss-only";
+  }
+  if (input.profile === "none") {
+    return "reset";
+  }
+  return "empty";
+}
+
+/** A request that carries any actionable change (everything but `empty`). */
+export function networkConditionInputIsRequest(input: SetNetworkConditionInput): boolean {
+  return classifyNetworkConditionRequest(input) !== "empty";
+}
+
+/**
+ * True when the request degrades the link (a real profile or a shaping override
+ * over `none`). The session layer uses this to decide whether to record a restore
+ * baseline, so an override-only request cannot leave a device shaped with no
+ * restore slot (issue #6012). Derived from the shared classifier so it cannot
+ * disagree with the setter's capability/verified decisions.
  */
 export function networkConditionInputDegrades(input: SetNetworkConditionInput): boolean {
-  if (input.cancel || input.reset) {
-    return false;
-  }
-  if (resolveNetworkProfile(input) !== "none") {
-    return true;
-  }
-  return hasShapingOverride(input);
+  return classifyNetworkConditionRequest(input) === "degrade";
 }
 
 /**
@@ -430,6 +465,24 @@ const NETWORK_CONDITION_PARTIAL_WARNING =
   "a no-op on newer API levels. If the emulator stays on an unshaped Wi-Fi transport the " +
   "condition may not take effect, so it is reported `partial`, not verified. Confirm connectivity " +
   "from within the app under test, or use a host-side proxy for guaranteed shaping.";
+
+const NETWORK_CONDITION_LOSS_ONLY_UNSUPPORTED_ERROR =
+  "Packet loss is not enforceable via the Android emulator console (it has no loss verb), so a " +
+  "networkCondition request whose only signal is packetLossPercent applies nothing and cannot be " +
+  "reported as applied. Use a documented profile (which bundles latency and bandwidth) or a " +
+  "host-side proxy for loss shaping.";
+
+const NETWORK_CONDITION_EMPTY_REQUEST_ERROR =
+  "networkCondition specified no change to apply. Provide a profile, cancel/reset, or a " +
+  "latency/bandwidth override.";
+
+/** Best-effort reset that undoes any shaping — used to roll back a failed degrade. */
+const NETWORK_CONDITION_ROLLBACK_COMMANDS = [
+  "emu network delay none",
+  "emu network speed full",
+  "emu gsm data on",
+  "shell svc wifi enable",
+];
 
 /**
  * Build the emulator console commands (in dispatch order) that apply a profile.
@@ -937,20 +990,18 @@ export class DeviceState {
   private async setAndroidNetworkCondition(
     input: SetNetworkConditionInput,
   ): Promise<NetworkConditionState> {
-    const isReset = Boolean(input.cancel || input.reset);
+    const kind = classifyNetworkConditionRequest(input);
     // A reset restores normal connectivity, so shaping overrides on the same
     // request are contradictory — drop them rather than apply latency while
     // reporting `none` (issue #6012 review). `resolveNetworkProfile` still reads
     // the original input to detect the cancel/reset intent.
+    const isReset = kind === "reset";
     const effectiveInput: SetNetworkConditionInput = isReset
       ? { expiresInSeconds: input.expiresInSeconds }
       : input;
     const profile = resolveNetworkProfile(input);
     const values = resolveNetworkValues(profile, effectiveInput);
-    // Whether the EFFECTIVE request degrades the link, keyed on values not the
-    // profile name so an override-only request (profile `none`, `delayMs:500`)
-    // is treated as a degrade (issue #6012 review).
-    const degrades = networkConditionInputDegrades(input);
+    const degrades = kind === "degrade";
     const expires =
       input.expiresInSeconds !== undefined ? { expiresInSeconds: input.expiresInSeconds } : {};
     const base = {
@@ -959,6 +1010,27 @@ export class DeviceState {
       values,
       ...expires,
     };
+    // Non-applying kinds are answered before touching the device or the platform
+    // guard: they issue no command, register no restore slot, and are never
+    // reported verified (issue #6012 convergence audit).
+    if (kind === "empty") {
+      return {
+        supported: false,
+        capability: "unsupported",
+        verified: false,
+        ...base,
+        error: NETWORK_CONDITION_EMPTY_REQUEST_ERROR,
+      };
+    }
+    if (kind === "loss-only") {
+      return {
+        supported: false,
+        capability: "unsupported",
+        verified: false,
+        ...base,
+        error: NETWORK_CONDITION_LOSS_ONLY_UNSUPPORTED_ERROR,
+      };
+    }
     if (!isAndroidEmulatorSerial(this.device.deviceId)) {
       // Physical device: no emulator console, so do not claim its method.
       return {
@@ -978,6 +1050,13 @@ export class DeviceState {
         buildEmulatorNetworkCommands(profile, effectiveInput, values),
       );
       if (commandError) {
+        // A mid-sequence failure can leave the device half-shaped. Roll back to
+        // normal connectivity (best-effort) so a failed degrade is not left
+        // applied indefinitely (issue #6012 review P2). A reset that fails is
+        // already heading to `none`, so it needs no rollback.
+        if (degrades) {
+          await this.rollbackNetworkConditionToNone(adb);
+        }
         return {
           supported: true,
           capability: degrades ? "partial" : "full",
@@ -998,6 +1077,18 @@ export class DeviceState {
         ...base,
         error: errorMessage(error),
       };
+    }
+  }
+
+  /** Best-effort rollback to normal connectivity after a failed degrade sequence. */
+  private async rollbackNetworkConditionToNone(adb: AdbExecutor): Promise<void> {
+    for (const command of NETWORK_CONDITION_ROLLBACK_COMMANDS) {
+      try {
+        await adb.executeCommand(command, undefined, undefined, true);
+      } catch (error) {
+        // Rollback is best-effort — the primary error is already being returned.
+        logger.debug(`[DeviceState] network rollback '${command}' failed: ${error}`);
+      }
     }
   }
 

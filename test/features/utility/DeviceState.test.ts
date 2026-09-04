@@ -4,7 +4,10 @@ import {
   DeviceState,
   EMPTY_STATE_SELECTION_ERROR,
   NETWORK_CONDITION_PROFILES,
+  classifyNetworkConditionRequest,
   networkConditionInputDegrades,
+  networkConditionInputIsRequest,
+  type SetNetworkConditionInput,
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -568,6 +571,96 @@ describe("DeviceState", () => {
     expect(set.networkCondition?.error).toContain("iOS");
     // No simctl command is issued for an unsupported concern.
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+  });
+
+  // Convergence audit (#6012): one classifier is the single source of truth for
+  // the schema refinement, the restore-slot decision, and the setter's
+  // capability/verified. Pin every input shape here.
+  test("classifyNetworkConditionRequest pins every input shape", () => {
+    const cases: Array<[SetNetworkConditionInput, string]> = [
+      [{}, "empty"],
+      [{ cancel: false }, "empty"],
+      [{ reset: false }, "empty"],
+      [{ expiresInSeconds: 30 }, "empty"],
+      [{ cancel: false, expiresInSeconds: 30 }, "empty"],
+      [{ cancel: true }, "reset"],
+      [{ reset: true }, "reset"],
+      [{ cancel: true, delayMs: 500 }, "reset"],
+      [{ profile: "none" }, "reset"],
+      [{ profile: "3g" }, "degrade"],
+      [{ profile: "offline" }, "degrade"],
+      [{ delayMs: 400 }, "degrade"],
+      [{ downloadKbps: 500 }, "degrade"],
+      [{ uploadKbps: 200 }, "degrade"],
+      [{ profile: "3g", delayMs: 250 }, "degrade"],
+      [{ packetLossPercent: 20 }, "loss-only"],
+      [{ packetLossPercent: 20, expiresInSeconds: 5 }, "loss-only"],
+    ];
+    for (const [input, expected] of cases) {
+      expect(classifyNetworkConditionRequest(input)).toBe(expected as never);
+    }
+    // networkConditionInputIsRequest is the schema gate: everything but `empty`.
+    expect(networkConditionInputIsRequest({})).toBe(false);
+    expect(networkConditionInputIsRequest({ cancel: false })).toBe(false);
+    expect(networkConditionInputIsRequest({ expiresInSeconds: 30 })).toBe(false);
+    expect(networkConditionInputIsRequest({ cancel: true })).toBe(true);
+    expect(networkConditionInputIsRequest({ packetLossPercent: 20 })).toBe(true);
+  });
+
+  test("reports a packet-loss-only request as unsupported, not verified (no command)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { packetLossPercent: 20 } });
+
+    // The emulator has no loss verb, so this applies nothing — never verified.
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+    });
+    expect(result.networkCondition?.verified).not.toBe(true);
+    expect(result.networkCondition?.error).toContain("Packet loss");
+    // No shaping command was issued for an unenforceable request.
+    expect(client.getAllCommands()).toEqual([]);
+  });
+
+  test("rejects an empty networkCondition request at the setter (no command)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { cancel: false } });
+
+    expect(result.success).toBe(false);
+    expect(result.networkCondition?.verified).not.toBe(true);
+    expect(result.networkCondition?.error).toContain("no change to apply");
+    expect(client.getAllCommands()).toEqual([]);
+  });
+
+  test("rolls back to normal connectivity when a mid-degrade command fails", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    // `network delay` succeeds, then `network speed` fails after the radio + delay
+    // were already applied — the device must not be left half-shaped.
+    client.setCommandResult("emu network speed umts", "", "KO: bad speed");
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
+
+    expect(result.success).toBe(false);
+    expect(result.networkCondition?.error).toContain("KO");
+    const commands = client.getAllCommands();
+    // The rollback reset sequence runs after the failed command.
+    expect(commands).toContain("emu network delay none");
+    expect(commands).toContain("emu network speed full");
+    expect(commands).toContain("emu gsm data on");
+    expect(commands).toContain("shell svc wifi enable");
+    // Rollback happens after the failing speed command, not before it.
+    expect(commands.indexOf("emu network delay none")).toBeGreaterThan(
+      commands.indexOf("emu network speed umts"),
+    );
   });
 
   test("networkConditionInputDegrades distinguishes shaping from resets and no-ops", () => {

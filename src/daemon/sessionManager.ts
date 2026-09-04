@@ -1386,7 +1386,7 @@ export class SessionManager {
         ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
         : null;
       const pendingNetworkRestoration = session.cacheData.networkCondition
-        ? (await this.restoreNetworkConditionBestEffort(session)).pending
+        ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
         : null;
       const pendingCleanup = [
         pendingSetups,
@@ -1872,6 +1872,37 @@ export class SessionManager {
       return { pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups) };
     }
     return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
+  }
+
+  /**
+   * A timed-out tracked network mutation can still issue `network delay/speed`
+   * commands. Defer the restore until that setup settles, so a `none` restore
+   * cannot land mid-mutation and then be re-shaped by a late command (issue #6012
+   * review P1). Mirrors `restoreBiometricEnrollmentAfterSetups`.
+   */
+  private restoreNetworkConditionAfterSetups(
+    session: Session,
+    pendingSetups: Promise<void>,
+  ): Promise<void> {
+    return pendingSetups.then(async () => {
+      const pendingRestoration = (await this.restoreNetworkConditionBestEffort(session)).pending;
+      await pendingRestoration;
+    });
+  }
+
+  /**
+   * Returned wrapped, never bare (see `getPendingBiometricRestoration`): sequence
+   * the network restore after any still-draining setup so it never restores
+   * `none` while a tracked mutation may still shape the device.
+   */
+  private async getPendingNetworkRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups && session.cacheData.networkCondition) {
+      return { pending: this.restoreNetworkConditionAfterSetups(session, pendingSetups) };
+    }
+    return { pending: (await this.restoreNetworkConditionBestEffort(session)).pending };
   }
 
   /**

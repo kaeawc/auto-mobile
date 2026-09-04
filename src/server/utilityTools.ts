@@ -5,6 +5,7 @@ import { SystemConfigurationManager } from "../features/utility/SystemConfigurat
 import {
   DeviceState,
   networkConditionInputDegrades,
+  networkConditionInputIsRequest,
   type BiometricEnrollment,
   type DeviceStateResult,
 } from "../features/utility/DeviceState";
@@ -155,17 +156,14 @@ const networkConditionInputSchema = z
       .optional()
       .describe("Advisory TTL; session release/expiry restores normal connectivity."),
   })
-  .refine(
-    (values) =>
-      values.profile !== undefined ||
-      values.cancel !== undefined ||
-      values.reset !== undefined ||
-      values.delayMs !== undefined ||
-      values.downloadKbps !== undefined ||
-      values.uploadKbps !== undefined ||
-      values.packetLossPercent !== undefined,
-    { message: "Provide profile, cancel/reset, or an explicit override for networkCondition" },
-  );
+  // Derive "is this an actual request" from the SAME classifier the setter uses,
+  // so schema acceptance and runtime behavior cannot disagree. This treats
+  // cancel/reset as signals only when strictly true, so `{cancel:false}` and
+  // TTL-only payloads are rejected as empty (issue #6012 review P2 + audit).
+  .refine((values) => networkConditionInputIsRequest(values), {
+    message:
+      "Provide a profile, cancel/reset=true, or a latency/bandwidth override for networkCondition",
+  });
 
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
@@ -186,10 +184,12 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
 // (issue #6012 review). (The top-level "at least one device-state field"
 // refinement is left unencoded, as it already is for doNotDisturb/biometrics —
 // setting a top-level `anyOf` collapses the object under `flattenTopLevelUnion`.)
+// cancel/reset count only when `true` (a falsy value is not a request), so their
+// branches pin `const: true` to match the runtime classifier (issue #6012 audit).
 const NETWORK_CONDITION_REQUIRED_ANY_OF = [
   { required: ["profile"] },
-  { required: ["cancel"] },
-  { required: ["reset"] },
+  { required: ["cancel"], properties: { cancel: { const: true } } },
+  { required: ["reset"], properties: { reset: { const: true } } },
   { required: ["delayMs"] },
   { required: ["downloadKbps"] },
   { required: ["uploadKbps"] },

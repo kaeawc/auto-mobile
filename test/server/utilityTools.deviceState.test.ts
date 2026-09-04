@@ -67,6 +67,18 @@ describe("device state tools", () => {
     expect(() => setTool!.schema.parse({ networkCondition: { profile: "offline" } })).not.toThrow();
     // An empty networkCondition sub-object is not a request.
     expect(() => setTool!.schema.parse({ networkCondition: {} })).toThrow();
+    // #6012 audit: falsey-only cancel/reset and TTL-only are NOT requests.
+    expect(() => setTool!.schema.parse({ networkCondition: { cancel: false } })).toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { reset: false } })).toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { expiresInSeconds: 30 } })).toThrow();
+    // packetLossPercent is a (backend-unsupported) request, so the schema accepts
+    // it — the setter reports it unsupported rather than the schema rejecting it.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { packetLossPercent: 20 } }),
+    ).not.toThrow();
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { delayMs: 400, expiresInSeconds: 5 } }),
+    ).not.toThrow();
   });
 
   test("threads networkCondition through the setDeviceState handler", async () => {

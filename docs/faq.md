@@ -28,6 +28,18 @@ Replace `android` with `ios` when needed. `startDevice` selects or boots a
 matching existing device; use `auto-mobile --cli help startDevice` for filters
 and options.
 
+## When do I pass `avdName` vs `deviceId` to `getAndroid` / `getApple`?
+
+Both tools take two ways to name a target; pass one. For `getAndroid`, `avdName`
+names a configured Android Virtual Device and is what AutoMobile uses to boot an
+unbooted AVD and coordinate its lifecycle, while `deviceId` attaches to an
+already-booted serial such as `emulator-5554` (it cannot name or boot an
+unbooted AVD, so the two are not interchangeable). For `getApple`, `deviceId` is
+an alias for `udid`: a booted simulator's `deviceId` is its `udid`. The
+`deviceId` fields let you copy the value `listDevices` and the
+`automobile:devices/booted/*` resources lead with straight into the acquire
+call.
+
 ## What if I have more than one device?
 
 Use `listDevices` to inspect them and `setActiveDevice` to select one. For

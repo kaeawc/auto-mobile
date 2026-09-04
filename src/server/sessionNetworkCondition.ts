@@ -51,6 +51,13 @@ export async function runSessionNetworkMutation<T>(
     sessionManager.setNetworkCondition(sessionUuid, { initialProfile: "none" });
   }
 
+  // Cancel any prior TTL BEFORE the mutation, not after (issue #6085 review): a
+  // slow re-apply would otherwise leave the OLD timer armed, and it could fire
+  // mid-mutation, reset the just-shaped device, and clear the freshly-published
+  // restore slot. Cancelling up front closes that overlap window; the new TTL (if
+  // any) is armed only after the mutation settles, below.
+  sessionManager.cancelNetworkConditionExpiry(sessionUuid);
+
   let completed = false;
   let result!: T;
   await sessionManager.trackSessionSetup(session, async () => {
@@ -62,16 +69,15 @@ export async function runSessionNetworkMutation<T>(
       `Cannot mutate network condition: session ${sessionUuid} began releasing before the mutation started.`,
     );
   }
-  // Arm / cancel the standalone per-condition TTL (issue #6085 item 2). A degrade
-  // that registered a restore slot AND carries a positive TTL schedules a timer
-  // that resets the device to `none` when it elapses, independent of session
-  // lifetime; any other network mutation (a reset, or a degrade with no TTL)
-  // cancels a previously-armed timer instead, so a manual reset supersedes a
-  // pending TTL rather than racing it.
+  // Arm the standalone per-condition TTL (issue #6085 item 2) for a degrade that
+  // registered a restore slot AND carries a positive TTL. Pass the CAPTURED
+  // `session` instance so a stale re-apply — one whose tracked setup finished only
+  // after this session was released and replaced under the same UUID — cannot arm
+  // a TTL against the replacement (scheduleNetworkConditionExpiry identity-guards
+  // on it). A reset, or a degrade with no TTL, arms nothing; the pre-mutation
+  // cancel above already cleared any prior timer.
   if (registerRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
-    sessionManager.scheduleNetworkConditionExpiry(sessionUuid, expiresInSeconds);
-  } else {
-    sessionManager.cancelNetworkConditionExpiry(sessionUuid);
+    sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds);
   }
   return result;
 }

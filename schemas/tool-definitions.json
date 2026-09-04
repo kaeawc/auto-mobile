@@ -8117,9 +8117,10 @@
               "maximum": 100
             },
             "expiresInSeconds": {
-              "description": "TTL in seconds. When set on a degrading request, a timer resets the device to normal connectivity after it elapses, independent of session lifetime; session release/expiry also restores connectivity, whichever comes first.",
+              "description": "TTL in seconds. When set on a degrading request, a timer resets the device to normal connectivity after it elapses, independent of session lifetime; session release/expiry also restores connectivity, whichever comes first. Capped at 2147483s (~24.8 days) to fit the timer's 32-bit limit.",
               "type": "number",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 2147483
             }
           },
           "additionalProperties": false,

@@ -191,6 +191,15 @@ export const NETWORK_CONDITION_PROFILES: Record<NetworkConditionProfile, Network
     ),
   ) as Record<NetworkConditionProfile, NetworkConditionValues>;
 
+/**
+ * Upper bound for `expiresInSeconds` (issue #6085 item 4). A single
+ * `setTimeout(ms)` in Node/Bun truncates its delay to a signed 32-bit int, so any
+ * value above `2_147_483_647` ms (~24.85 days) wraps to a tiny delay and would
+ * reset the network almost immediately. Cap the accepted TTL at
+ * `floor(2_147_483_647 / 1000)` seconds so the millisecond product always fits.
+ */
+export const MAX_NETWORK_CONDITION_TTL_SECONDS = Math.floor(2_147_483_647 / 1000);
+
 export interface NetworkConditionState {
   supported: boolean;
   capability?: NetworkConditionCapability;

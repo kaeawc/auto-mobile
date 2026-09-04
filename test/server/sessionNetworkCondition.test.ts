@@ -218,6 +218,57 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("cancels the prior TTL before a slow re-apply so it cannot clear the freshly-shaped slot (#6085 review)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const started = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-reapply", "emulator-5554", "android");
+      // First apply arms a 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-reapply",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // A slow re-apply begins; its tracked mutation blocks partway through.
+      const reapply = runSessionNetworkMutation(
+        manager,
+        "net-reapply",
+        "emulator-5554",
+        true,
+        async () => {
+          started.resolve();
+          await finished.promise;
+        },
+        30,
+      );
+      await started.promise;
+
+      // The prior TTL was cancelled BEFORE the mutation ran, so advancing past its
+      // original deadline while the re-apply is still in flight fires NO restore —
+      // the freshly-published slot is not cleared out from under the re-apply.
+      timer.advanceTime(60_000);
+      expect(restored).toEqual([]);
+      expect(manager.getNetworkCondition("net-reapply")).toEqual({ initialProfile: "none" });
+
+      finished.resolve();
+      await reapply;
+
+      // The new TTL is armed only after the mutation settled, and fires on its own clock.
+      timer.advanceTime(30_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

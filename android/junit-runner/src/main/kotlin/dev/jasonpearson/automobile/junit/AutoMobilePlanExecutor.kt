@@ -184,17 +184,35 @@ internal object AutoMobilePlanExecutor {
         )
       }
 
+      // Read the RAW plan once. Derive the effective secret keys and the concrete strings to scrub
+      // from THIS executor's own substitution — the single source of truth for what actually landed
+      // in
+      // the plan (#6029). Key names come from the RAW plan (placeholder-tolerant, immune to
+      // substitution truncation) plus the caller config, with any `${...}` in the names resolved.
+      val rawPlanContent = File(resolvedPlanPath).readText()
+      val secretKeys =
+        (options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(rawPlanContent))
+          .map { substituteParameters(it, parameters) }
+          .toSet()
+      val secretValues =
+        SecretRedactor.secretValues(resolveSecretConcreteValues(secretKeys, parameters))
+
       // Load and process the plan with parameter substitution
-      val processedPlanContent = loadAndProcessPlan(resolvedPlanPath, parameters)
+      val processedPlanContent = loadAndProcessPlan(rawPlanContent, parameters)
 
       if (options.debugMode) {
         println("Executing AutoMobile plan: $planPath")
-        println("Parameters: $parameters")
-        println("Processed plan content:\n$processedPlanContent")
+        println("Parameters: ${SecretRedactor.redactParameters(parameters, secretKeys)}")
+        // Redact substituted secret values out of the plan-content debug print too (#6029) —
+        // otherwise
+        // debugMode leaks them to logcat even though the LLM path is masked.
+        println(
+          "Processed plan content:\n${SecretRedactor.redact(processedPlanContent, secretValues)}"
+        )
       }
 
       // Execute the processed plan
-      val result = executeProcessedPlan(processedPlanContent, options)
+      val result = executeProcessedPlan(processedPlanContent, options, secretValues)
 
       val executionTime = System.currentTimeMillis() - startTime
 
@@ -239,23 +257,8 @@ internal object AutoMobilePlanExecutor {
     throw IllegalArgumentException("YAML plan not found: $planPath")
   }
 
-  private fun loadAndProcessPlan(planPath: String, parameters: Map<String, Any>): String {
-    val planContent = File(planPath).readText()
-
-    // Perform parameter substitution using template syntax ${parameter_name}
-    var processedContent = planContent
-    if (parameters.isNotEmpty()) {
-      parameters.forEach { (key, value) ->
-        val placeholder = "\${$key}"
-        val stringValue =
-          when (value) {
-            is String -> value
-            is Enum<*> -> value.name
-            else -> value.toString()
-          }
-        processedContent = processedContent.replace(placeholder, stringValue)
-      }
-    }
+  private fun loadAndProcessPlan(planContent: String, parameters: Map<String, Any>): String {
+    val processedContent = substituteParameters(planContent, parameters)
 
     // Validate YAML schema after parameter substitution
     val validationResult = PlanSchemaValidator.validateYaml(processedContent)
@@ -275,17 +278,62 @@ internal object AutoMobilePlanExecutor {
     return processedContent
   }
 
+  /**
+   * Substitute `${key}` placeholders with parameter values in a single ordered pass. Deterministic
+   * (sorted) key order so the result is reproducible — the redaction path re-runs this same
+   * function to derive exactly what landed (#6029), and a hash-ordered pass would make that mapping
+   * (and the daemon payload) non-reproducible. Kept in sync with the iOS executor's sorted
+   * substitution.
+   */
+  private fun substituteParameters(content: String, parameters: Map<String, Any>): String {
+    if (parameters.isEmpty()) return content
+    var result = content
+    for ((key, value) in parameters.entries.sortedBy { it.key }) {
+      result = result.replace("\${$key}", SecretRedactor.parameterStringValue(value))
+    }
+    return result
+  }
+
+  /**
+   * The concrete secret strings to scrub, derived entirely from THIS executor's substitution so
+   * they always equal what landed in the recovery context (#6029). For each secret key: its raw
+   * parameter value and its actual substituted value (`substituteParameters` applied to the bare
+   * `${key}`, matching the ordered single pass exactly — no independent fixpoint, so a
+   * self-referential value cannot blow up). Blank/unchanged results are dropped.
+   */
+  private fun resolveSecretConcreteValues(
+    secretKeys: Set<String>,
+    parameters: Map<String, Any>,
+  ): List<String> {
+    if (secretKeys.isEmpty()) return emptyList()
+    val values = mutableListOf<String>()
+    for (key in secretKeys) {
+      parameters[key]
+        ?.let { SecretRedactor.parameterStringValue(it) }
+        ?.takeIf { it.isNotEmpty() }
+        ?.let {
+          values.add(it)
+        }
+      val placeholder = "\${$key}"
+      val landed = substituteParameters(placeholder, parameters)
+      if (landed != placeholder && landed.isNotEmpty()) values.add(landed)
+    }
+    return values
+  }
+
   // ── Plan execution with recovery ──────────────────────────────────────────
 
   private fun executeProcessedPlan(
     planContent: String,
     options: AutoMobilePlanExecutionOptions,
+    secretValues: List<String>,
   ): InternalExecutionResult {
     return executePlanFromStep(
       planContent,
       options,
       startStep = 0,
       recoveryAlreadyAttempted = false,
+      secretValues = secretValues,
     )
   }
 
@@ -305,6 +353,7 @@ internal object AutoMobilePlanExecutor {
     options: AutoMobilePlanExecutionOptions,
     startStep: Int,
     recoveryAlreadyAttempted: Boolean,
+    secretValues: List<String>,
     deviceIdOverride: String? = null,
   ): InternalExecutionResult {
 
@@ -423,7 +472,8 @@ internal object AutoMobilePlanExecutor {
     }
 
     // Non-transient failure or retries exhausted — attempt recovery if allowed
-    val failedStepContext = buildFailedStepContext(response, json, planContent, options.device)
+    val failedStepContext =
+      buildFailedStepContext(response, json, planContent, options.device, secretValues)
     return handleFailure(
       result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
       options = options,
@@ -431,6 +481,7 @@ internal object AutoMobilePlanExecutor {
       failedStepContext = failedStepContext,
       planContent = planContent,
       recoveryAlreadyAttempted = recoveryAlreadyAttempted,
+      secretValues = secretValues,
     )
   }
 
@@ -443,6 +494,7 @@ internal object AutoMobilePlanExecutor {
     failedStepContext: FailedStepContext?,
     planContent: String,
     recoveryAlreadyAttempted: Boolean,
+    secretValues: List<String>,
   ): InternalExecutionResult {
 
     val errorMessage =
@@ -514,6 +566,7 @@ internal object AutoMobilePlanExecutor {
         options = options,
         startStep = resumeStep,
         recoveryAlreadyAttempted = true, // prevent recursive recovery
+        secretValues = secretValues,
         deviceIdOverride = failedStepContext.deviceId,
       )
 
@@ -535,6 +588,7 @@ internal object AutoMobilePlanExecutor {
     json: Json,
     planContent: String,
     deviceId: String?,
+    secretValues: List<String>,
   ): FailedStepContext? {
     try {
       val resultElement = response.result ?: return null
@@ -568,16 +622,26 @@ internal object AutoMobilePlanExecutor {
             stepObj["toolName"]?.jsonPrimitive?.content
               ?: stepObj["tool"]?.jsonPrimitive?.content
               ?: "unknown"
-          succeededSteps.add(SucceededStepSummary(stepIndex = index, tool = tool))
+          // A step's tool can be a substituted `${secret}` value, so scrub the name too (#6029).
+          succeededSteps.add(
+            SucceededStepSummary(
+              stepIndex = index,
+              tool = SecretRedactor.redact(tool, secretValues),
+            )
+          )
         }
       }
 
+      // Egress boundary (issue #6029): FailedStepContext.planContent, error, and the (possibly
+      // substituted) tool names are embedded verbatim into the recovery prompt sent to the LLM
+      // provider (see AutoMobileAgent.attemptAiRecovery), so mask secret values out of them here.
+      // The daemon's base64 payload above kept the real values.
       return FailedStepContext(
         failedStepIndex = failedStepIndex,
-        failedTool = failedTool,
-        error = error,
+        failedTool = SecretRedactor.redact(failedTool, secretValues),
+        error = SecretRedactor.redact(error, secretValues),
         succeededSteps = succeededSteps,
-        planContent = planContent,
+        planContent = SecretRedactor.redact(planContent, secretValues),
         deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
       )
     } catch (e: Exception) {

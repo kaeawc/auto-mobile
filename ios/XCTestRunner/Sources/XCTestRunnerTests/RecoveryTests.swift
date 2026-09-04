@@ -1,5 +1,5 @@
-import XCTest
 import Tachikoma
+import XCTest
 @testable import XCTestRunner
 import XCTestRunnerTestSupport
 
@@ -140,7 +140,9 @@ final class RecoveryExecutorTests: XCTestCase {
         handler: PlanRecoveryHandler,
         recoveryEnabled: Bool,
         aiAssistance: Bool = true
-    ) -> AutoMobilePlanExecutor {
+    )
+        -> AutoMobilePlanExecutor
+    {
         let config = AutoMobilePlanExecutor.Configuration(
             transport: .daemonUnixSocket(path: "/tmp/xctestrunner-recovery-test.sock"),
             planPath: "recovery-plan.yaml",
@@ -315,7 +317,9 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
         client: RecoveryMCPClient,
         responder: ModelResponding,
         maxToolCalls: Int
-    ) -> TachikomaPlanRecoveryHandler {
+    )
+        -> TachikomaPlanRecoveryHandler
+    {
         TachikomaPlanRecoveryHandler(
             mcpClient: client,
             configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: maxToolCalls),
@@ -323,6 +327,495 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
             timer: FakeTimer(),
             logger: SilentLogger(),
             responderFactory: { _ in responder }
+        )
+    }
+}
+
+/// Issue #6029 (CWE-200): a secret plan parameter must never reach the third-party LLM provider
+/// during AI-assisted recovery. These tests drive the FULL executor → recovery handler → model call
+/// path with a real `TachikomaPlanRecoveryHandler` and a capturing `ModelResponding` so the assertion
+/// is against the actual `ModelRequest` that would go over the wire, not a helper's rendering of it.
+final class PlanRecoverySecretRedactionTests: XCTestCase {
+    private let secret = "SECRET-hunter2-TOKEN"
+    private let visible = "keepme-visible-env"
+
+    private let plan = """
+    name: Redaction Plan
+    secretParameters:
+      - TOKEN
+    steps:
+      - tool: observe
+      - tool: inputText
+        text: "${TOKEN}"
+      - tool: tapOn
+        text: "${ENVIRONMENT}"
+    """
+
+    func testSecretIsRedactedFromModelRequestWhileNonSecretIsPreserved() throws {
+        let client = RecoveryMCPClient()
+        // Fail on the inputText step; the secret also surfaces in the error string and on-screen sample.
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: [
+                "stepIndex": 1,
+                "tool": "inputText",
+                "error": "timed out entering \(secret) into field",
+                "failureObservation": [
+                    "visibleTextsSample": ["Welcome \(visible)", "token: \(secret)"],
+                    "resourceIdsSample": ["field/\(secret)"],
+                ],
+            ]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first, "recovery must issue a model request")
+        let text = requestText(request)
+
+        XCTAssertFalse(text.contains(secret), "secret value must not appear anywhere in the model request")
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains(visible), "non-secret on-screen context must be preserved")
+        XCTAssertTrue(text.contains("ENVIRONMENT") || text.contains(visible), "non-secret plan context is preserved")
+
+        // The base64 executePlan payload sent to the LOCAL daemon must keep the REAL secret so the
+        // plan can actually run — the daemon is not the egress boundary.
+        let daemonPlan = try XCTUnwrap(decodedDaemonPlanContent(client.executePlanCalls.first))
+        XCTAssertTrue(daemonPlan.contains(secret), "daemon executePlan payload must stay unredacted")
+    }
+
+    func testSecretDeclaredOnlyViaConfigurationIsRedacted() throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secret)"]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        // Declare the secret ONLY through Configuration.secretParameterKeys — the plan here does NOT
+        // list `secretParameters`, isolating the Configuration path.
+        let planWithoutSecretDecl = """
+        name: Redaction Plan
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let executor = makeExecutor(
+            client: client,
+            handler: handler,
+            planText: planWithoutSecretDecl,
+            configSecretKeys: ["TOKEN"]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(requestText(request).contains(secret), "config-declared secret must also be redacted")
+    }
+
+    func testSecretRedactedWhenSecretParametersIsFlushZeroIndentBlockSequence() throws {
+        // Flush (zero-indent) block sequence — valid YAML that the iOS line parser previously dropped,
+        // silently disabling redaction on iOS while Android (snakeyaml) still redacted (#6029).
+        let flushPlan = """
+        name: Redaction Plan
+        secretParameters:
+        - TOKEN
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom \(secret)"]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler, planText: flushPlan)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(secret),
+            "a flush-form secretParameters declaration must still redact on iOS"
+        )
+    }
+
+    func testSecretSubstitutedIntoToolNameIsRedacted() throws {
+        let client = RecoveryMCPClient()
+        // The daemon reports the failed step's tool as the substituted secret value.
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": secret, "error": "step failed"]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(secret),
+            "a secret substituted into a tool name must be redacted from the recovery prompt"
+        )
+    }
+
+    /// #6029 review (695): the scrubbed value must equal what the executor's single ordered pass
+    /// actually produced. With sorted-key substitution, `${TOKEN}` -> `sec-${AA}-zeta` (AA resolved
+    /// before TOKEN inserts it, ZZ after) — neither the raw value nor a fully-resolved fixpoint. Using
+    /// the executor's own substitution as the source of truth scrubs exactly that.
+    func testScrubsExactlyWhatTheExecutorSubstitutionProduced() throws {
+        let plan = """
+        name: P
+        secretParameters:
+          - TOKEN
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["TOKEN": "sec-${AA}-${ZZ}", "AA": "alpha", "ZZ": "zeta"]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        let text = requestText(request)
+        XCTAssertFalse(text.contains("sec-"), "the actual substituted secret must be scrubbed")
+        // Positive assertions so the test can't pass on an empty/malformed request.
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
+    }
+
+    /// #6029 review (701): a self-referential secret must not blow up (no fixpoint expansion) and must
+    /// still be redacted. The executor's single pass turns `${TOKEN}` into `marker-${TOKEN}` once.
+    func testSelfReferentialSecretTerminatesAndIsRedacted() throws {
+        let plan = """
+        name: P
+        secretParameters:
+          - TOKEN
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${TOKEN}"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["TOKEN": "marker-${TOKEN}"]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        let text = requestText(request)
+        XCTAssertFalse(text.contains("marker-"), "the self-referential secret must be redacted")
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
+    }
+
+    /// #6029 review: a plan may parameterize the declared key name (`secretParameters: [${SECRET_KEY}]`)
+    /// — parsed from the raw plan, then the key name resolved against parameters.
+    func testParameterizedSecretKeyNameIsRedacted() throws {
+        let plan = """
+        name: P
+        secretParameters:
+          - ${SECRET_KEY}
+        steps:
+          - tool: observe
+          - tool: inputText
+            text: "${apiToken}"
+        """
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 2,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "boom"]
+        ))
+        let captor = CapturingModelResponder()
+        let executor = makeExecutor(
+            client: client,
+            handler: makeCapturingHandler(client: client, captor: captor),
+            planText: plan,
+            parameters: ["SECRET_KEY": "apiToken", "apiToken": secret]
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        let text = requestText(request)
+        XCTAssertFalse(text.contains(secret), "a parameterized secret key name must resolve and redact")
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+        XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
+    }
+
+    // MARK: - Helpers
+
+    private func makeCapturingHandler(
+        client: RecoveryMCPClient,
+        captor: CapturingModelResponder
+    )
+        -> TachikomaPlanRecoveryHandler
+    {
+        TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+    }
+
+    private func makeExecutor(
+        client: RecoveryMCPClient,
+        handler: PlanRecoveryHandler,
+        planText: String? = nil,
+        parameters: [String: String]? = nil,
+        configSecretKeys: Set<String> = []
+    )
+        -> AutoMobilePlanExecutor
+    {
+        // The default plan text declares `secretParameters:` itself; configSecretKeys exercises the
+        // Configuration path, and planText/parameters let a test swap in a different scenario.
+        let config = AutoMobilePlanExecutor.Configuration(
+            transport: .daemonUnixSocket(path: "/tmp/xctestrunner-redaction-test.sock"),
+            planPath: "redaction-plan.yaml",
+            retryCount: 0,
+            timeoutSeconds: 5,
+            retryDelaySeconds: 0,
+            startStep: 0,
+            parameters: parameters ?? ["TOKEN": secret, "ENVIRONMENT": visible],
+            secretParameterKeys: configSecretKeys,
+            aiAssistance: true
+        )
+        return AutoMobilePlanExecutor(
+            configuration: config,
+            planLoader: StubPlanLoader(content: planText ?? plan),
+            mcpClient: client,
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            recoveryHandler: handler,
+            recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5)
+        )
+    }
+
+    private func requestText(_ request: ModelRequest) -> String {
+        var parts: [String] = []
+        if let system = request.systemInstructions {
+            parts.append(system)
+        }
+        for message in request.messages {
+            switch message {
+            case let .user(_, content):
+                if case let .text(value) = content {
+                    parts.append(value)
+                }
+            case let .assistant(_, content, _):
+                for item in content {
+                    if case let .outputText(value) = item {
+                        parts.append(value)
+                    }
+                }
+            default:
+                break
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private func decodedDaemonPlanContent(_ call: RecoveryMCPClient.Call?) -> String? {
+        guard let raw = call?.arguments["planContent"] as? String else {
+            return nil
+        }
+        let base64 = raw.hasPrefix("base64:") ? String(raw.dropFirst("base64:".count)) : raw
+        guard let data = Data(base64Encoded: base64) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+/// Fake `ModelResponding` that records every `ModelRequest` it is asked to answer, then ends the
+/// recovery loop with a final (no-tool-call) response so nothing touches the device.
+private final class CapturingModelResponder: ModelResponding, @unchecked Sendable {
+    private(set) var captured: [ModelRequest] = []
+
+    func respond(_ request: ModelRequest) async throws -> ModelResponse {
+        captured.append(request)
+        return ModelResponse(id: "resp", content: [.outputText("done")])
+    }
+}
+
+/// Direct tests of `PlanMetadataParser`'s `secretParameters:` parsing (#6029). Parity note: these
+/// forms must all parse the same set of keys snakeyaml gives the Android runner.
+/// Tests of `PlanMetadataParser.parseSecretParameterKeys` — the RAW, placeholder-tolerant scanner
+/// that replaces the previous substituted-content / YAML-load parsing (#6029 convergence).
+final class PlanMetadataSecretParametersParsingTests: XCTestCase {
+    func testFlushZeroIndentBlockSequenceIsParsed() {
+        let yaml = """
+        name: P
+        secretParameters:
+        - TOKEN
+        - PASSWORD
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+    }
+
+    func testIndentedBlockSequenceIsParsed() {
+        let yaml = """
+        name: P
+        secretParameters:
+          - TOKEN
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN"])
+    }
+
+    func testInlineFlowListIsParsed() {
+        let yaml = "name: P\nsecretParameters: [TOKEN, \"PASSWORD\"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+    }
+
+    func testInlineFlowListDoesNotSplitOnCommaInsideQuotes() {
+        let yaml = "name: P\nsecretParameters: [\"API,TOKEN\", plain]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "plain"])
+    }
+
+    func testFlushBlockStopsAtNextTopLevelKey() {
+        let yaml = """
+        name: P
+        secretParameters:
+        - TOKEN
+        platform: ios
+        steps:
+          - tool: observe
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN"])
+    }
+
+    func testNoSecretParametersYieldsEmptySet() {
+        XCTAssertTrue(PlanMetadataParser.parseSecretParameterKeys(from: "name: P\nsteps:\n  - tool: observe").isEmpty)
+    }
+
+    func testToleratesPlaceholderKeyAndUnrelatedPlaceholderLists() {
+        // A parameterized key name is kept literal here (resolved later); an unrelated flow list with
+        // placeholders (which a full YAML load would choke on) must not affect the scan (#6029 review).
+        let yaml = """
+        name: P
+        secretParameters:
+          - ${SECRET_KEY}
+        steps:
+          - tool: observe
+            waitFor:
+              textAny: [${LABEL}, OK]
+          - tool: inputText
+            text: "${SECRET_KEY}"
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["${SECRET_KEY}"])
+    }
+
+    func testScansRawPlanSoInjectedContentInAValueCannotAddKeys() {
+        // Parsing runs on the RAW plan: a `${EVIL}` value that would expand to a fake secretParameters
+        // block cannot inject keys, because the scanner never sees substituted values (#6029 review).
+        let yaml = """
+        name: P
+        secretParameters:
+          - REAL
+        steps:
+          - tool: inputText
+            text: "${EVIL}"
+        """
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["REAL"])
+    }
+}
+
+/// Direct redaction tests for `SecretRedaction` — the type now only expands Unicode forms and scrubs;
+/// resolution/substitution is the executor's job (tested end-to-end below). (#6029 convergence)
+final class SecretRedactionTests: XCTestCase {
+    func testRedactsSecretRegardlessOfUnicodeNormalization() {
+        let composedValue = "caf\u{00E9}-token" // NFC form
+        let values = SecretRedaction.secretValues([composedValue])
+        // The same secret occurs in the target text in its decomposed (NFD) form.
+        let decomposedOccurrence = composedValue.decomposedStringWithCanonicalMapping
+        let result = SecretRedaction.redact("error: " + decomposedOccurrence + " seen", secretValues: values)
+        XCTAssertTrue(result.contains(SecretRedaction.placeholder))
+        XCTAssertFalse(
+            result.unicodeScalars.contains("\u{0301}"),
+            "the decomposed secret's combining mark must be gone"
+        )
+    }
+
+    func testShorterSecretSubstringOfLongerIsFullyRedactedWithoutResidue() {
+        // "ab" is a substring of "abcdef"; longest-first replacement must mask the whole "abcdef"
+        // rather than leaving a "cdef" residue (which shortest-first would).
+        let values = SecretRedaction.secretValues(["ab", "abcdef"])
+        let result = SecretRedaction.redact("x abcdef y", secretValues: values)
+        XCTAssertEqual(result, "x \(SecretRedaction.placeholder) y")
+        XCTAssertFalse(result.contains("cdef"), "no substring residue may remain")
+    }
+
+    func testEmptyValuesAreIgnored() {
+        XCTAssertEqual(
+            SecretRedaction.redact("unchanged", secretValues: SecretRedaction.secretValues([""])),
+            "unchanged"
         )
     }
 }
@@ -498,12 +991,12 @@ private final class StubModelResponder: ModelResponding, @unchecked Sendable {
 
     init(_ scripted: [ModelResponse]) {
         self.scripted = scripted
-        self.repeated = nil
+        repeated = nil
     }
 
     init(alwaysReturn response: ModelResponse) {
-        self.scripted = []
-        self.repeated = response
+        scripted = []
+        repeated = response
     }
 
     func respond(_: ModelRequest) async throws -> ModelResponse {
@@ -519,7 +1012,10 @@ private final class StubModelResponder: ModelResponding, @unchecked Sendable {
     static func toolCall(name: String, arguments: String = "{}") -> ModelResponse {
         ModelResponse(
             id: "resp",
-            content: [.toolCall(ToolCallItem(id: "call-\(name)", function: FunctionCall(name: name, arguments: arguments)))]
+            content: [.toolCall(ToolCallItem(
+                id: "call-\(name)",
+                function: FunctionCall(name: name, arguments: arguments)
+            ))]
         )
     }
 
@@ -551,7 +1047,9 @@ private func planJSON(
     executedSteps: Int,
     totalSteps: Int,
     failedStep: [String: Any]? = nil
-) -> String {
+)
+    -> String
+{
     var payload: [String: Any] = [
         "success": success,
         "executedSteps": executedSteps,

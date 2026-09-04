@@ -137,6 +137,89 @@ enum PlanMetadataParser {
         )
     }
 
+    /// Scan a plan's top-level `secretParameters:` declaration for the sensitive key names, tolerating
+    /// `${...}` placeholders anywhere (they are literal text to the scanner). MUST run on the RAW,
+    /// pre-substitution plan: a substituted value can inject a newline that truncates the declaration,
+    /// and a full YAML load chokes on unquoted placeholders in flow collections (issue #6029 review).
+    /// Non-throwing — declaring secrets is best-effort metadata, never a hard execution dependency.
+    /// Only the `secretParameters:` block is scanned, so unrelated `${...}` in other lists is ignored.
+    static func parseSecretParameterKeys(from yamlContent: String) -> Set<String> {
+        let lines = yamlContent.split(whereSeparator: \.isNewline).map { String($0) }
+        var keys: Set<String> = []
+        var index = 0
+        while index < lines.count {
+            let trimmed = stripComments(from: lines[index]).trimmingCharacters(in: .whitespaces)
+            guard indentationLevel(stripComments(from: lines[index])) == 0,
+                  trimmed.hasPrefix("secretParameters:")
+            else {
+                index += 1
+                continue
+            }
+
+            let inline = trimmed.dropFirst("secretParameters:".count).trimmingCharacters(in: .whitespaces)
+            if !inline.isEmpty {
+                keys.formUnion(parseInlineList(inline))
+                index += 1
+                continue
+            }
+
+            index += 1
+            // Block sequence: `-` items at ANY indent (flush with the parent key is valid YAML) until
+            // the next non-list line, i.e. the next top-level key.
+            while index < lines.count {
+                let rawTrimmed = stripComments(from: lines[index]).trimmingCharacters(in: .whitespaces)
+                if rawTrimmed.isEmpty {
+                    index += 1
+                    continue
+                }
+                if !rawTrimmed.hasPrefix("-") {
+                    break
+                }
+                let item = unquote(rawTrimmed.dropFirst().trimmingCharacters(in: .whitespaces))
+                if !item.isEmpty {
+                    keys.insert(item)
+                }
+                index += 1
+            }
+        }
+        return keys
+    }
+
+    /// Parse a YAML flow list of scalar keys, e.g. `[apiToken, "password"]`, into its trimmed,
+    /// unquoted, non-empty elements. Used for the inline form of `secretParameters:`. Commas inside a
+    /// quoted item are NOT separators, so `["API,TOKEN"]` yields the single key `API,TOKEN` rather
+    /// than splitting it in two (issue #6029 review).
+    private static func parseInlineList(_ value: String) -> [String] {
+        var inner = value
+        if inner.hasPrefix("[") { inner.removeFirst() }
+        if inner.hasSuffix("]") { inner.removeLast() }
+
+        var items: [String] = []
+        var current = ""
+        var activeQuote: Character?
+        for character in inner {
+            if let quote = activeQuote {
+                if character == quote {
+                    activeQuote = nil
+                }
+                current.append(character)
+            } else if character == "\"" || character == "'" {
+                activeQuote = character
+                current.append(character)
+            } else if character == "," {
+                items.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        items.append(current)
+
+        return items
+            .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
+            .filter { !$0.isEmpty }
+    }
+
     private static func parsePlatform(_ value: String) throws -> AutoMobilePlanExecutor.PlanPlatform {
         let normalized = unquote(value)
         guard let platform = AutoMobilePlanExecutor.PlanPlatform(rawValue: normalized) else {

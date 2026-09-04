@@ -65,6 +65,15 @@
       "description": "DEPRECATED: Plan parameters (legacy field)",
       "additionalProperties": true
     },
+    "secretParameters": {
+      "type": "array",
+      "description": "Names of parameter keys whose substituted values are sensitive (tokens, passwords, PII). Their values are redacted from any context sent to a third-party LLM during AI-assisted recovery (issue #6029); the values still reach the local daemon unredacted so the plan can execute.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
     "metadata": {
       "type": "object",
       "description": "Additional metadata about the plan",

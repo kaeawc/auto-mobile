@@ -14,6 +14,13 @@ extension AutoMobilePlanExecutor {
         public let retryDelaySeconds: TimeInterval
         public let startStep: Int
         public let parameters: [String: String]
+        /// Parameter keys whose substituted values are sensitive (tokens, passwords, PII). Their
+        /// values are masked out of any context handed to the AI recovery handler before it reaches
+        /// the third-party LLM provider (see `AutoMobilePlanExecutor.buildFailedStepContext`), while
+        /// the base64 `executePlan` payload to the LOCAL daemon keeps the real values so the plan can
+        /// run. A plan can also declare sensitive keys via its top-level `secretParameters:` list; the
+        /// two sets are unioned. Mirrors Android's `AutoMobilePlanExecutionOptions.secretParameterKeys`.
+        public let secretParameterKeys: Set<String>
         public let cleanup: CleanupOptions?
         public let planBundle: Bundle?
         public let defaultPlatform: PlanPlatform
@@ -31,6 +38,7 @@ extension AutoMobilePlanExecutor {
             retryDelaySeconds: TimeInterval = 1,
             startStep: Int = 0,
             parameters: [String: String] = [:],
+            secretParameterKeys: Set<String> = [],
             cleanup: CleanupOptions? = nil,
             planBundle: Bundle? = nil,
             defaultPlatform: PlanPlatform = .ios,
@@ -44,6 +52,7 @@ extension AutoMobilePlanExecutor {
             self.retryDelaySeconds = retryDelaySeconds
             self.startStep = startStep
             self.parameters = parameters
+            self.secretParameterKeys = secretParameterKeys
             self.cleanup = cleanup
             self.planBundle = planBundle
             self.defaultPlatform = defaultPlatform

@@ -158,6 +158,45 @@ checkpoints so failures explain which state was missing.
 
 </details>
 
+### Redacting sensitive parameters
+
+Plans substitute `${paramName}` placeholders with values you pass from the test
+(experiment groups, environments, and occasionally a token, password, or other
+secret). When AI-assisted recovery is enabled and a step fails, the runner sends
+failure context — the substituted plan YAML, the
+error, and sampled on-screen text — to your configured LLM provider. Any secret
+substituted into the plan would be disclosed to that provider.
+
+Mark the parameter keys whose values are sensitive and the runner masks them
+(`***REDACTED***`) in everything sent to the provider — the plan YAML, the error
+string, and the on-screen samples. The values still reach the **local** daemon
+unredacted so the plan actually runs; only what leaves the process for the LLM is
+masked.
+
+Declare them in the plan (applies on both platforms):
+
+```yaml
+name: login
+secretParameters:
+  - apiToken
+  - password
+steps:
+  - tool: inputText
+    text: "${apiToken}"
+```
+
+Or pass them from the test runner. Android:
+
+```kotlin
+AutoMobilePlan("test-plans/login.yaml") { "apiToken" to token }
+    .execute(AutoMobilePlanExecutionOptions(secretParameterKeys = setOf("apiToken")))
+```
+
+iOS — set `secretParameterKeys` on `AutoMobilePlanExecutor.Configuration`. The
+plan-declared and runner-supplied sets are unioned, so either source (or both)
+protects the value. Recovery stays opt-in; this only changes what recovery may
+disclose.
+
 ## 4. Run a multi-device plan
 
 Add device labels when a flow spans two users or devices. Steps for different

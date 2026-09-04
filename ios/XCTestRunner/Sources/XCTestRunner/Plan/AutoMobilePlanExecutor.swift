@@ -155,8 +155,11 @@ public final class AutoMobilePlanExecutor {
         deviceIdOverride: String?,
         sessionUuidOverride: String?,
         testMetadata: TestMetadata?
-    ) throws -> ExecutePlanResult {
-        PerfTimer.log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
+    )
+        throws -> ExecutePlanResult
+    {
+        PerfTimer
+            .log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
         let planContent: String
         do {
             planContent = try PerfTimer.measure("loadPlan") {
@@ -175,6 +178,17 @@ public final class AutoMobilePlanExecutor {
         let planMetadata = try PerfTimer.measure("parsePlanMetadata") {
             try PlanMetadataParser.parse(from: substituted)
         }
+
+        // Values to redact from any recovery context that leaves the process for the LLM provider
+        // (issue #6029). Parse the declared secret keys from the RAW plan (tolerant of `${...}` and
+        // immune to substitution truncation), union the caller-configured ones, and resolve any
+        // `${...}` inside the key names. The concrete strings to scrub are derived from THIS executor's
+        // own substitution — the single source of truth for what actually landed — so the scrub target
+        // always equals the recovery context. The `substituted` string keeps the real values for the
+        // daemon.
+        let secretValues = SecretRedaction.secretValues(
+            resolveSecretValues(rawPlan: planContent)
+        )
         PerfTimer
             .log(
                 "planMetadata: platform=\(planMetadata.platform.map { String(describing: $0) } ?? "nil"), hasDevices=\(planMetadata.hasDevices), deviceLabels=\(planMetadata.deviceLabels)"
@@ -226,13 +240,16 @@ public final class AutoMobilePlanExecutor {
                 try decodeExecutePlanResult(from: response.text)
             }
             PerfTimer
-                .log("executeAttempt END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
+                .log(
+                    "executeAttempt END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)"
+                )
             if result.success {
                 return result
             }
             return try handleFailure(
                 result: result,
                 planContent: substituted,
+                secretValues: secretValues,
                 platform: platform,
                 sessionUuid: sessionUuid,
                 deviceIdOverride: deviceIdOverride,
@@ -258,12 +275,15 @@ public final class AutoMobilePlanExecutor {
     private func handleFailure(
         result: ExecutePlanResult,
         planContent: String,
+        secretValues: [String],
         platform: PlanPlatform,
         sessionUuid: String,
         deviceIdOverride: String?,
         recoveryAlreadyAttempted: Bool,
         testMetadata: TestMetadata?
-    ) throws -> ExecutePlanResult {
+    )
+        throws -> ExecutePlanResult
+    {
         let failureMessage = buildFailureMessage(from: result)
 
         // Cheap local gates first; the feature-flag read (which may hit the daemon) is last and runs
@@ -283,6 +303,7 @@ public final class AutoMobilePlanExecutor {
         let context = buildFailedStepContext(
             failedStep: failedStep,
             planContent: planContent,
+            secretValues: secretValues,
             platform: platform,
             sessionUuid: sessionUuid,
             deviceIdOverride: deviceIdOverride
@@ -313,31 +334,43 @@ public final class AutoMobilePlanExecutor {
     private func buildFailedStepContext(
         failedStep: FailedStep,
         planContent: String,
+        secretValues: [String],
         platform: PlanPlatform,
         sessionUuid: String,
         deviceIdOverride: String?
-    ) -> FailedStepContext {
+    )
+        -> FailedStepContext
+    {
         // Sequential execution stops at the first failure, so every step before failedStep.stepIndex
-        // completed. Reconstruct their tool names from the plan for the agent prompt (best effort).
+        // completed. Reconstruct their tool names from the plan for the agent prompt (best effort). A
+        // step's `tool` can itself be a substituted `${secret}` value, so scrub the reconstructed tool
+        // names too (issue #6029 review).
         let stepTools = PlanStepToolParser.toolNames(from: planContent)
         var succeeded: [SucceededStepSummary] = []
         var index = 0
         while index < failedStep.stepIndex {
             let tool = index < stepTools.count ? stepTools[index] : "step"
-            succeeded.append(SucceededStepSummary(stepIndex: index, tool: tool))
+            succeeded.append(SucceededStepSummary(
+                stepIndex: index,
+                tool: SecretRedaction.redact(tool, secretValues: secretValues)
+            ))
             index += 1
         }
 
+        // Egress boundary (issue #6029): every field placed on the context is forwarded to the LLM
+        // provider by the recovery handler, so mask secret values out of the plan YAML, the failure
+        // error, the (possibly substituted) tool name, and the sampled on-screen text/ids here — the
+        // daemon's base64 payload above kept the real values.
         return FailedStepContext(
             failedStepIndex: failedStep.stepIndex,
-            failedTool: failedStep.tool,
-            error: failedStep.error,
+            failedTool: SecretRedaction.redact(failedStep.tool, secretValues: secretValues),
+            error: SecretRedaction.redact(failedStep.error, secretValues: secretValues),
             succeededSteps: succeeded,
-            planContent: planContent,
+            planContent: SecretRedaction.redact(planContent, secretValues: secretValues),
             platform: platform.rawValue,
             sessionUuid: sessionUuid,
             deviceId: failedStep.device ?? deviceIdOverride,
-            failureObservation: failedStep.failureObservation
+            failureObservation: SecretRedaction.redact(failedStep.failureObservation, secretValues: secretValues)
         )
     }
 
@@ -399,10 +432,43 @@ public final class AutoMobilePlanExecutor {
             return content
         }
         var substituted = content
-        for (key, value) in parameters {
+        // Deterministic (sorted) order so the single ordered pass produces a reproducible result — the
+        // redaction path re-runs this same function to derive exactly what landed (issue #6029), and a
+        // hash-ordered pass would make that mapping (and the daemon payload) non-reproducible. Kept in
+        // sync with Android's sorted substitution.
+        for (key, value) in parameters.sorted(by: { $0.key < $1.key }) {
             substituted = substituted.replacingOccurrences(of: "${\(key)}", with: value)
         }
         return substituted
+    }
+
+    /// The concrete secret strings to scrub, derived entirely from THIS executor's substitution so
+    /// they always equal what landed in the recovery context (issue #6029). Secret keys come from the
+    /// caller config plus the RAW plan's `secretParameters:` (parsed placeholder-tolerantly); any
+    /// `${...}` inside a key name is resolved with the same substitution; and for each key both its raw
+    /// parameter value and its actual substituted value (`substituteParameters` applied to the bare
+    /// `${key}`, matching the ordered single pass exactly) are collected.
+    private func resolveSecretValues(rawPlan: String) -> [String] {
+        let declaredKeys = configuration.secretParameterKeys
+            .union(PlanMetadataParser.parseSecretParameterKeys(from: rawPlan))
+        guard !declaredKeys.isEmpty else {
+            return []
+        }
+        let params = configuration.parameters
+        let resolvedKeys = Set(declaredKeys.map { substituteParameters(in: $0, parameters: params) })
+
+        var values: [String] = []
+        for key in resolvedKeys {
+            if let raw = params[key], !raw.isEmpty {
+                values.append(raw)
+            }
+            let placeholder = "${\(key)}"
+            let landed = substituteParameters(in: placeholder, parameters: params)
+            if landed != placeholder, !landed.isEmpty {
+                values.append(landed)
+            }
+        }
+        return values
     }
 
     private func decodeExecutePlanResult(from text: String) throws -> ExecutePlanResult {

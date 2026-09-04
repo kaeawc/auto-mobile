@@ -1193,10 +1193,16 @@ export class RealObserveScreen implements ObserveScreen {
     const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
     let hierarchy: ObserveResult["viewHierarchy"];
     try {
+      // `minTimestamp` rejects the cached (initial) tree; skipping the fresh
+      // wait goes straight to the sync that produces the newer one, so a static
+      // screen (nothing pushed) does not burn the full WebSocket wait (#6099).
+      // Android-only semantics: the iOS delegate serves its stale fallback for
+      // skip + unmet minTimestamp, but this recapture is unreachable there (it
+      // requires an adb-sourced back stack).
       hierarchy = await this.viewHierarchy.getViewHierarchy(
         undefined,
         new NoOpPerformanceTracker(),
-        false,
+        true,
         minTimestamp,
         signal,
       );

@@ -131,9 +131,13 @@ export class DeviceStateCollector {
       // has no expiry, so a `getActive()` (non-forced) read can serve a frozen
       // record — an empty activityName with a stale `layoutSeqSum` — across a
       // real navigation, which the observe layer would then publish. This path
-      // only runs during the lazy-CtrlProxy bootstrap interval (rare), so the
-      // extra dumpsys is cheap; the cache must never win over current window
-      // state (#6070).
+      // runs whenever the accessibility service supplies no usable
+      // foregroundActivity: the lazy-CtrlProxy bootstrap interval, every capture
+      // after a service start/reconnect until the app fires a window-state
+      // change, and any capture whose window root is a framework View class
+      // (#5939) — routine, not rare (#6099). The extra dumpsys is still cheap
+      // relative to a wrong window; the cache must never win over current
+      // window state (#6070).
       const activeWindow = await window.getActive(true);
       logger.debug(`Bootstrap active window retrieval took ${timer.now() - startedAt}ms`);
       if (activeWindow) {

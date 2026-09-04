@@ -1350,6 +1350,57 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("adopts the post-recapture layoutSeqSum when the window reports the activity in dumpsys shorthand (#6100)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(settingsHierarchy(now, "Sub settings") as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
+
+    // `dumpsys window` names an in-package activity as `pkg/.Activity`; the
+    // Window parser keeps the shorthand while the back stack expands it.
+    let windowReads = 0;
+    const window = {
+      getActive: async () => {
+        windowReads += 1;
+        return {
+          appId: "com.android.settings",
+          activityName: ".SubSettings",
+          layoutSeqSum: windowReads === 1 ? 5120 : 5121,
+        };
+      },
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    } as any;
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window,
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(windowReads).toBe(2);
+    expect(result.activeWindow?.layoutSeqSum).toBe(5121);
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+  });
+
   test("keeps the earlier correlated layoutSeqSum when the post-recapture window names a different activity (#6100)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

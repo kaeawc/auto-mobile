@@ -1285,11 +1285,18 @@ export class RealObserveScreen implements ObserveScreen {
       appendObserveError(result, error);
     }
     const reread = refreshed.activeWindow;
+    if (!reread?.layoutSeqSum) {
+      return activeWindow;
+    }
+    // `dumpsys window` reports an in-package activity in shorthand (`pkg/.Foo`),
+    // which the Window parser keeps, while the back stack expands it to
+    // `pkg.Foo`; compare the expanded form.
+    const rereadActivity = reread.activityName.startsWith(".")
+      ? reread.appId + reread.activityName
+      : reread.activityName;
     const sameIdentity =
-      reread?.appId === expected.packageName && reread.activityName === expected.activityName;
-    return sameIdentity && reread.layoutSeqSum
-      ? { ...activeWindow, layoutSeqSum: reread.layoutSeqSum }
-      : activeWindow;
+      reread.appId === expected.packageName && rereadActivity === expected.activityName;
+    return sameIdentity ? { ...activeWindow, layoutSeqSum: reread.layoutSeqSum } : activeWindow;
   }
 
   private isUsableAttributionRecapture(

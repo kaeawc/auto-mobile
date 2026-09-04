@@ -129,6 +129,36 @@ steps:
       expect(validator.validateYaml(yaml).valid).toBe(true);
     });
 
+    it("should accept an inline networkCondition that params.networkCondition overrides (#6090 review)", () => {
+      // PlanNormalizer gives params precedence, so at execution this step receives
+      // ONLY the valid params reset — the inline `{delayMs:0}` is discarded. Schema
+      // validation must not false-reject the discarded inline form.
+      const neutral = `
+name: net-inline-overridden-neutral
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      delayMs: 0
+    params:
+      networkCondition:
+        profile: none
+`;
+      expect(validator.validateYaml(neutral).valid).toBe(true);
+      // Same for an inline offline+override overridden by a valid params reset.
+      const offline = `
+name: net-inline-overridden-offline
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: offline
+      delayMs: 500
+    params:
+      networkCondition:
+        cancel: true
+`;
+      expect(validator.validateYaml(offline).valid).toBe(true);
+    });
+
     it("should validate cross-platform permission / appop steps in sequence", () => {
       const yaml = `
 name: grant-explicit
@@ -287,6 +317,20 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
+    });
+
+    it("should still reject a standalone inline neutral-only networkCondition (no params override) (#6090)", () => {
+      // Guards against weakening the standalone-inline validation: with no
+      // overriding params.networkCondition, a bare zero override is a no-op the
+      // schema must still reject (matching the runtime `empty`).
+      const yaml = `
+name: network-condition-inline-neutral
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      delayMs: 0
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(false);
     });
 
     it("should validate iOS simulator permissions through cross-platform permission tools", () => {

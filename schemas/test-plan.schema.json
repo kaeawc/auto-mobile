@@ -689,9 +689,6 @@
               },
               "biometrics": {
                 "$ref": "#/$defs/biometricStateInput"
-              },
-              "networkCondition": {
-                "$ref": "#/$defs/networkConditionStateInput"
               }
             },
             "anyOf": [
@@ -706,6 +703,27 @@
               },
               {
                 "required": ["params"]
+              }
+            ],
+            "allOf": [
+              {
+                "$comment": "params.networkCondition (when present) fully overrides an inline networkCondition at normalization (PlanNormalizer, params precedence), so the inline value is discarded at execution. Apply the strict networkConditionStateInput rules to the inline form ONLY when params.networkCondition is absent, otherwise a valid params reset would false-reject the discarded inline value (#6090 review).",
+                "if": {
+                  "required": ["params"],
+                  "properties": {
+                    "params": {
+                      "required": ["networkCondition"]
+                    }
+                  }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "networkCondition": {
+                      "$ref": "#/$defs/networkConditionStateInput"
+                    }
+                  }
+                }
               }
             ]
           }

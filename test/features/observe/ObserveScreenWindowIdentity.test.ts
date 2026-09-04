@@ -974,6 +974,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     const viewHierarchy = new FakeViewHierarchy();
     // Hierarchy captured for activity A; the navigation A->B lands before the
     // back-stack and window reads, which therefore both report B and agree.
+    // Note this fixture is indistinguishable from a STABLE screen whose
+    // recapture fails: the code cannot tell the two apart, and tolerating a
+    // failed recapture on agreement would reinstate the #6088 skew, so the
+    // honest verdict for both is unknown + retracted.
     viewHierarchy.configureHierarchySequence([
       settingsHierarchy(now, "Settings home"),
       { hierarchy: { error: "CtrlProxy timed out" }, fresh: false },
@@ -1060,7 +1064,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.isFresh).toBe(true);
   });
 
-  test("does not over-retract a stable bootstrap observation whose window and backStack agree (#6088)", async () => {
+  test("confirms a stable bootstrap observation through the recapture without retracting freshness (#6088)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();
     timer.setCurrentTime(now);
@@ -1101,6 +1105,64 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.warning).toBeUndefined();
+  });
+
+  test("surfaces a failed confirming back-stack read on the retracted result (#6088)", async () => {
+    // The bootstrap recapture now runs on every agreeing observation, so an adb
+    // hiccup on the confirming back-stack read retracts a stable observation.
+    // The cause must reach `result.errors` so the retraction is diagnosable.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(settingsHierarchy(now, "Sub settings") as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    let backStackReads = 0;
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 5120,
+        }),
+        backStack: {
+          execute: async () => {
+            backStackReads += 1;
+            if (backStackReads > 1) {
+              throw new Error("adb: device offline");
+            }
+            return {
+              depth: 1,
+              activities: [],
+              tasks: [],
+              currentActivity: { name: "com.android.settings.SubSettings", taskId: 14 },
+              source: "adb",
+            };
+          },
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(backStackReads).toBe(2);
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.freshness?.verified).toBe(false);
+    const backStackErrors = (result.errors ?? []).filter((e) => e.phase === "backStack");
+    expect(backStackErrors.length).toBeGreaterThan(0);
+    expect(backStackErrors[0]?.cause).toContain("device offline");
   });
 });
 

@@ -1205,6 +1205,12 @@ export class RealObserveScreen implements ObserveScreen {
     );
     const confirmed = resolveBackStackActivityAttribution(recapturedState);
     if (!this.matchesExpectedBackStackAttribution(confirmed, expected)) {
+      // A failed confirming back-stack read retracts freshness; surface its
+      // cause on the published result so the retraction is diagnosable rather
+      // than an unexplained "could not reconcile" (#6088).
+      for (const error of recapturedState.errors ?? []) {
+        appendObserveError(result, error);
+      }
       return false;
     }
 

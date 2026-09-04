@@ -143,13 +143,11 @@ the exact arguments supported by your connection.
   convenience: it accepts either an _already-booted_ serial such as
   `emulator-5554` (the `deviceId` field of `automobile:devices/booted/android`)
   **or** an AVD image name — if it names a defined-but-unbooted AVD, `getAndroid`
-  cold-boots that image by name. Both paths ultimately resolve a stable
-  lifecycle target before booting; the difference is that `avdName` supplies the
-  `androidAvdName` startup-lease hint and an eager `stableTarget` up front, while
-  the `deviceId` path resolves that stable target downstream from the id. Prefer
-  `avdName` when you specifically want to boot or coordinate a named AVD; use
-  `deviceId` to attach to a running device or to boot straight from a discovered
-  identifier.
+  cold-boots that image by name. The difference is the coordination hints the
+  `avdName` path passes up front — `matchExactName`, an `androidAvdName`
+  startup-lease hint, and an eager `stableTarget` — so prefer `avdName` when you
+  specifically want to boot or coordinate a named AVD; use `deviceId` to attach
+  to a running device or to boot straight from a discovered identifier.
 - **`getApple`** — `udid` is the iOS Simulator UDID. `deviceId` is an accepted
   **alias** for `udid`: a booted simulator's `deviceId` (from
   `automobile:devices/booted/ios`) _is_ its `udid`, so both fields resolve to the

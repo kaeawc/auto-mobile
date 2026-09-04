@@ -4,6 +4,7 @@ import {
   parseActiveWindowModern,
   parseActiveWindowLegacy,
   parseDumpsysWindowFocus,
+  isFocusedSystemUiSurface,
 } from "../../../src/features/observe/Window";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -946,6 +947,38 @@ describe("Window", () => {
         appId: "com.example.app",
         activityName: "com.example.app.SomeActivity",
       });
+    });
+  });
+
+  // Issue #6078: recognize a package-less SystemUI focus window (the shade owns
+  // focus while the app behind it is only the resumed activity).
+  describe("isFocusedSystemUiSurface", () => {
+    test("true for a NotificationShade focus window", () => {
+      expect(isFocusedSystemUiSurface("mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}")).toBe(
+        true,
+      );
+    });
+
+    test("true for StatusBar, QuickSettings, and keyguard variants", () => {
+      expect(isFocusedSystemUiSurface("mCurrentFocus=Window{1 u0 StatusBar}")).toBe(true);
+      expect(isFocusedSystemUiSurface("mCurrentFocus=Window{2 u0 QuickSettings}")).toBe(true);
+      expect(isFocusedSystemUiSurface("mCurrentFocus=Window{3 u0 Keyguard}")).toBe(true);
+      expect(
+        isFocusedSystemUiSurface("mCurrentFocus=Window{4 u0 StatusBarKeyguardViewManager}"),
+      ).toBe(true);
+    });
+
+    test("false when an app package/activity owns focus (shade collapsed)", () => {
+      expect(
+        isFocusedSystemUiSurface(
+          "mCurrentFocus=Window{41e2a458 u0 com.example.app/com.example.app.SomeActivity}",
+        ),
+      ).toBe(false);
+    });
+
+    test("false for empty output or no mCurrentFocus", () => {
+      expect(isFocusedSystemUiSurface("")).toBe(false);
+      expect(isFocusedSystemUiSurface("mFocusedApp=AppWindowToken{...}")).toBe(false);
     });
   });
 });

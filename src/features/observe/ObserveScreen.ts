@@ -1,6 +1,6 @@
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { BootedDevice, ObserveResult, ScreenIdentity } from "../../models";
+import { BootedDevice, ObserveResult, ScreenIdentity, ViewHierarchyWindowInfo } from "../../models";
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
@@ -89,6 +89,54 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
  * misreporting an expanded shade as a stale wrong-window capture.
  */
 const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
+
+const SYSTEM_UI_PACKAGE = "com.android.systemui";
+
+/**
+ * AccessibilityWindowInfo.TYPE_SYSTEM — the window type CtrlProxy reports for
+ * framework surfaces (notification shade, quick settings, keyguard, status bar).
+ * Same constant `androidSystemUiAnr.ts` keys the ANR dialog off.
+ */
+const ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
+
+type FocusedSystemUiSignal = "focused" | "topmost-suspect" | "none";
+
+function isSystemUiSurfaceWindow(window: ViewHierarchyWindowInfo): boolean {
+  return (
+    window.packageName === SYSTEM_UI_PACKAGE || window.type === ACCESSIBILITY_WINDOW_TYPE_SYSTEM
+  );
+}
+
+/**
+ * Classify what the captured `windows[]` list says about a focused SystemUI
+ * surface (issue #6078), the free (no-adb) primary signal:
+ *
+ * - `focused` — a window carries `isFocused === true` and it is a SystemUI
+ *   surface. This mirrors `mCurrentFocus` directly; no adb read is needed.
+ *   A focused non-SystemUI (ordinary app) window returns `none`.
+ * - `topmost-suspect` — no window reports focus, but the topmost window (by
+ *   `windowLayer`) is a SystemUI surface. Focus is unconfirmed on this API
+ *   level, so the caller confirms with a `dumpsys window` `mCurrentFocus` read.
+ * - `none` — no `windows[]`, a focused app window, or a topmost app window.
+ *   The status bar always exists but is not focused and is not topmost over an
+ *   expanded shade, so an ordinary app screen never lands here as a suspect.
+ */
+function classifyFocusedSystemUiWindow(
+  hierarchy: ObserveResult["viewHierarchy"],
+): FocusedSystemUiSignal {
+  const windows = hierarchy?.windows;
+  if (!windows || windows.length === 0) {
+    return "none";
+  }
+  const focused = windows.find((window) => window.isFocused === true);
+  if (focused) {
+    return isSystemUiSurfaceWindow(focused) ? "focused" : "none";
+  }
+  const topmost = windows.reduce((current, candidate) =>
+    (candidate.windowLayer ?? 0) > (current.windowLayer ?? 0) ? candidate : current,
+  );
+  return isSystemUiSurfaceWindow(topmost) ? "topmost-suspect" : "none";
+}
 
 interface PostCaptureForegroundIdentity {
   sampled: boolean;
@@ -910,8 +958,20 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     signal?: AbortSignal,
   ): Promise<PostCaptureForegroundIdentity> {
-    const observed = result.viewHierarchy?.packageName;
     const activeWindow = result.activeWindow;
+
+    // A focused SystemUI surface (notification shade, quick settings, keyguard,
+    // status bar owning focus) occludes the app behind it while CtrlProxy's
+    // `foregroundActivity` and `adb getForegroundApp` both still name that
+    // occluded app — neither reads `mCurrentFocus`. Mirror the SystemUI identity
+    // into `activeWindow` so `waitFor.activeWindow.appId == <app>` fails closed
+    // and one object never names two apps (issue #6078). This runs before the
+    // #6070 back-stack backfill and the system-UI bail below.
+    if (await this.applyFocusedSystemUiOverlay(result, signal)) {
+      return { sampled: false, identity: undefined, activityAttributionMismatch: false };
+    }
+
+    const observed = result.viewHierarchy?.packageName;
     if (
       observed === undefined ||
       activeWindow === undefined ||
@@ -965,6 +1025,58 @@ export class RealObserveScreen implements ObserveScreen {
       result.activeWindow = { ...activeWindow, appId: observed, activityName: "" };
     }
     return { sampled: true, identity: confirmed, activityAttributionMismatch: false };
+  }
+
+  /**
+   * Decide whether a focused SystemUI surface currently owns input focus
+   * (issue #6078). The free primary signal is the captured accessibility
+   * `windows[]`: a window flagged `isFocused` that is a SystemUI surface
+   * confirms the overlay with no extra device round-trip. When no window on this
+   * API level carries a focus flag but the topmost window is a SystemUI surface,
+   * focus is confirmed with a single `dumpsys window` `mCurrentFocus` read (the
+   * status bar always exists but is neither focused nor topmost over an expanded
+   * shade, so an ordinary app screen never reaches the adb read).
+   */
+  private async detectFocusedSystemUiOverlay(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const signalKind = classifyFocusedSystemUiWindow(result.viewHierarchy);
+    if (signalKind === "focused") {
+      return true;
+    }
+    if (signalKind === "topmost-suspect") {
+      return this.deviceStateCollector.collectFocusedSystemUiSurface(signal);
+    }
+    return false;
+  }
+
+  /**
+   * Mirror the SystemUI surface identity into `activeWindow` when a SystemUI
+   * surface owns focus (issue #6078). Returns `true` when the overlay was
+   * detected and applied — the caller then short-circuits the rest of
+   * attribution. A no-op (returns `false`) when there is no `activeWindow` to
+   * annotate or no focused SystemUI surface.
+   */
+  private async applyFocusedSystemUiOverlay(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const activeWindow = result.activeWindow;
+    if (activeWindow === undefined || !(await this.detectFocusedSystemUiOverlay(result, signal))) {
+      return false;
+    }
+    const overlay = {
+      ...activeWindow,
+      appId: SYSTEM_UI_PACKAGE,
+      activityName: "",
+      systemOverlay: true,
+    };
+    // The occluded-app `type` (e.g. a notification-permission dialog) does not
+    // describe the shade that is now on top; drop it while the overlay is up.
+    delete overlay.type;
+    result.activeWindow = overlay;
+    return true;
   }
 
   private async recaptureHierarchyForBackStackAttribution(

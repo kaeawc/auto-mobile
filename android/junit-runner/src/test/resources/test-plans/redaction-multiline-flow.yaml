@@ -1,0 +1,16 @@
+---
+name: redaction-multiline-flow
+description: Plan declaring secretParameters as a multiline YAML flow sequence (#6097)
+secretParameters: [
+    SECRET_TOKEN,
+  ]
+steps:
+  - tool: launchApp
+    appId: com.example.app
+    label: Launch app
+  - tool: inputText
+    text: "${SECRET_TOKEN}"
+    label: Enter the secret token
+  - tool: tapOn
+    text: "${ENVIRONMENT}"
+    label: Tap the environment control

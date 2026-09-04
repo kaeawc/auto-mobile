@@ -156,8 +156,24 @@ enum PlanMetadataParser {
                 continue
             }
 
-            let inline = trimmed.dropFirst("secretParameters:".count).trimmingCharacters(in: .whitespaces)
+            // Peek at the value with a quote-aware comment strip (a `#` inside a quoted key is literal
+            // YAML, not a comment): empty -> block sequence, `[` -> flow sequence, else bare scalar.
+            // `lines[index]` is the raw line and begins with the key (indent 0).
+            let rawValue = String(lines[index].dropFirst("secretParameters:".count))
+            let inline = stripFlowComment(rawValue).trimmingCharacters(in: .whitespaces)
             if !inline.isEmpty {
+                if inline.hasPrefix("[") {
+                    // A flow value may span multiple physical lines; a single-pass scanner handles the
+                    // multiline form, quoted `#`, escaped quotes, trailing comments after `]`, and line
+                    // folding — and fails safe toward over-capture (#6097).
+                    let (flowKeys, nextIndex) = parseSecretFlowSequence(
+                        lines: lines, startIndex: index, firstValue: rawValue
+                    )
+                    keys.formUnion(flowKeys)
+                    index = nextIndex
+                    continue
+                }
+                // Bare inline scalar (no brackets): treat as a single key name.
                 keys.formUnion(parseInlineList(inline))
                 index += 1
                 continue
@@ -197,12 +213,23 @@ enum PlanMetadataParser {
         var items: [String] = []
         var current = ""
         var activeQuote: Character?
+        var escaped = false
         for character in inner {
             if let quote = activeQuote {
-                if character == quote {
+                current.append(character)
+                // Inside a double-quoted scalar `\"` is a literal quote, not the closing delimiter, so
+                // a `,` or `]` after it stays part of the item (#6097).
+                if quote == "\"" {
+                    if escaped {
+                        escaped = false
+                    } else if character == "\\" {
+                        escaped = true
+                    } else if character == "\"" {
+                        activeQuote = nil
+                    }
+                } else if character == "'" {
                     activeQuote = nil
                 }
-                current.append(character)
             } else if character == "\"" || character == "'" {
                 activeQuote = character
                 current.append(character)
@@ -216,8 +243,224 @@ enum PlanMetadataParser {
         items.append(current)
 
         return items
-            .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
+            .map { unquoteFlowScalar($0.trimmingCharacters(in: .whitespaces)) }
             .filter { !$0.isEmpty }
+    }
+
+    private static func stripTrailingCarriageReturn(_ line: String) -> String {
+        line.hasSuffix("\r") ? String(line.dropLast()) : line
+    }
+
+    /// Scan a `secretParameters:` YAML flow sequence that may span multiple physical lines, returning
+    /// the declared key names and the index of the next line to resume from. A lenient hand-rolled
+    /// scanner (a full YAML load chokes on `${...}` in flow collections — issue #6029). It honors
+    /// quotes; double-quote backslash escaping (`\"`, so a `]`/`,`/`"` after it stays literal); quoted
+    /// `#` (a `#` inside a scalar is literal — only an unquoted `#` at line start or after whitespace
+    /// begins a comment); any content after the closing `]` (ignored — including a trailing comment);
+    /// and YAML newline folding inside a double-quoted scalar (a trailing `\` continues the scalar,
+    /// dropping the newline; a plain newline folds to a space; continuation indentation is not part of
+    /// the value).
+    ///
+    /// `secretParameters` key names are expected to be literal, simple identifiers. Exotic YAML
+    /// encodings (`\xNN`/`\uNNNN` hex/unicode escapes, plain-scalar line folding, CRLF-in-quoted
+    /// multiline keys) are handled best-effort here, NOT with full YAML-spec decoding — so a key may be
+    /// mis-named. That is made safe at the value layer: `SecretRedaction.secretParameterValues` matches
+    /// leniently and, if a declared key still cannot be resolved, over-redacts, so a declared secret's
+    /// VALUE is always scrubbed (possibly over-redacting), never leaked. Full decoding is tracked as a
+    /// follow-up to #6097.
+    ///
+    /// FAIL-SAFE: key-name parsing errs toward OVER-capturing for redaction, never dropping a declared
+    /// key (which would leak its value). Every non-empty token is kept as a secret key, and an
+    /// UNTERMINATED sequence (e.g. from substitution truncation) still yields every token seen (#6097).
+    private static func parseSecretFlowSequence(
+        lines: [String], startIndex: Int, firstValue: String
+    )
+        -> (keys: [String], nextIndex: Int)
+    {
+        var keys: [String] = []
+        var current = ""
+        var itemHasQuotedChar = false
+        var depth = 0
+        var started = false
+        var activeQuote: Character?
+        var escaped = false
+        var lineIndex = startIndex
+
+        // Emit the current item: a plain token is trimmed and a genuinely-empty token (nothing between
+        // the delimiters) is dropped, but a quoted scalar whose content is only whitespace (e.g. `" "`)
+        // is a valid key and is preserved rather than trimmed away (#6097).
+        func flushItem() {
+            let trimmed = current.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty {
+                keys.append(trimmed)
+            } else if itemHasQuotedChar {
+                keys.append(current)
+            }
+            current = ""
+            itemHasQuotedChar = false
+        }
+
+        // Drop a trailing CR so a CRLF-authored quoted multiline key does not embed `\r` (#6097).
+        var currentLine = stripTrailingCarriageReturn(firstValue)
+
+        while true {
+            var previous: Character?
+            var inComment = false
+            for character in currentLine {
+                if inComment { break }
+                if let quote = activeQuote {
+                    if quote == "\"" {
+                        if escaped {
+                            // `\"` decodes cleanly to `"`; any OTHER escape (`\xNN`, `\uNNNN`, `\n`, …)
+                            // is NOT spec-decoded here — keep the backslash so the value layer sees this
+                            // key as low-confidence and over-redacts rather than trusting a coincidental
+                            // (decoy) match (#6097).
+                            if character == "\"" {
+                                current.append("\"")
+                            } else {
+                                current.append("\\")
+                                current.append(character)
+                            }
+                            itemHasQuotedChar = true
+                            escaped = false
+                        } else if character == "\\" {
+                            escaped = true
+                        } else if character == "\"" {
+                            activeQuote = nil
+                        } else {
+                            current.append(character)
+                            itemHasQuotedChar = true
+                        }
+                    } else if character == "'" {
+                        activeQuote = nil
+                    } else {
+                        current.append(character)
+                        itemHasQuotedChar = true
+                    }
+                } else if !started {
+                    if character == "[" {
+                        started = true
+                        depth = 1
+                    }
+                } else if character == "#" && (previous == nil || previous == " " || previous == "\t") {
+                    inComment = true
+                } else if character == "\"" || character == "'" {
+                    activeQuote = character
+                } else if character == "[" {
+                    depth += 1
+                    current.append(character)
+                } else if character == "]" {
+                    depth -= 1
+                    if depth == 0 {
+                        flushItem()
+                        return (keys, lineIndex + 1)
+                    }
+                    current.append(character)
+                } else if character == ",", depth == 1 {
+                    flushItem()
+                } else {
+                    current.append(character)
+                }
+                previous = character
+            }
+
+            // Physical line ended. Fold per YAML inside a double-quoted scalar: a trailing `\`
+            // continues it (drop the newline); a plain newline folds to a space. Outside a quote, a
+            // plain scalar spanning lines is captured token-per-line (over-capture, fail-safe) instead
+            // of blending into one key.
+            if activeQuote == "\"", escaped {
+                escaped = false
+            } else if activeQuote != nil {
+                current.append(" ")
+            } else if started {
+                flushItem()
+            }
+
+            lineIndex += 1
+            if lineIndex >= lines.count {
+                // Unterminated flow: fail safe — keep every token seen so its value is still redacted.
+                flushItem()
+                return (keys, lineIndex)
+            }
+            // Drop a trailing CR; inside a quoted scalar the continuation's leading indentation is not
+            // part of the value.
+            let rawLine = stripTrailingCarriageReturn(lines[lineIndex])
+            currentLine = activeQuote != nil
+                ? String(rawLine.drop { $0 == " " || $0 == "\t" })
+                : rawLine
+        }
+    }
+
+    /// Remove a trailing YAML line comment from a flow line without stripping a `#` that sits inside a
+    /// quoted scalar. Only an unquoted `#` at line start or preceded by whitespace begins a comment
+    /// (YAML rule); double-quote backslash escaping is tracked so `\"` does not close the scalar and a
+    /// following `#` stays literal (#6097).
+    private static func stripFlowComment(_ line: String) -> String {
+        var result = ""
+        var activeQuote: Character?
+        var escaped = false
+        var previous: Character?
+        for character in line {
+            if let quote = activeQuote {
+                result.append(character)
+                if quote == "\"" {
+                    if escaped {
+                        escaped = false
+                    } else if character == "\\" {
+                        escaped = true
+                    } else if character == "\"" {
+                        activeQuote = nil
+                    }
+                } else if character == "'" {
+                    activeQuote = nil
+                }
+            } else if character == "#" && (previous == nil || previous == " " || previous == "\t") {
+                break
+            } else {
+                if character == "\"" || character == "'" {
+                    activeQuote = character
+                }
+                result.append(character)
+            }
+            previous = character
+        }
+        return result
+    }
+
+    /// Unquote a flow-list scalar: a single-quoted scalar is literal, a double-quoted scalar has its
+    /// backslash escapes resolved (so `"a\"]b"` yields `a"]b`), matching the escape tracking used to
+    /// find the sequence terminator and to split items (#6097).
+    private static func unquoteFlowScalar(_ value: String) -> String {
+        if value.count >= 2 {
+            if value.hasPrefix("\"") && value.hasSuffix("\"") {
+                return unescapeDoubleQuoted(String(value.dropFirst().dropLast()))
+            }
+            if value.hasPrefix("'") && value.hasSuffix("'") {
+                return String(value.dropFirst().dropLast())
+            }
+        }
+        return value
+    }
+
+    /// Resolve backslash escapes inside a double-quoted YAML scalar: `\` escapes the next character
+    /// literally (so `\"` -> `"`, `\\` -> `\`). Sufficient for key names (#6097).
+    private static func unescapeDoubleQuoted(_ inner: String) -> String {
+        var result = ""
+        var escaped = false
+        for character in inner {
+            if escaped {
+                result.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaped {
+            result.append("\\")
+        }
+        return result
     }
 
     private static func parsePlatform(_ value: String) throws -> AutoMobilePlanExecutor.PlanPlatform {

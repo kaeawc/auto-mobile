@@ -1,0 +1,11 @@
+---
+name: redaction-hex-escape-key
+description: secretParameters key using a YAML \x hex escape; fail-safe redaction (#6097)
+secretParameters: ["API\x54OKEN"]
+steps:
+  - tool: launchApp
+    appId: com.example.app
+    label: Launch app
+  - tool: inputText
+    text: "field"
+    label: Enter a value

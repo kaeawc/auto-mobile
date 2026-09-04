@@ -69,6 +69,78 @@ enum SecretRedaction {
         )
     }
 
+    /// The parameter VALUES to scrub for a set of declared secret key names, matched leniently so an
+    /// exotically-encoded key name cannot leak its value. For each declared key: a key that still
+    /// contains a backslash (a YAML escape the scanner did not spec-decode) is low-confidence and forces
+    /// over-redaction — its raw form must not be trusted to exact-match a DECOY parameter while the real
+    /// value hides under the decoded name. Otherwise an exact `parameters[key]` is taken; failing that,
+    /// any parameter whose key normalizes equal (case-folded, with backslashes/quotes/whitespace/CR
+    /// removed) is taken; and if a declared key still resolves to nothing, EVERY parameter value is taken
+    /// (over-redaction). `secretParameters` key names are expected to be literal identifiers — this is
+    /// the fail-safe backstop for YAML encodings the flow scanner does not fully decode (`\xNN`/`\uNNNN`
+    /// escapes, folding, CRLF): a declared secret's value is always scrubbed (possibly over-redacting),
+    /// never leaked (#6097). Full decoding is a follow-up (#6141).
+    static func secretParameterValues(
+        declaredKeys: Set<String>,
+        parameters: [String: String]
+    )
+        -> [String]
+    {
+        guard !declaredKeys.isEmpty else {
+            return []
+        }
+        var values: [String] = []
+        var hasUnresolvedKey = false
+        for key in declaredKeys {
+            if key.contains("\\") {
+                // A key that still contains a backslash carries a YAML escape the flow scanner did not
+                // spec-decode (e.g. `\xNN`). Its raw form may coincidentally match a DECOY parameter
+                // while the real value lives under the decoded name — so do NOT trust any match; force
+                // over-redaction so the real value cannot leak (#6097).
+                hasUnresolvedKey = true
+                continue
+            }
+            if let exact = parameters[key], !exact.isEmpty {
+                values.append(exact)
+                continue
+            }
+            let target = normalizeKey(key)
+            var matched = false
+            for (paramKey, paramValue) in parameters where normalizeKey(paramKey) == target {
+                if !paramValue.isEmpty {
+                    values.append(paramValue)
+                }
+                matched = true
+            }
+            if !matched {
+                hasUnresolvedKey = true
+            }
+        }
+        if hasUnresolvedKey {
+            // A declared secret could not be located even leniently (e.g. a `\xNN` hex-escaped key the
+            // scanner did not spec-decode). Over-redact every parameter value so it cannot leak (#6097).
+            for value in parameters.values where !value.isEmpty {
+                values.append(value)
+            }
+        }
+        return values
+    }
+
+    /// Case-folded key with backslashes, quotes, and whitespace/CR removed — the lenient key-identity
+    /// used to match a mis-encoded declared secret key to a parameter (#6097).
+    private static func normalizeKey(_ key: String) -> String {
+        var result = ""
+        for scalar in key.lowercased().unicodeScalars {
+            switch scalar {
+            case "\\", "\"", "'", " ", "\t", "\r", "\n":
+                continue
+            default:
+                result.unicodeScalars.append(scalar)
+            }
+        }
+        return result
+    }
+
     /// `value` plus its canonical NFC and NFD forms, distinct by UTF-16 code units (Swift string `!=`
     /// is canonical and would treat every form as equal).
     private static func normalizationForms(of value: String) -> [String] {

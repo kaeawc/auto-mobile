@@ -93,6 +93,137 @@ class AutoMobilePlanRedactionTest {
   }
 
   @Test
+  fun `secret is redacted when secretParameters is a multiline flow sequence`() {
+    // Multiline bracketed flow sequence — valid YAML the line scanner previously dropped, silently
+    // disabling redaction and letting the secret reach the LLM recovery context (#6097 fail-open
+    // gap).
+    fakeDaemonClient.executePlanResponse =
+      buildFailureResponse(error = "timed out entering $secret into field")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-multiline-flow.yaml",
+      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured) { "recovery must receive a context" }
+    assertFalse(
+      "a multiline-flow secretParameters declaration must still redact the plan content",
+      context.planContent.contains(secret),
+    )
+    assertFalse(
+      "a multiline-flow secretParameters declaration must still redact the error string",
+      context.error.contains(secret),
+    )
+    assertTrue(
+      "the secret is replaced by the redaction placeholder",
+      context.planContent.contains(SecretRedactor.PLACEHOLDER),
+    )
+    assertTrue(
+      "non-secret substituted context is preserved",
+      context.planContent.contains(visible),
+    )
+  }
+
+  @Test
+  fun `multiline flow key with a quoted hash does not drop the following secret`() {
+    // The first key quotes a `#`; a comment strip that runs before quote state truncates it, drops
+    // the
+    // second key, and leaks the second secret to the recovery LLM (#6097 Codex P1, fail-open).
+    val secretA = "SECRETA-hash-9f1"
+    val secretB = "SECRETB-plain-2a7"
+    fakeDaemonClient.executePlanResponse =
+      buildFailureResponse(error = "boom $secretA and $secretB")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-multiline-quoted-hash.yaml",
+      mapOf("API#TOKEN" to secretA, "PASSWORD" to secretB),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the quoted-# key's value must be redacted",
+      context.error.contains(secretA),
+    )
+    assertFalse(
+      "the following key must not be dropped, so its value redacts",
+      context.error.contains(secretB),
+    )
+  }
+
+  @Test
+  fun `multiline flow key with an escaped quote before a bracket does not drop the following secret`() {
+    // The first key is a double-quoted scalar with an escaped quote before a `]`; without escape
+    // tracking the sequence terminator is found early, the second key is dropped, and its secret
+    // leaks.
+    val secretA = "SECRETA-esc-4c2"
+    val secretB = "SECRETB-plain-8e5"
+    fakeDaemonClient.executePlanResponse =
+      buildFailureResponse(error = "boom $secretA and $secretB")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-multiline-escaped-quote.yaml",
+      mapOf("a\"]b" to secretA, "PASSWORD" to secretB),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the escaped-quote key's value must be redacted",
+      context.error.contains(secretA),
+    )
+    assertFalse(
+      "the following key must not be dropped, so its value redacts",
+      context.error.contains(secretB),
+    )
+  }
+
+  @Test
+  fun `secret value is redacted when the key uses a hex escape (fail-safe)`() {
+    // The key `"API\x54OKEN"` is not spec-decoded by the scanner, so it can't be matched to the
+    // parameter `APITOKEN` by name; the strengthened value-layer fail-safe over-redacts so the
+    // secret
+    // still cannot leak to the recovery LLM (#6097 — the important security assertion).
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-hex-escape-key.yaml",
+      mapOf("APITOKEN" to secret),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "a hex-escaped secret key's value must still be redacted via the fail-safe",
+      context.error.contains(secret),
+    )
+  }
+
+  @Test
+  fun `secret value is redacted despite a decoy parameter matching the un-decoded hex key`() {
+    // Parameters contain BOTH the real `APITOKEN` (what YAML decodes `"API\x54OKEN"` to) and a
+    // decoy
+    // `APIx54OKEN` matching the scanner's un-decoded spelling. The fail-safe must not trust the
+    // decoy
+    // exact-match; it over-redacts so the REAL secret cannot leak (#6097 — decoy collision).
+    val real = "REAL-hex-secret-1a2"
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $real")
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-hex-escape-key.yaml",
+      mapOf("APITOKEN" to real, "APIx54OKEN" to "DECOY-not-the-secret"),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "the real secret must be redacted despite the decoy exact-match",
+      context.error.contains(real),
+    )
+  }
+
+  @Test
   fun `secret declared only via options secretParameterKeys is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 

@@ -33,6 +33,224 @@ class SecretRedactorTest {
   }
 
   @Test
+  fun `parses multiline flow sequence with closing bracket on its own line`() {
+    // The bracketed flow value spans multiple lines with `]` alone on the last line — the form the
+    // line scanner previously dropped, silently disabling redaction (#6097 fail-open gap).
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        TOKEN,
+        PASSWORD
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `parses multiline flow sequence with trailing comma and closing bracket trailing an item`() {
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        TOKEN,
+        PASSWORD,
+        API ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("TOKEN", "PASSWORD", "API"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `multiline flow sequence tolerates quoted comma and placeholder key names`() {
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        "API,TOKEN",
+        ${'$'}{SECRET_KEY}
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("API,TOKEN", "\${SECRET_KEY}"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `empty multiline flow sequence yields an empty set`() {
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertTrue(SecretRedactor.parsePlanSecretKeys(yaml).isEmpty())
+  }
+
+  @Test
+  fun `multiline flow with a quoted hash key does not drop the following key`() {
+    // A `#` inside a quoted item is literal YAML, not a comment. Stripping comments line-by-line
+    // before quote state truncates `"API#TOKEN"` to `"API`, the unterminated quote swallows the
+    // rest,
+    // and PASSWORD is dropped — its secret would reach the LLM unredacted (#6097 Codex P1,
+    // fail-open).
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        "API#TOKEN",
+        PASSWORD
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("API#TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `multiline flow with an escaped quote before a bracket does not drop the following key`() {
+    // A double-quoted scalar may contain an escaped quote (\"); the `]` after it is still inside
+    // the
+    // scalar, not the sequence terminator. Without escape tracking the terminator is found early
+    // and
+    // PASSWORD is dropped — fail-open (#6097 Codex P2).
+    val yaml =
+      """
+      name: P
+      secretParameters: [
+        "a\"]b",
+        PASSWORD
+      ]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+    assertEquals(setOf("a\"]b", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `trailing comment after the closing bracket is ignored`() {
+    // A comment after `]` (with or without a leading space) must be ignored and TOKEN still parsed;
+    // dropping it would leak TOKEN's value (#6097 Codex — comment after `]`).
+    val spaced = "name: P\nsecretParameters: [TOKEN] # trailing comment\nsteps:\n  - tool: observe"
+    assertEquals(setOf("TOKEN"), SecretRedactor.parsePlanSecretKeys(spaced))
+    val unspaced = "name: P\nsecretParameters: [TOKEN]#c\nsteps:\n  - tool: observe"
+    assertEquals(setOf("TOKEN"), SecretRedactor.parsePlanSecretKeys(unspaced))
+  }
+
+  @Test
+  fun `an unrecognized token is still captured as a secret key (fail-safe)`() {
+    // Fail-safe: an unusual/unrecognized token must still be treated as a secret key (over-capture)
+    // rather than dropped — dropping would fail open (#6097).
+    val yaml = "name: P\nsecretParameters: [TOKEN, @@weird@@]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("TOKEN", "@@weird@@"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `an unterminated flow sequence fails safe by capturing its tokens`() {
+    // No closing `]` (e.g. substitution truncation): still yield the tokens (over-capture), never
+    // silently drop them (#6097 fail-safe).
+    val yaml = "name: P\nsecretParameters: [\n  TOKEN,\n  PASSWORD"
+    assertEquals(setOf("TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `a double-quoted line-continuation key is captured`() {
+    // A double-quoted key using YAML line continuation (`"API\`+newline+`TOKEN"` decodes to
+    // `APITOKEN`) must be captured so its value is redacted (#6097 Codex — line continuation).
+    val yaml = "name: P\nsecretParameters: [\n  \"API\\\n  TOKEN\"\n]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("APITOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `a CRLF-authored quoted multiline key is parsed without a carriage return`() {
+    // With CRLF line endings, split('\n') leaves a trailing `\r`; it must be stripped so the key
+    // isn't
+    // corrupted (#6097 Codex — CRLF). The quoted scalar folds to `API TOKEN`.
+    val yaml =
+      "name: P\r\nsecretParameters: [\r\n  \"API\r\n  TOKEN\"\r\n]\r\nsteps:\r\n  - tool: observe"
+    val keys = SecretRedactor.parsePlanSecretKeys(yaml)
+    assertEquals(setOf("API TOKEN"), keys)
+    assertFalse(keys.any { it.contains('\r') }, "no key may contain a carriage return")
+  }
+
+  @Test
+  fun `a plain multiline flow scalar captures each line's token (fail-safe over-capture)`() {
+    // A plain (unquoted) scalar spanning lines is captured token-per-line so both are redacted,
+    // rather
+    // than blended into one mis-named key (#6097 Codex — plain-scalar folding).
+    val yaml = "name: P\nsecretParameters: [\n  API\n  TOKEN\n]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("API", "TOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `secretParameterValues matches exactly and does not over-redact`() {
+    val values =
+      SecretRedactor.secretParameterValues(setOf("TOKEN"), mapOf("TOKEN" to "S", "VIS" to "v"))
+    assertEquals(listOf("S"), values)
+  }
+
+  @Test
+  fun `secretParameterValues matches leniently across whitespace and case`() {
+    // A folded/whitespaced key still resolves to the parameter by normalized identity (#6097).
+    val values = SecretRedactor.secretParameterValues(setOf("API TOKEN"), mapOf("apitoken" to "S"))
+    assertEquals(listOf("S"), values)
+  }
+
+  @Test
+  fun `a quoted whitespace-only key is not dropped`() {
+    // Stripping the quotes before the trim would discard `" "`; a single space is a valid quoted
+    // key
+    // and must be kept so its parameter value is redacted (#6097 Codex — quoted whitespace key).
+    val yaml = "name: P\nsecretParameters: [\" \"]\nsteps:\n  - tool: observe"
+    assertEquals(setOf(" "), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `secretParameterValues keeps a quoted whitespace key's value`() {
+    val values = SecretRedactor.secretParameterValues(setOf(" "), mapOf(" " to "SECRET"))
+    assertEquals(listOf("SECRET"), values)
+  }
+
+  @Test
+  fun `secretParameterValues over-redacts a backslash key despite a decoy exact-match`() {
+    // The un-decoded hex key `API\x54OKEN` exact-matches a DECOY parameter of the same raw
+    // spelling,
+    // while the REAL value lives under the YAML-decoded `APITOKEN`. A backslash key must not trust
+    // that
+    // coincidental match — it over-redacts so REAL is scrubbed too (#6097 Codex — decoy collision).
+    val values =
+      SecretRedactor.secretParameterValues(
+        setOf("API\\x54OKEN"),
+        mapOf("APITOKEN" to "REAL", "APIx54OKEN" to "DECOY"),
+      )
+    assertTrue(values.contains("REAL"), "the real (decoded-name) secret value must be scrubbed")
+  }
+
+  @Test
+  fun `secretParameterValues over-redacts when a declared key cannot be resolved (fail-safe)`() {
+    // A hex-escaped key parsed as `APIx54OKEN` matches no parameter by name or normalization, so
+    // every
+    // parameter value is scrubbed — the secret cannot leak (#6097 fail-safe).
+    val values =
+      SecretRedactor.secretParameterValues(
+        setOf("APIx54OKEN"),
+        mapOf("APITOKEN" to "SECRETV", "VIS" to "visible"),
+      )
+    assertTrue(values.contains("SECRETV"), "the real secret value must be scrubbed")
+  }
+
+  @Test
   fun `tolerates placeholder key names and unrelated placeholder flow lists`() {
     // A full YAML load would throw on `[${LABEL}, OK]`; the scanner tolerates it and ignores it.
     val yaml =

@@ -457,11 +457,10 @@ public final class AutoMobilePlanExecutor {
         let params = configuration.parameters
         let resolvedKeys = Set(declaredKeys.map { substituteParameters(in: $0, parameters: params) })
 
-        var values: [String] = []
+        // Raw parameter values via the lenient/fail-safe matcher (so an exotically-encoded key name
+        // cannot leak), plus each key's actual substituted value from this executor's ordered pass.
+        var values = SecretRedaction.secretParameterValues(declaredKeys: resolvedKeys, parameters: params)
         for key in resolvedKeys {
-            if let raw = params[key], !raw.isEmpty {
-                values.append(raw)
-            }
             let placeholder = "${\(key)}"
             let landed = substituteParameters(in: placeholder, parameters: params)
             if landed != placeholder, !landed.isEmpty {

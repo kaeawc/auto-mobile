@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runSessionNetworkMutation } from "../../src/server/sessionNetworkCondition";
+import { applyStateAfterBiometricCaptureFailure } from "../../src/server/sessionBiometricEnrollment";
+import type { DeviceStateResult } from "../../src/features/utility/DeviceState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -108,6 +110,52 @@ describe("runSessionNetworkMutation", () => {
 
       expect(mutationStarted).toBe(false);
       expect(manager.getNetworkCondition("net-rebind")).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("the biometric-capture-failure fallback registers the slot via the tracked setter (#6012 review P1)", async () => {
+    // The handler wraps its setter in runSessionNetworkMutation, then hands that
+    // tracked setter to applyStateAfterBiometricCaptureFailure. This composes the
+    // two to prove the fallback registers the restore slot (previously it applied
+    // networkCondition directly and leaked).
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-fallback", "emulator-5554", "android");
+      const applied: DeviceStateResult = {
+        success: true,
+        deviceId: "emulator-5554",
+        platform: "android",
+        networkCondition: { supported: true, capability: "partial", appliedProfile: "3g" },
+      };
+      const trackedSetter = (input: { networkCondition?: unknown }) =>
+        input.networkCondition
+          ? runSessionNetworkMutation(
+              manager,
+              "net-fallback",
+              "emulator-5554",
+              true,
+              async () => applied,
+            )
+          : Promise.resolve(applied);
+
+      const failure: DeviceStateResult = {
+        success: false,
+        deviceId: "emulator-5554",
+        platform: "android",
+        biometrics: { supported: false, error: "biometrics unsupported on Android" },
+        error: "biometrics unsupported on Android",
+      };
+      await applyStateAfterBiometricCaptureFailure(
+        { setState: trackedSetter },
+        { networkCondition: { profile: "3g" }, biometrics: { enrollment: "enrolled" } },
+        failure,
+      );
+
+      expect(manager.getNetworkCondition("net-fallback")).toEqual({ initialProfile: "none" });
     } finally {
       manager.stopCleanupTimer();
     }

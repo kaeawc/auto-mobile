@@ -8,6 +8,7 @@ import {
   networkConditionInputIsRequest,
   type BiometricEnrollment,
   type DeviceStateResult,
+  type SetDeviceStateInput,
 } from "../features/utility/DeviceState";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -476,10 +477,38 @@ export function registerUtilityTools() {
 
   const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
     const deviceState = new DeviceState(device);
+    const sessionManager =
+      args.sessionUuid && DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getSessionManager()
+        : undefined;
+    // Single decision for whether an applied networkCondition needs a session
+    // restore slot: a degrading request on an Android emulator (issue #6012).
+    const registerNetworkRestore =
+      args.networkCondition !== undefined &&
+      networkConditionInputDegrades(args.networkCondition) &&
+      device.platform === "android" &&
+      device.deviceId.startsWith("emulator-");
+
+    // A setter that routes ANY networkCondition-bearing mutation through
+    // runSessionNetworkMutation, so the restore slot is registered before the
+    // emulator command and the mutation is sequenced against release/rebind — on
+    // every path, including the biometric-capture-failure fallback below (issue
+    // #6012 review: that fallback previously applied networkCondition untracked).
+    const applyStateTracked = (input: SetDeviceStateInput): Promise<DeviceStateResult> =>
+      input.networkCondition
+        ? runSessionNetworkMutation(
+            sessionManager,
+            args.sessionUuid,
+            device.deviceId,
+            registerNetworkRestore,
+            () => deviceState.setState(input),
+          )
+        : deviceState.setState(input);
+
     const capture = await captureBiometricEnrollment(device, args, deviceState);
     if (capture.failure) {
       const result = await applyStateAfterBiometricCaptureFailure(
-        deviceState,
+        { setState: applyStateTracked },
         {
           doNotDisturb: args.doNotDisturb,
           biometrics: args.biometrics,
@@ -500,30 +529,17 @@ export function registerUtilityTools() {
         networkCondition: args.networkCondition,
       });
 
-    // A network mutation must be serialized against release the same way a
-    // biometric one is (issue #6012 review): the biometric path already binds the
-    // mutation via trackSessionSetup, but a network-only request skips it. Route
-    // network-only requests through runSessionNetworkMutation, which registers the
-    // restore slot BEFORE the emulator command and tracks the mutation so a
-    // release/rebind cannot restore `none` and then have a late command re-shape a
-    // freed device. Only a degrading request on an Android emulator needs the
-    // restore slot; DND-only requests keep the existing (untracked, restore-free)
-    // biometric-wrapper path unchanged.
+    // Route network-bearing requests through runSessionNetworkMutation (slot
+    // registered first, mutation tracked). The biometric-wrapper path is used
+    // only when biometrics succeeded (iOS) — where networkCondition is always
+    // unsupported and registers no slot — so it needs no network tracking.
     let result: DeviceStateResult;
     if (!args.biometrics && args.networkCondition) {
-      const sessionManager =
-        args.sessionUuid && DaemonState.getInstance().isInitialized()
-          ? DaemonState.getInstance().getSessionManager()
-          : undefined;
-      const registerRestore =
-        networkConditionInputDegrades(args.networkCondition) &&
-        device.platform === "android" &&
-        device.deviceId.startsWith("emulator-");
       result = await runSessionNetworkMutation(
         sessionManager,
         args.sessionUuid,
         device.deviceId,
-        registerRestore,
+        registerNetworkRestore,
         mutation,
       );
     } else {

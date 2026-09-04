@@ -663,6 +663,46 @@ describe("DeviceState", () => {
     );
   });
 
+  test("reset that cannot re-enable Wi-Fi is NOT reported verified (restorer keeps retrying)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    // The reset emu commands succeed, but re-enabling Wi-Fi fails.
+    client.setCommandResult("shell svc wifi enable", "", "error: wifi service not available");
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { cancel: true } });
+
+    // Connectivity is not fully restored, so success must be false — otherwise the
+    // session restorer would stop retrying and leave Wi-Fi off (issue #6012 P1).
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      capability: "partial",
+      appliedProfile: "none",
+      verified: false,
+    });
+    expect(result.networkCondition?.error).toContain("Wi-Fi");
+  });
+
+  test("rolls back to normal connectivity when a degrade command THROWS mid-sequence", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    // `network speed` rejects (thrown, not a KO string) after radio + delay applied.
+    client.setCommandError("emu network speed umts", new Error("adb: device offline"));
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
+
+    expect(result.success).toBe(false);
+    expect(result.networkCondition?.error).toContain("device offline");
+    const commands = client.getAllCommands();
+    // Rollback runs even though the failure was a throw, not a KO result.
+    expect(commands).toContain("emu network delay none");
+    expect(commands).toContain("emu network speed full");
+    expect(commands).toContain("emu gsm data on");
+    expect(commands).toContain("shell svc wifi enable");
+  });
+
   test("networkConditionInputDegrades distinguishes shaping from resets and no-ops", () => {
     // A real profile degrades.
     expect(networkConditionInputDegrades({ profile: "3g" })).toBe(true);

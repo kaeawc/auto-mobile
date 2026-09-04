@@ -214,6 +214,14 @@ export interface NetworkConditionState {
   error?: string;
 }
 
+/** Shared fields every Android network-condition result carries. */
+interface NetworkConditionResultBase {
+  method: "android_emulator_console";
+  requestedProfile: NetworkConditionProfile;
+  values: NetworkConditionValues;
+  expiresInSeconds?: number;
+}
+
 export interface SetNetworkConditionInput {
   profile?: NetworkConditionProfile;
   /** Reset to normal connectivity (equivalent to `profile: "none"`). */
@@ -1043,40 +1051,67 @@ export class DeviceState {
         error: ANDROID_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR,
       };
     }
+    return this.applyEmulatorNetworkCondition(
+      profile,
+      effectiveInput,
+      values,
+      degrades,
+      isReset,
+      input,
+      base,
+    );
+  }
+
+  /**
+   * Issue the emulator shaping commands and assemble the result. Any failure —
+   * a `KO` result OR a thrown command — rolls a degrade back to normal
+   * connectivity (best-effort) so a partial application is never left on the
+   * device (issue #6012 review P2).
+   */
+  private async applyEmulatorNetworkCondition(
+    profile: NetworkConditionProfile,
+    effectiveInput: SetNetworkConditionInput,
+    values: NetworkConditionValues,
+    degrades: boolean,
+    isReset: boolean,
+    input: SetNetworkConditionInput,
+    base: NetworkConditionResultBase,
+  ): Promise<NetworkConditionState> {
+    const failure = (error: string): NetworkConditionState => ({
+      supported: true,
+      capability: degrades ? "partial" : "full",
+      verified: false,
+      ...base,
+      error,
+    });
+    let adb: AdbExecutor;
     try {
-      const adb = this.adbFactory.create(this.device);
+      adb = this.adbFactory.create(this.device);
+    } catch (error) {
+      return failure(errorMessage(error));
+    }
+    try {
       const commandError = await this.runEmulatorNetworkCommands(
         adb,
         buildEmulatorNetworkCommands(profile, effectiveInput, values),
       );
       if (commandError) {
-        // A mid-sequence failure can leave the device half-shaped. Roll back to
-        // normal connectivity (best-effort) so a failed degrade is not left
-        // applied indefinitely (issue #6012 review P2). A reset that fails is
-        // already heading to `none`, so it needs no rollback.
         if (degrades) {
           await this.rollbackNetworkConditionToNone(adb);
         }
-        return {
-          supported: true,
-          capability: degrades ? "partial" : "full",
-          verified: false,
-          ...base,
-          error: commandError,
-        };
+        return failure(commandError);
       }
       // Toggle Wi-Fi so a shaping/cut condition reaches traffic (best-effort;
-      // never aborts — a failure only feeds the `partial` warning below).
+      // never aborts — a failure only feeds the `partial`/unverified report).
       const wifiWarning = await this.toggleWifiBestEffort(adb, wifiToggleCommand(degrades));
       return this.buildAppliedNetworkResult(base, profile, degrades, wifiWarning, isReset, input);
     } catch (error) {
-      return {
-        supported: true,
-        capability: degrades ? "partial" : "full",
-        verified: false,
-        ...base,
-        error: errorMessage(error),
-      };
+      // A THROWN command can also leave a partial application, so roll back a
+      // degrade here too — the `KO` path is not the only failure mode.
+      if (degrades) {
+        await this.rollbackNetworkConditionToNone(adb);
+      }
+      return failure(errorMessage(error));
     }
   }
 
@@ -1114,12 +1149,7 @@ export class DeviceState {
 
   /** Assemble the success result for an applied (or reset) network condition. */
   private buildAppliedNetworkResult(
-    base: {
-      method: "android_emulator_console";
-      requestedProfile: NetworkConditionProfile;
-      values: NetworkConditionValues;
-      expiresInSeconds?: number;
-    },
+    base: NetworkConditionResultBase,
     profile: NetworkConditionProfile,
     degrades: boolean,
     wifiWarning: string | undefined,
@@ -1128,20 +1158,29 @@ export class DeviceState {
   ): NetworkConditionState {
     const applied = { supported: true as const, profile, appliedProfile: profile, ...base };
     if (!degrades) {
-      // Reset removes all shaping and re-enables both radios — the safe restore
-      // direction, so it is fully applied and verifiable-by-completion.
       const overrideDiscarded = isReset && hasShapingOverride(input);
-      const warnings = [
-        overrideDiscarded
-          ? "Shaping overrides were ignored because cancel/reset was requested."
-          : undefined,
-        wifiWarning,
-      ].filter((w): w is string => w !== undefined);
+      const overrideNote = overrideDiscarded
+        ? "Shaping overrides were ignored because cancel/reset was requested."
+        : undefined;
+      if (wifiWarning) {
+        // Reset could not re-enable Wi-Fi, so connectivity is NOT fully restored.
+        // Reporting verified success here would stop the session restorer from
+        // retrying and leave the device with Wi-Fi off (issue #6012 review P1).
+        // Report unverified + error so the restorer keeps retrying / quarantines.
+        return {
+          ...applied,
+          capability: "partial",
+          verified: false,
+          error: overrideNote ? `${overrideNote} ${wifiWarning}` : wifiWarning,
+        };
+      }
+      // Reset removes all shaping and re-enables both radios — the safe restore
+      // direction, fully applied and verifiable-by-completion.
       return {
         ...applied,
         capability: "full",
         verified: true,
-        ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+        ...(overrideNote ? { warning: overrideNote } : {}),
       };
     }
     // Degrading profile (including offline): the commands were accepted, but

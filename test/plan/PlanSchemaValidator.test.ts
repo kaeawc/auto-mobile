@@ -214,6 +214,18 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should reject a networkCondition step with falsey-only cancel/reset (#6012 review)", () => {
+      const yaml = `
+name: network-condition-false-cancel
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      cancel: false
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should validate iOS simulator permissions through cross-platform permission tools", () => {
       const yaml = `
 name: ios-permissions

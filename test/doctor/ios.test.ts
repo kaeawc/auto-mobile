@@ -135,19 +135,41 @@ describe("iOS doctor checks", () => {
       expect(result.message).toContain("requires macOS");
     });
 
-    test("fails when xcodebuild throws", async () => {
+    test("warns (does not fail) when the xcodebuild probe times out", async () => {
+      // A slow `xcodebuild -version` probe must be diagnosed distinctly from a
+      // missing Xcode and must not force a nonzero doctor verdict (issue #6003).
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
         xcodebuild: {
           executeCommand: async () => {
-            throw new Error("xcodebuild not found");
+            throw new Error("Command timed out after 5000ms: xcodebuild -version");
+          },
+        },
+      });
+
+      expect(result.status).toBe("warn");
+      // Assert the duration shape, not a literal value: DOCTOR_EXEC_TIMEOUT_MS
+      // is read from AUTOMOBILE_DOCTOR_TIMEOUT_MS at module load, so hard-coding
+      // 5000ms would go red in any env that overrides it (issue #6003 review).
+      expect(result.message).toMatch(/timed out after \d+ms/);
+      expect(result.message).toContain("xcodebuild -version");
+      expect(result.message).not.toContain("Xcode not detected");
+      expect(result.recommendation).toContain("AUTOMOBILE_DOCTOR_TIMEOUT_MS");
+    });
+
+    test("fails when xcodebuild throws a non-timeout error", async () => {
+      const result = await checkXcodeInstallation("15.0", {
+        ...baseDependencies,
+        xcodebuild: {
+          executeCommand: async () => {
+            throw new Error("spawn xcodebuild ENOENT");
           },
         },
       });
 
       expect(result.status).toBe("fail");
       expect(result.message).toContain("Xcode not detected");
-      expect(result.message).toContain("xcodebuild not found");
+      expect(result.message).toContain("spawn xcodebuild ENOENT");
     });
   });
 

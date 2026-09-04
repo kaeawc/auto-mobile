@@ -795,6 +795,96 @@ describe("DaemonManager readiness", () => {
     }
   });
 
+  test("joins a peer daemon that publishes the socket just after our subprocess exits (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const spawner = new FakeDaemonSpawner();
+    // Our spawned child loses the socket-ownership race and exits 1 with an empty
+    // launch log, exactly as observed in #6103.
+    spawner.onSpawn = (process) => process.emit("exit", 1, null);
+
+    // A peer client's same-version daemon is coming up: it publishes the shared
+    // socket a beat after our child died, so the readiness probe only succeeds once
+    // the peer is ready.
+    let peerSocketReady = false;
+    const clients: ProbeClient[] = [];
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(peerSocketReady);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+    );
+
+    // No live daemon before we spawn (so start() spawns our own child), but a peer
+    // daemon process is present afterwards while it finishes coming up.
+    let liveCalls = 0;
+    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
+      liveCalls++;
+      return liveCalls <= 1 ? [] : [999999];
+    });
+    // Our own launch never reports ready — our child dies first.
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+      () => new Promise<boolean>(() => {}),
+    );
+    // The peer publishes its socket shortly after our child exited.
+    fakeTimer.setTimeout(() => {
+      peerSocketReady = true;
+    }, 500);
+
+    try {
+      await expect(manager.start()).resolves.toBeUndefined();
+      expect(clients.some((client) => client.connectCallCount > 0)).toBe(true);
+      // We must never terminate the peer daemon we joined.
+      expect(spawner.process.signals).toEqual([]);
+    } finally {
+      readySpy.mockRestore();
+      liveSpy.mockRestore();
+    }
+  });
+
+  test("still fails promptly when no peer daemon is coming up after our subprocess exits (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    const spawner = new FakeDaemonSpawner();
+    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
+    spawner.onSpawn = (process) => process.emit("exit", 1, null);
+
+    const manager = new DaemonManager(
+      () => new ProbeClient(false),
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+    );
+    // No socket inode is created and no live daemon exists, so nothing is coming up.
+    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+      () => new Promise<boolean>(() => {}),
+    );
+
+    try {
+      await expect(manager.start()).rejects.toThrow(
+        /Daemon subprocess exited before becoming ready \(exit code 1\)[\s\S]*SQLITE_BUSY: database is locked/,
+      );
+      // The genuine failure surfaces without arming any polling timer (no hang).
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      expect(fakeTimer.getPendingSleepCount()).toBe(0);
+    } finally {
+      readySpy.mockRestore();
+      findSpy.mockRestore();
+    }
+  });
+
   test("spawn failures preserve the raw spawn error", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

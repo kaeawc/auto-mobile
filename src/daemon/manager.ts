@@ -376,6 +376,15 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
 
 /**
+ * Poll cadence while rejoining a peer daemon that is coming up on the shared
+ * socket after our own spawned subprocess exited before becoming ready (issue
+ * #6103). Matched to the existing reachability poll interval so a peer that
+ * publishes the socket a beat after our child died is picked up within one poll,
+ * without hammering the process table between socket probes.
+ */
+const PEER_DAEMON_JOIN_POLL_MS = 100;
+
+/**
  * Cadence at which the liveness watchdog re-samples the "keep waiting" predicate
  * while a full-budget readiness probe is in flight (issue #5904). A per-poll
  * precheck only samples liveness between probes; if the holder dies *during* a
@@ -883,6 +892,20 @@ export class DaemonManager implements DaemonManagerLike {
           );
         }
       }
+    } catch (error) {
+      // Our spawned subprocess failed before becoming ready. Under a concurrent
+      // cold start, a PEER client's same-namespace daemon may still be publishing
+      // the shared socket a beat later — our child merely lost the socket-ownership
+      // race (issue #6103). Rejoin that peer within a bounded, candidate-gated wait
+      // instead of surfacing our child's exit as terminal; a genuine start failure
+      // (no peer coming up) still fails promptly (issue #5878).
+      if (await this.tryJoinPeerDaemonAfterSpawnExit()) {
+        stderrLog(
+          "A peer daemon became ready on the shared socket after our launch exited; joining it",
+        );
+        return;
+      }
+      throw error;
     } finally {
       // Close our reference to the log file (daemon process still has it open)
       closeSync(logFd);
@@ -1714,6 +1737,64 @@ export class DaemonManager implements DaemonManagerLike {
         callerSignal?.removeEventListener("abort", onCallerAbort);
       },
     };
+  }
+
+  /**
+   * Rejoin a peer daemon coming up on the shared socket after our own spawned
+   * subprocess exited before becoming ready (issue #6103).
+   *
+   * Under a concurrent cold start, multiple proxy clients each try to bring the
+   * daemon up. Only one child wins ownership of the per-user socket; a losing child
+   * exits — often with an empty launch log — a beat before the winner publishes the
+   * socket. Surfacing that lost race as a terminal "subprocess exited before
+   * becoming ready" error strands the caller even though a healthy same-namespace
+   * daemon is ready ~1s later. This bounded wait joins that winner instead.
+   *
+   * Prompt-failure invariant (issues #5878/#5904): the wait is GATED on a live
+   * candidate — a socket inode already present, or a live AutoMobile daemon process
+   * in the table — and gives up the instant no candidate remains, so a GENUINE start
+   * failure (nothing else coming up) still fails immediately rather than burning the
+   * client's ~30s `tools/list` budget. When a candidate is present the wait is
+   * capped at {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS} — the same bounded
+   * reachability budget {@link startUnlocked} already uses for an existing live
+   * daemon, deliberately held below the client deadline. It NEVER spawns — it only
+   * probes and joins, so it cannot double-spawn — and it joins only a daemon that
+   * answers the same non-destructive readiness probe every other reuse path trusts
+   * ({@link verifyDaemonConnection}, which never unlinks the socket); daemon version
+   * compatibility is enforced separately by the proxy handshake.
+   */
+  private async tryJoinPeerDaemonAfterSpawnExit(): Promise<boolean> {
+    const deadline = this.timer.now() + DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS;
+
+    while (this.remainingTime(deadline) > 0) {
+      if (!this.hasComingUpPeerDaemon()) {
+        // No socket and no live daemon process: nothing is coming up, so deliver the
+        // real subprocess-exit failure now instead of waiting out the budget (#5878).
+        return false;
+      }
+      const probeBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
+      if (probeBudget > 0 && (await this.verifyDaemonConnection(probeBudget))) {
+        stderrLog("Reusing a peer daemon that became ready after our launch exited");
+        return true;
+      }
+      const remaining = this.remainingTime(deadline);
+      if (remaining === 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(PEER_DAEMON_JOIN_POLL_MS, remaining));
+    }
+
+    return false;
+  }
+
+  /**
+   * Whether a peer daemon might still publish this namespace's socket: either the
+   * socket inode already exists, or a live AutoMobile daemon process is present in
+   * the table. Gates {@link tryJoinPeerDaemonAfterSpawnExit} so a genuine start
+   * failure is not turned into a bounded hang.
+   */
+  private hasComingUpPeerDaemon(): boolean {
+    return existsSync(this.socketPath) || this.findLiveDaemonProcesses().length > 0;
   }
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {

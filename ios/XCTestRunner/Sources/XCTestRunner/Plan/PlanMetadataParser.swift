@@ -171,13 +171,36 @@ enum PlanMetadataParser {
     }
 
     /// Parse a YAML flow list of scalar keys, e.g. `[apiToken, "password"]`, into its trimmed,
-    /// unquoted, non-empty elements. Used for the inline form of `secretParameters:`.
+    /// unquoted, non-empty elements. Used for the inline form of `secretParameters:`. Commas inside a
+    /// quoted item are NOT separators, so `["API,TOKEN"]` yields the single key `API,TOKEN` rather
+    /// than splitting it in two (issue #6029 review).
     private static func parseInlineList(_ value: String) -> [String] {
         var inner = value
         if inner.hasPrefix("[") { inner.removeFirst() }
         if inner.hasSuffix("]") { inner.removeLast() }
-        return inner
-            .split(separator: ",")
+
+        var items: [String] = []
+        var current = ""
+        var activeQuote: Character?
+        for character in inner {
+            if let quote = activeQuote {
+                if character == quote {
+                    activeQuote = nil
+                }
+                current.append(character)
+            } else if character == "\"" || character == "'" {
+                activeQuote = character
+                current.append(character)
+            } else if character == "," {
+                items.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        items.append(current)
+
+        return items
             .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
             .filter { !$0.isEmpty }
     }

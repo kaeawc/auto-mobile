@@ -191,7 +191,10 @@ internal object AutoMobilePlanExecutor {
       // literals unaffected by substitution, so the raw plan is the safe source.
       val rawPlanContent = File(resolvedPlanPath).readText()
       val secretKeys =
-        options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(rawPlanContent)
+        SecretRedactor.resolveKeyNames(
+          options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(rawPlanContent),
+          parameters,
+        )
       val secretValues = SecretRedactor.secretValues(secretKeys, parameters)
 
       // Load and process the plan with parameter substitution
@@ -579,19 +582,23 @@ internal object AutoMobilePlanExecutor {
             stepObj["toolName"]?.jsonPrimitive?.content
               ?: stepObj["tool"]?.jsonPrimitive?.content
               ?: "unknown"
-          succeededSteps.add(SucceededStepSummary(stepIndex = index, tool = tool))
+          // A step's tool can be a substituted `${secret}` value, so scrub the name too (#6029).
+          succeededSteps.add(
+            SucceededStepSummary(
+              stepIndex = index,
+              tool = SecretRedactor.redact(tool, secretValues),
+            )
+          )
         }
       }
 
-      // Egress boundary (issue #6029): FailedStepContext.planContent and error are embedded
-      // verbatim
-      // into the recovery prompt sent to the LLM provider (see AutoMobileAgent.attemptAiRecovery),
-      // so
-      // mask secret values out of both here. The daemon's base64 payload above kept the real
-      // values.
+      // Egress boundary (issue #6029): FailedStepContext.planContent, error, and the (possibly
+      // substituted) tool names are embedded verbatim into the recovery prompt sent to the LLM
+      // provider (see AutoMobileAgent.attemptAiRecovery), so mask secret values out of them here.
+      // The daemon's base64 payload above kept the real values.
       return FailedStepContext(
         failedStepIndex = failedStepIndex,
-        failedTool = failedTool,
+        failedTool = SecretRedactor.redact(failedTool, secretValues),
         error = SecretRedactor.redact(error, secretValues),
         succeededSteps = succeededSteps,
         planContent = SecretRedactor.redact(planContent, secretValues),

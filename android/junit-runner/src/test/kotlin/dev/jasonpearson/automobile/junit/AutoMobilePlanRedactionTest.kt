@@ -114,6 +114,23 @@ class AutoMobilePlanRedactionTest {
     )
   }
 
+  @Test
+  fun `secret substituted into a failing tool name is redacted`() {
+    fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom", tool = secret)
+
+    AutoMobilePlanExecutor.execute(
+      "test-plans/redaction-plan.yaml",
+      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+    )
+
+    val context = requireNotNull(capturingAgent.captured)
+    assertFalse(
+      "a secret substituted into a tool name must be redacted",
+      context.failedTool.contains(secret),
+    )
+  }
+
   private fun decodeDaemonPlanContent(): String? {
     val raw =
       fakeDaemonClient.executePlanArguments?.get("planContent")?.jsonPrimitive?.content
@@ -122,7 +139,7 @@ class AutoMobilePlanRedactionTest {
     return String(Base64.getDecoder().decode(base64))
   }
 
-  private fun buildFailureResponse(error: String): DaemonResponse {
+  private fun buildFailureResponse(error: String, tool: String = "inputText"): DaemonResponse {
     val payload =
       JsonObject(
         mapOf(
@@ -133,7 +150,7 @@ class AutoMobilePlanRedactionTest {
             JsonObject(
               mapOf(
                 "stepIndex" to JsonPrimitive(1),
-                "tool" to JsonPrimitive("inputText"),
+                "tool" to JsonPrimitive(tool),
                 "error" to JsonPrimitive(error),
               )
             ),

@@ -107,6 +107,15 @@ open class AutoMobileTestCase: XCTestCase {
         return [:]
     }
 
+    /// Parameter keys whose substituted values are sensitive (tokens, passwords, PII). Their values
+    /// are masked out of any context AI-assisted recovery sends to the LLM provider, while the local
+    /// daemon still executes with the real values (issue #6029). A plan can also declare sensitive
+    /// keys via its top-level `secretParameters:` list; the two sets are unioned. Override to protect
+    /// a `planParameters` value that carries a secret.
+    open var secretParameterKeys: Set<String> {
+        return []
+    }
+
     open var cleanupOptions: AutoMobilePlanExecutor.CleanupOptions? {
         return nil
     }
@@ -206,6 +215,7 @@ open class AutoMobileTestCase: XCTestCase {
             retryDelaySeconds: retryDelaySeconds,
             startStep: startStep,
             parameters: planParameters,
+            secretParameterKeys: secretParameterKeys,
             cleanup: cleanupOptions,
             planBundle: planBundle,
             aiAssistance: aiAssistance

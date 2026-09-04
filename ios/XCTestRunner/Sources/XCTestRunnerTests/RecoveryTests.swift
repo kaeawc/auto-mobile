@@ -470,6 +470,34 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
+    func testSecretSubstitutedIntoToolNameIsRedacted() throws {
+        let client = RecoveryMCPClient()
+        // The daemon reports the failed step's tool as the substituted secret value.
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": secret, "error": "step failed"]
+        ))
+
+        let captor = CapturingModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first)
+        XCTAssertFalse(
+            requestText(request).contains(secret),
+            "a secret substituted into a tool name must be redacted from the recovery prompt"
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeExecutor(
@@ -582,6 +610,12 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         XCTAssertEqual(try PlanMetadataParser.parse(from: yaml).secretParameterKeys, ["TOKEN", "PASSWORD"])
     }
 
+    func testInlineFlowListDoesNotSplitOnCommaInsideQuotes() throws {
+        // A comma inside a quoted item is part of the key, not a separator (#6029 review).
+        let yaml = "name: P\nsecretParameters: [\"API,TOKEN\", plain]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(try PlanMetadataParser.parse(from: yaml).secretParameterKeys, ["API,TOKEN", "plain"])
+    }
+
     func testFlushBlockStopsAtNextTopLevelKeyAndDoesNotSwallowIt() throws {
         // A flush block sequence must end at the next top-level key, which must still parse.
         let yaml = """
@@ -600,6 +634,47 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
     func testNoSecretParametersYieldsEmptySet() throws {
         let yaml = "name: P\nsteps:\n  - tool: observe"
         XCTAssertTrue(try PlanMetadataParser.parse(from: yaml).secretParameterKeys.isEmpty)
+    }
+}
+
+/// Direct redaction-completeness tests for `SecretRedaction` (#6029 review): nested substitution,
+/// Unicode normalization, and parameterized secret key names.
+final class SecretRedactionCompletenessTests: XCTestCase {
+    func testRedactsFullyResolvedNestedSecretValue() {
+        // TOKEN's value embeds ${ENV}; the value that lands in the plan is the resolved form, so that
+        // is what must be scrubbed — the raw `pre-${ENV}` snapshot alone would leak `pre-live`.
+        let params = ["TOKEN": "pre-${ENV}", "ENV": "live"]
+        let values = SecretRedaction.secretValues(keys: ["TOKEN"], parameters: params)
+        XCTAssertEqual(
+            SecretRedaction.redact("typed pre-live into field", secretValues: values),
+            "typed \(SecretRedaction.placeholder) into field"
+        )
+    }
+
+    func testRedactsSecretRegardlessOfUnicodeNormalization() {
+        let composedValue = "caf\u{00E9}-token" // NFC form
+        let values = SecretRedaction.secretValues(keys: ["K"], parameters: ["K": composedValue])
+        // The same secret occurs in the target text in its decomposed (NFD) form.
+        let decomposedOccurrence = composedValue.decomposedStringWithCanonicalMapping
+        let result = SecretRedaction.redact("error: " + decomposedOccurrence + " seen", secretValues: values)
+        XCTAssertTrue(result.contains(SecretRedaction.placeholder))
+        XCTAssertFalse(
+            result.unicodeScalars.contains("\u{0301}"),
+            "the decomposed secret's combining mark must be gone"
+        )
+    }
+
+    func testResolveKeyNamesResolvesParameterizedKey() {
+        // A plan may declare `secretParameters: [${SECRET_KEY}]`; the key name resolves against params.
+        let params = ["SECRET_KEY": "apiToken", "apiToken": "s3cr3t"]
+        let keys = SecretRedaction.resolveKeyNames(["${SECRET_KEY}"], parameters: params)
+        XCTAssertTrue(keys.contains("apiToken"))
+        let values = SecretRedaction.secretValues(keys: keys, parameters: params)
+        XCTAssertEqual(SecretRedaction.redact("x s3cr3t y", secretValues: values), "x \(SecretRedaction.placeholder) y")
+    }
+
+    func testLiteralKeyResolvesToItself() {
+        XCTAssertEqual(SecretRedaction.resolveKeyNames(["TOKEN"], parameters: ["TOKEN": "v"]), ["TOKEN"])
     }
 }
 

@@ -180,10 +180,15 @@ public final class AutoMobilePlanExecutor {
         }
 
         // Values to redact from any recovery context that leaves the process for the LLM provider
-        // (issue #6029). Union the plan-declared secret keys with the caller-configured ones. The
-        // `substituted` string below keeps the real values — the daemon needs them to run the plan.
+        // (issue #6029). Union the plan-declared secret keys with the caller-configured ones, resolve
+        // any parameterized key names, then collect the concrete values to scrub. The `substituted`
+        // string below keeps the real values — the daemon needs them to run the plan.
+        let secretKeys = SecretRedaction.resolveKeyNames(
+            configuration.secretParameterKeys.union(planMetadata.secretParameterKeys),
+            parameters: configuration.parameters
+        )
         let secretValues = SecretRedaction.secretValues(
-            keys: configuration.secretParameterKeys.union(planMetadata.secretParameterKeys),
+            keys: secretKeys,
             parameters: configuration.parameters
         )
         PerfTimer
@@ -339,24 +344,28 @@ public final class AutoMobilePlanExecutor {
         -> FailedStepContext
     {
         // Sequential execution stops at the first failure, so every step before failedStep.stepIndex
-        // completed. Reconstruct their tool names from the plan for the agent prompt (best effort).
-        // Tool names carry no secret values, so parsing the un-redacted plan here is safe.
+        // completed. Reconstruct their tool names from the plan for the agent prompt (best effort). A
+        // step's `tool` can itself be a substituted `${secret}` value, so scrub the reconstructed tool
+        // names too (issue #6029 review).
         let stepTools = PlanStepToolParser.toolNames(from: planContent)
         var succeeded: [SucceededStepSummary] = []
         var index = 0
         while index < failedStep.stepIndex {
             let tool = index < stepTools.count ? stepTools[index] : "step"
-            succeeded.append(SucceededStepSummary(stepIndex: index, tool: tool))
+            succeeded.append(SucceededStepSummary(
+                stepIndex: index,
+                tool: SecretRedaction.redact(tool, secretValues: secretValues)
+            ))
             index += 1
         }
 
         // Egress boundary (issue #6029): every field placed on the context is forwarded to the LLM
         // provider by the recovery handler, so mask secret values out of the plan YAML, the failure
-        // error, and the sampled on-screen text/ids here — the daemon's base64 payload above kept the
-        // real values.
+        // error, the (possibly substituted) tool name, and the sampled on-screen text/ids here — the
+        // daemon's base64 payload above kept the real values.
         return FailedStepContext(
             failedStepIndex: failedStep.stepIndex,
-            failedTool: failedStep.tool,
+            failedTool: SecretRedaction.redact(failedStep.tool, secretValues: secretValues),
             error: SecretRedaction.redact(failedStep.error, secretValues: secretValues),
             succeededSteps: succeeded,
             planContent: SecretRedaction.redact(planContent, secretValues: secretValues),

@@ -458,6 +458,24 @@ export async function checkXcodeInstallation(
     };
   } catch (error) {
     dependencies.logger.warn(`Xcode installation check failed: ${errorMessage(error)}`, error);
+
+    // A slow `xcodebuild -version` probe (issue #6003) must be diagnosed
+    // distinctly from a missing/unusable Xcode: it should not force a nonzero
+    // doctor verdict that blocks readiness-gate callers. Only a genuine
+    // timeout maps to `warn`; every other failure stays a `fail`.
+    if (isTimeoutError(error)) {
+      return {
+        name: "Xcode",
+        status: "warn",
+        message:
+          `Xcode availability probe timed out after ${DOCTOR_EXEC_TIMEOUT_MS}ms ` +
+          `(xcodebuild -version); Command Line Tools and simulator automation may still be usable`,
+        recommendation:
+          "A slow probe is not a missing install — re-run doctor. If it keeps timing out, " +
+          "raise AUTOMOBILE_DOCTOR_TIMEOUT_MS to give xcodebuild more time.",
+      };
+    }
+
     return {
       name: "Xcode",
       status: "fail",
@@ -465,6 +483,16 @@ export async function checkXcodeInstallation(
       recommendation: `Install Xcode ${minimumVersion}+ from the App Store.`,
     };
   }
+}
+
+/**
+ * A timed-out probe is distinct from a missing/unusable install (issue #6003).
+ * There is no typed timeout error at this seam, so match the message the way
+ * the rest of the repo does (e.g. CtrlProxyManager's `errorLower.includes`).
+ */
+function isTimeoutError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("timed out") || message.includes("timeout");
 }
 
 /**

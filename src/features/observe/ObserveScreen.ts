@@ -1001,8 +1001,6 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     signal?: AbortSignal,
   ): Promise<PostCaptureForegroundIdentity> {
-    const activeWindow = result.activeWindow;
-
     // A focused SystemUI surface (notification shade, quick settings, keyguard,
     // status bar owning focus) occludes the app behind it while CtrlProxy's
     // `foregroundActivity` and `adb getForegroundApp` both still name that
@@ -1013,6 +1011,13 @@ export class RealObserveScreen implements ObserveScreen {
     if (await this.applyFocusedSystemUiOverlay(result, signal)) {
       return { sampled: false, identity: undefined, activityAttributionMismatch: false };
     }
+
+    // Read `activeWindow` AFTER the overlay check: its fallback recapture can
+    // replace the tree and re-correlate `result.activeWindow` to it (#6108). A
+    // pre-await capture would be the STALE pre-recapture window, and the
+    // cross-package branch below would then spread it — erasing the re-derived
+    // identity and re-publishing the stale `layoutSeqSum` (#6108, bug 1).
+    const activeWindow = result.activeWindow;
 
     const observed = result.viewHierarchy?.packageName;
     if (
@@ -1345,11 +1350,21 @@ export class RealObserveScreen implements ObserveScreen {
     // rather than the stale value, then re-read paired with the replacement tree.
     delete result.deviceLock;
     await this.deviceStateCollector.collectDeviceLock(result, signal);
+    // `backStack` was sampled with the original tree (collectAllData). A recapture
+    // that replaced the tree — including the bounded gap-2 second recapture that
+    // lands on a same-package activity B — leaves `backStack` describing the
+    // pre-recapture screen A. A stale back stack that still agrees with a stale
+    // window would let `reconcileAgainstBackStack` skip confirmation and record
+    // A's depth/task against B's current node (#6108, bug 3). It cannot be
+    // confidently re-correlated to the replacement here (no expected identity to
+    // confirm against, and a fresh read would carry the same post-recapture lag),
+    // so drop it to unknown rather than publish it against the new tree.
+    delete result.backStack;
     // `activeWindow` (appId/activityName/layoutSeqSum) was likewise sampled with
-    // the original tree. Re-correlate it against the replacement so a same-app
-    // A->B deep link during the recapture does not publish B's tree with A's
-    // activityName, and a stale non-zero `layoutSeqSum` does not skew the next
-    // tap-effect comparison — the #6108 re-correlation, paired with the tree.
+    // the original tree. Re-correlate it against the replacement so a stale
+    // non-zero `layoutSeqSum` does not skew the next tap-effect comparison and a
+    // possibly-lagged activity is not stamped onto the fresh tree — the #6108
+    // re-correlation, paired with the tree.
     this.recorrelateActiveWindowToRecapture(result, hierarchy);
     return true;
   }
@@ -1385,29 +1400,30 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Derive an `activeWindow` identity purely from a hierarchy (issue #6108),
-   * following the primary-path build order: the accessibility `foregroundActivity`
-   * (when it names a real activity, not a framework View class) supplies both the
-   * package and the activity, else the tree's package with an unknown activity,
-   * else nothing (the tree names no owner). `layoutSeqSum` is the accessibility
-   * zero — the correlated window sequence for the replacement tree is not known
-   * here, and zero is the established "nothing to compare" sentinel (#6070)
-   * rather than the stale pre-recapture value.
+   * Derive an `activeWindow` identity from a recaptured hierarchy (issue #6108).
+   * Only the PACKAGE is trusted: after an overlay recapture a state transition is
+   * known to have occurred, and CtrlProxy's `foregroundActivity` can lag behind
+   * the tree it is attached to (the metadata lag #5972 documents — CtrlProxy can
+   * retain a prior `foregroundActivity` after a window transition), so a same-app
+   * A->B transition can leave `foregroundActivity`
+   * naming A while the fresh tree describes B. Stamping that possibly-lagged
+   * activity onto the replacement tree would publish a confidently-wrong
+   * `activityName` (#6108, bug 2), so the activity is marked UNKNOWN here; when a
+   * back stack is available it is confirmed through the #6088 recapture-and-match
+   * machinery instead. `layoutSeqSum` is the accessibility zero — the correlated
+   * window sequence for the replacement tree is not known here, and zero is the
+   * established "nothing to compare" sentinel (#6070) rather than the stale
+   * pre-recapture value. Prefer the tree package; fall back to the
+   * `foregroundActivity` package; `undefined` when the tree names no owner.
    */
   private deriveActiveWindowFromHierarchy(
     hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
   ): NonNullable<ObserveResult["activeWindow"]> | undefined {
-    const foregroundActivity = hierarchy.foregroundActivity;
-    if (foregroundActivity && !isAccessibilityViewClass(foregroundActivity)) {
-      const parts = foregroundActivity.split("/");
-      const packageName = parts[0];
-      const activityName = parts[1]?.startsWith(".") ? packageName + parts[1] : parts[1] || "";
-      return { appId: packageName, activityName, layoutSeqSum: 0 };
+    const appId = hierarchy.packageName ?? hierarchy.foregroundActivity?.split("/")[0];
+    if (!appId) {
+      return undefined;
     }
-    if (hierarchy.packageName) {
-      return { appId: hierarchy.packageName, activityName: "", layoutSeqSum: 0 };
-    }
-    return undefined;
+    return { appId, activityName: "", layoutSeqSum: 0 };
   }
 
   private async recaptureHierarchyForBackStackAttribution(

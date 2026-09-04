@@ -2113,19 +2113,112 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     expect(result.activeWindow?.layoutSeqSum).toBe(0);
   });
 
-  test("gap 3: shade closes to a same-app A->B deep link — activeWindow.activityName is re-derived from the fresh tree (#6108)", async () => {
+  const appTreeForPackage = (
+    now: number,
+    packageName: string,
+    foregroundActivity: string,
+    marker: string,
+  ): any => ({
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    packageName,
+    foregroundActivity,
+    windows: [
+      {
+        packageName,
+        type: 1,
+        isFocused: true,
+        windowLayer: 200,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      },
+    ],
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [{ text: marker, bounds: { left: 0, top: 300, right: 400, bottom: 360 } }],
+      },
+    },
+  });
+
+  // Bug 1 (#6108 review): the caller-local window `reconcileActiveWindowAttribution`
+  // captured BEFORE the overlay recapture must not be reused after it. When a
+  // suspect shade attributed to app A closes onto a DIFFERENT app B during the
+  // recapture, the overlay path re-derives `result.activeWindow` to B, but a
+  // pre-await local (A) drove the cross-package branch — spreading A's stale
+  // window (its non-zero layoutSeqSum) and erasing the re-derivation.
+  test("bug 1: cross-package shade A closes onto app B — the cross-package reconcile does not re-publish A's stale window (#6108)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();
     timer.setCurrentTime(now);
 
-    const activityB = `${OCCLUDED_APP}/${OCCLUDED_APP}.modules.details.DetailsActivity`;
+    const APP_B = "com.example.appb";
+    // Suspect shade attributed to app A, no usable activity -> bootstrap window
+    // supplies A's identity with a non-zero (shade-era) layoutSeqSum.
     const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
     const viewHierarchy = new FakeViewHierarchy();
     viewHierarchy.configureHierarchySequence([
-      // Captured shade names activity A (the occluded app's SearchActivity).
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)], {
+        foregroundActivity: `${OCCLUDED_APP}/android.widget.FrameLayout`,
+      }),
+      // Recapture: the shade closed onto a DIFFERENT app B.
+      appTreeForPackage(now + 25, APP_B, `${APP_B}/${APP_B}.MainActivity`, "App B content"),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    // Ground truth agrees with the fresh tree (B): on the buggy path this drives
+    // the cross-package branch that spreads A's stale window.
+    fakeAdb.setForegroundApp({ packageName: APP_B, userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: bootstrapWindow({
+          appId: OCCLUDED_APP,
+          activityName: `${OCCLUDED_APP}.modules.search.SearchActivity`,
+          layoutSeqSum: 7000,
+        }),
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App B content");
+    // Published window is B's re-derived identity, NOT A's stale window with only
+    // the appId swapped: A's 7000 must not survive onto the fresh B tree.
+    expect(result.activeWindow?.appId).toBe(APP_B);
+    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+  });
+
+  // Bug 2 (#6108 review): CtrlProxy's `foregroundActivity` can lag the tree it is
+  // attached to. On a same-app A->B transition the fresh recapture describes B
+  // while `foregroundActivity` still names A, so trusting it stamps a
+  // confidently-wrong activity. After a recapture the activity is UNKNOWN unless
+  // independently confirmed (a back stack, absent here under skipBackStack).
+  test("bug 2: same-app A->B with foregroundActivity lagging to A — the recaptured activity is unknown, not stale A (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const activityA = `${OCCLUDED_APP}.modules.search.SearchActivity`;
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      // Captured shade names activity A (same package).
       shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
-      // Recapture: closing the shade opened a deep link to activity B, same app.
-      appTreeWithActivity(now + 25, activityB, "Details B"),
+      // Recapture: the tree is B ("Screen B") but foregroundActivity still lags to A.
+      appTreeForPackage(now + 25, OCCLUDED_APP, `${OCCLUDED_APP}/${activityA}`, "Screen B"),
     ] as any);
 
     const fakeAdb = new FakeAdbExecutor();
@@ -2135,17 +2228,87 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
-    // The published tree describes B; attribution must describe B, not stale A.
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Details B");
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Screen B");
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
     expect(result.activeWindow?.systemOverlay).toBeUndefined();
-    expect(result.activeWindow?.activityName).toBe(
-      `${OCCLUDED_APP}.modules.details.DetailsActivity`,
+    // The lagged foregroundActivity A must NOT be published against the B tree.
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.activityName).not.toBe(activityA);
+  });
+
+  // Bug 3 (#6108 review): a back stack sampled with the pre-recapture screen A
+  // must not be published against a recaptured screen B. The bounded gap-2 second
+  // recapture lands on same-package activity B while `backStack` still describes
+  // A; a stale back stack that still agrees with a stale window would let
+  // reconcileAgainstBackStack skip confirmation and record A's depth/task.
+  test("bug 3: a bounded re-capture lands on same-package B — the stale backStack sampled at A is dropped to unknown (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const activityA = `${OCCLUDED_APP}.modules.search.SearchActivity`;
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    // Capture: suspect shade. Recapture #1: still a suspect shade. The focus read
+    // then names the app (disagreement) -> bounded recapture #2 lands app B.
+    const freshShade = shadeHierarchy(now + 25, [unfocusedShade, occludedAppWindow(false)]);
+    freshShade.hierarchy.node.node = [
+      { text: "Fresh shade", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+    ];
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+      freshShade,
+      appTreeForPackage(
+        now + 50,
+        OCCLUDED_APP,
+        `${OCCLUDED_APP}/${OCCLUDED_APP}.modules.details.DetailsActivity`,
+        "Details B",
+      ),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        // Back stack sampled with the pre-recapture screen A.
+        backStack: {
+          execute: async () => ({
+            depth: 3,
+            activities: [],
+            tasks: [{ id: 14, packageName: OCCLUDED_APP }],
+            currentActivity: { name: activityA, taskId: 14 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
     );
-    // The pre-recapture activity A must not survive onto the fresh B tree.
-    expect(result.activeWindow?.activityName).not.toBe(
-      `${OCCLUDED_APP}.modules.search.SearchActivity`,
-    );
+
+    // NOTE: backStack is collected (skipBackStack NOT set) so it can go stale.
+    const result = await screen.execute({ skipScreenshot: true });
+
+    // Initial capture + suspect recapture + the bounded re-capture.
+    expect(viewHierarchy.getCallCount()).toBe(3);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Details B");
+    // The back stack sampled at A must not be published against B's tree: it is
+    // dropped to unknown rather than recording A's depth/task against B's node.
+    expect(result.backStack).toBeUndefined();
+    // And the activity is not the stale A (it is unknown here).
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.activityName).not.toBe(activityA);
   });
 
   test("gap 2: shade closes during the focus dumpsys — a bounded re-capture converges on the app tree, no confidently-wrong overlay (#6108)", async () => {

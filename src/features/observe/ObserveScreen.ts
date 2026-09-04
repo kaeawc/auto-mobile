@@ -922,6 +922,15 @@ export class RealObserveScreen implements ObserveScreen {
 
     const backStackAttribution = resolveBackStackActivityAttribution(result);
     if (backStackAttribution && activeWindow.activityName !== backStackAttribution.activityName) {
+      // An empty `activityName` (the bootstrap `Window.getActive()` / last-resort
+      // package path) is reconciled through the SAME temporal confirmation as a
+      // stale non-empty name (#5992), never a blind backfill: the recapture
+      // re-reads the hierarchy so the adb activity is paired with a *fresh* tree.
+      // A same-app mid-flight navigation between capture and back-stack read is
+      // therefore surfaced as a mismatch/unknown rather than a confidently-wrong
+      // name, and the confirmed window keeps its correlated `layoutSeqSum` (the
+      // freshness of which is guaranteed by the `getActive(true)` bootstrap read)
+      // so tap-effect detection is not blinded by a zero sentinel (#6070).
       const recaptured = await this.recaptureHierarchyForBackStackAttribution(
         result,
         backStackAttribution,

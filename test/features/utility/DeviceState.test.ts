@@ -469,6 +469,28 @@ describe("DeviceState", () => {
     ]);
   });
 
+  test("#6090: `none` + neutral (zero) overrides is a clean reset that re-enables Wi-Fi", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({
+      networkCondition: { profile: "none", delayMs: 0, downloadKbps: 0, uploadKbps: 0 },
+    });
+
+    // Neutral overrides carry no shaping, so this is a reset, not a degrade: it
+    // must re-enable Wi-Fi (`svc wifi enable`), never disable it.
+    expect(result.success).toBe(true);
+    expect(result.networkCondition).toMatchObject({
+      capability: "full",
+      appliedProfile: "none",
+      verified: true,
+    });
+    const commands = client.getAllCommands();
+    expect(commands).toContain("shell svc wifi enable");
+    expect(commands).not.toContain("shell svc wifi disable");
+  });
+
   test("honors explicit numeric overrides over the profile's named specs", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
@@ -604,6 +626,26 @@ describe("DeviceState", () => {
       [{ profile: "offline", packetLossPercent: 50 }, "degrade"],
       // cancel:true wins even over an offline+override combo.
       [{ profile: "offline", delayMs: 500, cancel: true }, "reset"],
+      // #6090: neutral (zero / documented no-op) overrides do NOT degrade. `none`
+      // plus all-neutral overrides is a clean reset, not a Wi-Fi-disabling degrade.
+      [{ profile: "none", delayMs: 0 }, "reset"],
+      [{ profile: "none", downloadKbps: 0 }, "reset"],
+      [{ profile: "none", uploadKbps: 0 }, "reset"],
+      [{ profile: "none", packetLossPercent: 0 }, "reset"],
+      [
+        { profile: "none", delayMs: 0, downloadKbps: 0, uploadKbps: 0, packetLossPercent: 0 },
+        "reset",
+      ],
+      // A bare neutral override with no profile is a no-op, not a request.
+      [{ delayMs: 0 }, "empty"],
+      [{ downloadKbps: 0 }, "empty"],
+      [{ uploadKbps: 0 }, "empty"],
+      [{ packetLossPercent: 0 }, "empty"],
+      // A non-neutral override over `none` still degrades.
+      [{ profile: "none", delayMs: 500 }, "degrade"],
+      [{ profile: "none", downloadKbps: 100 }, "degrade"],
+      // A neutral delay alongside a real non-neutral override still degrades.
+      [{ delayMs: 0, downloadKbps: 100 }, "degrade"],
     ];
     for (const [input, expected] of cases) {
       expect(classifyNetworkConditionRequest(input)).toBe(expected as never);

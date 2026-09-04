@@ -390,10 +390,12 @@ function resolveNetworkValues(
  *                with a `delayMs`/`downloadKbps`/`uploadKbps` shaping override
  *                that cannot apply. Rejected (issue #6012 review P2).
  * - `reset`:     `cancel===true`, `reset===true`, or an explicit `profile:"none"`
- *                with no shaping override. Restores normal connectivity.
- * - `degrade`:   a real profile, or a bandwidth/latency override over `none`.
- * - `loss-only`: ONLY `packetLossPercent` (which the emulator console cannot
- *                enforce) — an unsupported no-op, never reported verified.
+ *                with no EFFECTIVE (non-neutral) shaping override — `none` plus
+ *                only zero/no-op overrides is a clean reset (issue #6090).
+ * - `degrade`:   a real profile, or a NON-NEUTRAL bandwidth/latency override over
+ *                `none` (a zero override is a documented no-op, not shaping).
+ * - `loss-only`: ONLY a non-zero `packetLossPercent` (which the emulator console
+ *                cannot enforce) — an unsupported no-op, never reported verified.
  */
 export type NetworkConditionRequestKind = "empty" | "invalid" | "reset" | "degrade" | "loss-only";
 
@@ -416,10 +418,14 @@ export function classifyNetworkConditionRequest(
   if (input.profile !== undefined && input.profile !== "none") {
     return "degrade";
   }
-  if (hasShapingOverride(input)) {
+  // Only a NON-NEUTRAL override degrades: a zero (documented no-op) delay/speed is
+  // not shaping, so `none` + all-neutral overrides falls through to `reset` rather
+  // than needlessly disabling Wi-Fi (issue #6090). The offline-invalid check above
+  // stays presence-based, matching the advertised schema's presence-based rule.
+  if (hasEffectiveShapingOverride(input)) {
     return "degrade";
   }
-  if (input.packetLossPercent !== undefined) {
+  if (isEffectivePacketLoss(input.packetLossPercent)) {
     return "loss-only";
   }
   if (input.profile === "none") {
@@ -472,6 +478,35 @@ function hasShapingOverride(input: SetNetworkConditionInput): boolean {
     input.downloadKbps !== undefined ||
     input.uploadKbps !== undefined
   );
+}
+
+/**
+ * A neutral override value is the documented no-op: `0` (no added latency, and
+ * `0` kbps means "unlimited" for the emulator `network speed` cap). `undefined`
+ * is likewise neutral. Only a non-neutral value shapes traffic, so a request
+ * carrying only neutral overrides is not a degrade (issue #6090).
+ */
+function isNeutralOverrideValue(value: number | undefined): boolean {
+  return value === undefined || value === 0;
+}
+
+/**
+ * True when the request carries a bandwidth/latency override that actually shapes
+ * traffic (a non-neutral value). Unlike `hasShapingOverride` (which is
+ * presence-based, used for the offline contradiction), this ignores neutral
+ * (zero) values so `none` + all-neutral overrides classifies as a `reset`.
+ */
+function hasEffectiveShapingOverride(input: SetNetworkConditionInput): boolean {
+  return (
+    !isNeutralOverrideValue(input.delayMs) ||
+    !isNeutralOverrideValue(input.downloadKbps) ||
+    !isNeutralOverrideValue(input.uploadKbps)
+  );
+}
+
+/** True only when a packet-loss request carries a non-neutral (non-zero) target. */
+function isEffectivePacketLoss(packetLossPercent: number | undefined): boolean {
+  return !isNeutralOverrideValue(packetLossPercent);
 }
 
 /**

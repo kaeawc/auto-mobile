@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import Ajv from "ajv";
+import fs from "node:fs";
+import path from "node:path";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -89,6 +92,47 @@ describe("device state tools", () => {
     ).not.toThrow();
     // 5g was dropped (identical to none) → no longer a valid enum value.
     expect(() => setTool!.schema.parse({ networkCondition: { profile: "5g" } })).toThrow();
+  });
+
+  // #6090: the ADVERTISED JSON schema (tool-definitions.json) must encode the same
+  // networkCondition edges as the runtime classifier, so a client that validates
+  // against tools/list agrees with invocation. Validate the generated sub-schema
+  // directly with the same Ajv the plan validator uses.
+  test("advertised networkCondition JSON schema matches the runtime classifier on edge inputs", () => {
+    const toolDefsPath = path.join(process.cwd(), "schemas/tool-definitions.json");
+    const toolDefs = JSON.parse(fs.readFileSync(toolDefsPath, "utf8")) as Array<{
+      name: string;
+      inputSchema: { properties?: Record<string, unknown> };
+    }>;
+    const setDeviceState = toolDefs.find((t) => t.name === "setDeviceState");
+    expect(setDeviceState).toBeDefined();
+    const ncSchema = setDeviceState!.inputSchema.properties?.networkCondition;
+    expect(ncSchema).toBeDefined();
+
+    const ajv = new Ajv({ allErrors: true, strict: false });
+    const validate = ajv.compile(ncSchema as object);
+
+    // offline + a shaping override with NO cancel/reset is invalid (matches runtime).
+    expect(validate({ profile: "offline", delayMs: 500 })).toBe(false);
+    // offline + override + cancel:true is a valid cancel-reset — must NOT be
+    // false-rejected (the #6090 issue-3 fix; runtime classifies it `reset`).
+    expect(validate({ profile: "offline", delayMs: 500, cancel: true })).toBe(true);
+    expect(validate({ profile: "offline", delayMs: 500, reset: true })).toBe(true);
+    // offline alone stays valid; offline + packetLossPercent is redundant, not
+    // contradictory (packet loss is not a shaping override).
+    expect(validate({ profile: "offline" })).toBe(true);
+    expect(validate({ profile: "offline", packetLossPercent: 50 })).toBe(true);
+
+    // #6090 issue-1 mirror: `none` + neutral (zero) overrides is a reset, so the
+    // advertised anyOf must accept it, while a bare zero override is a no-op the
+    // schema rejects (matching the runtime `empty`).
+    expect(validate({ profile: "none", delayMs: 0 })).toBe(true);
+    expect(validate({ profile: "none", downloadKbps: 0, uploadKbps: 0 })).toBe(true);
+    expect(validate({ delayMs: 0 })).toBe(false);
+    expect(validate({ downloadKbps: 0 })).toBe(false);
+    expect(validate({ packetLossPercent: 0 })).toBe(false);
+    // A real (non-zero) override remains a valid request.
+    expect(validate({ delayMs: 500 })).toBe(true);
   });
 
   test("threads networkCondition through the setDeviceState handler", async () => {

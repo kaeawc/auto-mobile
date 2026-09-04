@@ -1116,18 +1116,47 @@
           "properties": { "reset": { "const": true } }
         },
         {
-          "required": ["delayMs"]
+          "required": ["delayMs"],
+          "properties": { "delayMs": { "not": { "const": 0 } } }
         },
         {
-          "required": ["downloadKbps"]
+          "required": ["downloadKbps"],
+          "properties": { "downloadKbps": { "not": { "const": 0 } } }
         },
         {
-          "required": ["uploadKbps"]
+          "required": ["uploadKbps"],
+          "properties": { "uploadKbps": { "not": { "const": 0 } } }
         },
         {
-          "required": ["packetLossPercent"]
+          "required": ["packetLossPercent"],
+          "properties": { "packetLossPercent": { "not": { "const": 0 } } }
         }
       ],
+      "if": {
+        "required": ["profile"],
+        "properties": { "profile": { "const": "offline" } },
+        "not": {
+          "anyOf": [
+            {
+              "required": ["cancel"],
+              "properties": { "cancel": { "const": true } }
+            },
+            {
+              "required": ["reset"],
+              "properties": { "reset": { "const": true } }
+            }
+          ]
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["delayMs"] },
+            { "required": ["downloadKbps"] },
+            { "required": ["uploadKbps"] }
+          ]
+        }
+      },
       "description": "Device-wide network condition input (Android emulator)"
     },
     "getNotificationPolicyParams": {

@@ -1104,8 +1104,10 @@ export class RealObserveScreen implements ObserveScreen {
     // shade or keyguard that took focus mid-recapture keeps the occluded app's
     // package (so the package and back-stack checks accept it); re-run the
     // overlay reconciliation so the published window names the surface on top
-    // rather than the app beneath it (#6078, surfaced in #6088 review).
-    if (await this.applyFocusedSystemUiOverlay(result, signal)) {
+    // rather than the app beneath it (#6078, surfaced in #6088 review). The tree
+    // was just recaptured here, so the #6091 fallback recapture is redundant —
+    // skip it and confirm focus directly against this fresh tree.
+    if (await this.applyFocusedSystemUiOverlay(result, signal, true)) {
       return { sampled: false, identity: undefined, activityAttributionMismatch: false };
     }
     // Do not pair an adb activity from a later navigation with an earlier
@@ -1126,39 +1128,34 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Decide whether a focused SystemUI surface currently owns input focus
-   * (issue #6078). The free primary signal is the captured accessibility
-   * `windows[]`: a window flagged `isFocused` that is a SystemUI surface
-   * confirms the overlay with no extra device round-trip. When no window on this
-   * API level carries a focus flag but the topmost window is a SystemUI surface,
-   * focus is confirmed with a single `dumpsys window` `mCurrentFocus` read (the
-   * status bar always exists but is neither focused nor topmost over an expanded
-   * shade, so an ordinary app screen never reaches the adb read).
-   */
-  private async detectFocusedSystemUiOverlay(
-    result: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const signalKind = classifyFocusedSystemUiWindow(result.viewHierarchy);
-    if (signalKind === "focused") {
-      return true;
-    }
-    if (signalKind === "topmost-suspect") {
-      return this.deviceStateCollector.collectFocusedSystemUiSurface(signal);
-    }
-    return false;
-  }
-
-  /**
    * Mirror the SystemUI surface identity into `activeWindow` when a SystemUI
    * surface owns focus (issue #6078). Returns `true` when the overlay was
    * detected and applied — the caller then short-circuits the rest of
    * attribution. A no-op (returns `false`) when there is no `activeWindow` to
    * annotate or no focused SystemUI surface.
+   *
+   * Two detection paths (issue #6078). The free primary signal is the captured
+   * accessibility `windows[]`: a window flagged `isFocused` that is a SystemUI
+   * surface confirms the overlay with no extra device round-trip and — being
+   * sampled atomically with the hierarchy — is race-free, so it is trusted as
+   * captured. When no window on this API level carries a focus flag but the
+   * topmost window is a large SystemUI surface, focus is unconfirmed on the
+   * captured tree; that is the adb `mCurrentFocus` fallback.
+   *
+   * The fallback's focus read is not atomic with the hierarchy capture, so a
+   * shade transition in that interval can pair a stale hierarchy with the wrong
+   * attribution — e.g. a shade that closes leaves a stale shade tree stamped with
+   * the occluded app's id (issue #6091). The fallback therefore recaptures the
+   * hierarchy and re-classifies against the fresh tree so the published tree and
+   * the overlay attribution are drawn from the same post-fallback moment. When a
+   * caller already recaptured the tree (the #6088 back-stack path), it passes
+   * `skipRecapture` so the fallback confirms focus directly against that fresh
+   * tree instead of recapturing twice.
    */
   private async applyFocusedSystemUiOverlay(
     result: ObserveResult,
     signal?: AbortSignal,
+    skipRecapture: boolean = false,
   ): Promise<boolean> {
     // Android-only: `com.android.systemui`, the notification shade, and the
     // `dumpsys window` fallback are Android concepts. iOS reuses the same
@@ -1168,9 +1165,63 @@ export class RealObserveScreen implements ObserveScreen {
       return false;
     }
     const activeWindow = result.activeWindow;
-    if (activeWindow === undefined || !(await this.detectFocusedSystemUiOverlay(result, signal))) {
+    if (activeWindow === undefined) {
       return false;
     }
+    const signalKind = classifyFocusedSystemUiWindow(result.viewHierarchy);
+    if (signalKind === "none") {
+      return false;
+    }
+    if (signalKind === "focused") {
+      // Primary, race-free signal: mirror immediately, no recapture.
+      this.mirrorFocusedSystemUiOverlay(result, activeWindow);
+      return true;
+    }
+    // `topmost-suspect`: the non-atomic adb fallback path (#6091).
+    return this.applyFallbackSystemUiOverlay(result, activeWindow, skipRecapture, signal);
+  }
+
+  /**
+   * Resolve the adb `mCurrentFocus` fallback for a topmost SystemUI suspect
+   * (issue #6091). The focus read post-dates the captured tree, so — unless the
+   * caller already recaptured — recapture the hierarchy first and re-classify
+   * against the fresh tree, then confirm focus against that same tree. This keeps
+   * the published hierarchy and the overlay attribution from the same moment: a
+   * shade that closed in the interval reclassifies to `none` (fresh app tree,
+   * no overlay), and a shade genuinely up is mirrored against the fresh shade
+   * tree. When the recapture is unavailable (or skipped), fall back to the
+   * single focus read against the tree in hand — no worse than pre-#6091.
+   */
+  private async applyFallbackSystemUiOverlay(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    skipRecapture: boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (!skipRecapture && (await this.recaptureHierarchyForSystemUiOverlay(result, signal))) {
+      const freshSignal = classifyFocusedSystemUiWindow(result.viewHierarchy);
+      if (freshSignal === "none") {
+        // The shade closed between the original capture and the recapture; the
+        // fresh tree is the underlying app and `activeWindow` already names it.
+        return false;
+      }
+      if (freshSignal === "focused") {
+        this.mirrorFocusedSystemUiOverlay(result, activeWindow);
+        return true;
+      }
+      // `topmost-suspect` on the fresh tree: confirm focus against it below.
+    }
+    if (!(await this.deviceStateCollector.collectFocusedSystemUiSurface(signal))) {
+      return false;
+    }
+    this.mirrorFocusedSystemUiOverlay(result, activeWindow);
+    return true;
+  }
+
+  private mirrorFocusedSystemUiOverlay(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+  ): void {
     const overlay = {
       ...activeWindow,
       appId: SYSTEM_UI_PACKAGE,
@@ -1181,6 +1232,56 @@ export class RealObserveScreen implements ObserveScreen {
     // describe the shade that is now on top; drop it while the overlay is up.
     delete overlay.type;
     result.activeWindow = overlay;
+  }
+
+  /**
+   * Recapture the hierarchy for the SystemUI-overlay fallback so the published
+   * tree and the overlay attribution are sampled together (issue #6091). Unlike
+   * the back-stack recapture there is no expected package to match — the goal is
+   * simply a tree newer than the one captured before the focus read. Returns
+   * `true` when a usable fresh tree replaced the original; on any failure the
+   * original hierarchy is preserved and the caller falls back to the single
+   * focus read.
+   */
+  private async recaptureHierarchyForSystemUiOverlay(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const initialTimestamp = this.resolveObservationTimestampMs(result);
+    const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
+    let hierarchy: ObserveResult["viewHierarchy"];
+    try {
+      // `minTimestamp` rejects the cached (initial) tree; skipping the fresh wait
+      // goes straight to the sync that produces the newer one (#6099).
+      hierarchy = await this.viewHierarchy.getViewHierarchy(
+        undefined,
+        new NoOpPerformanceTracker(),
+        true,
+        minTimestamp,
+        signal,
+      );
+    } catch (error) {
+      logger.debug(
+        `[OBSERVE] SystemUI-overlay recapture failed; preserving original hierarchy: ${error}`,
+      );
+      return false;
+    }
+    if (
+      !hierarchy ||
+      !hasUsableHierarchy(hierarchy) ||
+      hierarchy.fresh !== true ||
+      !this.platformValidator.validate(this.device.platform, hierarchy).valid
+    ) {
+      return false;
+    }
+    this.applyRecapturedHierarchy(result, hierarchy);
+    // `deviceLock` was sampled before the original capture (collectAllData), so a
+    // keyguard that appeared during this recapture would otherwise be published
+    // as unlocked against the fresh (keyguard) tree — the #6100 seam, on the
+    // overlay recapture path. Clear first so a failed re-read yields "unknown"
+    // rather than the stale value, then re-read paired with the replacement tree.
+    delete result.deviceLock;
+    await this.deviceStateCollector.collectDeviceLock(result, signal);
     return true;
   }
 

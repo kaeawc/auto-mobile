@@ -803,18 +803,24 @@ describe("DaemonManager readiness", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const spawner = new FakeDaemonSpawner();
-    // Our spawned child loses the socket-ownership race and exits 1 with an empty
-    // launch log, exactly as observed in #6103.
-    spawner.onSpawn = (process) => process.emit("exit", 1, null);
+    // Our spawned child loses the socket-ownership race and exits 1; the race winner
+    // has bound the shared socket by then, so its inode is present.
+    spawner.onSpawn = (daemonProcess) => {
+      writeFileSync(socketPath, "peer socket placeholder");
+      daemonProcess.emit("exit", 1, null);
+    };
 
-    // A peer client's same-version daemon is coming up: it publishes the shared
-    // socket a beat after our child died, so the readiness probe only succeeds once
-    // the peer is ready.
-    let peerSocketReady = false;
+    // The peer's listener only starts accepting a beat later: the first readiness pass
+    // (up to READINESS_PROBE_MAX_ATTEMPTS clients) is refused and a later pass succeeds.
+    // Keying this off the probe count — which happens strictly during the rejoin, after
+    // the spawn is wired up — keeps ordering deterministic, rather than racing a
+    // pre-registered auto-advance timer against the spawner's own setImmediate.
+    let probeClientsCreated = 0;
     const clients: ProbeClient[] = [];
     const manager = new DaemonManager(
       () => {
-        const client = new ProbeClient(peerSocketReady);
+        probeClientsCreated++;
+        const client = new ProbeClient(probeClientsCreated > READINESS_PROBE_MAX_ATTEMPTS);
         clients.push(client);
         return client;
       },
@@ -837,18 +843,17 @@ describe("DaemonManager readiness", () => {
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
-    // The peer publishes its socket shortly after our child exited: the inode
-    // appears and the readiness probe starts succeeding.
-    fakeTimer.setTimeout(() => {
-      peerSocketReady = true;
-      writeFileSync(socketPath, "peer socket placeholder");
-    }, 500);
 
     try {
       await expect(manager.start()).resolves.toBeUndefined();
       expect(clients.some((client) => client.connectCallCount > 0)).toBe(true);
       // We must never terminate the peer daemon we joined.
       expect(spawner.process.signals).toEqual([]);
+      // The expensive synchronous process scan runs once pre-spawn and once up front in
+      // the rejoin — NOT on every poll iteration (issue #6103). The join completes well
+      // within the coarse re-scan interval, so exactly two scans occur; a per-iteration
+      // scan would push this higher.
+      expect(liveCalls).toBe(2);
     } finally {
       readySpy.mockRestore();
       liveSpy.mockRestore();

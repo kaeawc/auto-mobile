@@ -385,6 +385,17 @@ const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
 const PEER_DAEMON_JOIN_POLL_MS = 100;
 
 /**
+ * How often the post-exit peer rejoin (issue #6103) re-runs the SYNCHRONOUS process-
+ * table scan that establishes "a live peer daemon is coming up". The scan
+ * (`ps`/PowerShell/CIM via {@link findLiveDaemonProcesses}) blocks the event loop, so
+ * running it every {@link PEER_DAEMON_JOIN_POLL_MS} poll would stall the loop for the
+ * whole budget. The per-iteration signal is the cheap socket connect probe; the
+ * process table is scanned once up front and then only at this coarser cadence, purely
+ * so a peer that DIES mid-wait still ends the loop rather than polling out the budget.
+ */
+const PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS = 1000;
+
+/**
  * Cadence at which the liveness watchdog re-samples the "keep waiting" predicate
  * while a full-budget readiness probe is in flight (issue #5904). A per-poll
  * precheck only samples liveness between probes; if the holder dies *during* a
@@ -1770,11 +1781,14 @@ export class DaemonManager implements DaemonManagerLike {
    * daemon is ready ~1s later. This bounded wait joins that winner instead.
    *
    * Prompt-failure invariant (issues #5878/#5904): the wait is GATED on a live
-   * AutoMobile daemon process being present in the table (see
-   * {@link hasComingUpPeerDaemon}) and gives up the instant none remains, so a
-   * GENUINE start failure — nothing coming up, or only an orphaned socket inode with
-   * no listener and no backing process — still fails immediately rather than burning
-   * the client's ~30s `tools/list` budget. `budgetMs` is the time REMAINING under the
+   * AutoMobile daemon process being present in the table (a SINGLE up-front
+   * {@link hasComingUpPeerDaemon} scan, re-checked only at
+   * {@link PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS} — not per poll — since that scan is a
+   * synchronous `ps`/PowerShell call), so a GENUINE start failure — nothing coming up,
+   * or only an orphaned socket inode with no listener and no backing process — still
+   * fails immediately rather than burning the client's ~30s `tools/list` budget; a peer
+   * that dies mid-wait ends the loop at the next re-check. `budgetMs` is the time
+   * REMAINING under the
    * caller's original start deadline (already capped at
    * {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}), so when launchAndWait already
    * consumed the client budget the caller passes a non-positive value and skips this
@@ -1788,8 +1802,16 @@ export class DaemonManager implements DaemonManagerLike {
   private async tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean> {
     const deadline = this.timer.now() + budgetMs;
 
+    // Establish "a live peer daemon is coming up" with a SINGLE up-front process-table
+    // scan, then re-check it only at PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS — never every
+    // iteration. That scan is a synchronous `ps`/PowerShell/CIM call that blocks the
+    // event loop, so re-running it each poll would stall the loop for the whole budget
+    // (issue #6103); the cheap per-iteration signal is the socket connect probe below.
+    let peerProcessComingUp = this.hasComingUpPeerDaemon();
+    let nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
+
     while (this.remainingTime(deadline) > 0) {
-      if (!this.hasComingUpPeerDaemon()) {
+      if (!peerProcessComingUp) {
         // No live daemon process is coming up: deliver the real subprocess-exit
         // failure now instead of holding the budget on nothing — or on an orphaned
         // socket inode with no listener and no backing process (#5878/#5904).
@@ -1797,10 +1819,9 @@ export class DaemonManager implements DaemonManagerLike {
       }
       // On POSIX, only probe once the socket inode exists: a live daemon that has not
       // yet published its Unix socket has nothing to connect to, and probing a missing
-      // path just burns the connect retry/backoff; the poll below re-checks liveness so
-      // a peer that dies mid-wait still ends the loop promptly. On Windows the socket is
-      // a named pipe with no filesystem entry, so that gate would never open — probe
-      // directly there (see {@link socketPathWorthProbing}). verifyDaemonConnection is
+      // path just burns the connect retry/backoff. On Windows the socket is a named
+      // pipe with no filesystem entry, so that gate would never open — probe directly
+      // there (see {@link socketPathWorthProbing}). verifyDaemonConnection is
       // non-destructive (never unlinks the socket), so a slow peer racing to bind is not
       // torn down here.
       const probeBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
@@ -1817,6 +1838,14 @@ export class DaemonManager implements DaemonManagerLike {
         break;
       }
       await this.timer.sleep(Math.min(PEER_DAEMON_JOIN_POLL_MS, remaining));
+
+      // Coarse-cadence liveness re-check: cheap enough to run occasionally so a peer
+      // that dies mid-wait (and never publishes the socket) ends the loop before the
+      // full budget, without a synchronous scan on every poll.
+      if (this.timer.now() >= nextProcessScanAt) {
+        peerProcessComingUp = this.hasComingUpPeerDaemon();
+        nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
+      }
     }
 
     return false;

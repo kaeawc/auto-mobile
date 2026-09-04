@@ -875,7 +875,9 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
         hierarchy: {
           node: {
             bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-            node: [{ text: "Settings home", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+            node: [
+              { text: "Settings home", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+            ],
           },
         },
       },

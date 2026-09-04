@@ -934,6 +934,303 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     // Temporal confirmation was attempted: initial capture plus the recapture read.
     expect(viewHierarchy.getCallCount()).toBe(2);
   });
+
+  // Issue #6088: on the bootstrap path the hierarchy carries no activity signal,
+  // so a window read that AGREES with the back-stack read is not proof the
+  // hierarchy is aligned with either: both adb reads can post-date a same-app
+  // A->B navigation that the hierarchy pre-dates. The recapture must therefore
+  // run whenever a back-stack attribution exists on the bootstrap path, not only
+  // when the two adb reads disagree.
+  const settingsHierarchy = (now: number, label: string) => ({
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    packageName: "com.android.settings",
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [{ text: label, bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+      },
+    },
+  });
+
+  const subSettingsBackStack = {
+    execute: async () => ({
+      depth: 1,
+      activities: [],
+      tasks: [],
+      currentActivity: { name: "com.android.settings.SubSettings", taskId: 14 },
+      source: "adb",
+    }),
+  } as any;
+
+  test("does not publish an agreeing later same-app window/backStack activity onto an earlier hierarchy when the recapture cannot confirm it (#6088)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    // Hierarchy captured for activity A; the navigation A->B lands before the
+    // back-stack and window reads, which therefore both report B and agree.
+    // Note this fixture is indistinguishable from a STABLE screen whose
+    // recapture fails: the code cannot tell the two apart, and tolerating a
+    // failed recapture on agreement would reinstate the #6088 skew, so the
+    // honest verdict for both is unknown + retracted.
+    viewHierarchy.configureHierarchySequence([
+      settingsHierarchy(now, "Settings home"),
+      { hierarchy: { error: "CtrlProxy timed out" }, fresh: false },
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 3478,
+        }),
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    // Agreement between the two adb reads must not short-circuit the recapture.
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    // B is not paired with A's tree: the name resolves to unknown and the
+    // observation is retracted rather than confidently mis-attributed.
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.appId).toBe("com.android.settings");
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("disagree about the current activity");
+    // The original A hierarchy is preserved (not replaced by an unusable recapture).
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+  });
+
+  test("resolves a genuine bootstrap A->B skew to B's fresh hierarchy when the recapture confirms it (#6088)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      settingsHierarchy(now, "Settings home"),
+      settingsHierarchy(now + 50, "Sub settings"),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 3478,
+        }),
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    // The published tree is the recaptured B tree, paired with B's name.
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Sub settings");
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+    expect(result.activeWindow?.layoutSeqSum).toBe(3478);
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
+  });
+
+  test("confirms a stable bootstrap observation through the recapture without retracting freshness (#6088)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    // Stable device: every read returns the same fresh B hierarchy.
+    viewHierarchy.configureHierarchy(settingsHierarchy(now, "Sub settings") as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 5120,
+        }),
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    // The recapture ran (bootstrap path + back-stack present) and confirmed.
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+    expect(result.activeWindow?.appId).toBe("com.android.settings");
+    expect(result.activeWindow?.layoutSeqSum).toBe(5120);
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.warning).toBeUndefined();
+  });
+
+  test("mirrors a SystemUI surface that takes focus during the bootstrap recapture instead of the app beneath it (#6088)", async () => {
+    // The focused-SystemUI check (#6078) runs before the recapture. When the
+    // shade takes focus mid-recapture, the replacement tree still carries the
+    // occluded app's package, so the package and back-stack checks accept it;
+    // the overlay reconciliation must run again on the installed tree.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    const shadeOverSettings = {
+      ...settingsHierarchy(now + 50, "Notifications"),
+      windows: [
+        {
+          packageName: "com.android.systemui",
+          type: 3,
+          isFocused: true,
+          windowLayer: 200,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        },
+        {
+          packageName: "com.android.settings",
+          type: 1,
+          isFocused: false,
+          windowLayer: 10,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        },
+      ],
+    };
+    viewHierarchy.configureHierarchySequence([
+      settingsHierarchy(now, "Sub settings"),
+      shadeOverSettings,
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 5120,
+        }),
+        backStack: subSettingsBackStack,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    // The published tree is the recaptured shade tree...
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Notifications");
+    // ...and the window names the surface on top, never the occluded app's activity.
+    expect(result.activeWindow?.appId).toBe("com.android.systemui");
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.systemOverlay).toBe(true);
+  });
+
+  test("surfaces a failed confirming back-stack read on the retracted result (#6088)", async () => {
+    // The bootstrap recapture now runs on every agreeing observation, so an adb
+    // hiccup on the confirming back-stack read retracts a stable observation.
+    // The cause must reach `result.errors` so the retraction is diagnosable.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(settingsHierarchy(now, "Sub settings") as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    let backStackReads = 0;
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "com.android.settings.SubSettings",
+          layoutSeqSum: 5120,
+        }),
+        backStack: {
+          execute: async () => {
+            backStackReads += 1;
+            if (backStackReads > 1) {
+              throw new Error("adb: device offline");
+            }
+            return {
+              depth: 1,
+              activities: [],
+              tasks: [],
+              currentActivity: { name: "com.android.settings.SubSettings", taskId: 14 },
+              source: "adb",
+            };
+          },
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(backStackReads).toBe(2);
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.freshness?.verified).toBe(false);
+    const backStackErrors = (result.errors ?? []).filter((e) => e.phase === "backStack");
+    expect(backStackErrors.length).toBeGreaterThan(0);
+    expect(backStackErrors[0]?.cause).toContain("device offline");
+  });
 });
 
 /**

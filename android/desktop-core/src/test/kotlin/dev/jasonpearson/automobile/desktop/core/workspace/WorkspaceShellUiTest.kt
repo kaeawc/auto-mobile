@@ -841,6 +841,8 @@ class WorkspaceShellUiTest {
           onOpenPicker = {},
           status = WorkspaceStatus.Red,
           statusDetail = "Daemon unreachable",
+          // A local daemon that has not reported Ready — not Inactive, so recovery is offered.
+          bootstrapState = DaemonBootstrapState.Unknown,
           healthSheetContent = { Text("fake-health-body") },
         )
       }
@@ -849,6 +851,31 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Daemon recovery").assertIsDisplayed()
     onNodeWithText("Start daemon").assertIsDisplayed()
   }
+
+  @Test
+  fun `red status with an inactive (non-daemon) transport hides the recovery affordance`() =
+    runComposeUiTest {
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = WorkspaceUiState.Empty,
+            onAction = {},
+            onOpenPicker = {},
+            status = WorkspaceStatus.Red,
+            statusDetail = "Connection lost",
+            // HTTP/STDIO transport: bootstrap is Inactive and ensureReady() is a no-op, so a
+            // "Start daemon" button would silently do nothing — it must not be offered (#6080).
+            bootstrapState = DaemonBootstrapState.Inactive,
+            healthSheetContent = { Text("fake-health-body") },
+          )
+        }
+      }
+      onNodeWithContentDescription("Status: Red").performClick()
+      // The sheet still opens for diagnostics, but with no recovery affordance.
+      onNodeWithText("fake-health-body").assertIsDisplayed()
+      onNodeWithContentDescription("Daemon recovery").assertDoesNotExist()
+      onNodeWithText("Start daemon").assertDoesNotExist()
+    }
 
   @Test
   fun `green status health sheet hides the daemon recovery affordance`() = runComposeUiTest {
@@ -901,6 +928,7 @@ class WorkspaceShellUiTest {
           onOpenPicker = {},
           status = WorkspaceStatus.Red,
           statusDetail = "Daemon unreachable",
+          bootstrapState = DaemonBootstrapState.Unknown,
           onRecoverDaemon = { recoveries++ },
           healthSheetContent = { Text("fake-health-body") },
         )
@@ -921,6 +949,7 @@ class WorkspaceShellUiTest {
           onOpenPicker = {},
           status = WorkspaceStatus.Red,
           statusDetail = "Daemon unreachable",
+          bootstrapState = DaemonBootstrapState.Unknown,
           // The host's synchronous claim before bootstrapState has reported its first Working
           // phase.
           recovering = true,
@@ -948,6 +977,7 @@ class WorkspaceShellUiTest {
             onOpenPicker = {},
             status = WorkspaceStatus.Red,
             statusDetail = "Daemon unreachable",
+            bootstrapState = DaemonBootstrapState.Unknown,
             recovering = recovering.value,
             onRecoverDaemon = {
               dispatches++

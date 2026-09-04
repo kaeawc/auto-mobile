@@ -25,6 +25,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
@@ -168,12 +169,16 @@ fun AutoMobileDesktopApp(
   // user ever sees a stable Retry.
   val daemonBootstrap = graph.daemonBootstrap
   val bootstrapState by daemonBootstrap.state.collectAsState()
-  // Synchronous in-flight claim for the workspace health sheet's "Start daemon" recovery button
-  // (#6080). Flipped true on the UI thread the instant onRecoverDaemon fires and cleared when the
-  // launched ensureReady() pass finishes, it coalesces rapid clicks into a single lifecycle pass
-  // (bootstrapState's own Working phase lags behind the click, and does not report at all for a
-  // no-op inactive transport).
-  var recoveringDaemon by remember { mutableStateOf(false) }
+  // Coalescing launcher for the workspace health sheet's "Start daemon" recovery button (#6080): it
+  // makes a synchronous in-flight claim before dispatching ensureReady() off the main thread and
+  // drops clicks while a pass is running, so rapid clicks (or clicks before bootstrapState's own
+  // Working phase catches up) don't queue duplicate startup-budget passes. Its inFlight flag backs
+  // the button's disabled state.
+  val recoveryLauncher =
+    remember(scope, daemonBootstrap) {
+      CoalescingRecoveryLauncher(scope = scope, recover = { daemonBootstrap.ensureReady() })
+    }
+  val recoveringDaemon by recoveryLauncher.inFlight.collectAsState()
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
@@ -527,25 +532,11 @@ fun AutoMobileDesktopApp(
                 // non-daemon (Inactive) transport, so the affordance is inert on HTTP/STDIO.
                 bootstrapState = bootstrapState,
                 recovering = recoveringDaemon,
-                onRecoverDaemon = {
-                  // Synchronous in-flight guard (#6080): coalesce rapid clicks — and clicks landing
-                  // before the pass reports its first Working phase, or while Dispatchers.IO is
-                  // saturated — so only one ensureReady() runs at a time. DesktopDaemonLifecycle
-                  // serializes queued passes rather than coalescing them, so each extra launch
-                  // would
-                  // repeat the full startup budget. The flag flips on the UI thread before dispatch
-                  // and clears in a finally (so a no-op/inactive pass releases it too).
-                  if (!recoveringDaemon) {
-                    recoveringDaemon = true
-                    scope.launch(Dispatchers.IO) {
-                      try {
-                        daemonBootstrap.ensureReady()
-                      } finally {
-                        recoveringDaemon = false
-                      }
-                    }
-                  }
-                },
+                // Delegate to the coalescing launcher (#6080) so a rapid second click can't queue a
+                // duplicate ensureReady() pass; the guard itself lives in
+                // CoalescingRecoveryLauncher
+                // where it is unit-tested.
+                onRecoverDaemon = { recoveryLauncher.launch() },
                 updateStatus = updateStatus,
                 onUpdateClick = { showUpdateDetails = true },
                 facetContent = { column, tool -> WorkspaceFacet(column, tool) },

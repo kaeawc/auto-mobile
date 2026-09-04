@@ -434,9 +434,12 @@ private fun HealthSheetOverlay(
       Spacer(Modifier.height(8.dp))
       // Recovery affordance: the only daemon-mutating control in the (otherwise read-only) health
       // sheet, shown only when the status is Red (daemon down) — Start-daemon parity with the
-      // device
-      // picker (#6035). Green/Yellow keep the sheet purely diagnostic.
-      if (status == WorkspaceStatus.Red) {
+      // device picker (#6035). Green/Yellow keep the sheet purely diagnostic. Gated on a local
+      // daemon transport: a non-daemon (HTTP/STDIO) transport reports DaemonBootstrapState.Inactive
+      // and its ensureReady() is a no-op, so a Red caused by an HTTP/STDIO disconnect must NOT
+      // offer
+      // a "Start daemon" button that would silently do nothing (#6080).
+      if (status == WorkspaceStatus.Red && bootstrapState !is DaemonBootstrapState.Inactive) {
         DaemonRecoveryHeader(
           bootstrapState = bootstrapState,
           onRecoverDaemon = onRecoverDaemon,

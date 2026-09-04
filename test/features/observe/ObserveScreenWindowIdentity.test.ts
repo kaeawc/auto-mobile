@@ -760,4 +760,156 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.verified).toBe(true);
   });
+
+  // Issue #6070: on the bootstrap Window.getActive() path (used when the
+  // accessibility service supplies no usable foregroundActivity), a blank/stale
+  // active-window record can be published with an empty activityName and a
+  // frozen layoutSeqSum. The adb-sourced backStack never drifts, so an empty
+  // activityName must be backfilled directly from backStack — without requiring
+  // an expensive hierarchy recapture — and the stale layoutSeqSum must not ride
+  // along. System UI (#6078) is out of scope here.
+  const emptyBootstrapWindow = (activeWindow: {
+    appId: string;
+    activityName: string;
+    layoutSeqSum: number;
+  }) =>
+    ({
+      getActive: async () => activeWindow,
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    }) as any;
+
+  test("backfills an empty activeWindow activityName from backStack without a recapture (#6070)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    // No usable foregroundActivity -> the accessibility path does not set
+    // activeWindow, so the bootstrap Window.getActive() fallback runs.
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "com.android.settings",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Settings", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "",
+          layoutSeqSum: 3478,
+        }),
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [],
+            currentActivity: { name: "com.android.settings.Settings", taskId: 14 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.Settings");
+    expect(result.activeWindow?.appId).toBe("com.android.settings");
+    // The stale frozen layoutSeqSum must not be published alongside the
+    // corrected activity (it is reset to the unknown sentinel 0).
+    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+    // No hierarchy recapture is required to backfill an empty name.
+    expect(viewHierarchy.getCallCount()).toBe(1);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("backfills an empty activeWindow activityName even when a recapture is unavailable (#6070)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    // First read is the (usable) captured hierarchy; a second read (which the
+    // pre-#6070 recapture path would attempt) fails. The empty-name backfill
+    // must still succeed off backStack alone.
+    viewHierarchy.configureHierarchySequence([
+      {
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        packageName: "com.android.settings",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [{ text: "Settings", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
+        },
+      },
+      { hierarchy: { error: "CtrlProxy timed out" }, fresh: false },
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: emptyBootstrapWindow({
+          appId: "com.android.settings",
+          activityName: "",
+          layoutSeqSum: 3478,
+        }),
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [],
+            currentActivity: { name: "com.android.settings.Settings", taskId: 14 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    // On pre-#6070 code the empty name stays "" because the recapture is
+    // unusable; with the fix it is backfilled from backStack.
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.Settings");
+    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+    // Only the initial capture is read; no recapture round-trip is made.
+    expect(viewHierarchy.getCallCount()).toBe(1);
+  });
 });

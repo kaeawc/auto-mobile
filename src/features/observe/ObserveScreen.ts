@@ -922,6 +922,10 @@ export class RealObserveScreen implements ObserveScreen {
 
     const backStackAttribution = resolveBackStackActivityAttribution(result);
     if (backStackAttribution && activeWindow.activityName !== backStackAttribution.activityName) {
+      if (!activeWindow.activityName) {
+        this.backfillEmptyActivityFromBackStack(result, backStackAttribution);
+        return { sampled: false, identity: undefined, activityAttributionMismatch: false };
+      }
       const recaptured = await this.recaptureHierarchyForBackStackAttribution(
         result,
         backStackAttribution,
@@ -956,6 +960,34 @@ export class RealObserveScreen implements ObserveScreen {
       result.activeWindow = { ...activeWindow, appId: observed, activityName: "" };
     }
     return { sampled: true, identity: confirmed, activityAttributionMismatch: false };
+  }
+
+  /**
+   * Backfill an empty `activeWindow.activityName` from the adb-sourced
+   * `backStack`. An empty/missing activityName is not a real reading — it is the
+   * bootstrap `Window.getActive()` (or last-resort package) path publishing a
+   * blank, sometimes served from a stale cache with a frozen `layoutSeqSum`
+   * (e.g. 3478) across a genuine navigation. `backStack` never drifts and is
+   * already confirmed in-package, so this backfills directly — no expensive
+   * hierarchy recapture, which the non-empty stale-name case (#5992) still
+   * requires to avoid pairing a later activity with an earlier tree.
+   * `layoutSeqSum` is reset to the unknown sentinel (0, the value the
+   * accessibility path uses) so a stale sequence is never published beside the
+   * corrected activity (#6070).
+   */
+  private backfillEmptyActivityFromBackStack(
+    result: ObserveResult,
+    backStackAttribution: { packageName: string; activityName: string },
+  ): void {
+    const backfilled = {
+      appId: backStackAttribution.packageName,
+      activityName: backStackAttribution.activityName,
+      layoutSeqSum: 0,
+    } as NonNullable<ObserveResult["activeWindow"]>;
+    if (result.notificationPermissionDetected) {
+      backfilled.type = "notification_permission_dialog";
+    }
+    result.activeWindow = backfilled;
   }
 
   private async recaptureHierarchyForBackStackAttribution(

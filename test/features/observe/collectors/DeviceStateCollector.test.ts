@@ -146,5 +146,30 @@ describe("DeviceStateCollector", () => {
         layoutSeqSum: 1,
       });
     });
+
+    test("forces a fresh window read so a stale cached record cannot be published across a navigation (#6070)", async () => {
+      // A frozen memory/disk cache record (empty activityName + stale
+      // layoutSeqSum) must not win over the device's current window state.
+      fakeWindow.configureCachedActiveWindow({
+        appId: "com.android.settings",
+        activityName: "",
+        layoutSeqSum: 3478,
+      });
+      fakeWindow.configureActiveWindow({
+        appId: "com.android.settings",
+        activityName: "com.android.settings.SubSettings",
+        layoutSeqSum: 5000,
+      });
+      const result = makeResult();
+
+      await collector.collectActiveWindow(result);
+
+      expect(fakeWindow.getGetActiveForceRefreshes()).toEqual([true]);
+      expect(result.activeWindow).toEqual({
+        appId: "com.android.settings",
+        activityName: "com.android.settings.SubSettings",
+        layoutSeqSum: 5000,
+      });
+    });
   });
 });

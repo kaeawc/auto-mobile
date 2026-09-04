@@ -97,7 +97,14 @@ export class DeviceStateCollector {
     const { window, timer } = this.opts;
     try {
       const startedAt = timer.now();
-      const activeWindow = await window.getActive();
+      // Force a fresh read on the bootstrap path. The Window memory/disk cache
+      // has no expiry, so a `getActive()` (non-forced) read can serve a frozen
+      // record — an empty activityName with a stale `layoutSeqSum` — across a
+      // real navigation, which the observe layer would then publish. This path
+      // only runs during the lazy-CtrlProxy bootstrap interval (rare), so the
+      // extra dumpsys is cheap; the cache must never win over current window
+      // state (#6070).
+      const activeWindow = await window.getActive(true);
       logger.debug(`Bootstrap active window retrieval took ${timer.now() - startedAt}ms`);
       if (activeWindow) {
         result.activeWindow = activeWindow;

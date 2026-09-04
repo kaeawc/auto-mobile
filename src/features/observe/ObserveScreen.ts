@@ -1268,7 +1268,12 @@ export class RealObserveScreen implements ObserveScreen {
     // one bounded re-capture to converge on a coherent (tree, attribution) rather
     // than publishing this suspect tree stamped with the app beneath it.
     if (retriesLeft > 0) {
-      return this.resolveFallbackOverlayWithRecapture(result, recorrelated, signal, retriesLeft - 1);
+      return this.resolveFallbackOverlayWithRecapture(
+        result,
+        recorrelated,
+        signal,
+        retriesLeft - 1,
+      );
     }
     // Still a fresh suspect while the focus read keeps naming an app: the adb
     // ground truth is authoritative for focus, so no overlay is mirrored. The
@@ -1396,9 +1401,7 @@ export class RealObserveScreen implements ObserveScreen {
     if (foregroundActivity && !isAccessibilityViewClass(foregroundActivity)) {
       const parts = foregroundActivity.split("/");
       const packageName = parts[0];
-      const activityName = parts[1]?.startsWith(".")
-        ? packageName + parts[1]
-        : parts[1] || "";
+      const activityName = parts[1]?.startsWith(".") ? packageName + parts[1] : parts[1] || "";
       return { appId: packageName, activityName, layoutSeqSum: 0 };
     }
     if (hierarchy.packageName) {

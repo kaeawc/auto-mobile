@@ -20,6 +20,16 @@ export interface DaemonSocketReachabilityDeps {
 }
 
 /**
+ * The narrow contract the daemon manager's post-exit rejoin depends on: report
+ * whether the socket/pipe is reachable, observation-only. Injecting this (rather than
+ * subclassing the manager) lets a test drive the probe outcome under a FakeTimer
+ * without a real socket, and keeps the real probe wired to the manager's injected timer.
+ */
+export interface DaemonSocketReachabilityLike {
+  isReachable(socketPath: string, timeoutMs: number): Promise<boolean>;
+}
+
+/**
  * Observation-only reachability check for a daemon control socket/pipe (issue #6103).
  *
  * The post-exit peer rejoin needs to know "is a peer daemon accepting on the shared

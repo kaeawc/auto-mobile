@@ -37,7 +37,10 @@ import {
   formatSocketDiagnostics,
 } from "./debugTools";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
-import { DaemonSocketReachability } from "./daemonSocketReachability";
+import {
+  DaemonSocketReachability,
+  type DaemonSocketReachabilityLike,
+} from "./daemonSocketReachability";
 import {
   buildIdentitiesMatch,
   buildIdentityFromStatus,
@@ -493,10 +496,11 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Observation-only reachability probe for the post-exit peer rejoin (issue #6103):
    * it never unlinks or stale-cleans the socket, and is platform-aware at the connect
-   * layer. Kept as a field (not the recovery-capable {@link DaemonClient}) so the
-   * rejoin can never delete a live peer's endpoint. See {@link probePeerSocketReachable}.
+   * layer. Assigned in the constructor body from the injected {@link Timer} (never a
+   * field initializer, which would bind the real wall-clock even under a FakeTimer),
+   * and injectable so a test can drive the probe outcome without a real socket.
    */
-  private readonly peerSocketReachability = new DaemonSocketReachability();
+  private readonly peerSocketReachability: DaemonSocketReachabilityLike;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
   /**
@@ -525,8 +529,13 @@ export class DaemonManager implements DaemonManagerLike {
     launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
     processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
     idGenerator: IdGenerator = defaultIdGenerator,
+    peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
   ) {
     this.startupLockOwnerToken = idGenerator.next();
+    // Construct the reachability probe here (not in a field initializer) so its connect
+    // timeout is bound to the injected timer — a field initializer would capture the
+    // real wall-clock even when this manager runs under a FakeTimer (issue #6103).
+    this.peerSocketReachability = peerSocketReachability ?? new DaemonSocketReachability({ timer });
     this.stateProvider = stateProvider;
     this.timer = timer;
     this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
@@ -1800,53 +1809,65 @@ export class DaemonManager implements DaemonManagerLike {
    * becoming ready" error strands the caller even though a healthy same-namespace
    * daemon is ready ~1s later. This bounded wait joins that winner instead.
    *
-   * Prompt-failure invariant (issues #5878/#5904): the wait is GATED on a live
-   * AutoMobile daemon process being present in the table (a SINGLE up-front
-   * {@link hasComingUpPeerDaemon} scan, re-checked only at
-   * {@link PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS} — not per poll — since that scan is a
-   * synchronous `ps`/PowerShell call), so a GENUINE start failure — nothing coming up,
-   * or only an orphaned socket inode with no listener and no backing process — still
-   * fails immediately rather than burning the client's ~30s `tools/list` budget; a peer
-   * that dies mid-wait ends the loop at the next re-check. `budgetMs` is the time
-   * REMAINING under the
-   * caller's original start deadline (already capped at
-   * {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}), so when launchAndWait already
-   * consumed the client budget the caller passes a non-positive value and skips this
-   * wait entirely — the rejoin can only ever spend time the caller still has. It
-   * NEVER spawns — it only probes and joins, so it cannot double-spawn — and it joins
-   * only a daemon that answers the observation-only {@link probePeerSocketReachable}
-   * probe, which never unlinks or stale-cleans the socket (so it cannot delete a live
-   * peer's endpoint); daemon version compatibility is enforced separately by the proxy
-   * handshake.
+   * Each iteration evaluates the authoritative socket probe FIRST; only after a probe
+   * miss does it consult the process table, throttled to once up front plus once per
+   * {@link PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS} (that scan is a synchronous
+   * `ps`/PowerShell call and must never precede or preempt the socket probe).
+   *
+   * Prompt-failure invariant (issues #5878/#5904): once the socket probe misses, a
+   * GENUINE start failure — no live daemon process ({@link hasComingUpPeerDaemon}),
+   * nothing coming up, or only an orphaned socket inode with no listener and no backing
+   * process — fails immediately rather than burning the client's ~30s `tools/list`
+   * budget; a peer that dies mid-wait ends the loop at the next re-check. `budgetMs` is
+   * the time REMAINING under the caller's original start deadline, less a delivery
+   * reserve (capped at {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}), so when
+   * launchAndWait already consumed the client budget the caller passes a non-positive
+   * value and skips this wait entirely — the rejoin can only ever spend time the caller
+   * still has. It NEVER spawns — it only probes and joins, so it cannot double-spawn —
+   * and it joins only a daemon that answers the observation-only
+   * {@link peerSocketReachability} probe, which never unlinks or stale-cleans the socket
+   * (so it cannot delete a live peer's endpoint); daemon version compatibility is
+   * enforced separately by the proxy handshake.
    */
   private async tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean> {
     const deadline = this.timer.now() + budgetMs;
 
-    // Establish "a live peer daemon is coming up" with a SINGLE up-front process-table
-    // scan, then re-check it only at PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS — never every
-    // iteration. That scan is a synchronous `ps`/PowerShell/CIM call that blocks the
-    // event loop, so re-running it each poll would stall the loop for the whole budget
-    // (issue #6103). The per-iteration signal is the cheap socket probe below.
-    let peerProcessComingUp = this.hasComingUpPeerDaemon();
-    let nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
+    // The process-table scan is a synchronous `ps`/PowerShell/CIM call that blocks the
+    // event loop, so it must (a) never run BEFORE the authoritative socket probe, and
+    // (b) never run more than once up front plus once per
+    // PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS — otherwise a stalling scan could consume the
+    // whole deadline before an already-published peer socket is ever checked (issue
+    // #6103). It is populated lazily, only after a socket-probe miss.
+    let peerProcessComingUp: boolean | undefined;
+    let nextProcessScanAt = this.timer.now();
 
     while (this.remainingTime(deadline) > 0) {
-      // SOCKET-FIRST: a reachable socket is the AUTHORITATIVE readiness signal, so probe
-      // it before consulting the process scan and join immediately if it answers —
-      // regardless of what the (best-effort, occasionally-stale) scan reported. This is
-      // an observation-only probe: it never unlinks or stale-cleans the socket, so it
-      // cannot delete a live peer's endpoint during the race (issue #6103), and it is
+      // SOCKET-FIRST (authoritative), evaluated before any process scan: a reachable
+      // socket means join immediately, regardless of what the best-effort scan would
+      // say. This is an observation-only probe — it never unlinks or stale-cleans the
+      // socket, so it cannot delete a live peer's endpoint during the race — and it is
       // platform-aware at the connect layer so a Windows named-pipe peer (no filesystem
       // entry) is still reached.
       const probeBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
-      if (probeBudget > 0 && (await this.probePeerSocketReachable(probeBudget))) {
+      if (
+        probeBudget > 0 &&
+        (await this.peerSocketReachability.isReachable(this.socketPath, probeBudget))
+      ) {
         stderrLog("Reusing a peer daemon that became ready after our launch exited");
         return true;
       }
-      // Socket not reachable yet. Use the process-table presence ONLY to decide whether
-      // to keep waiting: a live peer process means the socket is still coming up, so
-      // poll again; nothing coming up (genuine failure, or an orphaned socket inode with
-      // no listener and no backing process) fails promptly (#5878/#5904).
+
+      // Socket not reachable yet. NOW consult the process table — throttled — purely to
+      // decide whether to keep waiting: a live peer process means the socket is still
+      // coming up, so poll again; nothing coming up (genuine failure, or an orphaned
+      // socket inode with no listener and no backing process) fails promptly (#5878).
+      // The scan runs at most once up front (when still undefined) and once per interval
+      // thereafter, so a peer that dies mid-wait still ends the loop without a scan per
+      // poll.
+      if (peerProcessComingUp === undefined || this.timer.now() >= nextProcessScanAt) {
+        peerProcessComingUp = this.hasComingUpPeerDaemon();
+        nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
+      }
       if (!peerProcessComingUp) {
         return false;
       }
@@ -1855,30 +1876,9 @@ export class DaemonManager implements DaemonManagerLike {
         break;
       }
       await this.timer.sleep(Math.min(PEER_DAEMON_JOIN_POLL_MS, remaining));
-
-      // Coarse-cadence liveness re-check: cheap enough to run occasionally so a peer
-      // that dies mid-wait (and never publishes the socket) ends the loop before the
-      // full budget, without a synchronous scan on every poll.
-      if (this.timer.now() >= nextProcessScanAt) {
-        peerProcessComingUp = this.hasComingUpPeerDaemon();
-        nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
-      }
     }
 
     return false;
-  }
-
-  /**
-   * Observation-only, platform-aware reachability probe for the post-exit peer rejoin.
-   * Delegates to {@link DaemonSocketReachability}, which attempts a bare connection and
-   * reports reachable/not WITHOUT ever unlinking or stale-cleaning the socket — unlike
-   * {@link DaemonClient.connect}, whose `cleanupStaleSocketIfDaemonDead` path could
-   * delete a live peer's endpoint when the PID file records the just-exited child
-   * (issue #6103). Extracted as its own method so tests can inject a fake reachability
-   * outcome without a real socket.
-   */
-  protected probePeerSocketReachable(timeoutMs: number): Promise<boolean> {
-    return this.peerSocketReachability.isReachable(this.socketPath, timeoutMs);
   }
 
   /**

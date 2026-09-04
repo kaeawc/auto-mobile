@@ -9,6 +9,8 @@ import {
 } from "../../src/daemon/daemonSocketReachability";
 import { cleanupStaleDaemonFilesForDeadPidSync } from "../../src/daemon/daemonFiles";
 import type { PidFileData } from "../../src/daemon/types";
+import type { Timer } from "../../src/utils/SystemTimer";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("DaemonSocketReachability", () => {
   const tempDirs: string[] = [];
@@ -74,6 +76,26 @@ describe("DaemonSocketReachability", () => {
     });
 
     await expect(reachability.isReachable("/tmp/present.sock", 500)).resolves.toBe(true);
+  });
+
+  test("threads the injected timer through to the connect attempt (#6103)", async () => {
+    // Proves the manager's `new DaemonSocketReachability({ timer })` wiring reaches the
+    // connect layer, so a slow probe under a FakeTimer advances the fake clock rather
+    // than blocking on real wall-clock.
+    const fakeTimer = new FakeTimer();
+    let receivedTimer: Timer | undefined;
+    const reachability = new DaemonSocketReachability({
+      platform: "linux",
+      existsSyncFn: () => true,
+      timer: fakeTimer,
+      connectAttempt: async (_socketPath, _timeoutMs, timer) => {
+        receivedTimer = timer;
+        return false;
+      },
+    });
+
+    await reachability.isReachable("/tmp/present.sock", 500);
+    expect(receivedTimer).toBe(fakeTimer);
   });
 
   test("returns false without attempting a connect when the budget is non-positive", async () => {

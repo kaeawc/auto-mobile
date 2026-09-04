@@ -6,6 +6,7 @@ import {
   NETWORK_CONDITION_PROFILES,
   classifyNetworkConditionRequest,
   networkConditionInputDegrades,
+  networkConditionInputError,
   networkConditionInputIsRequest,
   type SetNetworkConditionInput,
 } from "../../../src/features/utility/DeviceState";
@@ -377,11 +378,10 @@ describe("DeviceState", () => {
     ]);
   });
 
-  test("uses valid delay presets for veryBad/4g/5g (gsm/lte/full are speed-only)", async () => {
-    const cases: Array<{ profile: "veryBad" | "4g" | "5g"; delay: string; speed: string }> = [
+  test("uses valid delay presets for veryBad/4g (gsm/lte/full are speed-only)", async () => {
+    const cases: Array<{ profile: "veryBad" | "4g"; delay: string; speed: string }> = [
       { profile: "veryBad", delay: "gprs", speed: "gsm" },
       { profile: "4g", delay: "none", speed: "lte" },
-      { profile: "5g", delay: "none", speed: "full" },
     ];
     for (const { profile, delay, speed } of cases) {
       const adbFactory = new FakeAdbClientFactory();
@@ -523,8 +523,10 @@ describe("DeviceState", () => {
       supported: true,
       capability: "full",
       method: "android_emulator_console",
-      verified: true,
     });
+    // A read proves console reachability only — it verifies no specific condition,
+    // so it must NOT claim verified:true (issue #6012 review).
+    expect(result.networkCondition?.verified).toBeUndefined();
     expect(result.networkCondition?.rawStatus).toContain("network status");
     expect(client.getAllCommands()).toEqual(["emu network status"]);
   });
@@ -595,16 +597,68 @@ describe("DeviceState", () => {
       [{ profile: "3g", delayMs: 250 }, "degrade"],
       [{ packetLossPercent: 20 }, "loss-only"],
       [{ packetLossPercent: 20, expiresInSeconds: 5 }, "loss-only"],
+      // offline + a shaping override is self-contradictory → invalid.
+      [{ profile: "offline", delayMs: 500 }, "invalid"],
+      [{ profile: "offline", downloadKbps: 100 }, "invalid"],
+      // offline + packetLossPercent is redundant, not contradictory → still a degrade.
+      [{ profile: "offline", packetLossPercent: 50 }, "degrade"],
+      // cancel:true wins even over an offline+override combo.
+      [{ profile: "offline", delayMs: 500, cancel: true }, "reset"],
     ];
     for (const [input, expected] of cases) {
       expect(classifyNetworkConditionRequest(input)).toBe(expected as never);
     }
-    // networkConditionInputIsRequest is the schema gate: everything but `empty`.
+    // networkConditionInputIsRequest is the schema gate: rejects empty AND invalid.
     expect(networkConditionInputIsRequest({})).toBe(false);
     expect(networkConditionInputIsRequest({ cancel: false })).toBe(false);
     expect(networkConditionInputIsRequest({ expiresInSeconds: 30 })).toBe(false);
+    expect(networkConditionInputIsRequest({ profile: "offline", delayMs: 5 })).toBe(false);
     expect(networkConditionInputIsRequest({ cancel: true })).toBe(true);
     expect(networkConditionInputIsRequest({ packetLossPercent: 20 })).toBe(true);
+    // networkConditionInputError carries distinct messages for empty vs invalid.
+    expect(networkConditionInputError({})).toContain("no change to apply");
+    expect(networkConditionInputError({ profile: "offline", delayMs: 5 })).toContain("offline");
+    expect(networkConditionInputError({ profile: "3g" })).toBeNull();
+  });
+
+  test("rejects offline combined with a shaping override (no unapplied echo)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({
+      networkCondition: { profile: "offline", delayMs: 500 },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      verified: false,
+    });
+    expect(result.networkCondition?.error).toContain("offline");
+    // The unapplied 500ms override is NOT echoed in the reported values.
+    expect(result.networkCondition?.values?.delayMs).toBe(0);
+    // No console command is issued for a rejected request.
+    expect(client.getAllCommands()).toEqual([]);
+  });
+
+  test("does not disable Wi-Fi or report partial for a no-op fast profile (5g dropped)", () => {
+    // 5g was identical to none and only a confusing no-op; it no longer exists.
+    expect(NETWORK_CONDITION_PROFILES).not.toHaveProperty("5g");
+  });
+
+  test("omits the emulator-console method on non-applying (empty/loss-only) results", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+
+    const empty = await deviceState.setState({ networkCondition: { cancel: false } });
+    const lossOnly = await deviceState.setState({ networkCondition: { packetLossPercent: 20 } });
+
+    // Neither issued a console command, so — like the physical branch — neither
+    // claims the emulator-console method (issue #6012 review).
+    expect(empty.networkCondition?.method).toBeUndefined();
+    expect(lossOnly.networkCondition?.method).toBeUndefined();
   });
 
   test("reports a packet-loss-only request as unsupported, not verified (no command)", async () => {

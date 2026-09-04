@@ -79,6 +79,16 @@ describe("device state tools", () => {
     expect(() =>
       setTool!.schema.parse({ networkCondition: { delayMs: 400, expiresInSeconds: 5 } }),
     ).not.toThrow();
+    // #6012 final: offline + a shaping override is contradictory → rejected.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { profile: "offline", delayMs: 500 } }),
+    ).toThrow();
+    // offline + packetLossPercent is redundant, not contradictory → accepted.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { profile: "offline", packetLossPercent: 50 } }),
+    ).not.toThrow();
+    // 5g was dropped (identical to none) → no longer a valid enum value.
+    expect(() => setTool!.schema.parse({ networkCondition: { profile: "5g" } })).toThrow();
   });
 
   test("threads networkCondition through the setDeviceState handler", async () => {

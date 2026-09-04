@@ -5,7 +5,7 @@ import { SystemConfigurationManager } from "../features/utility/SystemConfigurat
 import {
   DeviceState,
   networkConditionInputDegrades,
-  networkConditionInputIsRequest,
+  networkConditionInputError,
   type BiometricEnrollment,
   type DeviceStateResult,
   type SetDeviceStateInput,
@@ -129,12 +129,13 @@ const biometricStateInputSchema = z.object({
 const networkConditionInputSchema = z
   .object({
     profile: z
-      .enum(["none", "offline", "veryBad", "2g", "3g", "4g", "5g"])
+      .enum(["none", "offline", "veryBad", "2g", "3g", "4g"])
       .optional()
       .describe(
         "Device-wide network profile. Documented values: none=unshaped, offline=no data, " +
           "veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), " +
-          "4g≈LTE, 5g=unlimited. Android emulator only.",
+          "4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`. " +
+          "Android emulator only.",
       ),
     cancel: z.boolean().optional().describe("Reset to normal connectivity (same as profile=none)."),
     reset: z.boolean().optional().describe("Alias of cancel."),
@@ -157,13 +158,16 @@ const networkConditionInputSchema = z
       .optional()
       .describe("Advisory TTL; session release/expiry restores normal connectivity."),
   })
-  // Derive "is this an actual request" from the SAME classifier the setter uses,
-  // so schema acceptance and runtime behavior cannot disagree. This treats
-  // cancel/reset as signals only when strictly true, so `{cancel:false}` and
-  // TTL-only payloads are rejected as empty (issue #6012 review P2 + audit).
-  .refine((values) => networkConditionInputIsRequest(values), {
-    message:
-      "Provide a profile, cancel/reset=true, or a latency/bandwidth override for networkCondition",
+  // Reject non-actionable / contradictory requests using the SAME classifier the
+  // setter uses, so schema acceptance and runtime behavior cannot disagree
+  // (issue #6012 review + audit): `{}`, falsy-only cancel/reset and TTL-only are
+  // `empty`; `offline` + a shaping override is `invalid`. `superRefine` so each
+  // carries its own message.
+  .superRefine((values, ctx) => {
+    const error = networkConditionInputError(values);
+    if (error) {
+      ctx.addIssue({ code: "custom", message: error });
+    }
   });
 
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
@@ -197,6 +201,22 @@ const NETWORK_CONDITION_REQUIRED_ANY_OF = [
   { required: ["packetLossPercent"] },
 ];
 
+// `offline` cuts the link, so a shaping override cannot apply — mirror the
+// runtime `invalid` rejection in JSON schema so tools/list matches invocation
+// (issue #6012 review): if profile is offline, forbid delayMs/downloadKbps/uploadKbps.
+const NETWORK_CONDITION_OFFLINE_NO_OVERRIDE = {
+  if: { properties: { profile: { const: "offline" } }, required: ["profile"] },
+  then: {
+    not: {
+      anyOf: [
+        { required: ["delayMs"] },
+        { required: ["downloadKbps"] },
+        { required: ["uploadKbps"] },
+      ],
+    },
+  },
+};
+
 export const setDeviceStateSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z.object({
@@ -224,6 +244,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
     const networkCondition = properties?.networkCondition;
     if (networkCondition) {
       networkCondition.anyOf = NETWORK_CONDITION_REQUIRED_ANY_OF;
+      networkCondition.if = NETWORK_CONDITION_OFFLINE_NO_OVERRIDE.if;
+      networkCondition.then = NETWORK_CONDITION_OFFLINE_NO_OVERRIDE.then;
     }
   },
 );
@@ -587,7 +609,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition (offline/2g/3g/4g degraded connectivity; Android emulator only).",
+    "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

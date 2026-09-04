@@ -1056,7 +1056,7 @@
       "properties": {
         "profile": {
           "type": "string",
-          "enum": ["none", "offline", "veryBad", "2g", "3g", "4g", "5g"],
+          "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"],
           "description": "Device-wide network profile (Android emulator only)"
         },
         "cancel": {

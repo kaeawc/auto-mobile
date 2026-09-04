@@ -68,8 +68,11 @@ export interface BiometricEnrollmentState {
  * condition *all* traffic on the selected device via the OS/emulator, so a
  * non-instrumented app is affected. `none` is the unshaped baseline; `offline`
  * cuts data entirely; the remaining tiers approximate real-world connectivity.
+ * (There is deliberately no `5g` profile — an unlimited/unshaped tier would be
+ * identical to `none` and would only be a no-op that confusingly disabled Wi-Fi;
+ * use `none` for a clean/fast link — issue #6012 review.)
  */
-export type NetworkConditionProfile = "none" | "offline" | "veryBad" | "2g" | "3g" | "4g" | "5g";
+export type NetworkConditionProfile = "none" | "offline" | "veryBad" | "2g" | "3g" | "4g";
 
 /**
  * How faithfully a platform can apply a requested network condition:
@@ -176,13 +179,6 @@ const NETWORK_CONDITION_PROFILE_DEFINITIONS: Record<
     values: { delayMs: 0, downloadKbps: 173000, uploadKbps: 58000, packetLossPercent: 0 },
     emulatorDelaySpec: "none",
     emulatorSpeedSpec: "lte",
-    dataEnabled: true,
-  },
-  "5g": {
-    // Unshaped: delay `none`, speed `full` (unlimited).
-    values: { delayMs: 0, downloadKbps: 0, uploadKbps: 0, packetLossPercent: 0 },
-    emulatorDelaySpec: "none",
-    emulatorSpeedSpec: "full",
     dataEnabled: true,
   },
 };
@@ -390,21 +386,32 @@ function resolveNetworkValues(
  *
  * - `empty`:     no actionable field — `{}`, `{cancel:false}`, `{reset:false}`,
  *                `{expiresInSeconds}`, or any falsy-only combination. Rejected.
+ * - `invalid`:   a self-contradictory combination — `offline` (a disabled link)
+ *                with a `delayMs`/`downloadKbps`/`uploadKbps` shaping override
+ *                that cannot apply. Rejected (issue #6012 review P2).
  * - `reset`:     `cancel===true`, `reset===true`, or an explicit `profile:"none"`
  *                with no shaping override. Restores normal connectivity.
  * - `degrade`:   a real profile, or a bandwidth/latency override over `none`.
  * - `loss-only`: ONLY `packetLossPercent` (which the emulator console cannot
  *                enforce) — an unsupported no-op, never reported verified.
  */
-export type NetworkConditionRequestKind = "empty" | "reset" | "degrade" | "loss-only";
+export type NetworkConditionRequestKind = "empty" | "invalid" | "reset" | "degrade" | "loss-only";
 
 export function classifyNetworkConditionRequest(
   input: SetNetworkConditionInput,
 ): NetworkConditionRequestKind {
   // cancel/reset are reset signals only when strictly true; `{cancel:false}` is
-  // not a request (issue #6012 review P2).
+  // not a request (issue #6012 review P2). cancel/reset wins over everything else
+  // (it means "make it clean"), so extra fields are harmlessly discarded.
   if (input.cancel === true || input.reset === true) {
     return "reset";
+  }
+  // `offline` cuts the link, so a shaping override on the same request cannot be
+  // applied — reject it rather than silently echo an unapplied value. (Unlike
+  // cancel/reset, this is a shaping INTENT on a link that will be down — a
+  // genuine contradiction worth surfacing, not a harmlessly-ignorable extra.)
+  if (input.profile === "offline" && hasShapingOverride(input)) {
+    return "invalid";
   }
   if (input.profile !== undefined && input.profile !== "none") {
     return "degrade";
@@ -421,9 +428,26 @@ export function classifyNetworkConditionRequest(
   return "empty";
 }
 
-/** A request that carries any actionable change (everything but `empty`). */
+/**
+ * A request that carries an actionable, non-contradictory change. Both `empty`
+ * (nothing to do) and `invalid` (offline + shaping override) fail the schema
+ * refinement; `invalid` carries its own message via `networkConditionInputError`.
+ */
 export function networkConditionInputIsRequest(input: SetNetworkConditionInput): boolean {
-  return classifyNetworkConditionRequest(input) !== "empty";
+  const kind = classifyNetworkConditionRequest(input);
+  return kind !== "empty" && kind !== "invalid";
+}
+
+/** Human-readable rejection reason for a non-actionable request, or null. */
+export function networkConditionInputError(input: SetNetworkConditionInput): string | null {
+  switch (classifyNetworkConditionRequest(input)) {
+    case "invalid":
+      return NETWORK_CONDITION_OFFLINE_OVERRIDE_ERROR;
+    case "empty":
+      return NETWORK_CONDITION_EMPTY_REQUEST_ERROR;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -483,6 +507,11 @@ const NETWORK_CONDITION_LOSS_ONLY_UNSUPPORTED_ERROR =
 const NETWORK_CONDITION_EMPTY_REQUEST_ERROR =
   "networkCondition specified no change to apply. Provide a profile, cancel/reset, or a " +
   "latency/bandwidth override.";
+
+const NETWORK_CONDITION_OFFLINE_OVERRIDE_ERROR =
+  "networkCondition profile 'offline' cannot be combined with a latency/bandwidth override " +
+  "(delayMs/downloadKbps/uploadKbps): offline disables the link, so there is nothing to shape. " +
+  "Use 'offline' alone, or a connected profile with the override.";
 
 /** Best-effort reset that undoes any shaping — used to roll back a failed degrade. */
 const NETWORK_CONDITION_ROLLBACK_COMMANDS = [
@@ -952,9 +981,12 @@ export class DeviceState {
     }
     // The emulator console has no structured "get" for the applied delay/speed,
     // so readback is best-effort: `network status` prints the current shaping as
-    // free text. We surface it verbatim (rawStatus) and treat a clean response
-    // as verification that the console is reachable — the applied profile itself
-    // is tracked at the session layer, not re-derived here.
+    // free text. We surface it verbatim (rawStatus). A clean response only proves
+    // the console is REACHABLE — it does not verify any specific condition (no
+    // profile/values are reconstructed), so the read deliberately does NOT set
+    // `verified: true` (issue #6012 review): `verified` is reserved for an applied
+    // condition that was actually achieved. The applied profile is tracked at the
+    // session layer, not re-derived here.
     try {
       const adb = this.adbFactory.create(this.device);
       const result = await adb.executeCommand("emu network status", undefined, undefined, true);
@@ -973,7 +1005,6 @@ export class DeviceState {
         supported: true,
         capability: "full",
         method: "android_emulator_console",
-        verified: true,
         ...(stdout.trim() ? { rawStatus: stdout.trim() } : {}),
       };
     } catch (error) {
@@ -1019,24 +1050,27 @@ export class DeviceState {
       ...expires,
     };
     // Non-applying kinds are answered before touching the device or the platform
-    // guard: they issue no command, register no restore slot, and are never
-    // reported verified (issue #6012 convergence audit).
-    if (kind === "empty") {
+    // guard: they issue no console command, so — like the physical-device branch —
+    // they do NOT claim the emulator-console `method` (issue #6012 review). They
+    // register no restore slot and are never reported verified.
+    if (kind === "empty" || kind === "invalid" || kind === "loss-only") {
+      const error =
+        kind === "invalid"
+          ? NETWORK_CONDITION_OFFLINE_OVERRIDE_ERROR
+          : kind === "loss-only"
+            ? NETWORK_CONDITION_LOSS_ONLY_UNSUPPORTED_ERROR
+            : NETWORK_CONDITION_EMPTY_REQUEST_ERROR;
+      // Echo the profile's documented baseline, NOT the caller's overrides —
+      // nothing was applied, so an unapplied override must not appear in `values`
+      // (issue #6012 review, the offline+override echo bug).
       return {
         supported: false,
         capability: "unsupported",
+        requestedProfile: profile,
+        values: NETWORK_CONDITION_PROFILES[profile],
         verified: false,
-        ...base,
-        error: NETWORK_CONDITION_EMPTY_REQUEST_ERROR,
-      };
-    }
-    if (kind === "loss-only") {
-      return {
-        supported: false,
-        capability: "unsupported",
-        verified: false,
-        ...base,
-        error: NETWORK_CONDITION_LOSS_ONLY_UNSUPPORTED_ERROR,
+        ...expires,
+        error,
       };
     }
     if (!isAndroidEmulatorSerial(this.device.deviceId)) {

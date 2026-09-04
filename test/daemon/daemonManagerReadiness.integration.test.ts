@@ -834,9 +834,11 @@ describe("DaemonManager readiness", () => {
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
-    // The peer publishes its socket shortly after our child exited.
+    // The peer publishes its socket shortly after our child exited: the inode
+    // appears and the readiness probe starts succeeding.
     fakeTimer.setTimeout(() => {
       peerSocketReady = true;
+      writeFileSync(socketPath, "peer socket placeholder");
     }, 500);
 
     try {
@@ -877,6 +879,49 @@ describe("DaemonManager readiness", () => {
         /Daemon subprocess exited before becoming ready \(exit code 1\)[\s\S]*SQLITE_BUSY: database is locked/,
       );
       // The genuine failure surfaces without arming any polling timer (no hang).
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      expect(fakeTimer.getPendingSleepCount()).toBe(0);
+    } finally {
+      readySpy.mockRestore();
+      findSpy.mockRestore();
+    }
+  });
+
+  test("fails promptly when only an orphaned socket inode remains after our subprocess exits (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    const spawner = new FakeDaemonSpawner();
+    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
+    // A race winner bound the socket then died right after, leaving an orphaned
+    // socket inode with no listener — and our own child then exits 1.
+    spawner.onSpawn = (process) => {
+      writeFileSync(socketPath, "orphaned socket placeholder");
+      process.emit("exit", 1, null);
+    };
+
+    const manager = new DaemonManager(
+      // No listener: every readiness probe refuses to connect.
+      () => new ProbeClient(false),
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+    );
+    // No live daemon process backs the orphaned socket, so nothing is coming up.
+    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+      () => new Promise<boolean>(() => {}),
+    );
+
+    try {
+      await expect(manager.start()).rejects.toThrow(
+        /Daemon subprocess exited before becoming ready \(exit code 1\)[\s\S]*SQLITE_BUSY: database is locked/,
+      );
+      // The bare inode must NOT hold the reachability budget: no probe backoff and
+      // no poll sleep are armed, so the failure is prompt (#5878/#5904).
+      expect(existsSync(socketPath)).toBe(true);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
       expect(fakeTimer.getPendingSleepCount()).toBe(0);
     } finally {

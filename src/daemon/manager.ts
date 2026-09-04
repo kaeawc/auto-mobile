@@ -1751,10 +1751,11 @@ export class DaemonManager implements DaemonManagerLike {
    * daemon is ready ~1s later. This bounded wait joins that winner instead.
    *
    * Prompt-failure invariant (issues #5878/#5904): the wait is GATED on a live
-   * candidate — a socket inode already present, or a live AutoMobile daemon process
-   * in the table — and gives up the instant no candidate remains, so a GENUINE start
-   * failure (nothing else coming up) still fails immediately rather than burning the
-   * client's ~30s `tools/list` budget. When a candidate is present the wait is
+   * AutoMobile daemon process being present in the table (see
+   * {@link hasComingUpPeerDaemon}) and gives up the instant none remains, so a
+   * GENUINE start failure — nothing coming up, or only an orphaned socket inode with
+   * no listener and no backing process — still fails immediately rather than burning
+   * the client's ~30s `tools/list` budget. When a live daemon is present the wait is
    * capped at {@link DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS} — the same bounded
    * reachability budget {@link startUnlocked} already uses for an existing live
    * daemon, deliberately held below the client deadline. It NEVER spawns — it only
@@ -1768,12 +1769,23 @@ export class DaemonManager implements DaemonManagerLike {
 
     while (this.remainingTime(deadline) > 0) {
       if (!this.hasComingUpPeerDaemon()) {
-        // No socket and no live daemon process: nothing is coming up, so deliver the
-        // real subprocess-exit failure now instead of waiting out the budget (#5878).
+        // No live daemon process is coming up: deliver the real subprocess-exit
+        // failure now instead of holding the budget on nothing — or on an orphaned
+        // socket inode with no listener and no backing process (#5878/#5904).
         return false;
       }
+      // Only probe once the socket inode exists. A live daemon that has not yet
+      // published its socket has nothing to connect to, and probing a missing path
+      // just burns the connect retry/backoff; the poll below re-checks liveness so
+      // a peer that dies mid-wait still ends the loop promptly. verifyDaemonConnection
+      // is non-destructive (never unlinks the socket), so a slow peer racing to bind
+      // is not torn down here.
       const probeBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
-      if (probeBudget > 0 && (await this.verifyDaemonConnection(probeBudget))) {
+      if (
+        probeBudget > 0 &&
+        existsSync(this.socketPath) &&
+        (await this.verifyDaemonConnection(probeBudget))
+      ) {
         stderrLog("Reusing a peer daemon that became ready after our launch exited");
         return true;
       }
@@ -1788,13 +1800,23 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * Whether a peer daemon might still publish this namespace's socket: either the
-   * socket inode already exists, or a live AutoMobile daemon process is present in
-   * the table. Gates {@link tryJoinPeerDaemonAfterSpawnExit} so a genuine start
-   * failure is not turned into a bounded hang.
+   * Whether a peer daemon is genuinely coming up and worth waiting on: a live
+   * AutoMobile daemon process is present in the table.
+   *
+   * A bare socket INODE is deliberately NOT sufficient. An orphaned socket file —
+   * left in the window after {@link startUnlocked}'s stale-file cleanup by a race
+   * winner that bound the socket then died right after — has no listener and no
+   * backing process; counting it as "coming up" would make
+   * {@link tryJoinPeerDaemonAfterSpawnExit} poll out the full reachability budget
+   * before failing, a delayed failure the prompt-failure invariant (#5878/#5904)
+   * exists to prevent. The responding-listener case is handled directly by the
+   * {@link verifyDaemonConnection} join probe in that method, which returns success
+   * the instant the socket accepts — so a socket that actually has a listener is
+   * joined regardless of this gate, and a socket that does not is not waited on
+   * unless a live daemon process backs it.
    */
   private hasComingUpPeerDaemon(): boolean {
-    return existsSync(this.socketPath) || this.findLiveDaemonProcesses().length > 0;
+    return this.findLiveDaemonProcesses().length > 0;
   }
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {

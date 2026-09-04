@@ -763,15 +763,18 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
   // Issue #6070: on the bootstrap Window.getActive() path (used when the
   // accessibility service supplies no usable foregroundActivity), a blank/stale
-  // active-window record can be published with an empty activityName and a
-  // frozen layoutSeqSum. An empty activityName is reconciled from the adb-sourced
-  // backStack, but through the SAME temporal confirmation (hierarchy recapture)
-  // the stale non-empty case uses (#5992): the adb activity is only accepted once
-  // a fresh recapture agrees, never blindly stamped onto the earlier hierarchy.
-  // When the recapture cannot confirm (e.g. a same-app mid-flight navigation
-  // between capture and back-stack read), the name resolves to unknown/mismatch
-  // rather than a confidently-wrong value. The stale layoutSeqSum must not ride
-  // along. System UI (#6078) is out of scope here.
+  // active-window record can be published with an empty activityName. An empty
+  // activityName is reconciled from the adb-sourced backStack, but through the
+  // SAME temporal confirmation (hierarchy recapture) the stale non-empty case
+  // uses (#5992): the adb activity is only accepted once a fresh recapture
+  // agrees, never blindly stamped onto the earlier hierarchy. When the recapture
+  // cannot confirm (e.g. a same-app mid-flight navigation between capture and
+  // back-stack read), the name resolves to unknown/mismatch rather than a
+  // confidently-wrong value. The confirmed window keeps its correlated
+  // layoutSeqSum (kept fresh by the getActive(true) bootstrap read), never a
+  // zero sentinel that would blind tap-effect detection. The frozen-cache source
+  // of the stale layoutSeqSum is eliminated at the collector (see
+  // DeviceStateCollector force-refresh). System UI (#6078) is out of scope here.
   const emptyBootstrapWindow = (activeWindow: {
     appId: string;
     activityName: string;
@@ -821,7 +824,8 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
         window: emptyBootstrapWindow({
           appId: "com.android.settings",
           activityName: "",
-          layoutSeqSum: 3478,
+          // The current (force-refreshed) window layout sequence.
+          layoutSeqSum: 5120,
         }),
         backStack: {
           execute: async () => ({
@@ -844,9 +848,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     expect(result.activeWindow?.activityName).toBe("com.android.settings.Settings");
     expect(result.activeWindow?.appId).toBe("com.android.settings");
-    // The stale frozen layoutSeqSum must not be published alongside the
-    // corrected activity (it is reset to the unknown sentinel 0).
-    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+    // The correlated layoutSeqSum is preserved, NOT reset to the 0 sentinel: a
+    // zero would make TapOnElement.compareActiveWindow treat a same-activity
+    // content change as "unchanged" and mask it.
+    expect(result.activeWindow?.layoutSeqSum).toBe(5120);
     // Temporal confirmation ran: the initial capture plus one recapture.
     expect(viewHierarchy.getCallCount()).toBe(2);
     expect(result.freshness?.verified).toBe(true);

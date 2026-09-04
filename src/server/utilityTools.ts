@@ -4,8 +4,11 @@ import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
   DeviceState,
+  networkConditionInputDegrades,
+  networkConditionInputError,
   type BiometricEnrollment,
   type DeviceStateResult,
+  type SetDeviceStateInput,
 } from "../features/utility/DeviceState";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -25,6 +28,7 @@ import {
   applyStateAfterBiometricCaptureFailure,
   runSessionBiometricMutation,
 } from "./sessionBiometricEnrollment";
+import { runSessionNetworkMutation } from "./sessionNetworkCondition";
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
@@ -122,28 +126,129 @@ const biometricStateInputSchema = z.object({
     .describe("Set iOS Simulator biometric enrollment state."),
 });
 
+const networkConditionInputSchema = z
+  .object({
+    profile: z
+      .enum(["none", "offline", "veryBad", "2g", "3g", "4g"])
+      .optional()
+      .describe(
+        "Device-wide network profile. Documented values: none=unshaped, offline=no data, " +
+          "veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), " +
+          "4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`. " +
+          "Android emulator only.",
+      ),
+    cancel: z.boolean().optional().describe("Reset to normal connectivity (same as profile=none)."),
+    reset: z.boolean().optional().describe("Alias of cancel."),
+    delayMs: z.number().min(0).optional().describe("Override added latency in milliseconds."),
+    downloadKbps: z
+      .number()
+      .min(0)
+      .optional()
+      .describe("Override download cap in kbps (0=unlimited)."),
+    uploadKbps: z.number().min(0).optional().describe("Override upload cap in kbps (0=unlimited)."),
+    packetLossPercent: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe("Documented target packet loss; the emulator console cannot enforce partial loss."),
+    expiresInSeconds: z
+      .number()
+      .min(0)
+      .optional()
+      .describe("Advisory TTL; session release/expiry restores normal connectivity."),
+  })
+  // Reject non-actionable / contradictory requests using the SAME classifier the
+  // setter uses, so schema acceptance and runtime behavior cannot disagree
+  // (issue #6012 review + audit): `{}`, falsy-only cancel/reset and TTL-only are
+  // `empty`; `offline` + a shaping override is `invalid`. `superRefine` so each
+  // carries its own message.
+  .superRefine((values, ctx) => {
+    const error = networkConditionInputError(values);
+    if (error) {
+      ctx.addIssue({ code: "custom", message: error });
+    }
+  });
+
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
     include: z
-      .array(z.enum(["doNotDisturb", "biometrics"]))
+      .array(z.enum(["doNotDisturb", "biometrics", "networkCondition"]))
       .min(1)
       .optional()
-      .describe("State fields to read; supports doNotDisturb and biometrics"),
+      .describe("State fields to read; supports doNotDisturb, biometrics, and networkCondition"),
   }),
 );
 
-export const setDeviceStateSchema = addDeviceTargetingToSchema(
-  z.object({
-    doNotDisturb: doNotDisturbStateInputSchema
-      .optional()
-      .describe("Do Not Disturb state to apply."),
-    biometrics: biometricStateInputSchema
-      .optional()
-      .describe("iOS Simulator biometric enrollment state to apply."),
-  }),
-).refine((values) => values.doNotDisturb !== undefined || values.biometrics !== undefined, {
-  message: "At least one device state field must be provided",
-});
+// The networkCondition sub-object's zod refinement ("at least one meaningful
+// field") cannot be expressed by zod's JSON-schema conversion, so
+// tool-definitions.json would advertise every field as optional and let a client
+// build a `networkCondition: {}` (or TTL-only) input that tools/list calls valid
+// but invocation rejects. Re-encode it as JSON-schema `anyOf`/`required` via a
+// `withJsonSchemaOverride` so the advertised contract matches the runtime one
+// (issue #6012 review). (The top-level "at least one device-state field"
+// refinement is left unencoded, as it already is for doNotDisturb/biometrics —
+// setting a top-level `anyOf` collapses the object under `flattenTopLevelUnion`.)
+// cancel/reset count only when `true` (a falsy value is not a request), so their
+// branches pin `const: true` to match the runtime classifier (issue #6012 audit).
+const NETWORK_CONDITION_REQUIRED_ANY_OF = [
+  { required: ["profile"] },
+  { required: ["cancel"], properties: { cancel: { const: true } } },
+  { required: ["reset"], properties: { reset: { const: true } } },
+  { required: ["delayMs"] },
+  { required: ["downloadKbps"] },
+  { required: ["uploadKbps"] },
+  { required: ["packetLossPercent"] },
+];
+
+// `offline` cuts the link, so a shaping override cannot apply — mirror the
+// runtime `invalid` rejection in JSON schema so tools/list matches invocation
+// (issue #6012 review): if profile is offline, forbid delayMs/downloadKbps/uploadKbps.
+const NETWORK_CONDITION_OFFLINE_NO_OVERRIDE = {
+  if: { properties: { profile: { const: "offline" } }, required: ["profile"] },
+  then: {
+    not: {
+      anyOf: [
+        { required: ["delayMs"] },
+        { required: ["downloadKbps"] },
+        { required: ["uploadKbps"] },
+      ],
+    },
+  },
+};
+
+export const setDeviceStateSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z.object({
+      doNotDisturb: doNotDisturbStateInputSchema
+        .optional()
+        .describe("Do Not Disturb state to apply."),
+      biometrics: biometricStateInputSchema
+        .optional()
+        .describe("iOS Simulator biometric enrollment state to apply."),
+      networkCondition: networkConditionInputSchema
+        .optional()
+        .describe("Device-wide network condition to apply (Android emulator only)."),
+    }),
+  ).refine(
+    (values) =>
+      values.doNotDisturb !== undefined ||
+      values.biometrics !== undefined ||
+      values.networkCondition !== undefined,
+    {
+      message: "At least one device state field must be provided",
+    },
+  ),
+  (jsonSchema) => {
+    const properties = jsonSchema.properties as Record<string, Record<string, unknown>> | undefined;
+    const networkCondition = properties?.networkCondition;
+    if (networkCondition) {
+      networkCondition.anyOf = NETWORK_CONDITION_REQUIRED_ANY_OF;
+      networkCondition.if = NETWORK_CONDITION_OFFLINE_NO_OVERRIDE.if;
+      networkCondition.then = NETWORK_CONDITION_OFFLINE_NO_OVERRIDE.then;
+    }
+  },
+);
 
 // Export interfaces for type safety
 export interface SetActiveDeviceArgs {
@@ -394,11 +499,43 @@ export function registerUtilityTools() {
 
   const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
     const deviceState = new DeviceState(device);
+    const sessionManager =
+      args.sessionUuid && DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getSessionManager()
+        : undefined;
+    // Single decision for whether an applied networkCondition needs a session
+    // restore slot: a degrading request on an Android emulator (issue #6012).
+    const registerNetworkRestore =
+      args.networkCondition !== undefined &&
+      networkConditionInputDegrades(args.networkCondition) &&
+      device.platform === "android" &&
+      device.deviceId.startsWith("emulator-");
+
+    // A setter that routes ANY networkCondition-bearing mutation through
+    // runSessionNetworkMutation, so the restore slot is registered before the
+    // emulator command and the mutation is sequenced against release/rebind — on
+    // every path, including the biometric-capture-failure fallback below (issue
+    // #6012 review: that fallback previously applied networkCondition untracked).
+    const applyStateTracked = (input: SetDeviceStateInput): Promise<DeviceStateResult> =>
+      input.networkCondition
+        ? runSessionNetworkMutation(
+            sessionManager,
+            args.sessionUuid,
+            device.deviceId,
+            registerNetworkRestore,
+            () => deviceState.setState(input),
+          )
+        : deviceState.setState(input);
+
     const capture = await captureBiometricEnrollment(device, args, deviceState);
     if (capture.failure) {
       const result = await applyStateAfterBiometricCaptureFailure(
-        deviceState,
-        { doNotDisturb: args.doNotDisturb, biometrics: args.biometrics },
+        { setState: applyStateTracked },
+        {
+          doNotDisturb: args.doNotDisturb,
+          biometrics: args.biometrics,
+          networkCondition: args.networkCondition,
+        },
         capture.failure,
       );
       return createJSONToolResponse({
@@ -406,17 +543,36 @@ export function registerUtilityTools() {
         ...result,
       });
     }
-    const result = await runSessionBiometricMutation(
-      capture.sessionManager,
-      args.sessionUuid,
-      device.deviceId,
-      capture.initialEnrollment,
-      () =>
-        deviceState.setState({
-          doNotDisturb: args.doNotDisturb,
-          biometrics: args.biometrics,
-        }),
-    );
+
+    const mutation = () =>
+      deviceState.setState({
+        doNotDisturb: args.doNotDisturb,
+        biometrics: args.biometrics,
+        networkCondition: args.networkCondition,
+      });
+
+    // Route network-bearing requests through runSessionNetworkMutation (slot
+    // registered first, mutation tracked). The biometric-wrapper path is used
+    // only when biometrics succeeded (iOS) — where networkCondition is always
+    // unsupported and registers no slot — so it needs no network tracking.
+    let result: DeviceStateResult;
+    if (!args.biometrics && args.networkCondition) {
+      result = await runSessionNetworkMutation(
+        sessionManager,
+        args.sessionUuid,
+        device.deviceId,
+        registerNetworkRestore,
+        mutation,
+      );
+    } else {
+      result = await runSessionBiometricMutation(
+        capture.sessionManager,
+        args.sessionUuid,
+        device.deviceId,
+        capture.initialEnrollment,
+        mutation,
+      );
+    }
 
     return createJSONToolResponse({
       message: result.success
@@ -445,7 +601,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state such as Do Not Disturb and iOS Simulator biometric enrollment",
+    "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
     getDeviceStateSchema,
     getDeviceStateHandler,
     { defaultEnabled: false },
@@ -453,7 +609,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb and iOS Simulator biometric enrollment.",
+    "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

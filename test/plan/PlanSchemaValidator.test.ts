@@ -188,6 +188,44 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should validate networkCondition device state steps (#6012)", () => {
+      const yaml = `
+name: network-condition-state
+steps:
+  - tool: getDeviceState
+    include:
+      - networkCondition
+  - tool: setDeviceState
+    networkCondition:
+      profile: "3g"
+  - tool: setDeviceState
+    networkCondition:
+      cancel: true
+  - tool: setDeviceState
+    params:
+      networkCondition:
+        profile: offline
+  - tool: setDeviceState
+    networkCondition:
+      delayMs: 400
+      downloadKbps: 500
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a networkCondition step with falsey-only cancel/reset (#6012 review)", () => {
+      const yaml = `
+name: network-condition-false-cancel
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      cancel: false
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should validate iOS simulator permissions through cross-platform permission tools", () => {
       const yaml = `
 name: ios-permissions

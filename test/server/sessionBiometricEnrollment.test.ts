@@ -138,6 +138,31 @@ describe("applyStateAfterBiometricCaptureFailure", () => {
     expect(result.error).toBe("iOS Simulator biometrics are unsupported; DND unsupported");
   });
 
+  test("forwards networkCondition after a biometric capture failure (#6012 review)", async () => {
+    const setter = setterReturning({
+      success: true,
+      deviceId: "emulator-5554",
+      platform: "android",
+      networkCondition: { supported: true, capability: "partial", appliedProfile: "3g" },
+    });
+
+    const result = await applyStateAfterBiometricCaptureFailure(
+      setter,
+      { networkCondition: { profile: "3g" }, biometrics: { enrollment: "enrolled" } },
+      failure,
+    );
+
+    // The network mutation is applied, not silently dropped.
+    expect(setter.inputs).toEqual([{ networkCondition: { profile: "3g" } }]);
+    expect(result.networkCondition).toEqual({
+      supported: true,
+      capability: "partial",
+      appliedProfile: "3g",
+    });
+    expect(result.biometrics).toEqual(failure.biometrics);
+    expect(result.success).toBe(false);
+  });
+
   test("returns the biometric failure untouched when nothing else was requested", async () => {
     const setter = setterReturning({
       success: true,

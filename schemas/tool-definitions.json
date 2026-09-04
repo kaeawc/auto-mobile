@@ -1708,18 +1708,18 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state such as Do Not Disturb and iOS Simulator biometric enrollment",
+    "description": "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb and biometrics",
+          "description": "State fields to read; supports doNotDisturb, biometrics, and networkCondition",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "biometrics"]
+            "enum": ["doNotDisturb", "biometrics", "networkCondition"]
           }
         },
         "platform": {
@@ -8041,7 +8041,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb and iOS Simulator biometric enrollment.",
+    "description": "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -8074,6 +8074,108 @@
           },
           "required": ["enrollment"],
           "additionalProperties": false
+        },
+        "networkCondition": {
+          "description": "Device-wide network condition to apply (Android emulator only).",
+          "type": "object",
+          "properties": {
+            "profile": {
+              "description": "Device-wide network profile. Documented values: none=unshaped, offline=no data, veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), 4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`. Android emulator only.",
+              "type": "string",
+              "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"]
+            },
+            "cancel": {
+              "description": "Reset to normal connectivity (same as profile=none).",
+              "type": "boolean"
+            },
+            "reset": {
+              "description": "Alias of cancel.",
+              "type": "boolean"
+            },
+            "delayMs": {
+              "description": "Override added latency in milliseconds.",
+              "type": "number",
+              "minimum": 0
+            },
+            "downloadKbps": {
+              "description": "Override download cap in kbps (0=unlimited).",
+              "type": "number",
+              "minimum": 0
+            },
+            "uploadKbps": {
+              "description": "Override upload cap in kbps (0=unlimited).",
+              "type": "number",
+              "minimum": 0
+            },
+            "packetLossPercent": {
+              "description": "Documented target packet loss; the emulator console cannot enforce partial loss.",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "expiresInSeconds": {
+              "description": "Advisory TTL; session release/expiry restores normal connectivity.",
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": ["profile"]
+            },
+            {
+              "required": ["cancel"],
+              "properties": {
+                "cancel": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "required": ["reset"],
+              "properties": {
+                "reset": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "required": ["delayMs"]
+            },
+            {
+              "required": ["downloadKbps"]
+            },
+            {
+              "required": ["uploadKbps"]
+            },
+            {
+              "required": ["packetLossPercent"]
+            }
+          ],
+          "if": {
+            "properties": {
+              "profile": {
+                "const": "offline"
+              }
+            },
+            "required": ["profile"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["delayMs"]
+                },
+                {
+                  "required": ["downloadKbps"]
+                },
+                {
+                  "required": ["uploadKbps"]
+                }
+              ]
+            }
+          }
         },
         "platform": {
           "type": "string",

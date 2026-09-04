@@ -11,7 +11,11 @@ import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
-import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
+import {
+  DeviceState,
+  type BiometricEnrollment,
+  type NetworkConditionProfile,
+} from "../features/utility/DeviceState";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -48,6 +52,27 @@ export interface BiometricEnrollmentRestorer {
 }
 
 /**
+ * Original device-wide network condition restored when a session releases its
+ * device (issue #6012). Written the first time a session degrades the network,
+ * so release/expiry never hands an impaired device back to the pool.
+ */
+export interface NetworkConditionSessionState {
+  initialProfile: NetworkConditionProfile;
+}
+
+/** What a pending network restore must write, resolved before any await. */
+interface NetworkConditionRestoreTarget {
+  sessionId: string;
+  deviceId: string;
+  profile: NetworkConditionProfile;
+}
+
+/** Narrow seam for restoring the device-wide network condition on release. */
+export interface NetworkConditionRestorer {
+  restore(profile: NetworkConditionProfile): Promise<void>;
+}
+
+/**
  * Session Cache Data
  *
  * Stores data that can be reused across multiple tool calls
@@ -70,6 +95,7 @@ export interface SessionCacheData {
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
   biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
+  networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
 }
 
@@ -211,6 +237,15 @@ const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
  */
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
+const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
+/**
+ * A failed network restore leaves the emulator holding session-modified shaping,
+ * so — like the biometric restorer — the device must not return to the idle pool
+ * on one attempt. Retries run inside the pending-cleanup promise, keeping the
+ * device quarantined until they settle (issue #6012 review, was deferred #6085).
+ */
+const NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS = 2;
+const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
@@ -314,6 +349,9 @@ export class SessionManager {
   private readonly biometricEnrollmentRestorerFactory: (
     device: BootedDevice,
   ) => BiometricEnrollmentRestorer;
+  private readonly networkConditionRestorerFactory: (
+    device: BootedDevice,
+  ) => NetworkConditionRestorer;
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
   // Session timeout: 30 minutes
@@ -352,12 +390,31 @@ export class SessionManager {
         }
       },
     }),
+    // Device-wide network conditioning is session-scoped state (issue #6012).
+    // Keep this seam parallel to biometric/keep-awake so lifecycle tests never
+    // invoke adb. The default restores normal connectivity via the emulator
+    // console; a released session must never leave a device impaired.
+    networkConditionRestorerFactory: (device: BootedDevice) => NetworkConditionRestorer = (
+      device,
+    ) => ({
+      restore: async (profile) => {
+        const result = await new DeviceState(device).setState({
+          networkCondition: { profile },
+        });
+        if (!result.success) {
+          throw new Error(
+            result.networkCondition?.error ?? result.error ?? "Failed to restore network condition",
+          );
+        }
+      },
+    }),
   ) {
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
     this.biometricEnrollmentRestorerFactory = biometricEnrollmentRestorerFactory;
+    this.networkConditionRestorerFactory = networkConditionRestorerFactory;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -908,10 +965,16 @@ export class SessionManager {
     // against that device below, so DevicePool.releaseDevice defers idling it.
     const pendingBiometricRestoration = (await this.restoreBiometricEnrollmentBestEffort(existing))
       .pending;
+    const pendingNetworkRestoration = existing.cacheData.networkCondition
+      ? (await this.restoreNetworkConditionBestEffort(existing)).pending
+      : null;
 
     const previousDevice = existing.assignedDevice;
-    if (pendingBiometricRestoration) {
-      this.trackPendingDeviceCleanup(previousDevice, [pendingBiometricRestoration]);
+    const pendingRebindCleanup = [pendingBiometricRestoration, pendingNetworkRestoration].filter(
+      (cleanup): cleanup is Promise<void> => cleanup !== null,
+    );
+    if (pendingRebindCleanup.length > 0) {
+      this.trackPendingDeviceCleanup(previousDevice, pendingRebindCleanup);
     }
     // Preserve object identity so an already-started release observes the
     // rebinding and frees its live replacement rather than a stale snapshot.
@@ -1322,10 +1385,14 @@ export class SessionManager {
       const pendingBiometricRestoration = session.cacheData.biometricEnrollment
         ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
         : null;
+      const pendingNetworkRestoration = session.cacheData.networkCondition
+        ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
+        : null;
       const pendingCleanup = [
         pendingSetups,
         pendingRestoration,
         pendingBiometricRestoration,
+        pendingNetworkRestoration,
       ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
       const deviceId = session.assignedDevice;
       const releasedAtMs = this.timer.now();
@@ -1807,6 +1874,159 @@ export class SessionManager {
     return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
   }
 
+  /**
+   * A timed-out tracked network mutation can still issue `network delay/speed`
+   * commands. Defer the restore until that setup settles, so a `none` restore
+   * cannot land mid-mutation and then be re-shaped by a late command (issue #6012
+   * review P1). Mirrors `restoreBiometricEnrollmentAfterSetups`.
+   */
+  private restoreNetworkConditionAfterSetups(
+    session: Session,
+    pendingSetups: Promise<void>,
+  ): Promise<void> {
+    return pendingSetups.then(async () => {
+      const pendingRestoration = (await this.restoreNetworkConditionBestEffort(session)).pending;
+      await pendingRestoration;
+    });
+  }
+
+  /**
+   * Returned wrapped, never bare (see `getPendingBiometricRestoration`): sequence
+   * the network restore after any still-draining setup so it never restores
+   * `none` while a tracked mutation may still shape the device.
+   */
+  private async getPendingNetworkRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups && session.cacheData.networkCondition) {
+      return { pending: this.restoreNetworkConditionAfterSetups(session, pendingSetups) };
+    }
+    return { pending: (await this.restoreNetworkConditionBestEffort(session)).pending };
+  }
+
+  /**
+   * Snapshot of the network restore, taken before any await. Like the biometric
+   * target, a rebind reassigns `session.assignedDevice` while a restore is in
+   * flight, so the device is captured up front rather than read lazily.
+   */
+  private networkConditionRestoreTarget(session: Session): NetworkConditionRestoreTarget | null {
+    const state = session.cacheData.networkCondition;
+    // Keyed on the cache alone: the slot is only written by the Android emulator
+    // network path, so its presence is the authoritative evidence a device needs
+    // restoring — independent of whatever platform the caller declared.
+    if (!state) {
+      return null;
+    }
+    return {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      profile: state.initialProfile,
+    };
+  }
+
+  private async restoreNetworkCondition(target: NetworkConditionRestoreTarget): Promise<void> {
+    const device: BootedDevice = {
+      name: target.deviceId,
+      platform: "android",
+      deviceId: target.deviceId,
+    };
+    await this.networkConditionRestorerFactory(device).restore(target.profile);
+  }
+
+  /**
+   * Best-effort network-condition restore, bounded by a timeout so a wedged
+   * emulator console cannot stall release. A timeout hands the still-running
+   * restore back as pending cleanup, keeping the device quarantined until it
+   * settles (issue #6012).
+   */
+  private async restoreNetworkConditionBestEffort(
+    session: Session,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const target = this.networkConditionRestoreTarget(session);
+    if (!target) {
+      return { pending: null };
+    }
+    const restoration = this.restoreNetworkCondition(target).then(
+      () => ({ outcome: "restored" as const }),
+      (error) => ({ outcome: "failed" as const, error }),
+    );
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<{ outcome: "timed-out" }>((resolve) => {
+      timeoutHandle = this.timer.setTimeout(
+        () => resolve({ outcome: "timed-out" }),
+        NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+      );
+    });
+    try {
+      const result = await Promise.race([restoration, timeout]);
+      if (result.outcome === "failed") {
+        logger.warn(
+          `Failed to restore network condition for session ${session.sessionId}; device ` +
+            `${target.deviceId} may hold session-modified shaping: ${result.error}`,
+        );
+        // Quarantine the device until the retries below settle; a prompt
+        // rejection otherwise returns a shaped emulator straight to the pool.
+        return { pending: this.retryNetworkConditionRestore(target, result.error) };
+      }
+      if (result.outcome === "timed-out") {
+        logger.warn(
+          `Timed out after ${NETWORK_CONDITION_RESTORE_TIMEOUT_MS}ms restoring network condition ` +
+            `for session ${session.sessionId}`,
+        );
+        return { pending: this.settleNetworkConditionRestore(target, restoration) };
+      }
+      return { pending: null };
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  /** A slow restore can still fail; retry before the device leaves quarantine. */
+  private async settleNetworkConditionRestore(
+    target: NetworkConditionRestoreTarget,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(
+      `Failed to restore network condition for session ${target.sessionId}: ${result.error}`,
+    );
+    await this.retryNetworkConditionRestore(target, result.error);
+  }
+
+  private async retryNetworkConditionRestore(
+    target: NetworkConditionRestoreTarget,
+    initialError: unknown,
+  ): Promise<void> {
+    let lastError = initialError;
+    for (let attempt = 1; attempt <= NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      try {
+        await this.restoreNetworkCondition(target);
+        logger.info(
+          `Restored network condition for session ${target.sessionId} on retry ${attempt}`,
+        );
+        return;
+      } catch (error) {
+        // Teardown is best-effort: keep retrying, then report the last failure.
+        lastError = error;
+        logger.debug(
+          `Retry ${attempt} restoring network condition for session ${target.sessionId} failed: ${error}`,
+        );
+      }
+    }
+    logger.warn(
+      `Gave up restoring network condition for session ${target.sessionId} after ` +
+        `${NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
+        `may hold session-modified shaping: ${lastError}`,
+    );
+  }
+
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
@@ -1951,6 +2171,24 @@ export class SessionManager {
   /** Read the original enrollment state without recording session activity. */
   getBiometricEnrollment(sessionId: string): BiometricEnrollmentSessionState | undefined {
     return this.getSession(sessionId)?.cacheData.biometricEnrollment;
+  }
+
+  /**
+   * Record that a session degraded the device-wide network condition (issue
+   * #6012), preserving the pre-session baseline to restore on release. Write-once
+   * per session: the first degrade wins, so release always restores the same
+   * baseline the session first observed.
+   */
+  setNetworkCondition(sessionId: string, state: NetworkConditionSessionState): void {
+    if (this.getNetworkCondition(sessionId)) {
+      return;
+    }
+    this.updateSessionCache(sessionId, { networkCondition: state });
+  }
+
+  /** Read the original network condition without recording session activity. */
+  getNetworkCondition(sessionId: string): NetworkConditionSessionState | undefined {
+    return this.getSession(sessionId)?.cacheData.networkCondition;
   }
 
   /**

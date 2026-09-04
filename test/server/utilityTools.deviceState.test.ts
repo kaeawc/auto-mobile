@@ -59,6 +59,98 @@ describe("device state tools", () => {
       }),
     ).not.toThrow();
     expect(() => setTool!.schema.parse({})).toThrow();
+
+    // #6012: networkCondition is a first-class device-state field.
+    expect(() => getTool!.schema.parse({ include: ["networkCondition"] })).not.toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { profile: "3g" } })).not.toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { cancel: true } })).not.toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { profile: "offline" } })).not.toThrow();
+    // An empty networkCondition sub-object is not a request.
+    expect(() => setTool!.schema.parse({ networkCondition: {} })).toThrow();
+    // #6012 audit: falsey-only cancel/reset and TTL-only are NOT requests.
+    expect(() => setTool!.schema.parse({ networkCondition: { cancel: false } })).toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { reset: false } })).toThrow();
+    expect(() => setTool!.schema.parse({ networkCondition: { expiresInSeconds: 30 } })).toThrow();
+    // packetLossPercent is a (backend-unsupported) request, so the schema accepts
+    // it — the setter reports it unsupported rather than the schema rejecting it.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { packetLossPercent: 20 } }),
+    ).not.toThrow();
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { delayMs: 400, expiresInSeconds: 5 } }),
+    ).not.toThrow();
+    // #6012 final: offline + a shaping override is contradictory → rejected.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { profile: "offline", delayMs: 500 } }),
+    ).toThrow();
+    // offline + packetLossPercent is redundant, not contradictory → accepted.
+    expect(() =>
+      setTool!.schema.parse({ networkCondition: { profile: "offline", packetLossPercent: 50 } }),
+    ).not.toThrow();
+    // 5g was dropped (identical to none) → no longer a valid enum value.
+    expect(() => setTool!.schema.parse({ networkCondition: { profile: "5g" } })).toThrow();
+  });
+
+  test("threads networkCondition through the setDeviceState handler", async () => {
+    // A physical Android device short-circuits to an unsupported result before
+    // any adb call, so this proves the handler forwards networkCondition into
+    // DeviceState.setState without needing a real device.
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const physicalAndroid = createBootedDevice("38290DLJG000XY", "android", "Pixel 8");
+
+    const response = await setTool!.deviceAwareHandler!(physicalAndroid, {
+      networkCondition: { profile: "3g" },
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedProfile: "3g",
+    });
+  });
+
+  test("does not register a network restore slot for an unsupported (iOS) platform", async () => {
+    // #6012 (review #2): the slot's presence is authoritative evidence a device
+    // was shaped, so an unsupported platform — where setState applies nothing —
+    // must not register one.
+    const fakeTimer = new FakeTimer();
+    const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+    const devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      new FakeInstalledAppsRepository(),
+      new FakeDeviceManager([], []),
+      new DefaultRetryExecutor(fakeTimer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("ios-session", "sim-ios-1", "ios");
+
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    await setTool!.deviceAwareHandler!(createBootedDevice("sim-ios-1", "ios", "iPhone 16"), {
+      networkCondition: { profile: "3g" },
+      sessionUuid: "ios-session",
+    });
+
+    expect(sessionManager.getNetworkCondition("ios-session")).toBeUndefined();
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("reads networkCondition through the getDeviceState handler on iOS", async () => {
+    const getTool = ToolRegistry.getTool("getDeviceState");
+    const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");
+
+    const response = await getTool!.deviceAwareHandler!(iosSim, {
+      include: ["networkCondition"],
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+    });
   });
 
   test("setActiveDevice binds a refreshed session device in the pool", async () => {

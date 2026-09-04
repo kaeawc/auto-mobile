@@ -655,7 +655,7 @@
                 "description": "Optional device state fields to read",
                 "items": {
                   "type": "string",
-                  "enum": ["doNotDisturb", "biometrics"]
+                  "enum": ["doNotDisturb", "biometrics", "networkCondition"]
                 }
               }
             }
@@ -680,6 +680,9 @@
               },
               "biometrics": {
                 "$ref": "#/$defs/biometricStateInput"
+              },
+              "networkCondition": {
+                "$ref": "#/$defs/networkConditionStateInput"
               }
             },
             "anyOf": [
@@ -688,6 +691,9 @@
               },
               {
                 "required": ["biometrics"]
+              },
+              {
+                "required": ["networkCondition"]
               },
               {
                 "required": ["params"]
@@ -1010,7 +1016,7 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "biometrics"]
+            "enum": ["doNotDisturb", "biometrics", "networkCondition"]
           },
           "description": "Optional device state fields to read"
         }
@@ -1026,6 +1032,9 @@
         },
         "biometrics": {
           "$ref": "#/$defs/biometricStateInput"
+        },
+        "networkCondition": {
+          "$ref": "#/$defs/networkConditionStateInput"
         }
       },
       "anyOf": [
@@ -1034,9 +1043,83 @@
         },
         {
           "required": ["biometrics"]
+        },
+        {
+          "required": ["networkCondition"]
         }
       ],
       "description": "Parameters for setDeviceState"
+    },
+    "networkConditionStateInput": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"],
+          "description": "Device-wide network profile (Android emulator only)"
+        },
+        "cancel": {
+          "type": "boolean",
+          "description": "Reset to normal connectivity"
+        },
+        "reset": {
+          "type": "boolean",
+          "description": "Alias of cancel"
+        },
+        "delayMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Override added latency in milliseconds"
+        },
+        "downloadKbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Override download cap in kbps (0 = unlimited)"
+        },
+        "uploadKbps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Override upload cap in kbps (0 = unlimited)"
+        },
+        "packetLossPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Documented target packet loss"
+        },
+        "expiresInSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Advisory TTL; session release/expiry restores connectivity"
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["profile"]
+        },
+        {
+          "required": ["cancel"],
+          "properties": { "cancel": { "const": true } }
+        },
+        {
+          "required": ["reset"],
+          "properties": { "reset": { "const": true } }
+        },
+        {
+          "required": ["delayMs"]
+        },
+        {
+          "required": ["downloadKbps"]
+        },
+        {
+          "required": ["uploadKbps"]
+        },
+        {
+          "required": ["packetLossPercent"]
+        }
+      ],
+      "description": "Device-wide network condition input (Android emulator)"
     },
     "getNotificationPolicyParams": {
       "type": "object",

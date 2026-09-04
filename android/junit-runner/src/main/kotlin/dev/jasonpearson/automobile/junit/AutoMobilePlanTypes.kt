@@ -22,6 +22,16 @@ data class AutoMobilePlanExecutionOptions(
   val aiAssistance: Boolean = true,
   val maxRetries: Int = 0,
   val debugMode: Boolean = System.getProperty("automobile.debug", "false").toBoolean(),
+  /**
+   * Parameter keys whose substituted values are sensitive (tokens, passwords, PII). Their values
+   * are masked out of any context handed to AI-assisted recovery before it reaches the third-party
+   * LLM provider (see [AutoMobilePlanExecutor.buildFailedStepContext]), while the base64
+   * `executePlan` payload to the LOCAL daemon keeps the real values so the plan can run. A plan can
+   * also declare sensitive keys via its top-level `secretParameters:` list; the two sets are
+   * unioned. Mirrors iOS's `AutoMobilePlanExecutor.Configuration.secretParameterKeys`
+   * (issue #6029).
+   */
+  val secretParameterKeys: Set<String> = emptySet(),
 )
 
 /**

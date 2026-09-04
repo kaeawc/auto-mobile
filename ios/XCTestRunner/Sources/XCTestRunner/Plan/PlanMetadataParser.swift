@@ -9,6 +9,7 @@ enum PlanMetadataParser {
         var devicePlatforms: [String: AutoMobilePlanExecutor.PlanPlatform] = [:]
         var deviceLabels: [String] = []
         var hasDevices = false
+        var secretParameterKeys: Set<String> = []
 
         var index = 0
         while index < lines.count {
@@ -20,6 +21,33 @@ enum PlanMetadataParser {
             }
 
             let indent = indentationLevel(line)
+            if indent == 0 && trimmed.hasPrefix("secretParameters:") {
+                let inline = trimmed.dropFirst("secretParameters:".count).trimmingCharacters(in: .whitespaces)
+                if !inline.isEmpty {
+                    secretParameterKeys.formUnion(parseInlineList(inline))
+                    index += 1
+                    continue
+                }
+                index += 1
+                while index < lines.count {
+                    let raw = stripComments(from: lines[index])
+                    let rawTrimmed = raw.trimmingCharacters(in: .whitespaces)
+                    if rawTrimmed.isEmpty {
+                        index += 1
+                        continue
+                    }
+                    if indentationLevel(raw) == 0 || !rawTrimmed.hasPrefix("-") {
+                        break
+                    }
+                    let item = unquote(rawTrimmed.dropFirst().trimmingCharacters(in: .whitespaces))
+                    if !item.isEmpty {
+                        secretParameterKeys.insert(item)
+                    }
+                    index += 1
+                }
+                continue
+            }
+
             if indent == 0 && trimmed.hasPrefix("platform:") {
                 let value = trimmed.dropFirst("platform:".count).trimmingCharacters(in: .whitespaces)
                 let normalized = unquote(value)
@@ -133,8 +161,21 @@ enum PlanMetadataParser {
             platform: platform,
             devicePlatforms: devicePlatforms,
             deviceLabels: deviceLabels,
-            hasDevices: hasDevices
+            hasDevices: hasDevices,
+            secretParameterKeys: secretParameterKeys
         )
+    }
+
+    /// Parse a YAML flow list of scalar keys, e.g. `[apiToken, "password"]`, into its trimmed,
+    /// unquoted, non-empty elements. Used for the inline form of `secretParameters:`.
+    private static func parseInlineList(_ value: String) -> [String] {
+        var inner = value
+        if inner.hasPrefix("[") { inner.removeFirst() }
+        if inner.hasSuffix("]") { inner.removeLast() }
+        return inner
+            .split(separator: ",")
+            .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
+            .filter { !$0.isEmpty }
     }
 
     private static func parsePlatform(_ value: String) throws -> AutoMobilePlanExecutor.PlanPlatform {

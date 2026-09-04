@@ -187,6 +187,13 @@ internal object AutoMobilePlanExecutor {
       // Load and process the plan with parameter substitution
       val processedPlanContent = loadAndProcessPlan(resolvedPlanPath, parameters)
 
+      // Values to redact from any recovery context that leaves the process for the LLM provider
+      // (issue #6029). Union the plan-declared secret keys with the caller-configured ones. The
+      // processedPlanContent below keeps the real values — the daemon needs them to run the plan.
+      val secretKeys =
+        options.secretParameterKeys + SecretRedactor.parsePlanSecretKeys(processedPlanContent)
+      val secretValues = SecretRedactor.secretValues(secretKeys, parameters)
+
       if (options.debugMode) {
         println("Executing AutoMobile plan: $planPath")
         println("Parameters: $parameters")
@@ -194,7 +201,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       // Execute the processed plan
-      val result = executeProcessedPlan(processedPlanContent, options)
+      val result = executeProcessedPlan(processedPlanContent, options, secretValues)
 
       val executionTime = System.currentTimeMillis() - startTime
 
@@ -247,13 +254,8 @@ internal object AutoMobilePlanExecutor {
     if (parameters.isNotEmpty()) {
       parameters.forEach { (key, value) ->
         val placeholder = "\${$key}"
-        val stringValue =
-          when (value) {
-            is String -> value
-            is Enum<*> -> value.name
-            else -> value.toString()
-          }
-        processedContent = processedContent.replace(placeholder, stringValue)
+        processedContent =
+          processedContent.replace(placeholder, SecretRedactor.parameterStringValue(value))
       }
     }
 
@@ -280,12 +282,14 @@ internal object AutoMobilePlanExecutor {
   private fun executeProcessedPlan(
     planContent: String,
     options: AutoMobilePlanExecutionOptions,
+    secretValues: List<String>,
   ): InternalExecutionResult {
     return executePlanFromStep(
       planContent,
       options,
       startStep = 0,
       recoveryAlreadyAttempted = false,
+      secretValues = secretValues,
     )
   }
 
@@ -305,6 +309,7 @@ internal object AutoMobilePlanExecutor {
     options: AutoMobilePlanExecutionOptions,
     startStep: Int,
     recoveryAlreadyAttempted: Boolean,
+    secretValues: List<String>,
     deviceIdOverride: String? = null,
   ): InternalExecutionResult {
 
@@ -423,7 +428,8 @@ internal object AutoMobilePlanExecutor {
     }
 
     // Non-transient failure or retries exhausted — attempt recovery if allowed
-    val failedStepContext = buildFailedStepContext(response, json, planContent, options.device)
+    val failedStepContext =
+      buildFailedStepContext(response, json, planContent, options.device, secretValues)
     return handleFailure(
       result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
       options = options,
@@ -431,6 +437,7 @@ internal object AutoMobilePlanExecutor {
       failedStepContext = failedStepContext,
       planContent = planContent,
       recoveryAlreadyAttempted = recoveryAlreadyAttempted,
+      secretValues = secretValues,
     )
   }
 
@@ -443,6 +450,7 @@ internal object AutoMobilePlanExecutor {
     failedStepContext: FailedStepContext?,
     planContent: String,
     recoveryAlreadyAttempted: Boolean,
+    secretValues: List<String>,
   ): InternalExecutionResult {
 
     val errorMessage =
@@ -514,6 +522,7 @@ internal object AutoMobilePlanExecutor {
         options = options,
         startStep = resumeStep,
         recoveryAlreadyAttempted = true, // prevent recursive recovery
+        secretValues = secretValues,
         deviceIdOverride = failedStepContext.deviceId,
       )
 
@@ -535,6 +544,7 @@ internal object AutoMobilePlanExecutor {
     json: Json,
     planContent: String,
     deviceId: String?,
+    secretValues: List<String>,
   ): FailedStepContext? {
     try {
       val resultElement = response.result ?: return null
@@ -572,12 +582,18 @@ internal object AutoMobilePlanExecutor {
         }
       }
 
+      // Egress boundary (issue #6029): FailedStepContext.planContent and error are embedded
+      // verbatim
+      // into the recovery prompt sent to the LLM provider (see AutoMobileAgent.attemptAiRecovery),
+      // so
+      // mask secret values out of both here. The daemon's base64 payload above kept the real
+      // values.
       return FailedStepContext(
         failedStepIndex = failedStepIndex,
         failedTool = failedTool,
-        error = error,
+        error = SecretRedactor.redact(error, secretValues),
         succeededSteps = succeededSteps,
-        planContent = planContent,
+        planContent = SecretRedactor.redact(planContent, secretValues),
         deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
       )
     } catch (e: Exception) {

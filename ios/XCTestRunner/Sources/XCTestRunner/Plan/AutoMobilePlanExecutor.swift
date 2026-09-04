@@ -155,8 +155,11 @@ public final class AutoMobilePlanExecutor {
         deviceIdOverride: String?,
         sessionUuidOverride: String?,
         testMetadata: TestMetadata?
-    ) throws -> ExecutePlanResult {
-        PerfTimer.log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
+    )
+        throws -> ExecutePlanResult
+    {
+        PerfTimer
+            .log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
         let planContent: String
         do {
             planContent = try PerfTimer.measure("loadPlan") {
@@ -175,6 +178,14 @@ public final class AutoMobilePlanExecutor {
         let planMetadata = try PerfTimer.measure("parsePlanMetadata") {
             try PlanMetadataParser.parse(from: substituted)
         }
+
+        // Values to redact from any recovery context that leaves the process for the LLM provider
+        // (issue #6029). Union the plan-declared secret keys with the caller-configured ones. The
+        // `substituted` string below keeps the real values — the daemon needs them to run the plan.
+        let secretValues = SecretRedaction.secretValues(
+            keys: configuration.secretParameterKeys.union(planMetadata.secretParameterKeys),
+            parameters: configuration.parameters
+        )
         PerfTimer
             .log(
                 "planMetadata: platform=\(planMetadata.platform.map { String(describing: $0) } ?? "nil"), hasDevices=\(planMetadata.hasDevices), deviceLabels=\(planMetadata.deviceLabels)"
@@ -226,13 +237,16 @@ public final class AutoMobilePlanExecutor {
                 try decodeExecutePlanResult(from: response.text)
             }
             PerfTimer
-                .log("executeAttempt END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
+                .log(
+                    "executeAttempt END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)"
+                )
             if result.success {
                 return result
             }
             return try handleFailure(
                 result: result,
                 planContent: substituted,
+                secretValues: secretValues,
                 platform: platform,
                 sessionUuid: sessionUuid,
                 deviceIdOverride: deviceIdOverride,
@@ -258,12 +272,15 @@ public final class AutoMobilePlanExecutor {
     private func handleFailure(
         result: ExecutePlanResult,
         planContent: String,
+        secretValues: [String],
         platform: PlanPlatform,
         sessionUuid: String,
         deviceIdOverride: String?,
         recoveryAlreadyAttempted: Bool,
         testMetadata: TestMetadata?
-    ) throws -> ExecutePlanResult {
+    )
+        throws -> ExecutePlanResult
+    {
         let failureMessage = buildFailureMessage(from: result)
 
         // Cheap local gates first; the feature-flag read (which may hit the daemon) is last and runs
@@ -283,6 +300,7 @@ public final class AutoMobilePlanExecutor {
         let context = buildFailedStepContext(
             failedStep: failedStep,
             planContent: planContent,
+            secretValues: secretValues,
             platform: platform,
             sessionUuid: sessionUuid,
             deviceIdOverride: deviceIdOverride
@@ -313,12 +331,16 @@ public final class AutoMobilePlanExecutor {
     private func buildFailedStepContext(
         failedStep: FailedStep,
         planContent: String,
+        secretValues: [String],
         platform: PlanPlatform,
         sessionUuid: String,
         deviceIdOverride: String?
-    ) -> FailedStepContext {
+    )
+        -> FailedStepContext
+    {
         // Sequential execution stops at the first failure, so every step before failedStep.stepIndex
         // completed. Reconstruct their tool names from the plan for the agent prompt (best effort).
+        // Tool names carry no secret values, so parsing the un-redacted plan here is safe.
         let stepTools = PlanStepToolParser.toolNames(from: planContent)
         var succeeded: [SucceededStepSummary] = []
         var index = 0
@@ -328,16 +350,20 @@ public final class AutoMobilePlanExecutor {
             index += 1
         }
 
+        // Egress boundary (issue #6029): every field placed on the context is forwarded to the LLM
+        // provider by the recovery handler, so mask secret values out of the plan YAML, the failure
+        // error, and the sampled on-screen text/ids here — the daemon's base64 payload above kept the
+        // real values.
         return FailedStepContext(
             failedStepIndex: failedStep.stepIndex,
             failedTool: failedStep.tool,
-            error: failedStep.error,
+            error: SecretRedaction.redact(failedStep.error, secretValues: secretValues),
             succeededSteps: succeeded,
-            planContent: planContent,
+            planContent: SecretRedaction.redact(planContent, secretValues: secretValues),
             platform: platform.rawValue,
             sessionUuid: sessionUuid,
             deviceId: failedStep.device ?? deviceIdOverride,
-            failureObservation: failedStep.failureObservation
+            failureObservation: SecretRedaction.redact(failedStep.failureObservation, secretValues: secretValues)
         )
     }
 

@@ -148,8 +148,11 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("warn");
-      expect(result.message).toContain("timed out");
-      expect(result.message).toContain("5000ms");
+      // Assert the duration shape, not a literal value: DOCTOR_EXEC_TIMEOUT_MS
+      // is read from AUTOMOBILE_DOCTOR_TIMEOUT_MS at module load, so hard-coding
+      // 5000ms would go red in any env that overrides it (issue #6003 review).
+      expect(result.message).toMatch(/timed out after \d+ms/);
+      expect(result.message).toContain("xcodebuild -version");
       expect(result.message).not.toContain("Xcode not detected");
       expect(result.recommendation).toContain("AUTOMOBILE_DOCTOR_TIMEOUT_MS");
     });

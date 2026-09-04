@@ -31,6 +31,50 @@ internal class FileDaemonSocketChecker(
   }
 }
 
+/**
+ * Protocol-level liveness of a socket-reachable daemon. A [DaemonSocketChecker] only proves the
+ * Unix socket accepts a connection; a WEDGED daemon accepts the socket and keeps a matching PID
+ * file yet never answers a request — so the workspace status dot goes Red while
+ * [FileDaemonSocketChecker] still reports Ready. This is the protocol-health signal that tells the
+ * two apart (#6082).
+ */
+internal enum class DaemonHealth {
+  /** `ide/status` answered within its hang ceiling — the daemon is serving requests. */
+  HEALTHY,
+
+  /** `ide/status` failed/timed out against an open socket — the daemon is wedged. */
+  UNHEALTHY,
+
+  /** No probe is available (not wired, or a non-daemon transport) — health is indeterminate. */
+  UNKNOWN,
+}
+
+/**
+ * Probes protocol-level daemon health. The real implementation ([healthProbeFor]) reuses the same
+ * bounded `ide/status` call that drives the Red status dot, so a momentarily-slow-but-healthy
+ * daemon that still answers within the ceiling reads [DaemonHealth.HEALTHY] and is never restarted;
+ * only a daemon that exceeds the same ceiling that turns the dot Red reads
+ * [DaemonHealth.UNHEALTHY].
+ */
+internal fun interface DaemonHealthProbe {
+  fun check(): DaemonHealth
+}
+
+/**
+ * The production [DaemonHealthProbe]: a successful `ide/status` round trip is
+ * [DaemonHealth.HEALTHY]; a thrown error (the client's status hang ceiling closed the wedged
+ * socket) is [DaemonHealth.UNHEALTHY]. This is exactly the signal the connectivity monitor uses to
+ * drive Red, so recovery restarts a daemon precisely when — and only when — the dot would be Red.
+ */
+internal fun healthProbeFor(client: AutoMobileClient): DaemonHealthProbe = DaemonHealthProbe {
+  try {
+    client.getDaemonStatus()
+    DaemonHealth.HEALTHY
+  } catch (_: Exception) {
+    DaemonHealth.UNHEALTHY
+  }
+}
+
 internal interface DaemonPidFileReader {
   fun read(): DaemonPidReadResult
 }
@@ -482,7 +526,29 @@ sealed interface DaemonLifecyclePhase {
 }
 
 internal interface DaemonLifecycleEnsurer {
+  /**
+   * The cheap per-request preflight: detect the daemon, or install/start one when none is
+   * reachable. A socket-open, version-matched daemon short-circuits to Ready WITHOUT a protocol
+   * health probe, so ordinary requests never pay an extra `ide/status` round trip and a wedged
+   * daemon is never restarted from under an in-flight request.
+   */
   fun ensureVersionMatchedDaemon(): DaemonLifecycleResult
+
+  /**
+   * The explicit recovery entry point (status-dot "Start daemon" and the device-picker Retry). Like
+   * [ensureVersionMatchedDaemon], but when the daemon is socket-open and version-matched it also
+   * probes protocol health and FORCES a restart if the daemon is wedged (`ide/status` times out),
+   * instead of reporting Ready (#6082). The default delegates to the plain preflight so fakes and
+   * non-daemon transports keep their existing behavior.
+   */
+  fun ensureHealthyDaemon(): DaemonLifecycleResult = ensureVersionMatchedDaemon()
+
+  /**
+   * Installs the protocol-health probe used by [ensureHealthyDaemon]. Wired after the daemon client
+   * exists (the client supplies the `ide/status` call), so it cannot be a constructor dependency of
+   * the lifecycle the client itself is built around. A no-op by default.
+   */
+  fun attachHealthProbe(probe: DaemonHealthProbe) {}
 }
 
 /**
@@ -505,11 +571,25 @@ internal class DesktopDaemonLifecycle(
    * implementations must be non-blocking (e.g. a `StateFlow.value` write).
    */
   private val phaseListener: (DaemonLifecyclePhase) -> Unit = {},
+  healthProbe: DaemonHealthProbe = DaemonHealthProbe { DaemonHealth.UNKNOWN },
 ) : DaemonLifecycleEnsurer {
+  // Wired after the daemon client exists (see [attachHealthProbe]); until then it reads UNKNOWN, so
+  // the recovery pass preserves the legacy socket-open+version-match short-circuit.
+  @Volatile private var healthProbe: DaemonHealthProbe = healthProbe
+
+  override fun attachHealthProbe(probe: DaemonHealthProbe) {
+    healthProbe = probe
+  }
+
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
+    runPass(forceRestartUnhealthy = false)
+
+  override fun ensureHealthyDaemon(): DaemonLifecycleResult = runPass(forceRestartUnhealthy = true)
+
+  private fun runPass(forceRestartUnhealthy: Boolean): DaemonLifecycleResult =
     synchronized(lifecycleLock) {
       phaseListener(DaemonLifecyclePhase.Probing)
-      val result = ensureLocked()
+      val result = ensureLocked(forceRestartUnhealthy)
       phaseListener(
         when (result) {
           is DaemonLifecycleResult.Ready -> DaemonLifecyclePhase.Completed(result.restarted)
@@ -519,7 +599,7 @@ internal class DesktopDaemonLifecycle(
       result
     }
 
-  private fun ensureLocked(): DaemonLifecycleResult {
+  private fun ensureLocked(forceRestartUnhealthy: Boolean): DaemonLifecycleResult {
     val expectedVersion =
       expectedVersionProvider()
         ?: return DaemonLifecycleResult.Failure(
@@ -538,7 +618,15 @@ internal class DesktopDaemonLifecycle(
     val currentVersion = currentDaemon?.version
     val daemonAvailable = socketIsReady(currentVersion, expectedVersion)
     if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
-      return DaemonLifecycleResult.Ready(restarted = false)
+      // Socket-open and version-matched. On the ordinary preflight this is Ready. On an explicit
+      // recovery pass, first probe protocol health: a wedged daemon (open socket, but `ide/status`
+      // times out — the same signal that drives Red) must be RESTARTED rather than reported Ready,
+      // so the status-dot recovery and the picker Retry actually un-stick it (#6082). Only an
+      // explicit UNHEALTHY forces the restart; HEALTHY or UNKNOWN preserves the short-circuit, so a
+      // momentarily-slow-but-healthy daemon is never spuriously restarted.
+      if (!(forceRestartUnhealthy && healthProbe.check() == DaemonHealth.UNHEALTHY)) {
+        return DaemonLifecycleResult.Ready(restarted = false)
+      }
     }
 
     if (declaresFullVersion(expectedVersion)) {

@@ -65,6 +65,11 @@ fun DevicePicker(
   // work instead of sitting on "Loading devices…", and the Error state surfaces the bootstrap
   // failure with its actionable message.
   bootstrapState: DaemonBootstrapState = DaemonBootstrapState.Inactive,
+  // Protocol-health-aware daemon recovery, shared with the workspace status-dot "Start daemon"
+  // button. The Error state's Retry runs this so a WEDGED daemon (socket open, but ide/status times
+  // out) is actually restarted — a plain reload would short-circuit on the still-open socket and
+  // re-fail (#6082). Defaults to a no-op so the reload alone still covers a plain down daemon.
+  onRecoverDaemon: () -> Unit = {},
   // The per-card device thumbnail. Hoisted (default = the screenshot [DeviceThumbnail]) so a test
   // can stub it and never open an observation socket while composing the grid. Thumbnails are
   // stills by design — a per-card live-video subscription would put a standing capture/decode cost
@@ -91,9 +96,18 @@ fun DevicePicker(
             else "Couldn't load devices",
           detail = bootstrapFailure ?: state.message,
         ) {
-          // Retry re-runs the whole chain: the load's preflight re-detects the daemon and, when
-          // none is reachable, re-attempts the install/start pipeline before reading devices.
-          Button(onClick = { onAction(DevicePickerAction.Refresh) }) { Text("Retry") }
+          // Retry runs the shared health-aware recovery first — restarting a wedged daemon (socket
+          // open, ide/status times out) that a plain reload's preflight would short-circuit past
+          // (#6082) — then reloads. The reload's preflight still covers a plain down daemon
+          // (install/start), and the daemon-up transition auto-refreshes once recovery restarts it.
+          Button(
+            onClick = {
+              onRecoverDaemon()
+              onAction(DevicePickerAction.Refresh)
+            }
+          ) {
+            Text("Retry")
+          }
         }
       }
       is DevicePickerUiState.Content -> Content(state, onAction, onClose, canClose, thumbnail)

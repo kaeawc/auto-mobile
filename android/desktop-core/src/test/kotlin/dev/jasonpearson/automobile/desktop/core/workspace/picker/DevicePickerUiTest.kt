@@ -129,4 +129,29 @@ class DevicePickerUiTest {
     picker(canClose = false)
     onNodeWithContentDescription("Close picker").assertDoesNotExist()
   }
+
+  @Test
+  fun `retry triggers protocol-health-aware recovery and reloads`() = runComposeUiTest {
+    // A wedged daemon (socket open, but ide/status times out) makes the load fail with the grid in
+    // Error. The Retry must run the shared health-aware recovery so a wedged daemon is restarted —
+    // not only reload, which would short-circuit on the still-open socket and re-fail (#6082).
+    var recovered = false
+    var action: DevicePickerAction? = null
+    setContent {
+      MaterialTheme {
+        DevicePicker(
+          DevicePickerUiState.Error("Couldn't load devices"),
+          onAction = { action = it },
+          onClose = {},
+          onRecoverDaemon = { recovered = true },
+          thumbnail = { _, _ -> },
+        )
+      }
+    }
+
+    onNodeWithText("Retry").performClick()
+
+    assertTrue(recovered)
+    assertEquals(DevicePickerAction.Refresh, action)
+  }
 }

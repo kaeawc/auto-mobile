@@ -699,6 +699,166 @@ class DesktopDaemonLifecycleTest {
     assertEquals(DaemonLifecyclePhase.Failed(result.message), phases.last())
   }
 
+  @Test
+  fun `restarts a wedged socket-open daemon when recovery finds it unhealthy`() {
+    // Socket reachable, version matched, but the ide/status health probe reports the daemon is
+    // wedged. A protocol-health-aware recovery pass must restart it instead of short-circuiting to
+    // Ready (#6082).
+    val commands = FakeDaemonCommandExecutor()
+    val healthProbe = FakeDaemonHealthProbe(DaemonHealth.UNHEALTHY)
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40", "0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        healthProbe = healthProbe,
+      )
+
+    val result = lifecycle.ensureHealthyDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertTrue(result.restarted)
+    assertEquals(
+      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      commands.commands,
+    )
+    assertEquals(1, healthProbe.checks)
+  }
+
+  @Test
+  fun `does not restart a healthy socket-open daemon on recovery`() {
+    // A momentarily-slow-but-healthy daemon still answers ide/status within the probe's ceiling, so
+    // recovery must NOT spuriously restart it (#6082).
+    val commands = FakeDaemonCommandExecutor()
+    val healthProbe = FakeDaemonHealthProbe(DaemonHealth.HEALTHY)
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        healthProbe = healthProbe,
+      )
+
+    val result = lifecycle.ensureHealthyDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertFalse(result.restarted)
+    assertTrue(commands.commands.isEmpty())
+    assertEquals(1, healthProbe.checks)
+  }
+
+  @Test
+  fun `does not restart when the health probe is indeterminate on recovery`() {
+    // No probe wired (UNKNOWN) preserves the legacy socket-open+version-match short-circuit: an
+    // indeterminate signal must never force a restart.
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        healthProbe = FakeDaemonHealthProbe(DaemonHealth.UNKNOWN),
+      )
+
+    val result = lifecycle.ensureHealthyDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertFalse(result.restarted)
+    assertTrue(commands.commands.isEmpty())
+  }
+
+  @Test
+  fun `the ordinary preflight never probes health or restarts a wedged daemon`() {
+    // Per-request preflight (ensureVersionMatchedDaemon) must stay cheap: no ide/status round trip
+    // per request, and no restart of a socket-open+version-matched daemon even if it is wedged.
+    // Only
+    // the explicit recovery entry point (ensureHealthyDaemon) forces a restart (#6082).
+    val commands = FakeDaemonCommandExecutor()
+    val healthProbe = FakeDaemonHealthProbe(DaemonHealth.UNHEALTHY)
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        healthProbe = healthProbe,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertFalse(result.restarted)
+    assertTrue(commands.commands.isEmpty())
+    assertEquals(0, healthProbe.checks)
+  }
+
+  @Test
+  fun `recovery still starts a fully down daemon without probing health`() {
+    // A daemon-down recovery is unchanged: the socket is unreachable, so the health probe is never
+    // consulted and the normal start pipeline runs.
+    val commands = FakeDaemonCommandExecutor()
+    val healthProbe = FakeDaemonHealthProbe(DaemonHealth.UNHEALTHY)
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false, false, false, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        healthProbe = healthProbe,
+      )
+
+    val result = lifecycle.ensureHealthyDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertTrue(result.restarted)
+    assertEquals(
+      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start")),
+      commands.commands,
+    )
+    assertEquals(0, healthProbe.checks)
+  }
+
+  @Test
+  fun `health probe maps a successful ide status to healthy`() {
+    val client = dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient()
+
+    assertEquals(DaemonHealth.HEALTHY, healthProbeFor(client).check())
+  }
+
+  @Test
+  fun `health probe maps an ide status failure to unhealthy`() {
+    // getDaemonStatus is the same bounded ide/status call that drives the Red status dot: when it
+    // throws (its hang ceiling closed the wedged socket) the daemon is unhealthy.
+    val client =
+      dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient().apply {
+        getDaemonStatusError = java.io.IOException("status timed out")
+      }
+
+    assertEquals(DaemonHealth.UNHEALTHY, healthProbeFor(client).check())
+  }
+
+  private class FakeDaemonHealthProbe(private val health: DaemonHealth) : DaemonHealthProbe {
+    var checks = 0
+
+    override fun check(): DaemonHealth {
+      checks++
+      return health
+    }
+  }
+
   private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
     private var reads = 0
 

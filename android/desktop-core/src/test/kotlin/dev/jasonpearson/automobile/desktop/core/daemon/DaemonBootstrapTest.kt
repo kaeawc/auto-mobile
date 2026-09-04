@@ -12,11 +12,17 @@ class DaemonBootstrapTest {
   ) : DaemonLifecycleEnsurer {
     lateinit var listener: (DaemonLifecyclePhase) -> Unit
     var passes = 0
+    var healthyPasses = 0
 
     override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult {
       passes++
       phases.forEach(listener)
       return result
+    }
+
+    override fun ensureHealthyDaemon(): DaemonLifecycleResult {
+      healthyPasses++
+      return ensureVersionMatchedDaemon()
     }
   }
 
@@ -46,6 +52,24 @@ class DaemonBootstrapTest {
     bootstrap.ensureReady()
 
     assertEquals(1, lifecycle.passes)
+    assertEquals(DaemonBootstrapState.Ready(restarted = true), bootstrap.state.value)
+  }
+
+  @Test
+  fun `ensureReady drives the health-aware recovery entry point`() {
+    // The recovery affordance and the picker Retry both share this seam, so ensureReady must route
+    // through the protocol-health-aware pass that can restart a wedged (socket-open) daemon
+    // (#6082),
+    // not the plain preflight that short-circuits to Ready.
+    val lifecycle =
+      ScriptedLifecycle(
+        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = true))
+      )
+    val bootstrap = bootstrapOf(lifecycle)
+
+    bootstrap.ensureReady()
+
+    assertEquals(1, lifecycle.healthyPasses)
     assertEquals(DaemonBootstrapState.Ready(restarted = true), bootstrap.state.value)
   }
 

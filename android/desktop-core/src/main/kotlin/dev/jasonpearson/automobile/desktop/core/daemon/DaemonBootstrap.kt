@@ -63,15 +63,28 @@ internal constructor(lifecycleFactory: ((DaemonLifecyclePhase) -> Unit) -> Daemo
   }
 
   /**
-   * Runs one lifecycle pass — detect the current daemon, or install Bun and start the pinned
-   * package when none is reachable. Blocking (up to the daemon-startup budget); call on an IO
+   * Runs one recovery lifecycle pass — detect the current daemon, install Bun and start the pinned
+   * package when none is reachable, OR restart a socket-open-but-wedged daemon whose `ide/status`
+   * probe fails (#6082). This is the shared recovery primitive behind BOTH the workspace status-dot
+   * "Start daemon" button and the device-picker Retry, so both un-stick a wedged daemon rather than
+   * short-circuiting on the open socket. Blocking (up to the daemon-startup budget); call on an IO
    * dispatcher. Progress and the terminal outcome land in [state] via the phase listener. Safe to
    * call again to retry a failure. A no-op for an [markInactive]-marked bootstrap (non-daemon
    * transport) — the app must never install/start a local daemon it is not connected to.
    */
   fun ensureReady() {
     if (inactive) return
-    lifecycle.ensureVersionMatchedDaemon()
+    lifecycle.ensureHealthyDaemon()
+  }
+
+  /**
+   * Installs the protocol-health probe that [ensureReady] uses to tell a wedged daemon from a
+   * reachable one. Wired once the daemon client exists (the client supplies the `ide/status` call
+   * the probe issues), so it cannot be a constructor dependency of the lifecycle the client is
+   * built around.
+   */
+  internal fun attachHealthProbe(probe: DaemonHealthProbe) {
+    lifecycle.attachHealthProbe(probe)
   }
 
   /** Marks bootstrap as not applicable for this run (non-daemon transport). */

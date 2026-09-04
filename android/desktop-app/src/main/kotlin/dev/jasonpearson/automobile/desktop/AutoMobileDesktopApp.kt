@@ -493,6 +493,10 @@ fun AutoMobileDesktopApp(
               // Only offer Close when there is an observed workspace to return to.
               canClose = workspaceState is WorkspaceUiState.Content,
               bootstrapState = bootstrapState,
+              // Retry shares the workspace status-dot's coalescing recovery (#6082 / #6080), so a
+              // wedged daemon is restarted rather than short-circuited past; a no-op on an inactive
+              // (non-daemon) transport.
+              onRecoverDaemon = { recoveryLauncher.launch() },
             )
           else ->
             Box(Modifier.fillMaxSize()) {

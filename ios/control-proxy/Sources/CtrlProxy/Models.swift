@@ -133,6 +133,12 @@ public struct RequestKeyboard: Decodable {
     public var action: String
 }
 
+public struct RequestPressKey: Decodable {
+    public var requestId: String?
+    public var key: String
+    public var modifiers: [String]
+}
+
 public struct RequestPressButton: Decodable {
     public var requestId: String?
     public var action: String
@@ -347,6 +353,7 @@ extension RequestAppendText: CommandPayload {}
 extension RequestClearText: CommandPayload {}
 extension RequestImeAction: CommandPayload {}
 extension RequestKeyboard: CommandPayload {}
+extension RequestPressKey: CommandPayload {}
 extension RequestPressButton: CommandPayload {}
 extension RequestAction: CommandPayload {}
 extension RequestActivateAccessibilityLink: CommandPayload {}
@@ -396,6 +403,7 @@ public enum WebSocketRequest: Decodable {
     case imeAction(RequestImeAction)
     case selectAll(RequestEnvelope)
     case keyboard(RequestKeyboard)
+    case pressKey(RequestPressKey)
     case pressButton(RequestPressButton)
     case pressHome(RequestEnvelope)
     case pressBack(RequestEnvelope)
@@ -482,6 +490,8 @@ public enum WebSocketRequest: Decodable {
             self = try .selectAll(RequestEnvelope(from: decoder))
         case .requestKeyboard:
             self = try .keyboard(RequestKeyboard(from: decoder))
+        case .requestPressKey:
+            self = try .pressKey(RequestPressKey(from: decoder))
         case .requestPressButton:
             self = try .pressButton(RequestPressButton(from: decoder))
         case .requestPressHome:
@@ -566,6 +576,7 @@ public enum WebSocketRequest: Decodable {
         case .imeAction: return .requestImeAction
         case .selectAll: return .requestSelectAll
         case .keyboard: return .requestKeyboard
+        case .pressKey: return .requestPressKey
         case .pressButton: return .requestPressButton
         case .pressHome: return .requestPressHome
         case .pressBack: return .requestPressBack
@@ -637,6 +648,7 @@ public enum WebSocketRequest: Decodable {
         case let .clearText(payload): return payload
         case let .imeAction(payload): return payload
         case let .keyboard(payload): return payload
+        case let .pressKey(payload): return payload
         case let .pressButton(payload): return payload
         case let .action(payload): return payload
         case let .activateAccessibilityLink(payload): return payload
@@ -1850,6 +1862,7 @@ public enum RequestType: String, CaseIterable {
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
     case requestKeyboard = "request_keyboard"
+    case requestPressKey = "request_press_key"
     case requestPressButton = "request_press_button"
     case requestPressHome = "request_press_home"
     case requestPressBack = "request_press_back"
@@ -1917,6 +1930,7 @@ public enum ResponseType: String {
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
     case keyboardResult = "keyboard_result"
+    case pressKeyResult = "press_key_result"
     case pressButtonResult = "press_button_result"
     case pressHomeResult = "press_home_result"
     case pressBackResult = "press_back_result"
@@ -1984,6 +1998,7 @@ extension RequestType {
         case .requestImeAction: return .imeActionResult
         case .requestSelectAll: return .selectAllResult
         case .requestKeyboard: return .keyboardResult
+        case .requestPressKey: return .pressKeyResult
         case .requestPressButton: return .pressButtonResult
         case .requestPressHome: return .pressHomeResult
         case .requestPressBack: return .pressBackResult

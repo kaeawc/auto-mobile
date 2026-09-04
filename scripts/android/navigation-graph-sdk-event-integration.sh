@@ -13,10 +13,11 @@ bun_bin_dir="${HOME}/.bun/bin"
 device_id="${1:-}"
 package_id="dev.jasonpearson.automobile.playground"
 emit_action="dev.jasonpearson.automobile.playground.action.TEST_EMIT_SDK_NAVIGATION"
-session_uuid="52150000-0000-4000-8000-000000000000"
+session_uuid=""
 timestamp_ms="$(($(date +%s) * 1000))"
 destination="Issue5215SdkNavigation-${timestamp_ms}"
 graph=""
+automation_ready_timeout_ms="120000"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -59,6 +60,33 @@ fi
 # the selected emulator's adbd as root before launching the session it serves.
 "$adb_bin" -s "$device_id" root >/dev/null
 "$adb_bin" -s "$device_id" wait-for-device
+
+# Acquire the booted emulator before issuing session-scoped calls. A caller must
+# not fabricate a UUID to access a device it has not acquired.
+# CtrlProxy can take longer than the product's 30-second steady-state health
+# budget immediately after this CI job installs its APK. This is a bounded,
+# getAndroid-specific preparation allowance, not a global timeout override.
+session_result="$(auto-mobile --debug --embedded-sdk --cli getAndroid --deviceId "$device_id" \
+  --automation-ready-timeout-ms "$automation_ready_timeout_ms")"
+if ! session_uuid="$(
+  jq -er '
+    (
+      if .sessionUuid? then .sessionUuid
+      elif .content? then
+        .content[]
+        | select(.type == "text")
+        | .text
+        | fromjson
+        | .sessionUuid
+      else empty
+      end
+    )
+    | select(type == "string" and length > 0)
+  ' <<<"$session_result"
+)"; then
+  echo "error: could not acquire navigation graph session for emulator $device_id" >&2
+  exit 1
+fi
 
 # Bind CtrlProxy's SDK-event client and the graph query to the same daemon
 # session before emitting the event. The debug-only Playground receiver invokes

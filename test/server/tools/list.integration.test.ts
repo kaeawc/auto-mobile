@@ -3,6 +3,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
+import { isSendKeysReleased } from "../../../src/features/action/SendKeys";
 
 const listToolsResponseSchema = z.object({
   tools: z.array(
@@ -86,7 +87,16 @@ describe("MCP Tools List", () => {
       const toolNames = result.tools.map((tool) => tool.name);
       expect(toolNames).toContain("observe");
       expect(toolNames).toContain("tapOn");
-      expect(toolNames).toContain("inputText");
+      if (isSendKeysReleased()) {
+        expect(toolNames).toContain("sendKeys");
+        expect(toolNames).not.toContain("inputText");
+        expect(toolNames).not.toContain("clearText");
+      } else {
+        expect(toolNames).not.toContain("sendKeys");
+        expect(toolNames).toContain("inputText");
+        expect(toolNames).toContain("clearText");
+      }
+      expect(toolNames).not.toContain("imeAction");
       expect(toolNames).not.toContain("clipboard");
       expect(toolNames).not.toContain("openLink");
       expect(toolNames).not.toContain("provisionDevice");

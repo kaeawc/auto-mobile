@@ -191,6 +191,11 @@ public class FakeGesturePerformer: GesturePerforming {
         public let resourceId: String?
     }
 
+    public struct KeyCall {
+        public let key: String
+        public let modifiers: [String]
+    }
+
     public struct ResetAuthorizationsCall {
         public let bundleId: String
         public let resources: [String]
@@ -211,6 +216,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var selectAllCallCount = 0
     private var imeActionHistory: [String] = []
     private var keyboardHistory: [String] = []
+    private var keyHistory: [KeyCall] = []
     private var keyboardOpen = false
     private var nextKeyboardResult: Bool?
     private var actionHistory: [(action: String, resourceId: String?, label: String?)] = []
@@ -301,6 +307,10 @@ public class FakeGesturePerformer: GesturePerforming {
         keyboardHistory
     }
 
+    public func getKeyHistory() -> [KeyCall] {
+        keyHistory
+    }
+
     public func setKeyboardOpen(_ open: Bool) {
         keyboardOpen = open
     }
@@ -377,6 +387,7 @@ public class FakeGesturePerformer: GesturePerforming {
         selectAllCallCount = 0
         imeActionHistory.removeAll()
         keyboardHistory.removeAll()
+        keyHistory.removeAll()
         keyboardOpen = false
         nextKeyboardResult = nil
         actionHistory.removeAll()
@@ -563,6 +574,11 @@ public class FakeGesturePerformer: GesturePerforming {
         default:
             return nil
         }
+    }
+
+    public func pressKey(key: String, modifiers: [String]) throws {
+        try checkFailure("pressKey")
+        keyHistory.append(KeyCall(key: key, modifiers: modifiers))
     }
 
     public func performAction(_ action: String, resourceId: String?, label: String?) throws {

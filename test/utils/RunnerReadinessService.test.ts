@@ -65,6 +65,8 @@ class FakeAndroidManager implements ReadinessAndroidManager {
   versionCompatible = true;
   setupCalls = 0;
   enableCalls = 0;
+  resetSetupStateCalls = 0;
+  private setupAttempted = false;
   compatibilityResult: Awaited<ReturnType<ReadinessAndroidManager["ensureCompatibleVersion"]>> = {
     status: "compatible",
   };
@@ -92,12 +94,19 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 
   async setup() {
     this.setupCalls++;
+    if (this.setupAttempted) {
+      return { success: false, message: "Setup already attempted" };
+    }
+    this.setupAttempted = true;
     this.installed = true;
     this.enabled = true;
     return { success: true, message: "ready" };
   }
 
-  resetSetupState(): void {}
+  resetSetupState(): void {
+    this.resetSetupStateCalls++;
+    this.setupAttempted = false;
+  }
 }
 
 class FakeIosManager implements ReadinessIosManager {
@@ -508,6 +517,35 @@ describe("RunnerReadinessService", () => {
     expect(androidManager.setupCalls).toBe(1);
     expect(androidClient.connectionCalls).toBe(1);
     expect(androidClient.healthCalls).toBe(1);
+  });
+
+  test("reopens Android setup after a failed health check and contract reinstall", async () => {
+    const androidManager = new FakeAndroidManager();
+    const androidClient = new FakeReadinessClient();
+    androidClient.connected = false;
+    androidClient.healthResults = Array.from({ length: 10 }, () => false);
+    const { service } = createService({ androidManager, androidClient });
+    const readinessRequest = {
+      device: androidDevice(),
+      requestedIdentity: "platform=android deviceId=emulator-5554",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 1_000,
+    };
+
+    await expect(service.ensureReady(readinessRequest)).rejects.toThrow(/phase=runner-health/);
+
+    // The permission-contract integration test clean-reinstalls CtrlProxy
+    // between action-level retries, leaving it installed but disabled.
+    androidManager.installed = true;
+    androidManager.enabled = false;
+    androidClient.connected = false;
+    androidClient.connectionResults = [true];
+    androidClient.healthResults = [true];
+
+    await expect(service.ensureReady(readinessRequest)).resolves.toBeUndefined();
+
+    expect(androidManager.setupCalls).toBe(2);
+    expect(androidManager.resetSetupStateCalls).toBe(2);
   });
 
   test("honors disabled downloads while still enabling an installed compatible runner", async () => {

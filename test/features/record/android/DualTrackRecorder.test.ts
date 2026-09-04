@@ -37,8 +37,14 @@ class FakeGestureEmitter implements GestureEmitter {
 class FakeA11ySource implements A11ySource {
   private listener?: InteractionListener;
 
+  constructor(private readonly supportedCommands: string[] | null = ["request_insert_text"]) {}
+
   async ensureConnected(): Promise<boolean> {
     return true;
+  }
+
+  async getSupportedCommands(): Promise<string[] | null> {
+    return this.supportedCommands;
   }
 
   onInteraction(listener: InteractionListener): () => void {
@@ -83,7 +89,7 @@ describe("DualTrackRecorder", () => {
     fakeA11y = new FakeA11ySource();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, true);
   });
 
   test("tap gesture + matching A11y element → tapOn step", async () => {
@@ -183,7 +189,7 @@ describe("DualTrackRecorder", () => {
     expect(steps[0].params.button).toBe("back");
   });
 
-  test("inputText from A11y with no gesture match → inputText step", async () => {
+  test("inputText from A11y records a sendKeys replacement", async () => {
     await recorder.start();
 
     fakeA11y.emit({
@@ -196,8 +202,63 @@ describe("DualTrackRecorder", () => {
     const { steps } = await recorder.stop();
 
     expect(steps).toHaveLength(1);
-    expect(steps[0].tool).toBe("inputText");
-    expect(steps[0].params.text).toBe("hello@example.com");
+    expect(steps[0]).toEqual({
+      tool: "sendKeys",
+      params: {
+        commands: [
+          {
+            action: "type",
+            text: "hello@example.com",
+            operation: "replace",
+          },
+        ],
+      },
+    });
+  });
+
+  test("inputText from A11y remains replayable before the sendKeys runner release", async () => {
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, false);
+    await recorder.start();
+
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: Date.now(),
+      text: "hello@example.com",
+      element: { "resource-id": "com.example:id/email_field" },
+    });
+
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: Date.now(),
+      text: "updated@example.com",
+      element: { "resource-id": "com.example:id/email_field" },
+    });
+
+    const { steps } = await recorder.stop();
+
+    expect(steps).toEqual([
+      {
+        tool: "inputText",
+        params: { text: "updated@example.com" },
+      },
+    ]);
+  });
+
+  test("inputText from a runner without insert support records a replayable inputText step", async () => {
+    fakeA11y = new FakeA11ySource([]);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, true);
+    await recorder.start();
+
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: Date.now(),
+      text: "hello@example.com",
+      element: { "resource-id": "com.example:id/email_field" },
+    });
+
+    const { steps } = await recorder.stop();
+
+    expect(steps).toEqual([{ tool: "inputText", params: { text: "hello@example.com" } }]);
   });
 
   test("consecutive inputText events on same element are coalesced", async () => {
@@ -214,7 +275,7 @@ describe("DualTrackRecorder", () => {
     const { steps } = await recorder.stop();
     // Should be coalesced into a single step with the last text
     expect(steps).toHaveLength(1);
-    expect(steps[0].params.text).toBe("hel");
+    expect(steps[0].params.commands[0].text).toBe("hel");
   });
 
   test("buffered A11y event is rejected when gesture does not hit element bounds", async () => {
@@ -275,11 +336,11 @@ describe("DualTrackRecorder", () => {
 
     const { steps } = await recorder.stop();
     expect(steps).toHaveLength(3);
-    expect(steps[0].tool).toBe("inputText");
-    expect(steps[0].params.text).toBe("hello");
+    expect(steps[0].tool).toBe("sendKeys");
+    expect(steps[0].params.commands[0].text).toBe("hello");
     expect(steps[1].tool).toBe("pressButton");
-    expect(steps[2].tool).toBe("inputText");
-    expect(steps[2].params.text).toBe("world");
+    expect(steps[2].tool).toBe("sendKeys");
+    expect(steps[2].params.commands[0].text).toBe("world");
   });
 
   test("windowChange A11y events are not emitted as steps", async () => {

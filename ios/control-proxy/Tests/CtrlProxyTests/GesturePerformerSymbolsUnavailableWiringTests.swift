@@ -49,6 +49,18 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         )
     }
 
+    func testImeActionRequiresKeyboardFocusBeforeDispatch() throws {
+        let imeAction = try gesturePerformerFunction(named: "performImeAction(")
+        let focusGuard = try XCTUnwrap(imeAction.range(of: "try requireKeyboardFocus("))
+        let dispatch = try XCTUnwrap(imeAction.range(of: "switch action.lowercased()"))
+
+        XCTAssertLessThan(
+            focusGuard.lowerBound,
+            dispatch.lowerBound,
+            "IME actions must require keyboard focus before dispatch"
+        )
+    }
+
     private func gesturePerformerFunction(named name: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

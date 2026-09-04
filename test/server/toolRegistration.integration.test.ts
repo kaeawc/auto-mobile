@@ -57,6 +57,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       "selectAllTextSchema",
       "pressButtonSchema",
       "systemTraySchema",
+      "sendKeysSchema",
     ];
 
     criticalSchemas.forEach((schemaName) => {

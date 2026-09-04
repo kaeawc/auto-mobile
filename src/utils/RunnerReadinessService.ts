@@ -318,9 +318,10 @@ export class RunnerReadinessService {
       return;
     }
 
-    if (installed && enabled) {
-      manager.resetSetupState();
-    }
+    // A prior readiness request may have exhausted its health budget while the
+    // daemon stays alive. Reopen the manager's one-attempt setup gate before
+    // this independent request tries to recover a reinstalled or disabled runner.
+    manager.resetSetupState();
     await this.setupAndroidRunner(context, manager);
     await this.waitForResponsiveClient(context, client);
     await this.recoverSystemUiAnrIfPresent(context, client);

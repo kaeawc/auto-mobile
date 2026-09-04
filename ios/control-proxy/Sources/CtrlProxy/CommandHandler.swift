@@ -139,6 +139,9 @@ public class CommandHandler: CommandHandling {
             case let .keyboard(payload):
                 return try handleKeyboard(payload, startTime: startTime)
 
+            case let .pressKey(payload):
+                return try handlePressKey(payload, startTime: startTime)
+
             case let .pressButton(payload):
                 return try handlePressButton(payload, startTime: startTime)
 
@@ -811,6 +814,21 @@ public class CommandHandler: CommandHandling {
             open: open,
             totalTimeMs: totalTimeMs(from: startTime),
             error: success ? nil : "Keyboard did not \(action.lowercased())"
+        )
+    }
+
+    private func handlePressKey(_ request: RequestPressKey, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handlePressKey")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("pressKey") {
+            try gesturePerformer.pressKey(key: request.key, modifiers: request.modifiers)
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.pressKeyResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
         )
     }
 

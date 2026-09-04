@@ -21,6 +21,15 @@ import { OpenURL } from "../features/action/OpenURL";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
 import {
+  isSendKeysReleased,
+  SEND_KEYS_MIN_RELEASE,
+  SEND_KEYS_OPERATIONS,
+  SEND_KEYS_SEMANTIC_KEYS,
+  SEND_KEYS_TYPING_MODES,
+  SendKeys,
+} from "../features/action/SendKeys";
+import { INPUT_KEY_MODIFIERS, SUPPORTED_INPUT_KEYS } from "../features/action/InputKey";
+import {
   ActionableError,
   BootedDevice,
   ClipboardResult,
@@ -32,6 +41,8 @@ import {
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import {
   overrideWaitForJsonSchema,
   refineWaitForArgs,
@@ -52,6 +63,7 @@ import {
   addDeviceTargetingToSchema,
   platformSchema,
   withAppIdAliases,
+  withCanonicalDiscriminatedUnionJsonSchema,
   withJsonSchemaOverride,
   compactExclusiveSelectorProperties,
   responseShapeControlFields,
@@ -72,6 +84,7 @@ import type {
   SystemTrayNotificationArgs,
   SystemTrayArgs,
   InputTextArgs,
+  SendKeysArgs,
   WakeAndUnlockArgs,
   OpenLinkArgs,
   TapOnArgs,
@@ -118,6 +131,7 @@ export type {
   SystemTrayNotificationArgs,
   SystemTrayArgs,
   InputTextArgs,
+  SendKeysArgs,
   WakeAndUnlockArgs,
   OpenLinkArgs,
   TapOnArgs,
@@ -639,6 +653,90 @@ export const inputTextSchema = addDeviceTargetingToSchema(
     ...responseShapeControlFields,
   }),
 );
+
+const sendKeysKeyValues = [...SUPPORTED_INPUT_KEYS, ...SEND_KEYS_SEMANTIC_KEYS] as const;
+
+const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
+  z.discriminatedUnion("action", [
+    z
+      .object({
+        action: z.literal("type"),
+        text: z.string().min(1).describe("Text to insert or replace; never echoed in the result"),
+        operation: z
+          .enum(SEND_KEYS_OPERATIONS)
+          .default("insert")
+          .describe("Insert at the current selection (default) or replace the focused field"),
+        mode: z
+          .enum(SEND_KEYS_TYPING_MODES)
+          .default("auto")
+          .describe(
+            "Android delivery mode. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
+          ),
+      })
+      .strict(),
+    z
+      .object({
+        action: z.literal("key"),
+        key: z
+          .enum(sendKeysKeyValues)
+          .describe(
+            "Raw key or semantic IME key. Semantic next/previous/done/search/send/go ignore modifiers",
+          ),
+        modifiers: z
+          .array(z.enum(INPUT_KEY_MODIFIERS))
+          .max(INPUT_KEY_MODIFIERS.length)
+          .optional()
+          .describe("Raw-key modifier chord: shift, ctrl, alt, or meta"),
+      })
+      .strict(),
+    z.object({ action: z.literal("clear") }).strict(),
+  ]),
+);
+
+export const sendKeysSchema = addDeviceTargetingToSchema(
+  z.object({
+    selector: inputTextSelectorSchema
+      .optional()
+      .describe("Field to focus once before executing the ordered command sequence"),
+    commands: z
+      .array(sendKeysCommandSchema)
+      .min(1)
+      .max(100)
+      .describe("One to 100 commands executed serially; execution stops on the first failure"),
+    platform: platformSchema,
+    ...responseShapeControlFields,
+  }),
+);
+
+export interface SendKeysRunnerCommandSource {
+  getSupportedCommands(): Promise<string[] | null>;
+}
+
+export type SendKeysRunnerCommandSourceFactory = (
+  device: BootedDevice,
+) => SendKeysRunnerCommandSource;
+
+const defaultSendKeysRunnerCommandSourceFactory: SendKeysRunnerCommandSourceFactory = (device) =>
+  device.platform === "android"
+    ? AndroidCtrlProxyClient.getInstance(device)
+    : IOSCtrlProxyClient.getInstance(device);
+
+export async function assertSendKeysRunnerCompatible(
+  device: BootedDevice,
+  sourceFactory: SendKeysRunnerCommandSourceFactory = defaultSendKeysRunnerCommandSourceFactory,
+): Promise<void> {
+  const requiredCommand =
+    device.platform === "android" ? "request_insert_text" : "request_press_key";
+  const supportedCommands = await sourceFactory(device).getSupportedCommands();
+  if (supportedCommands?.includes(requiredCommand)) {
+    return;
+  }
+  throw new ActionableError(
+    `${device.platform === "android" ? "Android CtrlProxy APK" : "iOS CtrlProxy runner"} ` +
+      `does not support sendKeys (${requiredCommand} is unavailable). Rebuild and redeploy the ` +
+      `CtrlProxy from this source checkout, or retry after AutoMobile ${SEND_KEYS_MIN_RELEASE} ships.`,
+  );
+}
 
 export const wakeAndUnlockSchema = addDeviceTargetingToSchema(
   z.object({
@@ -1420,6 +1518,25 @@ export function registerInteractionTools() {
     return result.success ? response : { ...response, isError: true };
   };
 
+  const sendKeysHandler = async (
+    device: BootedDevice,
+    args: SendKeysArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    await assertSendKeysRunnerCompatible(device);
+    RecompositionTracker.getInstance().recordInteraction();
+    const sendKeys = new SendKeys(device);
+    const result = await sendKeys.execute(args.commands, args.selector, progress, signal);
+    const response = createJSONToolResponse({
+      message: result.success
+        ? `Executed ${result.completedCommands} sendKeys command(s)`
+        : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
+      ...result,
+    });
+    return result.success ? response : { ...response, isError: true };
+  };
+
   // Wake and unlock handler
   const wakeAndUnlockHandler = async (device: BootedDevice, args: WakeAndUnlockArgs) => {
     const iosUnlocker = device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined;
@@ -1604,13 +1721,17 @@ export function registerInteractionTools() {
     }
   };
 
+  // Keep the released input tool as the default until coordinated CtrlProxy
+  // artifacts contain the commands sendKeys preflights at invocation time.
+  const sendKeysReleased = isSendKeysReleased();
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "clearText",
     "Clear text from focused input",
     clearTextSchema,
     clearTextHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: !sendKeysReleased, supportsProgress: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1642,7 +1763,15 @@ export function registerInteractionTools() {
     "Input text. The optional mode field is Android-only and ignored on iOS.",
     inputTextSchema,
     inputTextHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: !sendKeysReleased },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "sendKeys",
+    "Execute an ordered sequence of text insertion/replacement, clear, raw keys, and semantic IME keys.",
+    sendKeysSchema,
+    sendKeysHandler,
+    { defaultEnabled: sendKeysReleased, supportsProgress: true },
   );
 
   ToolRegistry.registerDeviceAware(

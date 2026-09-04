@@ -163,6 +163,16 @@
       }
     },
     {
+      "name": "request_press_key",
+      "builder": "CtrlProxyKeyboard.requestPressKey",
+      "wire": {
+        "type": "request_press_key",
+        "requestId": "fixture-request-id",
+        "key": "tab",
+        "modifiers": ["shift"]
+      }
+    },
+    {
       "name": "request_press_button",
       "builder": "CtrlProxyNavigation.requestPressButton",
       "wire": {

@@ -224,7 +224,9 @@ export type A11yDragResult = GestureTimingResult;
 export type A11yPinchResult = GestureTimingResult;
 
 /** Set text result from accessibility service */
-export type A11ySetTextResult = BaseResult;
+export interface A11ySetTextResult extends BaseResult {
+  partialApplication?: boolean;
+}
 
 /** IME action result from accessibility service */
 export type A11yImeActionResult = ActionTimingResult;

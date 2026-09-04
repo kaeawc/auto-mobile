@@ -259,6 +259,7 @@ class WebSocketServer(
                               "set_hierarchy_interval",
                               "node_selector_actions",
                               "request_activate_accessibility_link",
+                              "request_insert_text",
                             ),
                         ),
                       )

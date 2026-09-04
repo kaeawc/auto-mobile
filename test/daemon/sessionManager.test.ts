@@ -1883,6 +1883,80 @@ describe("SessionManager", () => {
       }
     });
 
+    test("keeps the device quarantined and retries when the network restore fails (#6012 review)", async () => {
+      const timer = new FakeTimer();
+      let attempts = 0;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => {} }),
+        (): NetworkConditionRestorer => ({
+          restore: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+              throw new Error("emulator console rejected the restore");
+            }
+          },
+        }),
+      );
+      try {
+        await manager.createSession("net-restore-retry", "emulator-5554", "android");
+        manager.setNetworkCondition("net-restore-retry", { initialProfile: "none" });
+
+        await manager.releaseSession("net-restore-retry");
+
+        // A failed first attempt must keep the shaped emulator quarantined, not
+        // return it to the idle pool (previously deferred as #6085).
+        const cleanup = manager.getPendingDeviceCleanup("emulator-5554");
+        expect(cleanup).not.toBeNull();
+        expect(attempts).toBe(1);
+
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+        expect(attempts).toBe(2);
+        expect(manager.getPendingDeviceCleanup("emulator-5554")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("stops retrying the network restore after bounded attempts are exhausted", async () => {
+      const timer = new FakeTimer();
+      let attempts = 0;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => {} }),
+        (): NetworkConditionRestorer => ({
+          restore: async () => {
+            attempts += 1;
+            throw new Error("emulator console rejected the restore");
+          },
+        }),
+      );
+      try {
+        await manager.createSession("net-restore-exhausted", "emulator-5556", "android");
+        manager.setNetworkCondition("net-restore-exhausted", { initialProfile: "none" });
+
+        await manager.releaseSession("net-restore-exhausted");
+        const cleanup = manager.getPendingDeviceCleanup("emulator-5556");
+        await timer.advanceTimeAsync(250);
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+
+        // One initial attempt plus the two bounded retries, then the device is
+        // freed rather than quarantined forever.
+        expect(attempts).toBe(3);
+        expect(manager.getPendingDeviceCleanup("emulator-5556")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("restores the old emulator before a session rebinds to a new device", async () => {
       const restored: Array<{ deviceId: string; profile: string }> = [];
       const manager = new SessionManager(

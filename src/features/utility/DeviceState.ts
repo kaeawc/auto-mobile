@@ -3,6 +3,7 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
@@ -72,11 +73,20 @@ export type NetworkConditionProfile = "none" | "offline" | "veryBad" | "2g" | "3
 
 /**
  * How faithfully a platform can apply a requested network condition:
- * - `full`: the condition is applied device-wide (Android emulator console).
+ * - `full`: fully applied and safe — used for the reset to `none`, which removes
+ *   all shaping and re-enables both radios (the restore direction, which cannot
+ *   leave a device impaired).
+ * - `partial`: the shaping/cut commands were accepted, but effectiveness is not
+ *   guaranteed. The emulator console (`network delay|speed`, `gsm data`) shapes
+ *   only the emulated **cellular** interface; a Wi-Fi-connected emulator would
+ *   bypass it, and Wi-Fi cannot be disabled by any single automatable command
+ *   across API levels (`svc wifi disable` is best-effort and a no-op on newer
+ *   images). So a degrading profile (including `offline`) is applied best-effort
+ *   and reported `partial` with a warning, never a false `verified: true`.
  * - `unsupported`: no automatable per-device shaper exists (physical Android,
  *   and every iOS target — see the *_UNSUPPORTED_ERROR constants below).
  */
-export type NetworkConditionCapability = "full" | "unsupported";
+export type NetworkConditionCapability = "full" | "partial" | "unsupported";
 
 /**
  * The explicit, documented condition values a profile maps to. `delayMs` is the
@@ -99,15 +109,26 @@ export interface NetworkConditionValues {
 
 /**
  * Profile → explicit documented values, plus the emulator console named specs
- * used to apply latency/bandwidth. The named specs are the Android emulator's
- * own `gsm`/`edge`/`umts`/`lte`/`full`/`none` categories, so the applied
- * condition is deterministic and matches the documented values.
+ * used to apply latency and bandwidth.
+ *
+ * IMPORTANT: `network delay` and `network speed` have DIFFERENT vocabularies per
+ * the Android Emulator console reference:
+ * - `network delay <latency>` accepts ONLY `gprs` (150-550ms), `edge`
+ *   (80-400ms), `umts` (35-200ms), `none` (0), or a numeric ms / `min:max`.
+ * - `network speed <speed>` accepts `gsm`, `hscsd`, `gprs`, `edge`, `umts`,
+ *   `hsdpa`, `lte`, `evdo`, `full`, or a numeric `up:down` in kbps.
+ *
+ * So `gsm`/`lte`/`full`/`hsdpa` are speed-only presets and MUST NOT be sent to
+ * `network delay` — doing so is rejected by the console (issue #6012 review).
+ * Each profile therefore carries an independently-valid delay spec and speed
+ * spec, and its documented `delayMs` reflects the chosen delay preset's max
+ * latency while `download/uploadKbps` reflect the chosen speed preset.
  */
 interface NetworkConditionProfileDefinition {
   values: NetworkConditionValues;
-  /** Emulator `network delay` named spec, or null when the radio is cut. */
+  /** Emulator `network delay` spec (gprs/edge/umts/none), or null when offline. */
   emulatorDelaySpec: string | null;
-  /** Emulator `network speed` named spec, or null when the radio is cut. */
+  /** Emulator `network speed` spec (gsm/edge/umts/lte/full/...), or null offline. */
   emulatorSpeedSpec: string | null;
   /** Whether the mobile data radio should be on for this profile. */
   dataEnabled: boolean;
@@ -130,32 +151,37 @@ const NETWORK_CONDITION_PROFILE_DEFINITIONS: Record<
     dataEnabled: false,
   },
   veryBad: {
+    // delay `gprs` (150-550ms, max 550); speed `gsm` (14.4 kbps up/down).
     values: { delayMs: 550, downloadKbps: 14, uploadKbps: 14, packetLossPercent: 10 },
-    emulatorDelaySpec: "gsm",
+    emulatorDelaySpec: "gprs",
     emulatorSpeedSpec: "gsm",
     dataEnabled: true,
   },
   "2g": {
+    // delay `edge` (80-400ms, max 400); speed `edge` (236.8/118.4 kbps).
     values: { delayMs: 400, downloadKbps: 237, uploadKbps: 118, packetLossPercent: 5 },
     emulatorDelaySpec: "edge",
     emulatorSpeedSpec: "edge",
     dataEnabled: true,
   },
   "3g": {
+    // delay `umts` (35-200ms, max 200); speed `umts` (1920/128 kbps).
     values: { delayMs: 200, downloadKbps: 1920, uploadKbps: 128, packetLossPercent: 2 },
     emulatorDelaySpec: "umts",
     emulatorSpeedSpec: "umts",
     dataEnabled: true,
   },
   "4g": {
+    // LTE latency is negligible, so delay `none`; speed `lte` (173000/58000 kbps).
     values: { delayMs: 0, downloadKbps: 173000, uploadKbps: 58000, packetLossPercent: 0 },
-    emulatorDelaySpec: "lte",
+    emulatorDelaySpec: "none",
     emulatorSpeedSpec: "lte",
     dataEnabled: true,
   },
   "5g": {
+    // Unshaped: delay `none`, speed `full` (unlimited).
     values: { delayMs: 0, downloadKbps: 0, uploadKbps: 0, packetLossPercent: 0 },
-    emulatorDelaySpec: "full",
+    emulatorDelaySpec: "none",
     emulatorSpeedSpec: "full",
     dataEnabled: true,
   },
@@ -365,6 +391,15 @@ export function networkConditionInputDegrades(input: SetNetworkConditionInput): 
   if (resolveNetworkProfile(input) !== "none") {
     return true;
   }
+  return hasShapingOverride(input);
+}
+
+/**
+ * Whether the request carries a bandwidth/latency override that the emulator
+ * console can apply (`packetLossPercent` is excluded — the console has no loss
+ * verb, so a loss-only override applies nothing).
+ */
+function hasShapingOverride(input: SetNetworkConditionInput): boolean {
   return (
     input.delayMs !== undefined ||
     input.downloadKbps !== undefined ||
@@ -373,9 +408,36 @@ export function networkConditionInputDegrades(input: SetNetworkConditionInput): 
 }
 
 /**
+ * A shaping condition (delay/speed) only reaches traffic that uses the emulated
+ * cellular interface, so Wi-Fi is toggled to route traffic through it. This is
+ * best-effort: `svc wifi disable`/`enable` is broadly available but restricted /
+ * a no-op on newer API levels, and there is no automatable command that reliably
+ * disables Wi-Fi on every emulator image. Its failure never aborts the request —
+ * it only downgrades the reported capability (see the `partial` warning).
+ *
+ * Keyed on whether the request degrades the link (`networkConditionInputDegrades`),
+ * NOT the profile name: an override-only request (e.g. `{delayMs:500}`) resolves
+ * to profile `none` yet still shapes traffic, so it must disable Wi-Fi like any
+ * other degrade — while a genuine reset re-enables it (issue #6012 review).
+ */
+function wifiToggleCommand(degrades: boolean): string {
+  return degrades ? "shell svc wifi disable" : "shell svc wifi enable";
+}
+
+const NETWORK_CONDITION_PARTIAL_WARNING =
+  "Applied best-effort. The emulator console (`network delay|speed`, `gsm data`) shapes only the " +
+  "emulated cellular interface, and Wi-Fi was toggled with `svc wifi` — which is best-effort and " +
+  "a no-op on newer API levels. If the emulator stays on an unshaped Wi-Fi transport the " +
+  "condition may not take effect, so it is reported `partial`, not verified. Confirm connectivity " +
+  "from within the app under test, or use a host-side proxy for guaranteed shaping.";
+
+/**
  * Build the emulator console commands (in dispatch order) that apply a profile.
- * Explicit numeric overrides replace the profile's named specs with
- * `<min>:<max>` delay and `<up>:<down>` speed specs the emulator also accepts.
+ * Only the emulated-cellular shaping commands (`emu ...`) — Wi-Fi is handled
+ * separately as a best-effort step. Explicit numeric overrides replace the
+ * profile's named specs with `<min>:<max>` delay and `<up>:<down>` speed specs
+ * the emulator also accepts. Callers pass a reset-normalized input, so overrides
+ * are already dropped for `none`.
  */
 function buildEmulatorNetworkCommands(
   profile: NetworkConditionProfile,
@@ -875,68 +937,157 @@ export class DeviceState {
   private async setAndroidNetworkCondition(
     input: SetNetworkConditionInput,
   ): Promise<NetworkConditionState> {
+    const isReset = Boolean(input.cancel || input.reset);
+    // A reset restores normal connectivity, so shaping overrides on the same
+    // request are contradictory — drop them rather than apply latency while
+    // reporting `none` (issue #6012 review). `resolveNetworkProfile` still reads
+    // the original input to detect the cancel/reset intent.
+    const effectiveInput: SetNetworkConditionInput = isReset
+      ? { expiresInSeconds: input.expiresInSeconds }
+      : input;
     const profile = resolveNetworkProfile(input);
-    const values = resolveNetworkValues(profile, input);
+    const values = resolveNetworkValues(profile, effectiveInput);
+    // Whether the EFFECTIVE request degrades the link, keyed on values not the
+    // profile name so an override-only request (profile `none`, `delayMs:500`)
+    // is treated as a degrade (issue #6012 review).
+    const degrades = networkConditionInputDegrades(input);
+    const expires =
+      input.expiresInSeconds !== undefined ? { expiresInSeconds: input.expiresInSeconds } : {};
+    const base = {
+      method: "android_emulator_console" as const,
+      requestedProfile: profile,
+      values,
+      ...expires,
+    };
     if (!isAndroidEmulatorSerial(this.device.deviceId)) {
+      // Physical device: no emulator console, so do not claim its method.
       return {
         supported: false,
         capability: "unsupported",
         requestedProfile: profile,
         values,
         verified: false,
-        ...(input.expiresInSeconds !== undefined
-          ? { expiresInSeconds: input.expiresInSeconds }
-          : {}),
+        ...expires,
         error: ANDROID_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR,
       };
     }
-    const commands = buildEmulatorNetworkCommands(profile, input, values);
     try {
       const adb = this.adbFactory.create(this.device);
-      for (const command of commands) {
-        const result = await adb.executeCommand(command, undefined, undefined, true);
-        const stdout = result.stdout ?? "";
-        const stderr = result.stderr ?? "";
-        if (emulatorConsoleReportsFailure(stdout, stderr)) {
-          return {
-            supported: true,
-            capability: "full",
-            method: "android_emulator_console",
-            requestedProfile: profile,
-            values,
-            verified: false,
-            ...(input.expiresInSeconds !== undefined
-              ? { expiresInSeconds: input.expiresInSeconds }
-              : {}),
-            error: `${stdout}\n${stderr}`.trim() || `${command} reported an error`,
-          };
-        }
+      const commandError = await this.runEmulatorNetworkCommands(
+        adb,
+        buildEmulatorNetworkCommands(profile, effectiveInput, values),
+      );
+      if (commandError) {
+        return {
+          supported: true,
+          capability: degrades ? "partial" : "full",
+          verified: false,
+          ...base,
+          error: commandError,
+        };
       }
-      // The emulator console acknowledges but does not echo the applied shaping,
-      // so verification is command-success-based (documented in getAndroid*).
-      return {
-        supported: true,
-        capability: "full",
-        method: "android_emulator_console",
-        profile,
-        requestedProfile: profile,
-        appliedProfile: profile,
-        values,
-        verified: true,
-        ...(input.expiresInSeconds !== undefined
-          ? { expiresInSeconds: input.expiresInSeconds }
-          : {}),
-      };
+      // Toggle Wi-Fi so a shaping/cut condition reaches traffic (best-effort;
+      // never aborts — a failure only feeds the `partial` warning below).
+      const wifiWarning = await this.toggleWifiBestEffort(adb, wifiToggleCommand(degrades));
+      return this.buildAppliedNetworkResult(base, profile, degrades, wifiWarning, isReset, input);
     } catch (error) {
       return {
         supported: true,
-        capability: "full",
-        method: "android_emulator_console",
-        requestedProfile: profile,
-        values,
+        capability: degrades ? "partial" : "full",
         verified: false,
+        ...base,
         error: errorMessage(error),
       };
+    }
+  }
+
+  /**
+   * Run the emulator shaping commands in order. Returns an error string on the
+   * first command the console rejects (`KO`/shell failure), or null when all
+   * succeeded.
+   */
+  private async runEmulatorNetworkCommands(
+    adb: AdbExecutor,
+    commands: string[],
+  ): Promise<string | null> {
+    for (const command of commands) {
+      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const stdout = result.stdout ?? "";
+      const stderr = result.stderr ?? "";
+      if (emulatorConsoleReportsFailure(stdout, stderr)) {
+        return `${stdout}\n${stderr}`.trim() || `${command} reported an error`;
+      }
+    }
+    return null;
+  }
+
+  /** Assemble the success result for an applied (or reset) network condition. */
+  private buildAppliedNetworkResult(
+    base: {
+      method: "android_emulator_console";
+      requestedProfile: NetworkConditionProfile;
+      values: NetworkConditionValues;
+      expiresInSeconds?: number;
+    },
+    profile: NetworkConditionProfile,
+    degrades: boolean,
+    wifiWarning: string | undefined,
+    isReset: boolean,
+    input: SetNetworkConditionInput,
+  ): NetworkConditionState {
+    const applied = { supported: true as const, profile, appliedProfile: profile, ...base };
+    if (!degrades) {
+      // Reset removes all shaping and re-enables both radios — the safe restore
+      // direction, so it is fully applied and verifiable-by-completion.
+      const overrideDiscarded = isReset && hasShapingOverride(input);
+      const warnings = [
+        overrideDiscarded
+          ? "Shaping overrides were ignored because cancel/reset was requested."
+          : undefined,
+        wifiWarning,
+      ].filter((w): w is string => w !== undefined);
+      return {
+        ...applied,
+        capability: "full",
+        verified: true,
+        ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+      };
+    }
+    // Degrading profile (including offline): the commands were accepted, but
+    // effectiveness depends on the emulator's transport and the best-effort
+    // Wi-Fi toggle, so report `partial` with a warning and NO `verified: true`.
+    return {
+      ...applied,
+      capability: "partial",
+      warning: wifiWarning
+        ? `${NETWORK_CONDITION_PARTIAL_WARNING} (${wifiWarning})`
+        : NETWORK_CONDITION_PARTIAL_WARNING,
+    };
+  }
+
+  /**
+   * Toggle Wi-Fi via `svc wifi`, swallowing failure. Returns a short warning
+   * fragment when the toggle did not cleanly succeed (so the caller can fold it
+   * into the `partial` report), or undefined on success. Never throws: Wi-Fi
+   * toggling is best-effort and its failure must not fail the whole request.
+   */
+  private async toggleWifiBestEffort(
+    adb: AdbExecutor,
+    command: string,
+  ): Promise<string | undefined> {
+    try {
+      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const stdout = result.stdout ?? "";
+      const stderr = result.stderr ?? "";
+      if (outputLooksLikeShellFailure(stdout, stderr)) {
+        return `Wi-Fi toggle '${command}' reported: ${`${stdout} ${stderr}`.trim()}`;
+      }
+      return undefined;
+    } catch (error) {
+      // Connection/permission failures here are expected on some API levels and
+      // must not abort the shaping request; surface them only as a warning.
+      logger.debug(`[DeviceState] wifi toggle '${command}' failed: ${error}`);
+      return `Wi-Fi toggle '${command}' failed: ${errorMessage(error)}`;
     }
   }
 

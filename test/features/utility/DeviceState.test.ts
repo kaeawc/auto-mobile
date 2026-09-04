@@ -345,31 +345,61 @@ describe("DeviceState", () => {
     expect(simctl.getMethodCalls("executeCommand")).toEqual([]);
   });
 
-  test("applies a documented degraded profile via the emulator console (3g)", async () => {
+  test("applies a documented degraded profile with VALID delay/speed presets (3g)", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
 
     const deviceState = new DeviceState(androidDevice, { adbFactory });
     const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
 
+    // A degrade is reported `partial`, never a false `verified: true`: the console
+    // shapes only the cellular interface and Wi-Fi disable is best-effort.
     expect(result.success).toBe(true);
     expect(result.networkCondition).toMatchObject({
       supported: true,
-      capability: "full",
+      capability: "partial",
       method: "android_emulator_console",
       requestedProfile: "3g",
       appliedProfile: "3g",
-      verified: true,
       values: NETWORK_CONDITION_PROFILES["3g"],
     });
+    expect(result.networkCondition?.verified).toBeUndefined();
+    expect(result.networkCondition?.warning).toContain("cellular");
+    // `umts` is a valid preset for BOTH network delay and network speed.
     expect(client.getAllCommands()).toEqual([
       "emu gsm data on",
       "emu network delay umts",
       "emu network speed umts",
+      "shell svc wifi disable",
     ]);
   });
 
-  test("takes the device offline by turning the data radio off", async () => {
+  test("uses valid delay presets for veryBad/4g/5g (gsm/lte/full are speed-only)", async () => {
+    const cases: Array<{ profile: "veryBad" | "4g" | "5g"; delay: string; speed: string }> = [
+      { profile: "veryBad", delay: "gprs", speed: "gsm" },
+      { profile: "4g", delay: "none", speed: "lte" },
+      { profile: "5g", delay: "none", speed: "full" },
+    ];
+    for (const { profile, delay, speed } of cases) {
+      const adbFactory = new FakeAdbClientFactory();
+      const client = adbFactory.getFakeClient();
+      const deviceState = new DeviceState(androidDevice, { adbFactory });
+
+      await deviceState.setState({ networkCondition: { profile } });
+
+      const commands = client.getAllCommands();
+      // The delay spec must be a valid `network delay` preset (gprs/edge/umts/none).
+      expect(commands).toContain(`emu network delay ${delay}`);
+      expect(commands).toContain(`emu network speed ${speed}`);
+      // Guard against the regression: no speed-only preset reaches `network delay`.
+      expect(commands).not.toContain("emu network delay gsm");
+      expect(commands).not.toContain("emu network delay lte");
+      expect(commands).not.toContain("emu network delay full");
+      expect(commands).not.toContain("emu network delay hsdpa");
+    }
+  });
+
+  test("takes the device offline (cellular cut + best-effort Wi-Fi disable, reported partial)", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
 
@@ -379,22 +409,27 @@ describe("DeviceState", () => {
     expect(result.success).toBe(true);
     expect(result.networkCondition).toMatchObject({
       supported: true,
+      capability: "partial",
       appliedProfile: "offline",
-      verified: true,
     });
-    expect(client.getAllCommands()).toEqual(["emu gsm data off"]);
+    // Honest: offline is NOT reported verified, because Wi-Fi may keep the link up.
+    expect(result.networkCondition?.verified).toBeUndefined();
+    expect(result.networkCondition?.warning).toContain("cellular");
+    expect(client.getAllCommands()).toEqual(["emu gsm data off", "shell svc wifi disable"]);
   });
 
-  test("cancels/resets a network condition back to normal connectivity", async () => {
+  test("cancels/resets a network condition back to normal connectivity (re-enables Wi-Fi)", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
 
     const deviceState = new DeviceState(androidDevice, { adbFactory });
     const result = await deviceState.setState({ networkCondition: { cancel: true } });
 
+    // Reset is the safe restore direction, so it is fully applied and verified.
     expect(result.success).toBe(true);
     expect(result.networkCondition).toMatchObject({
       supported: true,
+      capability: "full",
       appliedProfile: "none",
       verified: true,
     });
@@ -402,6 +437,32 @@ describe("DeviceState", () => {
       "emu network delay none",
       "emu network speed full",
       "emu gsm data on",
+      "shell svc wifi enable",
+    ]);
+  });
+
+  test("discards shaping overrides when cancel/reset is set (no latency leak)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({
+      networkCondition: { cancel: true, delayMs: 500, downloadKbps: 10 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.networkCondition).toMatchObject({
+      capability: "full",
+      appliedProfile: "none",
+      verified: true,
+    });
+    expect(result.networkCondition?.warning).toContain("ignored");
+    // The override does NOT become a `500:500` delay — reset clears shaping.
+    expect(client.getAllCommands()).toEqual([
+      "emu network delay none",
+      "emu network speed full",
+      "emu gsm data on",
+      "shell svc wifi enable",
     ]);
   });
 
@@ -415,6 +476,7 @@ describe("DeviceState", () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.networkCondition?.capability).toBe("partial");
     expect(result.networkCondition?.values).toMatchObject({
       delayMs: 250,
       downloadKbps: 1000,
@@ -424,6 +486,7 @@ describe("DeviceState", () => {
       "emu gsm data on",
       "emu network delay 250:250",
       "emu network speed 400:1000",
+      "shell svc wifi disable",
     ]);
   });
 
@@ -437,6 +500,7 @@ describe("DeviceState", () => {
 
     expect(result.success).toBe(false);
     expect(result.networkCondition?.supported).toBe(true);
+    expect(result.networkCondition?.verified).toBe(false);
     expect(result.networkCondition?.error).toContain("KO");
   });
 
@@ -522,20 +586,40 @@ describe("DeviceState", () => {
     expect(networkConditionInputDegrades({ packetLossPercent: 20 })).toBe(false);
   });
 
-  test("applies a shaping override with no profile (override-only degrade)", async () => {
+  test("applies a shaping override with no profile (override-only degrade, disables Wi-Fi)", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
 
     const deviceState = new DeviceState(androidDevice, { adbFactory });
     const result = await deviceState.setState({ networkCondition: { delayMs: 500 } });
 
+    // An override-only request resolves to profile `none` but still degrades, so
+    // it must be reported `partial` and DISABLE Wi-Fi (not re-enable it).
     expect(result.success).toBe(true);
+    expect(result.networkCondition?.capability).toBe("partial");
+    expect(result.networkCondition?.verified).toBeUndefined();
     expect(result.networkCondition?.values).toMatchObject({ delayMs: 500 });
     expect(client.getAllCommands()).toEqual([
       "emu network delay 500:500",
       "emu network speed 0:0",
       "emu gsm data on",
+      "shell svc wifi disable",
     ]);
+  });
+
+  test("surfaces a best-effort Wi-Fi toggle failure in the partial warning", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell svc wifi disable", "", "error: wifi service not available");
+
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const result = await deviceState.setState({ networkCondition: { profile: "3g" } });
+
+    // The Wi-Fi failure does NOT abort the request; it feeds the partial warning.
+    expect(result.success).toBe(true);
+    expect(result.networkCondition?.capability).toBe("partial");
+    expect(result.networkCondition?.warning).toContain("Wi-Fi toggle");
+    expect(client.getAllCommands()).toContain("shell svc wifi disable");
   });
 
   test("rejects an empty state selection instead of reporting a no-op success", async () => {

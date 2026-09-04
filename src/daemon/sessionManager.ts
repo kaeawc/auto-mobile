@@ -238,6 +238,14 @@ const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
 const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
+/**
+ * A failed network restore leaves the emulator holding session-modified shaping,
+ * so — like the biometric restorer — the device must not return to the idle pool
+ * on one attempt. Retries run inside the pending-cleanup promise, keeping the
+ * device quarantined until they settle (issue #6012 review, was deferred #6085).
+ */
+const NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS = 2;
+const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
@@ -1926,12 +1934,16 @@ export class SessionManager {
           `Failed to restore network condition for session ${session.sessionId}; device ` +
             `${target.deviceId} may hold session-modified shaping: ${result.error}`,
         );
-      } else if (result.outcome === "timed-out") {
+        // Quarantine the device until the retries below settle; a prompt
+        // rejection otherwise returns a shaped emulator straight to the pool.
+        return { pending: this.retryNetworkConditionRestore(target, result.error) };
+      }
+      if (result.outcome === "timed-out") {
         logger.warn(
           `Timed out after ${NETWORK_CONDITION_RESTORE_TIMEOUT_MS}ms restoring network condition ` +
             `for session ${session.sessionId}`,
         );
-        return { pending: restoration.then(() => undefined) };
+        return { pending: this.settleNetworkConditionRestore(target, restoration) };
       }
       return { pending: null };
     } finally {
@@ -1939,6 +1951,49 @@ export class SessionManager {
         this.timer.clearTimeout(timeoutHandle);
       }
     }
+  }
+
+  /** A slow restore can still fail; retry before the device leaves quarantine. */
+  private async settleNetworkConditionRestore(
+    target: NetworkConditionRestoreTarget,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(
+      `Failed to restore network condition for session ${target.sessionId}: ${result.error}`,
+    );
+    await this.retryNetworkConditionRestore(target, result.error);
+  }
+
+  private async retryNetworkConditionRestore(
+    target: NetworkConditionRestoreTarget,
+    initialError: unknown,
+  ): Promise<void> {
+    let lastError = initialError;
+    for (let attempt = 1; attempt <= NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      try {
+        await this.restoreNetworkCondition(target);
+        logger.info(
+          `Restored network condition for session ${target.sessionId} on retry ${attempt}`,
+        );
+        return;
+      } catch (error) {
+        // Teardown is best-effort: keep retrying, then report the last failure.
+        lastError = error;
+        logger.debug(
+          `Retry ${attempt} restoring network condition for session ${target.sessionId} failed: ${error}`,
+        );
+      }
+    }
+    logger.warn(
+      `Gave up restoring network condition for session ${target.sessionId} after ` +
+        `${NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
+        `may hold session-modified shaping: ${lastError}`,
+    );
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {

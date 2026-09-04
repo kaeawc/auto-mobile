@@ -26,6 +26,7 @@ import {
   applyStateAfterBiometricCaptureFailure,
   runSessionBiometricMutation,
 } from "./sessionBiometricEnrollment";
+import { runSessionNetworkMutation } from "./sessionNetworkCondition";
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
@@ -176,25 +177,53 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
   }),
 );
 
-export const setDeviceStateSchema = addDeviceTargetingToSchema(
-  z.object({
-    doNotDisturb: doNotDisturbStateInputSchema
-      .optional()
-      .describe("Do Not Disturb state to apply."),
-    biometrics: biometricStateInputSchema
-      .optional()
-      .describe("iOS Simulator biometric enrollment state to apply."),
-    networkCondition: networkConditionInputSchema
-      .optional()
-      .describe("Device-wide network condition to apply (Android emulator only)."),
-  }),
-).refine(
-  (values) =>
-    values.doNotDisturb !== undefined ||
-    values.biometrics !== undefined ||
-    values.networkCondition !== undefined,
-  {
-    message: "At least one device state field must be provided",
+// The networkCondition sub-object's zod refinement ("at least one meaningful
+// field") cannot be expressed by zod's JSON-schema conversion, so
+// tool-definitions.json would advertise every field as optional and let a client
+// build a `networkCondition: {}` (or TTL-only) input that tools/list calls valid
+// but invocation rejects. Re-encode it as JSON-schema `anyOf`/`required` via a
+// `withJsonSchemaOverride` so the advertised contract matches the runtime one
+// (issue #6012 review). (The top-level "at least one device-state field"
+// refinement is left unencoded, as it already is for doNotDisturb/biometrics —
+// setting a top-level `anyOf` collapses the object under `flattenTopLevelUnion`.)
+const NETWORK_CONDITION_REQUIRED_ANY_OF = [
+  { required: ["profile"] },
+  { required: ["cancel"] },
+  { required: ["reset"] },
+  { required: ["delayMs"] },
+  { required: ["downloadKbps"] },
+  { required: ["uploadKbps"] },
+  { required: ["packetLossPercent"] },
+];
+
+export const setDeviceStateSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z.object({
+      doNotDisturb: doNotDisturbStateInputSchema
+        .optional()
+        .describe("Do Not Disturb state to apply."),
+      biometrics: biometricStateInputSchema
+        .optional()
+        .describe("iOS Simulator biometric enrollment state to apply."),
+      networkCondition: networkConditionInputSchema
+        .optional()
+        .describe("Device-wide network condition to apply (Android emulator only)."),
+    }),
+  ).refine(
+    (values) =>
+      values.doNotDisturb !== undefined ||
+      values.biometrics !== undefined ||
+      values.networkCondition !== undefined,
+    {
+      message: "At least one device state field must be provided",
+    },
+  ),
+  (jsonSchema) => {
+    const properties = jsonSchema.properties as Record<string, Record<string, unknown>> | undefined;
+    const networkCondition = properties?.networkCondition;
+    if (networkCondition) {
+      networkCondition.anyOf = NETWORK_CONDITION_REQUIRED_ANY_OF;
+    }
   },
 );
 
@@ -451,7 +480,11 @@ export function registerUtilityTools() {
     if (capture.failure) {
       const result = await applyStateAfterBiometricCaptureFailure(
         deviceState,
-        { doNotDisturb: args.doNotDisturb, biometrics: args.biometrics },
+        {
+          doNotDisturb: args.doNotDisturb,
+          biometrics: args.biometrics,
+          networkCondition: args.networkCondition,
+        },
         capture.failure,
       );
       return createJSONToolResponse({
@@ -459,38 +492,49 @@ export function registerUtilityTools() {
         ...result,
       });
     }
-    // Register the network-condition slot so session release/expiry restores
-    // normal connectivity and never leaves a device impaired (issue #6012). Only
-    // a request that actually degrades the link needs restoring (a real profile
-    // OR a shaping override over the `none` baseline — cancel/reset/none do not),
-    // and only on an Android emulator, the sole platform where setState applies
-    // anything. Guarding on the emulator serial keeps the restore slot's presence
-    // authoritative evidence a device was shaped.
-    if (
-      args.networkCondition &&
-      networkConditionInputDegrades(args.networkCondition) &&
-      device.platform === "android" &&
-      device.deviceId.startsWith("emulator-") &&
-      args.sessionUuid &&
-      DaemonState.getInstance().isInitialized()
-    ) {
-      DaemonState.getInstance()
-        .getSessionManager()
-        .setNetworkCondition(args.sessionUuid, { initialProfile: "none" });
-    }
 
-    const result = await runSessionBiometricMutation(
-      capture.sessionManager,
-      args.sessionUuid,
-      device.deviceId,
-      capture.initialEnrollment,
-      () =>
-        deviceState.setState({
-          doNotDisturb: args.doNotDisturb,
-          biometrics: args.biometrics,
-          networkCondition: args.networkCondition,
-        }),
-    );
+    const mutation = () =>
+      deviceState.setState({
+        doNotDisturb: args.doNotDisturb,
+        biometrics: args.biometrics,
+        networkCondition: args.networkCondition,
+      });
+
+    // A network mutation must be serialized against release the same way a
+    // biometric one is (issue #6012 review): the biometric path already binds the
+    // mutation via trackSessionSetup, but a network-only request skips it. Route
+    // network-only requests through runSessionNetworkMutation, which registers the
+    // restore slot BEFORE the emulator command and tracks the mutation so a
+    // release/rebind cannot restore `none` and then have a late command re-shape a
+    // freed device. Only a degrading request on an Android emulator needs the
+    // restore slot; DND-only requests keep the existing (untracked, restore-free)
+    // biometric-wrapper path unchanged.
+    let result: DeviceStateResult;
+    if (!args.biometrics && args.networkCondition) {
+      const sessionManager =
+        args.sessionUuid && DaemonState.getInstance().isInitialized()
+          ? DaemonState.getInstance().getSessionManager()
+          : undefined;
+      const registerRestore =
+        networkConditionInputDegrades(args.networkCondition) &&
+        device.platform === "android" &&
+        device.deviceId.startsWith("emulator-");
+      result = await runSessionNetworkMutation(
+        sessionManager,
+        args.sessionUuid,
+        device.deviceId,
+        registerRestore,
+        mutation,
+      );
+    } else {
+      result = await runSessionBiometricMutation(
+        capture.sessionManager,
+        args.sessionUuid,
+        device.deviceId,
+        capture.initialEnrollment,
+        mutation,
+      );
+    }
 
     return createJSONToolResponse({
       message: result.success

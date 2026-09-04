@@ -8119,7 +8119,30 @@
               "minimum": 0
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": ["profile"]
+            },
+            {
+              "required": ["cancel"]
+            },
+            {
+              "required": ["reset"]
+            },
+            {
+              "required": ["delayMs"]
+            },
+            {
+              "required": ["downloadKbps"]
+            },
+            {
+              "required": ["uploadKbps"]
+            },
+            {
+              "required": ["packetLossPercent"]
+            }
+          ]
         },
         "platform": {
           "type": "string",

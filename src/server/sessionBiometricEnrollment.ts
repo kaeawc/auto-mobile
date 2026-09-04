@@ -14,18 +14,22 @@ export interface DeviceStateSetter {
  * A failed biometric pre-read must not swallow the other fields of a combined
  * request. Session-scoped `setDeviceState` reads enrollment before mutating so
  * release can restore it; when that read fails there is still nothing stopping
- * the independent Do Not Disturb update, which the sessionless path applies.
- * Apply it here too and report the biometric failure alongside it.
+ * the independent Do Not Disturb / network-condition updates, which the
+ * sessionless path applies. Apply them here too and report the biometric failure
+ * alongside them (issue #6012 review: networkCondition was previously dropped).
  */
 export async function applyStateAfterBiometricCaptureFailure(
   deviceState: DeviceStateSetter,
   input: SetDeviceStateInput,
   failure: DeviceStateResult,
 ): Promise<DeviceStateResult> {
-  if (!input.doNotDisturb) {
+  if (!input.doNotDisturb && !input.networkCondition) {
     return failure;
   }
-  const applied = await deviceState.setState({ doNotDisturb: input.doNotDisturb });
+  const applied = await deviceState.setState({
+    ...(input.doNotDisturb ? { doNotDisturb: input.doNotDisturb } : {}),
+    ...(input.networkCondition ? { networkCondition: input.networkCondition } : {}),
+  });
   const errors = [failure.error, applied.error].filter(
     (error): error is string => error !== undefined,
   );

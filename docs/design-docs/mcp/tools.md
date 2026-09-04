@@ -131,6 +131,33 @@ the exact arguments supported by your connection.
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                           |
 
+### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
+
+`getAndroid` and `getApple` each accept two ways to name a target; pass one.
+
+- **`getAndroid`** — `avdName` names a configured Android Virtual Device (the
+  `name` field of `automobile:devices/images/android`). It is the identity
+  AutoMobile uses to boot and coordinate a named AVD: the `avdName` path passes
+  `matchExactName`, `androidAvdName`, and a `stableTarget` for exact AVD-identity
+  and lifecycle coordination. `deviceId` is the copy-paste-from-discovery
+  convenience: it accepts either an _already-booted_ serial such as
+  `emulator-5554` (the `deviceId` field of `automobile:devices/booted/android`)
+  **or** an AVD image name — if it names a defined-but-unbooted AVD, `getAndroid`
+  cold-boots that image by name. The difference is the coordination hints the
+  `avdName` path passes up front — `matchExactName`, an `androidAvdName`
+  startup-lease hint, and an eager `stableTarget` — so prefer `avdName` when you
+  specifically want to boot or coordinate a named AVD; use `deviceId` to attach
+  to a running device or to boot straight from a discovered identifier.
+- **`getApple`** — `udid` is the iOS Simulator UDID. `deviceId` is an accepted
+  **alias** for `udid`: a booted simulator's `deviceId` (from
+  `automobile:devices/booted/ios`) _is_ its `udid`, so both fields resolve to the
+  same value.
+
+The `deviceId` fields exist so the value that `listDevices` and the
+`automobile:devices/booted/*` resources lead with can be copied straight into
+`getAndroid`/`getApple` — the discovery→acquire path (#5870). See the
+[FAQ](../../faq.md#how-do-i-see-or-start-a-device) for the CLI equivalents.
+
 ## Network, plans & recording
 
 | Tool                                                           | What it does                                                                              |

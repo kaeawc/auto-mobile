@@ -37,6 +37,7 @@ import {
   formatSocketDiagnostics,
 } from "./debugTools";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
+import { DaemonSocketReachability } from "./daemonSocketReachability";
 import {
   buildIdentitiesMatch,
   buildIdentityFromStatus,
@@ -396,6 +397,18 @@ const PEER_DAEMON_JOIN_POLL_MS = 100;
 const PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS = 1000;
 
 /**
+ * Delivery headroom reserved under the client's original start deadline before the
+ * post-exit peer rejoin (issue #6103) may run. The rejoin is nested inside a
+ * `tools/list` the client times out at DAEMON_STARTUP_TIMEOUT_MS; if the rejoin were
+ * allowed to consume every last millisecond, the actionable diagnostic it rethrows on
+ * failure would land AT the deadline instead of before it (issue #5878/#5904). Skipping
+ * the rejoin once less than this remains guarantees time to format and deliver that
+ * error. A near-deadline exit therefore fails fast rather than spending its final
+ * moments on a rejoin that cannot report its own failure in time.
+ */
+const PEER_DAEMON_JOIN_DELIVERY_HEADROOM_MS = 2000;
+
+/**
  * Cadence at which the liveness watchdog re-samples the "keep waiting" predicate
  * while a full-budget readiness probe is in flight (issue #5904). A per-poll
  * precheck only samples liveness between probes; if the holder dies *during* a
@@ -477,6 +490,13 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly extractionCleaner: ExtractionCleaner;
   private readonly launcher: DaemonLauncher;
   private readonly fallbackLauncher: DaemonLauncher;
+  /**
+   * Observation-only reachability probe for the post-exit peer rejoin (issue #6103):
+   * it never unlinks or stale-cleans the socket, and is platform-aware at the connect
+   * layer. Kept as a field (not the recovery-capable {@link DaemonClient}) so the
+   * rejoin can never delete a live peer's endpoint. See {@link probePeerSocketReachable}.
+   */
+  private readonly peerSocketReachability = new DaemonSocketReachability();
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
   /**
@@ -920,14 +940,14 @@ export class DaemonManager implements DaemonManagerLike {
       // instead of surfacing our child's exit as terminal; a genuine start failure
       // (no peer coming up) still fails promptly (issue #5878).
       //
-      // Bound the rejoin by the time REMAINING under the original start deadline, not
-      // a fresh reachability budget: if launchAndWait already consumed the client's
-      // ~30s budget (a startup timeout, plus stopping the timed-out child), skip the
-      // rejoin entirely and rethrow now, so the actionable diagnostic still beats the
-      // client deadline (issue #5878/#5904).
+      // Bound the rejoin by the time REMAINING under the original start deadline, LESS a
+      // delivery-headroom reserve, not a fresh reachability budget: if launchAndWait
+      // already consumed most of the client's ~30s budget (a startup timeout, plus
+      // stopping the timed-out child), skip the rejoin and rethrow now so the actionable
+      // diagnostic still beats the client deadline WITH time to spare (issue #5878/#5904).
       const rejoinBudget = Math.min(
         DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
-        this.remainingTime(startDeadline),
+        this.remainingTime(startDeadline) - PEER_DAEMON_JOIN_DELIVERY_HEADROOM_MS,
       );
       if (rejoinBudget > 0 && (await this.tryJoinPeerDaemonAfterSpawnExit(rejoinBudget))) {
         stderrLog(
@@ -1794,9 +1814,9 @@ export class DaemonManager implements DaemonManagerLike {
    * consumed the client budget the caller passes a non-positive value and skips this
    * wait entirely — the rejoin can only ever spend time the caller still has. It
    * NEVER spawns — it only probes and joins, so it cannot double-spawn — and it joins
-   * only a daemon that answers the same non-destructive readiness probe every other
-   * reuse path trusts ({@link verifyDaemonConnection}, which never unlinks the
-   * socket); daemon version compatibility is enforced separately by the proxy
+   * only a daemon that answers the observation-only {@link probePeerSocketReachable}
+   * probe, which never unlinks or stale-cleans the socket (so it cannot delete a live
+   * peer's endpoint); daemon version compatibility is enforced separately by the proxy
    * handshake.
    */
   private async tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean> {
@@ -1806,32 +1826,29 @@ export class DaemonManager implements DaemonManagerLike {
     // scan, then re-check it only at PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS — never every
     // iteration. That scan is a synchronous `ps`/PowerShell/CIM call that blocks the
     // event loop, so re-running it each poll would stall the loop for the whole budget
-    // (issue #6103); the cheap per-iteration signal is the socket connect probe below.
+    // (issue #6103). The per-iteration signal is the cheap socket probe below.
     let peerProcessComingUp = this.hasComingUpPeerDaemon();
     let nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
 
     while (this.remainingTime(deadline) > 0) {
-      if (!peerProcessComingUp) {
-        // No live daemon process is coming up: deliver the real subprocess-exit
-        // failure now instead of holding the budget on nothing — or on an orphaned
-        // socket inode with no listener and no backing process (#5878/#5904).
-        return false;
-      }
-      // On POSIX, only probe once the socket inode exists: a live daemon that has not
-      // yet published its Unix socket has nothing to connect to, and probing a missing
-      // path just burns the connect retry/backoff. On Windows the socket is a named
-      // pipe with no filesystem entry, so that gate would never open — probe directly
-      // there (see {@link socketPathWorthProbing}). verifyDaemonConnection is
-      // non-destructive (never unlinks the socket), so a slow peer racing to bind is not
-      // torn down here.
+      // SOCKET-FIRST: a reachable socket is the AUTHORITATIVE readiness signal, so probe
+      // it before consulting the process scan and join immediately if it answers —
+      // regardless of what the (best-effort, occasionally-stale) scan reported. This is
+      // an observation-only probe: it never unlinks or stale-cleans the socket, so it
+      // cannot delete a live peer's endpoint during the race (issue #6103), and it is
+      // platform-aware at the connect layer so a Windows named-pipe peer (no filesystem
+      // entry) is still reached.
       const probeBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
-      if (
-        probeBudget > 0 &&
-        this.socketPathWorthProbing() &&
-        (await this.verifyDaemonConnection(probeBudget))
-      ) {
+      if (probeBudget > 0 && (await this.probePeerSocketReachable(probeBudget))) {
         stderrLog("Reusing a peer daemon that became ready after our launch exited");
         return true;
+      }
+      // Socket not reachable yet. Use the process-table presence ONLY to decide whether
+      // to keep waiting: a live peer process means the socket is still coming up, so
+      // poll again; nothing coming up (genuine failure, or an orphaned socket inode with
+      // no listener and no backing process) fails promptly (#5878/#5904).
+      if (!peerProcessComingUp) {
+        return false;
       }
       const remaining = this.remainingTime(deadline);
       if (remaining === 0) {
@@ -1852,6 +1869,19 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
+   * Observation-only, platform-aware reachability probe for the post-exit peer rejoin.
+   * Delegates to {@link DaemonSocketReachability}, which attempts a bare connection and
+   * reports reachable/not WITHOUT ever unlinking or stale-cleaning the socket — unlike
+   * {@link DaemonClient.connect}, whose `cleanupStaleSocketIfDaemonDead` path could
+   * delete a live peer's endpoint when the PID file records the just-exited child
+   * (issue #6103). Extracted as its own method so tests can inject a fake reachability
+   * outcome without a real socket.
+   */
+  protected probePeerSocketReachable(timeoutMs: number): Promise<boolean> {
+    return this.peerSocketReachability.isReachable(this.socketPath, timeoutMs);
+  }
+
+  /**
    * Whether a peer daemon is genuinely coming up and worth waiting on: a live
    * AutoMobile daemon process is present in the table.
    *
@@ -1862,10 +1892,10 @@ export class DaemonManager implements DaemonManagerLike {
    * {@link tryJoinPeerDaemonAfterSpawnExit} poll out the full reachability budget
    * before failing, a delayed failure the prompt-failure invariant (#5878/#5904)
    * exists to prevent. The responding-listener case is handled directly by the
-   * {@link verifyDaemonConnection} join probe in that method, which returns success
-   * the instant the socket accepts — so a socket that actually has a listener is
-   * joined regardless of this gate, and a socket that does not is not waited on
-   * unless a live daemon process backs it.
+   * socket-first {@link probePeerSocketReachable} probe in that method, which returns
+   * success the instant the socket accepts — so a socket that actually has a listener is
+   * joined regardless of this gate, and a socket that does not is not waited on unless a
+   * live daemon process backs it.
    */
   private hasComingUpPeerDaemon(): boolean {
     try {
@@ -1882,20 +1912,6 @@ export class DaemonManager implements DaemonManagerLike {
       );
       return false;
     }
-  }
-
-  /**
-   * Whether the daemon socket path is worth a connect probe during the post-exit
-   * rejoin. On POSIX a Unix socket has a filesystem entry, so a missing path means
-   * nothing is listening yet and we skip the probe to avoid hammering a nonexistent
-   * socket with connect/backoff cycles. On Windows the socket is a NAMED PIPE with no
-   * filesystem entry — `existsSync` is always false there (mirroring
-   * {@link DaemonClient.isAvailable}'s `platform() !== "win32"` guard) — so skip the
-   * filesystem gate and let the connect attempt itself decide reachability, or a
-   * reachable Windows peer would never be probed or joined.
-   */
-  private socketPathWorthProbing(): boolean {
-    return process.platform === "win32" || existsSync(this.socketPath);
   }
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {

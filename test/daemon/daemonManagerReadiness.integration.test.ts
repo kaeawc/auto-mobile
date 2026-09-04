@@ -94,6 +94,23 @@ class FakeDaemonSpawner implements DaemonProcessSpawner {
   }
 }
 
+/**
+ * Injects the observation-only peer-reachability outcome for the post-exit rejoin
+ * (issue #6103), so the loop logic (socket-first join, process gate, deadline headroom)
+ * can be driven deterministically without a real socket. `peerReachable` decides each
+ * probe's result; `probeCalls` records how many probes ran (0 proves the rejoin was
+ * skipped).
+ */
+class RejoinProbeDaemonManager extends DaemonManager {
+  peerReachable: () => boolean = () => false;
+  probeCalls = 0;
+
+  protected override probePeerSocketReachable(_timeoutMs: number): Promise<boolean> {
+    this.probeCalls++;
+    return Promise.resolve(this.peerReachable());
+  }
+}
+
 describe("DaemonManager readiness", () => {
   const tempDirs: string[] = [];
   const servers: Server[] = [];
@@ -798,32 +815,16 @@ describe("DaemonManager readiness", () => {
     }
   });
 
-  test("joins a peer daemon that publishes the socket just after our subprocess exits (#6103)", async () => {
+  test("joins a peer daemon that becomes reachable just after our subprocess exits (#6103)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const spawner = new FakeDaemonSpawner();
-    // Our spawned child loses the socket-ownership race and exits 1; the race winner
-    // has bound the shared socket by then, so its inode is present.
-    spawner.onSpawn = (daemonProcess) => {
-      writeFileSync(socketPath, "peer socket placeholder");
-      daemonProcess.emit("exit", 1, null);
-    };
+    // Our spawned child loses the socket-ownership race and exits 1.
+    spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
-    // The peer's listener only starts accepting a beat later: the first readiness pass
-    // (up to READINESS_PROBE_MAX_ATTEMPTS clients) is refused and a later pass succeeds.
-    // Keying this off the probe count — which happens strictly during the rejoin, after
-    // the spawn is wired up — keeps ordering deterministic, rather than racing a
-    // pre-registered auto-advance timer against the spawner's own setImmediate.
-    let probeClientsCreated = 0;
-    const clients: ProbeClient[] = [];
-    const manager = new DaemonManager(
-      () => {
-        probeClientsCreated++;
-        const client = new ProbeClient(probeClientsCreated > READINESS_PROBE_MAX_ATTEMPTS);
-        clients.push(client);
-        return client;
-      },
+    const manager = new RejoinProbeDaemonManager(
+      undefined,
       undefined,
       fakeTimer,
       lockPath,
@@ -831,6 +832,9 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
     );
+    // The peer's listener only starts accepting a beat later: the observation-only
+    // socket probe is refused the first time and reachable on the second.
+    manager.peerReachable = () => manager.probeCalls >= 2;
 
     // No live daemon before we spawn (so start() spawns our own child), but a peer
     // daemon process is present afterwards while it finishes coming up.
@@ -846,13 +850,13 @@ describe("DaemonManager readiness", () => {
 
     try {
       await expect(manager.start()).resolves.toBeUndefined();
-      expect(clients.some((client) => client.connectCallCount > 0)).toBe(true);
+      expect(manager.probeCalls).toBeGreaterThanOrEqual(2);
       // We must never terminate the peer daemon we joined.
       expect(spawner.process.signals).toEqual([]);
-      // The expensive synchronous process scan runs once pre-spawn and once up front in
-      // the rejoin — NOT on every poll iteration (issue #6103). The join completes well
-      // within the coarse re-scan interval, so exactly two scans occur; a per-iteration
-      // scan would push this higher.
+      // The synchronous process scan runs once pre-spawn and once up front in the rejoin
+      // — NOT on every poll iteration (issue #6103). The join completes well within the
+      // coarse re-scan interval, so exactly two scans occur; a per-iteration scan would
+      // push this higher.
       expect(liveCalls).toBe(2);
     } finally {
       readySpy.mockRestore();
@@ -865,10 +869,10 @@ describe("DaemonManager readiness", () => {
     const fakeTimer = new FakeTimer();
     const spawner = new FakeDaemonSpawner();
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
-    spawner.onSpawn = (process) => process.emit("exit", 1, null);
+    spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
-    const manager = new DaemonManager(
-      () => new ProbeClient(false),
+    const manager = new RejoinProbeDaemonManager(
+      undefined,
       undefined,
       fakeTimer,
       lockPath,
@@ -876,7 +880,8 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
     );
-    // No socket inode is created and no live daemon exists, so nothing is coming up.
+    manager.peerReachable = () => false; // socket never reachable
+    // No live daemon exists, so nothing is coming up.
     const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
@@ -886,7 +891,8 @@ describe("DaemonManager readiness", () => {
       await expect(manager.start()).rejects.toThrow(
         /Daemon subprocess exited before becoming ready \(exit code 1\)[\s\S]*SQLITE_BUSY: database is locked/,
       );
-      // The genuine failure surfaces without arming any polling timer (no hang).
+      // Socket unreachable and no live peer process: fails without arming any polling
+      // timer (no hang).
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
       expect(fakeTimer.getPendingSleepCount()).toBe(0);
     } finally {
@@ -895,21 +901,15 @@ describe("DaemonManager readiness", () => {
     }
   });
 
-  test("fails promptly when only an orphaned socket inode remains after our subprocess exits (#6103)", async () => {
+  test("joins via the authoritative socket probe even when the process scan misses the peer (#6103)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
     const spawner = new FakeDaemonSpawner();
-    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
-    // A race winner bound the socket then died right after, leaving an orphaned
-    // socket inode with no listener — and our own child then exits 1.
-    spawner.onSpawn = (process) => {
-      writeFileSync(socketPath, "orphaned socket placeholder");
-      process.emit("exit", 1, null);
-    };
+    spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
-    const manager = new DaemonManager(
-      // No listener: every readiness probe refuses to connect.
-      () => new ProbeClient(false),
+    const manager = new RejoinProbeDaemonManager(
+      undefined,
       undefined,
       fakeTimer,
       lockPath,
@@ -917,21 +917,20 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
     );
-    // No live daemon process backs the orphaned socket, so nothing is coming up.
+    // The peer is already accepting on the socket...
+    manager.peerReachable = () => true;
+    // ...but the best-effort process scan never sees it (a transient miss). Socket
+    // reachability is authoritative, so the peer must still be joined — the scan result
+    // only governs whether to KEEP WAITING after a probe miss.
     const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
 
     try {
-      await expect(manager.start()).rejects.toThrow(
-        /Daemon subprocess exited before becoming ready \(exit code 1\)[\s\S]*SQLITE_BUSY: database is locked/,
-      );
-      // The bare inode must NOT hold the reachability budget: no probe backoff and
-      // no poll sleep are armed, so the failure is prompt (#5878/#5904).
-      expect(existsSync(socketPath)).toBe(true);
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
-      expect(fakeTimer.getPendingSleepCount()).toBe(0);
+      await expect(manager.start()).resolves.toBeUndefined();
+      expect(manager.probeCalls).toBeGreaterThanOrEqual(1);
+      expect(spawner.process.signals).toEqual([]);
     } finally {
       readySpy.mockRestore();
       findSpy.mockRestore();
@@ -944,23 +943,9 @@ describe("DaemonManager readiness", () => {
     fakeTimer.enableAutoAdvance();
     const spawner = new FakeDaemonSpawner();
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
-    // A socket inode and a live peer process both remain after our launch, so the
-    // rejoin's own gate would let it run — a FRESH-budget rejoin would probe the
-    // socket (populating `clients`). The ONLY reason nothing gets probed must be the
-    // exhausted deadline.
-    spawner.onSpawn = () => {
-      writeFileSync(socketPath, "peer socket placeholder");
-    };
 
-    const clients: ProbeClient[] = [];
-    const manager = new DaemonManager(
-      () => {
-        // Never becomes ready, so start() still rejects; whether it is even
-        // constructed is the discriminator for "did the rejoin run".
-        const client = new ProbeClient(false);
-        clients.push(client);
-        return client;
-      },
+    const manager = new RejoinProbeDaemonManager(
+      undefined,
       undefined,
       fakeTimer,
       lockPath,
@@ -968,7 +953,9 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
     );
-    // A live peer daemon process remains present after our launch.
+    // A reachable peer would be joined if probed — the ONLY reason nothing gets probed
+    // must be the exhausted deadline.
+    manager.peerReachable = () => true;
     let liveCalls = 0;
     const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
       liveCalls++;
@@ -982,10 +969,9 @@ describe("DaemonManager readiness", () => {
 
     try {
       await expect(manager.start()).rejects.toThrow(/Daemon failed to start within \d+ms/);
-      // Rejoin skipped: no readiness probe ran, so no fresh reachability wait was
-      // armed after the budget was already spent — the diagnostic is not pushed past
-      // the client deadline (#5878/#5904).
-      expect(clients).toHaveLength(0);
+      // Rejoin skipped: the socket was never probed, so no fresh reachability wait was
+      // armed after the budget was already spent (#5878/#5904).
+      expect(manager.probeCalls).toBe(0);
       expect(spawner.process.signals).toEqual(["SIGTERM"]);
     } finally {
       readySpy.mockRestore();
@@ -993,57 +979,56 @@ describe("DaemonManager readiness", () => {
     }
   });
 
-  test("probes and joins a Windows named-pipe peer that has no filesystem socket entry (#6103)", async () => {
-    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+  test("reserves delivery headroom: skips the near-deadline rejoin so the diagnostic beats the deadline (#6103)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const spawner = new FakeDaemonSpawner();
+    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
+    // Our child exits only near the deadline: it burns all but ~1s of the ~30s start
+    // budget, then exits 1. Scheduling the exit inside onSpawn (after the spawn is wired
+    // up) keeps ordering deterministic. This leaves a SMALL positive remainder under the
+    // start deadline — less than the delivery headroom — at the point of the rejoin.
+    spawner.onSpawn = (daemonProcess) => {
+      fakeTimer.setTimeout(
+        () => daemonProcess.emit("exit", 1, null),
+        DAEMON_STARTUP_TIMEOUT_MS - 1000,
+      );
+    };
+
+    const manager = new RejoinProbeDaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner,
+    );
+    // The socket never becomes reachable, and a live peer process is present — so a
+    // rejoin that ran would poll out its remaining budget and rethrow AT the deadline.
+    manager.peerReachable = () => false;
+    let liveCalls = 0;
+    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
+      liveCalls++;
+      return liveCalls <= 1 ? [] : [999999];
+    });
+    // Our launch never reports ready on its own — the delayed child exit is what ends it.
+    const readySpy = spyOn(manager, "waitForReady").mockImplementation(
+      () => new Promise<boolean>(() => {}),
+    );
+
     try {
-      const { lockPath, pidPath, socketPath } = createPaths();
-      const fakeTimer = new FakeTimer();
-      fakeTimer.enableAutoAdvance();
-      const spawner = new FakeDaemonSpawner();
-      // Our child loses the race and exits 1; the peer is a reachable Windows named
-      // pipe with NO filesystem entry (writeFileSync is never called for socketPath).
-      spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
-
-      const clients: ProbeClient[] = [];
-      const manager = new DaemonManager(
-        () => {
-          const client = new ProbeClient(true);
-          clients.push(client);
-          return client;
-        },
-        undefined,
-        fakeTimer,
-        lockPath,
-        pidPath,
-        socketPath,
-        spawner,
+      await expect(manager.start()).rejects.toThrow(
+        /Daemon subprocess exited before becoming ready \(exit code 1\)[\s\S]*SQLITE_BUSY: database is locked/,
       );
-      let liveCalls = 0;
-      const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
-        liveCalls++;
-        return liveCalls <= 1 ? [] : [999999];
-      });
-      const readySpy = spyOn(manager, "waitForReady").mockImplementation(
-        () => new Promise<boolean>(() => {}),
-      );
-
-      try {
-        // No filesystem socket entry exists, yet the reachable named-pipe peer must
-        // still be probed and joined rather than waited out (the existsSync gate would
-        // be permanently false on Windows).
-        expect(existsSync(socketPath)).toBe(false);
-        await expect(manager.start()).resolves.toBeUndefined();
-        expect(clients.some((client) => client.connectCallCount > 0)).toBe(true);
-        expect(spawner.process.signals).toEqual([]);
-      } finally {
-        readySpy.mockRestore();
-        liveSpy.mockRestore();
-      }
+      // Skipped even though positive time remained (unlike the fully-exhausted case),
+      // because that remainder was below the delivery-headroom reserve — so the
+      // diagnostic is delivered with headroom rather than raced against the deadline.
+      expect(manager.probeCalls).toBe(0);
     } finally {
-      if (originalPlatform) {
-        Object.defineProperty(process, "platform", originalPlatform);
-      }
+      readySpy.mockRestore();
+      liveSpy.mockRestore();
     }
   });
 
@@ -1054,8 +1039,8 @@ describe("DaemonManager readiness", () => {
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
-    const manager = new DaemonManager(
-      () => new ProbeClient(false),
+    const manager = new RejoinProbeDaemonManager(
+      undefined,
       undefined,
       fakeTimer,
       lockPath,
@@ -1063,6 +1048,7 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
     );
+    manager.peerReachable = () => false; // socket not reachable
     // Pre-spawn inspection succeeds (empty, so we spawn), but the recovery-path
     // inspection throws transiently.
     let findCalls = 0;
@@ -1089,7 +1075,7 @@ describe("DaemonManager readiness", () => {
       expect(surfaced).toMatch(/Daemon subprocess exited before becoming ready \(exit code 1\)/);
       expect(surfaced).toContain("SQLITE_BUSY: database is locked");
       expect(surfaced).not.toContain("Failed to inspect daemon process table");
-      // Recovery gave up immediately on the inspection failure — no poll armed.
+      // Recovery gave up without arming a poll after the inspection failure.
       expect(fakeTimer.getPendingSleepCount()).toBe(0);
     } finally {
       readySpy.mockRestore();

@@ -234,14 +234,38 @@ function describeStatusBarOnlyCapture(
 }
 
 /**
- * The service's own incomplete-capture signal (issue #6151), for the freshness
- * `unavailable` path: a rootless payload never reaches the status-bar geometry
- * gate, so this is what lets the verdict still name the unreadable focused window.
+ * The service's own incomplete-capture signal (issue #6151), scoped to whether it
+ * actually pertains to the SELECTED/focused window.
+ *
+ * `ctrlProxyIncomplete` on the wire is a single, generic flag: CtrlProxy sets it
+ * whenever ANY active window was rootless, including an unrelated active
+ * SystemUI/overlay window that has nothing to do with the focused application
+ * (#6151 follow-up). Converting that flag unconditionally into a retracted
+ * verdict over-corrects: a perfectly good, verified focused-app hierarchy would
+ * be reported `verified: false` / `isFresh: false` on every observe that happens
+ * to catch a transient rootless overlay elsewhere on screen.
+ *
+ * Correlate it the same way `resolveStatusBarOnlyHierarchy` correlates a
+ * wrong-window capture: the observed package is the selected window's own
+ * identity, so when it matches the device's current foreground app, that
+ * window's content is trustworthy and the flag does not describe it — do not
+ * retract. It only describes the selected window when the observed package is
+ * absent or does not match the foreground app (a substituted window from the
+ * incomplete-capture fallback, or no content at all) — the genuine #6151 case,
+ * where the focused app's OWN root was null.
  */
 function describeIncompleteCapture(
   hierarchy: ObserveResult["viewHierarchy"],
+  foreground: string | undefined,
 ): { sdkInt: number | undefined } | undefined {
-  return hierarchy?.ctrlProxyIncomplete === true ? { sdkInt: hierarchy.sdkInt } : undefined;
+  if (hierarchy?.ctrlProxyIncomplete !== true) {
+    return undefined;
+  }
+  const observed = hierarchy.packageName;
+  if (foreground !== undefined && observed !== undefined && observed === foreground) {
+    return undefined;
+  }
+  return { sdkInt: hierarchy.sdkInt };
 }
 
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
@@ -654,7 +678,10 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
-        incompleteCapture: describeIncompleteCapture(result.viewHierarchy),
+        incompleteCapture: describeIncompleteCapture(
+          result.viewHierarchy,
+          await foregroundIdentity,
+        ),
       });
 
       // Cache the result for future use

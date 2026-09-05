@@ -857,6 +857,34 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).not.toContain("isAccessibilityTool");
   });
 
+  test("REGRESSION: does not retract freshness when an unrelated overlay is rootless but the focused app is fully readable (#6151 follow-up)", async () => {
+    // `ctrlProxyIncomplete` is a generic wire flag: CtrlProxy sets it whenever ANY active
+    // window was rootless, including a transient SystemUI/overlay window that has nothing to
+    // do with the focused application. Here the captured hierarchy IS the focused app's own,
+    // full content (package matches the foreground app), so the flag must not retract
+    // freshness — that would be an over-correction of the real #6151 fix.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      ctrlProxyIncomplete: true,
+      sdkInt: 34,
+    });
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+
+    const screen = makeScreen(viewHierarchy, fakeAdb);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {
     // The parallel foreground sample lags the newer captured hierarchy during an
     // A→B transition: sample1 = the old app, observed hierarchy = the new app.

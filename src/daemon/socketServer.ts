@@ -18,6 +18,7 @@ import {
   SOCKET_PATH,
   DAEMON_HANDSHAKE_ENABLED,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_HEARTBEAT_METHOD,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
@@ -659,6 +660,21 @@ export class UnixSocketServer {
         type: "mcp_response",
         success: true,
         result: { subscribed: true },
+      };
+    }
+
+    // Bound-session keepalive must never wait behind an in-flight tools/call on the same
+    // socket: a queued heartbeat can lose the race with the session's heartbeat-timeout
+    // during a long unattributed acquisition (e.g. startDevice for a second device), and the
+    // session gets reaped out from under a still-live client (issue #6135). It touches only
+    // SessionManager's heartbeat bookkeeping, so answering it out-of-band here does not
+    // reorder anything tool calls observe.
+    if (request.method === DAEMON_HEARTBEAT_METHOD) {
+      const daemonResponse = await handleDaemonRequest(request, this.daemonState);
+      return {
+        id: request.id,
+        type: "mcp_response",
+        ...daemonResponse,
       };
     }
 

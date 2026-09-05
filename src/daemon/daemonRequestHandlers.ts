@@ -2,7 +2,7 @@ import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
-import { DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
+import { DAEMON_HEARTBEAT_METHOD, DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -88,7 +88,7 @@ export async function handleDaemonRequest(
   }
 
   switch (request.method) {
-    case "daemon/heartbeat": {
+    case DAEMON_HEARTBEAT_METHOD: {
       const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
       if (!sessionId) {
         return {

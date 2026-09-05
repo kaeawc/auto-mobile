@@ -226,6 +226,16 @@ export const DAEMON_BOUND_SESSION_REPLAY_TTL_MS = 30 * 60 * 1000;
 export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notifications";
 
 /**
+ * Bound-session keepalive method. Must be answered immediately, never queued
+ * behind an in-flight `tools/call` on the same socket: the MCP proxy's keeper
+ * sends this over the same `DaemonClient` socket used for tool forwarding, so
+ * head-of-line blocking behind a long acquisition call (e.g. `startDevice` for
+ * a second device) can starve the heartbeat past the session's
+ * heartbeat-timeout and get it reaped (issue #6135).
+ */
+export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
+
+/**
  * Control-socket method returning the current `deviceId (serial/UDID) ↔
  * deviceSessionUuid` map from the daemon's `DeviceSessionRegistry`. Lets a
  * stream consumer resolve a serial to its stable connection-epoch identity

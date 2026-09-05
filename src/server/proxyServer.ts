@@ -211,7 +211,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   });
 
   // Register tools/call handler - forward to daemon
-  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const name = request.params.name;
     const args = (request.params.arguments || {}) as Record<string, unknown>;
 
@@ -221,8 +221,32 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
 
     logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
 
+    // Echo the CLIENT's own progress token through the daemon round trip
+    // (issue #6205) — the direct server (#6118) already refuses to fabricate
+    // one, and the proxy must not either: relay a tick only when the client
+    // asked, tagged with that SAME token.
+    const requestProgressToken = extra._meta?.progressToken;
+    const onProgress =
+      requestProgressToken !== undefined
+        ? (progress: number, total?: number, message?: string): void => {
+            extra
+              .sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken: requestProgressToken,
+                  progress,
+                  total,
+                  ...(message && { message }),
+                },
+              })
+              .catch((error: unknown) => {
+                logger.warn(`[ProxyServer] Failed to relay progress notification: ${error}`);
+              });
+          }
+        : undefined;
+
     try {
-      const result = await proxy.callTool(name, args);
+      const result = await proxy.callTool(name, args, requestProgressToken, onProgress);
       return result;
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

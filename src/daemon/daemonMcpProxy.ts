@@ -19,7 +19,7 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
 } from "./constants";
-import type { DaemonNotification, DaemonOptions } from "./types";
+import { PROGRESS_NOTIFICATION_METHOD, type DaemonNotification, type DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
@@ -273,6 +273,17 @@ export class DaemonToolUnavailableError extends Error {
     this.daemonBuildId = params.daemon.buildId;
   }
 }
+
+/**
+ * Callback for a relayed `notifications/progress` tick (issue #6205), mirroring
+ * `ProgressCallback` in `src/server/toolRegistry.ts` without importing the
+ * server's tool-registry module from the daemon layer.
+ */
+export type DaemonProxyProgressCallback = (
+  progress: number,
+  total?: number,
+  message?: string,
+) => void;
 
 /**
  * Configuration for the DaemonMcpProxy
@@ -732,6 +743,12 @@ export class DaemonMcpProxy {
   // Listeners for daemon-forwarded list-changed notifications (issue #3223),
   // fired after the matching cache is invalidated so a re-fetch is never stale.
   private readonly listChangedListeners = new Set<(kind: ListChangedKind) => void>();
+  // In-flight `callTool` progress callbacks keyed by the client's own
+  // progressToken (issue #6205) — registered just before forwarding and
+  // removed in the call's `finally`, so a relayed `notifications/progress`
+  // frame is routed to the right caller purely by echoing that token, with no
+  // daemon-fabricated correlation id needed.
+  private readonly progressListeners = new Map<string | number, DaemonProxyProgressCallback>();
   // Releases this proxy's handler on the current client. Needed because a
   // clientFactory may return a shared/reused client (test fakes do); without it
   // every reconnect would stack another handler on that client.
@@ -964,6 +981,11 @@ export class DaemonMcpProxy {
       return;
     }
 
+    if (notification.method === PROGRESS_NOTIFICATION_METHOD) {
+      this.handleProgressNotification(notification);
+      return;
+    }
+
     const kind = listChangedKindForMethod(notification.method);
     if (kind === undefined) {
       // Unknown pushed methods are expected as the daemon grows new
@@ -991,6 +1013,30 @@ export class DaemonMcpProxy {
         // break cache invalidation or sibling listeners.
         logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
       }
+    }
+  }
+
+  // Route a relayed `notifications/progress` frame to the caller that
+  // registered for its token (issue #6205). A token with no registered
+  // listener (the call already completed, or a stray/unexpected frame) is
+  // silently dropped — never surfaced as an error, since a race between the
+  // final tick and call completion is expected.
+  private handleProgressNotification(notification: DaemonNotification): void {
+    if (notification.progressToken === undefined || notification.progress === undefined) {
+      return;
+    }
+    const listener = this.progressListeners.get(notification.progressToken);
+    if (!listener) {
+      return;
+    }
+    try {
+      listener(notification.progress, notification.total, notification.message);
+    } catch (error) {
+      // Best-effort: a throwing progress consumer must never break the
+      // notification channel or the in-flight tool call it belongs to.
+      logger.warn(
+        `[DaemonMcpProxy] progress listener failed for token ${notification.progressToken}: ${error}`,
+      );
     }
   }
 
@@ -1633,9 +1679,18 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Call a tool on the daemon
+   * Call a tool on the daemon. `progressToken` echoes the external MCP
+   * client's own `params._meta.progressToken` (issue #6205); when present it
+   * is forwarded to the daemon so `notifications/progress` ticks relayed back
+   * over the socket can be routed to `onProgress`, tagged with that SAME
+   * token. Omit both to request no progress relay — nothing is fabricated.
    */
-  async callTool(name: string, args: Record<string, unknown>): Promise<any> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    progressToken?: string | number,
+    onProgress?: DaemonProxyProgressCallback,
+  ): Promise<any> {
     // Device-session acquisition (getAndroid/getApple/startDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
@@ -1659,11 +1714,14 @@ export class DaemonMcpProxy {
     // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
+    if (progressToken !== undefined && onProgress) {
+      this.progressListeners.set(progressToken, onProgress);
+    }
     try {
       const result = await this.withRecoverableReconnect(
         () => {
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-          return this.client!.callTool(name, forwardedArgs);
+          return this.client!.callTool(name, forwardedArgs, progressToken);
         },
         forwardedSessionUuid,
         // Acquisition is admitted while fenced; the terminal fence is cleared once
@@ -1713,6 +1771,9 @@ export class DaemonMcpProxy {
       throw error;
     } finally {
       this.releaseReleaseEpochReference(forwardedSessionUuid);
+      if (progressToken !== undefined) {
+        this.progressListeners.delete(progressToken);
+      }
     }
   }
 

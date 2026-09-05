@@ -476,13 +476,24 @@ export class DaemonClient {
   }
 
   /**
-   * Call a tool on the daemon
+   * Call a tool on the daemon. `progressToken` echoes the MCP client's own
+   * `params._meta.progressToken` (issue #6205) so the daemon can relay
+   * `notifications/progress` ticks back tagged with that SAME token — omit it
+   * to request no progress relay, never fabricate one downstream.
    */
-  async callTool(toolName: string, params: Record<string, any>): Promise<any> {
-    return this.sendRequest("tools/call", {
-      name: toolName,
-      arguments: params,
-    });
+  async callTool(
+    toolName: string,
+    params: Record<string, any>,
+    progressToken?: string | number,
+  ): Promise<any> {
+    return this.sendRequest(
+      "tools/call",
+      {
+        name: toolName,
+        arguments: params,
+      },
+      progressToken,
+    );
   }
 
   /**
@@ -492,7 +503,11 @@ export class DaemonClient {
     return this.sendRequest("resources/read", { uri, ...params });
   }
 
-  private async sendRequest(method: string, params: Record<string, any>): Promise<any> {
+  private async sendRequest(
+    method: string,
+    params: Record<string, any>,
+    progressToken?: string | number,
+  ): Promise<any> {
     // Ensure we're connected
     if (!this.connected) {
       await this.connect();
@@ -505,6 +520,7 @@ export class DaemonClient {
       type: "mcp_request",
       method,
       params,
+      ...(progressToken !== undefined ? { progressToken } : {}),
       ...this.handshakeFields(),
     };
 
@@ -617,7 +633,11 @@ export class DaemonClient {
 export interface DaemonClientLike {
   connect(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
-  callTool(toolName: string, params: Record<string, any>): Promise<any>;
+  callTool(
+    toolName: string,
+    params: Record<string, any>,
+    progressToken?: string | number,
+  ): Promise<any>;
   readResource(uri: string, params?: Record<string, any>): Promise<any>;
   callDaemonMethod(method: string, params: Record<string, any>): Promise<any>;
   /**

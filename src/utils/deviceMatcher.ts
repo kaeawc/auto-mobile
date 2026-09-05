@@ -128,18 +128,21 @@ function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCrit
   return item.platform === criteria.platform;
 }
 
-function matchesVersionRange(item: { osVersion?: string }, criteria: DeviceMatchCriteria): boolean {
+function matchesVersionRange(
+  item: { platform: Platform; osVersion?: string },
+  criteria: DeviceMatchCriteria,
+): boolean {
   const version = item.osVersion;
   const meetsMinimum =
     !criteria.minOsVersion ||
-    Boolean(version && compareVersionToBound(version, criteria.minOsVersion) >= 0);
+    Boolean(version && compareVersionToBound(version, criteria.minOsVersion, item.platform) >= 0);
   const meetsMaximum =
     !criteria.maxOsVersion ||
-    Boolean(version && compareVersionToBound(version, criteria.maxOsVersion) <= 0);
+    Boolean(version && compareVersionToBound(version, criteria.maxOsVersion, item.platform) <= 0);
   return meetsMinimum && meetsMaximum;
 }
 
-function compareVersionToBound(version: string, bound: string): number {
+function compareVersionToBound(version: string, bound: string, platform: Platform): number {
   const parsedVersion = parseDeviceVersion(version);
   const parsedBound = parseDeviceVersion(bound);
   if (parsedVersion && parsedBound) {
@@ -151,7 +154,12 @@ function compareVersionToBound(version: string, bound: string): number {
     // instead of zero-padding the bound out to the version's length --
     // keeps "8.1" equal to "8", so a matcher against maxOsVersion:"8"
     // accepts an AVD that provisioning widened to 8.1 instead of rejecting
-    // it and re-provisioning forever.
+    // it and re-provisioning forever. This API-level range expansion is an
+    // Android-only concept (there is no iOS equivalent table), so the
+    // widening is gated to platform === "android" -- an iOS maxOsVersion of
+    // "17" is an exact inclusive maximum and "17.6" is genuinely newer and
+    // must be rejected, not treated as "every 17.x" (regression caught in
+    // review).
     //
     // A bound with its own dotted precision (e.g. "17.2") is NOT widened
     // this way: it names an exact inclusive endpoint, so "17.2.1" must
@@ -168,6 +176,7 @@ function compareVersionToBound(version: string, bound: string): number {
     // arbitrary numeric versions is out of scope here -- see the tracking
     // issue linked from the PR body).
     const isMajorOnlyBound =
+      platform === "android" &&
       parsedBound.components.length === 1 &&
       parsedBound.letter === undefined &&
       parsedBound.qpr === undefined;

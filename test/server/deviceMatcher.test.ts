@@ -149,6 +149,33 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("1");
   });
 
+  it("rejects a point release under a major-only iOS maxOsVersion bound (does not widen)", () => {
+    // The major-only widening/truncation exists only to mirror Android's
+    // API-level range expansion (#6132) -- there is no iOS equivalent
+    // table. An iOS maxOsVersion of "17" is an exact inclusive maximum, so
+    // a simulator running 17.6 is genuinely newer and must be rejected, not
+    // treated as "every 17.x" the way Android's "8" spans 8.0-8.1.
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17.6" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("accepts an exact match under a major-only iOS maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
   it("accepts a device below a lettered maxOsVersion bound (Android 12L, #6132 follow-up)", () => {
     // maxOsVersion "12L" resolves to exactly API 32 in AvdConfigReader's
     // table. If only android-31 is installed, provisioning falls back to

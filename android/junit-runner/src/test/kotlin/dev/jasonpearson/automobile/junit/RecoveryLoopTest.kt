@@ -325,8 +325,14 @@ private class RecoveryFakeAutoMobileAgent(recoveryEnabled: Boolean = true) :
   var recoveryOutcome: RecoveryOutcome = RecoveryOutcome(success = false, recoveryTimeMs = 0)
   val recoveryCalls = mutableListOf<FailedStepContext>()
 
-  override fun attemptAiRecovery(context: FailedStepContext): RecoveryOutcome {
+  val recoverySecretValues = mutableListOf<List<String>>()
+
+  override fun attemptAiRecovery(
+    context: FailedStepContext,
+    secretValues: List<String>,
+  ): RecoveryOutcome {
     recoveryCalls.add(context)
+    recoverySecretValues.add(secretValues)
     return recoveryOutcome
   }
 }

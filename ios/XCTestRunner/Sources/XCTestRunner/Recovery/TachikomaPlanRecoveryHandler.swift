@@ -86,8 +86,22 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
                 + "with model \(modelConfig.modelName), budget \(maxToolCalls) tool calls..."
         )
 
+        // Normalize the context's concrete secret values into every scrub form (NFC/NFD + the
+        // transport-encoding depths) HERE, at the recovery entry point, so the loop is safe no matter
+        // whether a caller passed raw or pre-expanded values (issue #6094): `FailedStepContext` is a
+        // public type, so a direct caller could set raw concrete values, and matching only those would
+        // miss the escaped representation in JSON tool results. Idempotent for the executor's already-
+        // expanded input (dedup collapses the repeats).
+        let secretValues = SecretRedaction.secretValues(context.secretValues)
+
         do {
-            try runAgentLoop(context: context, responder: responder, settings: modelSettings(for: modelConfig), maxToolCalls: maxToolCalls)
+            try runAgentLoop(
+                context: context,
+                responder: responder,
+                settings: modelSettings(for: modelConfig),
+                maxToolCalls: maxToolCalls,
+                secretValues: secretValues
+            )
         } catch {
             logger.warn("AI recovery execution failed: \(error)")
             return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
@@ -97,7 +111,7 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         // Android: success == a post-recovery observe returned something. The resumed step is the real
         // check of whether recovery actually worked.
         logger.info("AI recovery agent finished, verifying device state...")
-        let observeResult = observeDeviceState(context: context)
+        let observeResult = observeDeviceState(context: context, secretValues: secretValues)
         return RecoveryOutcome(
             success: observeResult != nil,
             recoveryTimeMs: elapsedMs(since: start),
@@ -111,11 +125,20 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         context: FailedStepContext,
         responder: ModelResponding,
         settings: ModelSettings,
-        maxToolCalls: Int
-    ) throws {
+        maxToolCalls: Int,
+        secretValues: [String]
+    )
+        throws
+    {
         let tools = Self.buildToolDefinitions()
+        // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
+        // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path; it
+        // makes the public entry point self-contained, so a direct caller who supplies raw context
+        // fields cannot leak them in the first ModelRequest. Routing fields stay real — `executeTool`
+        // reads the ORIGINAL `context` for platform/session/device.
+        let promptContext = Self.redactContext(context, secretValues: secretValues)
         var messages: [Message] = [
-            .user(content: .text(Self.buildRecoveryPrompt(context: context, maxToolCalls: maxToolCalls))),
+            .user(content: .text(Self.buildRecoveryPrompt(context: promptContext, maxToolCalls: maxToolCalls))),
         ]
 
         var toolCallsUsed = 0
@@ -155,7 +178,12 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
                     continue
                 }
                 toolCallsUsed += 1
-                let resultText = executeTool(name: call.function.name, argumentsJSON: call.function.arguments, context: context)
+                let resultText = executeTool(
+                    name: call.function.name,
+                    argumentsJSON: call.function.arguments,
+                    context: context,
+                    secretValues: secretValues
+                )
                 messages.append(.tool(toolCallId: call.id, content: resultText))
             }
         }
@@ -167,7 +195,14 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
 
     // MARK: - Tool execution over the AutoMobile MCP client
 
-    private func executeTool(name: String, argumentsJSON: String, context: FailedStepContext) -> String {
+    private func executeTool(
+        name: String,
+        argumentsJSON: String,
+        context: FailedStepContext,
+        secretValues: [String]
+    )
+        -> String
+    {
         var arguments = Self.parseArguments(argumentsJSON)
         // Required routing fields are injected by us, not trusted from the model, so every recovery
         // call is valid and targets the same platform/session/device as the plan.
@@ -184,14 +219,20 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
 
         do {
             let response = try mcpClient.callTool(name: name, arguments: arguments, timeout: timeoutSeconds)
-            return response.text
+            // The tool EXECUTED against the device with real values above; only the RESULT TEXT that
+            // re-enters the next ModelRequest is scrubbed, so a secret still visible on-screen at
+            // recovery time cannot reach the LLM provider through the agent loop (issue #6094).
+            return SecretRedaction.redact(response.text, secretValues: secretValues)
         } catch {
             logger.warn("Recovery tool \(name) failed: \(error)")
-            return "{\"error\":\"\(Self.escapeForJSON(String(describing: error)))\"}"
+            // The error can echo on-screen/tool content, so scrub it too before it enters the
+            // transcript (issue #6094).
+            let message = SecretRedaction.redact(String(describing: error), secretValues: secretValues)
+            return "{\"error\":\"\(Self.escapeForJSON(message))\"}"
         }
     }
 
-    private func observeDeviceState(context: FailedStepContext) -> String? {
+    private func observeDeviceState(context: FailedStepContext, secretValues: [String]) -> String? {
         var arguments: [String: Any] = ["platform": context.platform]
         if let session = context.sessionUuid {
             arguments["sessionUuid"] = session
@@ -201,7 +242,9 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         }
         do {
             let response = try mcpClient.callTool(name: "observe", arguments: arguments, timeout: timeoutSeconds)
-            return response.text
+            // Post-recovery liveness observe. Its text can carry an on-screen secret, so scrub it
+            // before it is surfaced as the recovery result (issue #6094).
+            return SecretRedaction.redact(response.text, secretValues: secretValues)
         } catch {
             logger.warn("Post-recovery observe failed: \(error)")
             return nil
@@ -218,6 +261,32 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
     with a better selector). Do not try to complete the whole test — only fix the immediate blocker so \
     the next step can run. When the device is ready, stop and briefly say what you did.
     """
+
+    /// A copy of `context` with every field that reaches the initial prompt scrubbed of secret
+    /// values (#6094). Routing fields (`platform`/`sessionUuid`/`deviceId`) and `secretValues` are
+    /// preserved unchanged. A no-op when there is nothing to redact.
+    static func redactContext(_ context: FailedStepContext, secretValues: [String]) -> FailedStepContext {
+        guard !secretValues.isEmpty else {
+            return context
+        }
+        return FailedStepContext(
+            failedStepIndex: context.failedStepIndex,
+            failedTool: SecretRedaction.redact(context.failedTool, secretValues: secretValues),
+            error: SecretRedaction.redact(context.error, secretValues: secretValues),
+            succeededSteps: context.succeededSteps.map {
+                SucceededStepSummary(
+                    stepIndex: $0.stepIndex,
+                    tool: SecretRedaction.redact($0.tool, secretValues: secretValues)
+                )
+            },
+            planContent: SecretRedaction.redact(context.planContent, secretValues: secretValues),
+            platform: context.platform,
+            sessionUuid: context.sessionUuid,
+            deviceId: context.deviceId,
+            failureObservation: SecretRedaction.redact(context.failureObservation, secretValues: secretValues),
+            secretValues: context.secretValues
+        )
+    }
 
     static func buildRecoveryPrompt(context: FailedStepContext, maxToolCalls: Int) -> String {
         let succeeded: String
@@ -361,7 +430,9 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         description: String,
         properties: [String: ParameterSchema],
         required: [String]
-    ) -> ToolDefinition {
+    )
+        -> ToolDefinition
+    {
         ToolDefinition(
             function: FunctionDefinition(
                 name: name,

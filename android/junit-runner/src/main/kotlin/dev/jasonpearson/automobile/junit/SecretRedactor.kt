@@ -23,19 +23,58 @@ internal object SecretRedactor {
 
   /**
    * Expand the executor-supplied concrete secret strings into the exact forms to scrub: each value
-   * in its NFC and NFD Unicode forms, so a decomposed on-screen/error occurrence still matches a
-   * composed value (and vice versa). Blank inputs are dropped; the result is deduped preserving
-   * order.
+   * in its NFC and NFD Unicode forms (so a decomposed on-screen/error occurrence still matches a
+   * composed value and vice versa) and, for each, its JSON-string-escaped form (the recovery loop's
+   * tool/observe results are JSON — issue #6094 — so a secret with a JSON-special character appears
+   * only escaped there). Blank inputs are dropped; the result is deduped preserving order.
    */
   fun secretValues(concreteValues: List<String>): List<String> {
     val values = LinkedHashSet<String>()
     for (value in concreteValues) {
       if (value.isEmpty()) continue
-      values.add(value)
-      values.add(Normalizer.normalize(value, Normalizer.Form.NFC))
-      values.add(Normalizer.normalize(value, Normalizer.Form.NFD))
+      for (form in
+        listOf(
+          value,
+          Normalizer.normalize(value, Normalizer.Form.NFC),
+          Normalizer.normalize(value, Normalizer.Form.NFD),
+        )) {
+        // The recovery loop's tool/observe results are JSON (issue #6094), so a secret containing a
+        // JSON-special character (`"`, `\`, newline, tab, CR) appears only escaped there and the
+        // literal replace would miss it. Android additionally reserializes the enclosing MCP
+        // `JsonElement` over an already-encoded `content[].text` (`DefaultMCPClient.callTool`), so
+        // the value can be DOUBLE-escaped. Scrub raw + single + double; a no-op escape equals its
+        // predecessor and is deduped away.
+        var encoded = form
+        repeat(3) {
+          values.add(encoded)
+          encoded = jsonEscape(encoded)
+        }
+      }
     }
     return values.toList()
+  }
+
+  /**
+   * The JSON-string-escaped form of [value] (its inner content, without surrounding quotes),
+   * covering the short escapes every JSON serializer agrees on plus lowercase `\uXXXX` for other
+   * control characters. Used to also scrub a secret that reaches the recovery loop inside a JSON
+   * tool/observe result (#6094).
+   */
+  fun jsonEscape(value: String): String = buildString {
+    for (character in value) {
+      when (character) {
+        '"' -> append("\\\"")
+        '\\' -> append("\\\\")
+        '\n' -> append("\\n")
+        '\r' -> append("\\r")
+        '\t' -> append("\\t")
+        '\b' -> append("\\b")
+        '\u000C' -> append("\\f")
+        else ->
+          if (character < ' ') append("\\u" + character.code.toString(16).padStart(4, '0'))
+          else append(character)
+      }
+    }
   }
 
   /** Stringify a parameter value exactly as [AutoMobilePlanExecutor] does during substitution. */
@@ -56,7 +95,12 @@ internal object SecretRedactor {
     if (secretValues.isEmpty()) return text
     var redacted = text
     for (value in secretValues.sortedByDescending { it.length }) {
-      if (value.isNotEmpty()) redacted = redacted.replace(value, PLACEHOLDER)
+      if (value.isEmpty()) continue
+      // If the secret is itself a substring of the placeholder (e.g. a secret value of "REDACTED"
+      // or "***REDACTED***"), substituting the placeholder would reintroduce the secret — so remove
+      // it instead, guaranteeing it cannot survive in the result (#6094).
+      val replacement = if (PLACEHOLDER.contains(value)) "" else PLACEHOLDER
+      redacted = redacted.replace(value, replacement)
     }
     return redacted
   }

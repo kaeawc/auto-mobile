@@ -16,16 +16,57 @@ enum SecretRedaction {
     static let placeholder = "***REDACTED***"
 
     /// Expand the executor-supplied concrete secret strings into the exact byte forms to scrub: each
-    /// value in its NFC and NFD Unicode forms, so a decomposed on-screen/error occurrence still
-    /// matches a composed value (and vice versa). Blank inputs are dropped. Dedup is by UTF-16 code
-    /// units, NOT `Set<String>`, because Swift string equality is canonical and would collapse the
-    /// distinct forms we deliberately keep.
+    /// value in its NFC and NFD Unicode forms — so a decomposed on-screen/error occurrence still
+    /// matches a composed value (and vice versa) — and, for each of those, its JSON-string-escaped
+    /// form. The recovery loop's tool/observe results are JSON (issue #6094), so a secret containing
+    /// a JSON-special character (`"`, `\`, newline, tab, CR) appears only in escaped form there and
+    /// the literal `redact` would miss it. Blank inputs are dropped. Dedup is by UTF-16 code units,
+    /// NOT `Set<String>`, because Swift string equality is canonical and would collapse the distinct
+    /// forms we deliberately keep (a no-op escape equals its raw form and is dropped by dedup).
     static func secretValues(_ concreteValues: [String]) -> [String] {
         var result: [String] = []
         var seen: Set<[UInt16]> = []
         for value in concreteValues where !value.isEmpty {
-            for form in normalizationForms(of: value) where seen.insert(Array(form.utf16)).inserted {
-                result.append(form)
+            for form in normalizationForms(of: value) {
+                // Cover the raw value and its JSON-escaped forms through the transport-encoding depth
+                // the runners actually apply: iOS surfaces one encoding layer, and Android reserializes
+                // the enclosing MCP `JsonElement` over an already-encoded `content[].text`, so a
+                // special-character secret can appear double-escaped (#6094). Raw + single + double
+                // covers all three; a no-op escape equals its predecessor and is dropped by dedup.
+                var encoded = form
+                for _ in 0 ..< 3 {
+                    if seen.insert(Array(encoded.utf16)).inserted {
+                        result.append(encoded)
+                    }
+                    encoded = jsonEscaped(encoded)
+                }
+            }
+        }
+        return result
+    }
+
+    /// The JSON-string-escaped form of `value` (its inner content, without surrounding quotes),
+    /// covering the short escapes every JSON serializer agrees on plus lowercase `\uXXXX` for other
+    /// control characters (matching `JSON.stringify`). Used to also scrub a secret that reaches the
+    /// recovery loop inside a JSON tool/observe result (#6094). A value with no JSON-special
+    /// character escapes to itself and is deduped away by the caller.
+    static func jsonEscaped(_ value: String) -> String {
+        var result = ""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\"": result += "\\\""
+            case "\\": result += "\\\\"
+            case "\n": result += "\\n"
+            case "\r": result += "\\r"
+            case "\t": result += "\\t"
+            case "\u{08}": result += "\\b"
+            case "\u{0C}": result += "\\f"
+            default:
+                if scalar.value < 0x20 {
+                    result += String(format: "\\u%04x", scalar.value)
+                } else {
+                    result.unicodeScalars.append(scalar)
+                }
             }
         }
         return result
@@ -43,7 +84,11 @@ enum SecretRedaction {
         }
         var redacted = text
         for value in secretValues.sorted(by: { $0.utf16.count > $1.utf16.count }) where !value.isEmpty {
-            redacted = redacted.replacingOccurrences(of: value, with: placeholder, options: [.literal])
+            // If the secret is itself a substring of the placeholder (e.g. a secret value of
+            // "REDACTED" or "***REDACTED***"), substituting the placeholder would reintroduce the
+            // secret — so remove it instead, guaranteeing it cannot survive in the result (#6094).
+            let replacement = placeholder.contains(value) ? "" : placeholder
+            redacted = redacted.replacingOccurrences(of: value, with: replacement, options: [.literal])
         }
         return redacted
     }

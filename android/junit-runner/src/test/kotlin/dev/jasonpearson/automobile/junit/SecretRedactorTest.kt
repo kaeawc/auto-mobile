@@ -4,6 +4,10 @@ import java.text.Normalizer
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Test
 
 /**
@@ -298,5 +302,79 @@ class SecretRedactorTest {
       "unchanged",
       SecretRedactor.redact("unchanged", SecretRedactor.secretValues(listOf(""))),
     )
+  }
+
+  @Test
+  fun `redacts the singly JSON-escaped form of a secret in a tool result`() {
+    // The recovery loop's tool/observe results are JSON (issue #6094). A secret with a JSON-special
+    // character appears there only in escaped form, which the literal raw value would not match.
+    val secret = "pa\"ss\\word\nline"
+    val values = SecretRedactor.secretValues(listOf(secret))
+    // A singly JSON-encoded result (e.g. iOS's single transport layer).
+    val toolResultJson = """{"field":"token pa\"ss\\word\nline"}"""
+    assertFalse(
+      toolResultJson.contains(secret),
+      "precondition: the raw secret is not literally present",
+    )
+    val result = SecretRedactor.redact(toolResultJson, values)
+    assertTrue(
+      result.contains(SecretRedactor.PLACEHOLDER),
+      "the JSON-escaped secret must be redacted",
+    )
+    assertFalse(result.contains("""pa\"ss"""), "no escaped-secret fragment may survive")
+  }
+
+  @Test
+  fun `redacts a secret double-encoded by the Android MCP transport`() {
+    // Reproduce DefaultMCPClient's transform (#6094 Codex P1): the observe hierarchy carrying the
+    // on-screen secret is a JSON STRING inside content[].text, and `mcpResponse.result.toString()`
+    // reserializes the enclosing element, so the secret is DOUBLE-escaped in the string the agent's
+    // tools return to the model.
+    val secret = "pa\"ss\\word\nline"
+    val values = SecretRedactor.secretValues(listOf(secret))
+    val hierarchy = buildJsonObject {
+      put("node", buildJsonObject { put("value", "token $secret") })
+    }
+    val envelope = buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(
+            buildJsonObject {
+              put("type", "text")
+              // The hierarchy JSON as a string value → one encoding layer here …
+              put("text", hierarchy.toString())
+            }
+          )
+        },
+      )
+    }
+    // … and serializing the enclosing element re-encodes it → the secret is double-escaped.
+    val transportText = envelope.toString()
+    assertFalse(
+      transportText.contains(secret),
+      "precondition: the raw secret is not literally present in the double-encoded transport",
+    )
+    val result = SecretRedactor.redact(transportText, values)
+    assertTrue(
+      result.contains(SecretRedactor.PLACEHOLDER),
+      "the double-encoded secret must be redacted",
+    )
+    assertFalse(result.contains("word"), "no double-escaped secret fragment may survive")
+  }
+
+  @Test
+  fun `a secret that collides with the redaction marker does not survive`() {
+    // A secret whose VALUE is the marker (or a substring of it) must not be reintroduced by the
+    // replacement — e.g. replacing "REDACTED" with "***REDACTED***" would leave "REDACTED" (#6094).
+    for (secret in listOf("REDACTED", "***REDACTED***", "***")) {
+      val values = SecretRedactor.secretValues(listOf(secret))
+      val result = SecretRedactor.redact("token $secret here", values)
+      assertFalse(
+        result.contains(secret),
+        "the marker-colliding secret \"$secret\" must not survive redaction",
+      )
+      assertTrue(result.contains("token "), "non-secret context is preserved")
+    }
   }
 }

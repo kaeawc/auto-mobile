@@ -80,9 +80,11 @@ export interface FreshnessInputs {
   /**
    * The hierarchy contains only status-bar content while a non-system app is resumed. This is a
    * device-side wrong-window capture even when System UI would normally be a legitimate
-   * accessibility window.
+   * accessibility window. `ctrlProxyIncomplete` is set when the accessibility service itself
+   * reported that it could not read the focused application window (a null root), which is an
+   * incomplete capture rather than a stale one and needs a different recovery (issue #6151).
    */
-  statusBarOnlyHierarchy?: { foreground: string };
+  statusBarOnlyHierarchy?: { foreground: string; ctrlProxyIncomplete?: boolean };
   /**
    * ADB and CtrlProxy disagree about the current activity within the same
    * application, and a forced recapture could not safely reconcile them.
@@ -181,13 +183,18 @@ function resolveIdentityMismatch(
     };
   }
   if (inputs.statusBarOnlyHierarchy) {
+    const { foreground, ctrlProxyIncomplete } = inputs.statusBarOnlyHierarchy;
     return {
       requestedAfter,
       actualTimestamp,
       ageMs,
       verified: false,
       isFresh: false,
-      warning: `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${inputs.statusBarOnlyHierarchy.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
+      warning: ctrlProxyIncomplete
+        ? // The service could not read the focused window at all: home/relaunch does not
+          // recover it (issue #6151), so do not send the client down that path.
+          `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete, not stale: the foreground window's content was withheld from the service. On Android 14+ this is the shape of an accessibility-data-sensitive surface (a runtime permission dialog, the Settings Wi-Fi picker) read by a CtrlProxy build that does not declare isAccessibilityTool; pressing home or relaunching the app will not recover it. Update CtrlProxy to a build that declares isAccessibilityTool (fix for #6151) and observe again.`
+        : `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
     };
   }
   if (inputs.activityAttributionMismatch) {

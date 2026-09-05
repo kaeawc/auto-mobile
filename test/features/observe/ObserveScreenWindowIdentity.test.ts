@@ -656,6 +656,121 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain("com.android.settings");
   });
 
+  // Issue #6151: the exact shape captured on an API 34 emulator with the Settings
+  // Wi-Fi picker (or a runtime permission dialog) in front. The focused
+  // application window exists but the accessibility service cannot read its root
+  // (Android 14+ withholds accessibility-data-sensitive surfaces from a service
+  // that does not declare `isAccessibilityTool`), so CtrlProxy emits only the
+  // status-bar window, no package, `ctrlProxyIncomplete: true`, and no activity.
+  // The verdict must retract freshness AND name the actual cause: pressing home
+  // or relaunching (the stale-window advice) does not recover this capture.
+  const unreadableFocusedWindowHierarchy = (now: number) => ({
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+    ctrlProxyIncomplete: true,
+    windows: [
+      {
+        id: 219,
+        type: 3,
+        isActive: false,
+        isFocused: false,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+      },
+    ],
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+        node: [
+          {
+            "resource-id": "com.android.systemui:id/clock",
+            text: "8:33",
+            bounds: { left: 21, top: 0, right: 107, bottom: 63 },
+          },
+          {
+            "resource-id": "com.android.systemui:id/wifi_signal",
+            "content-desc": "Wifi signal full.",
+            bounds: { left: 892, top: 11, right: 931, bottom: 50 },
+          },
+        ],
+      },
+    },
+  });
+
+  test("names the unreadable focused window as the cause when the service reports an incomplete capture (#6151)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(unreadableFocusedWindowHierarchy(now) as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("com.android.settings");
+    expect(result.freshness?.warning).toContain("unreadable");
+    expect(result.freshness?.warning).toContain("isAccessibilityTool");
+    // The stale-window recovery advice is wrong for this cause and must not be given.
+    expect(result.freshness?.warning).not.toContain("pressButton");
+    expect(result.freshness?.warning).not.toContain("stale wrong-window");
+  });
+
+  test("keeps the stale-window advice for a status-bar-only capture the service did not report as incomplete (#6151)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...unreadableFocusedWindowHierarchy(now),
+      ctrlProxyIncomplete: undefined,
+      packageName: "com.android.systemui",
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("stale wrong-window");
+    expect(result.freshness?.warning).not.toContain("isAccessibilityTool");
+  });
+
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {
     // The parallel foreground sample lags the newer captured hierarchy during an
     // A→B transition: sample1 = the old app, observed hierarchy = the new app.

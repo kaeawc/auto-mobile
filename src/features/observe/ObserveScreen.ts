@@ -1654,12 +1654,22 @@ export class RealObserveScreen implements ObserveScreen {
     return { observed, foreground };
   }
 
+  /**
+   * Status-bar-only capture gate. The returned `ctrlProxyIncomplete` distinguishes
+   * the two device-side causes so the verdict can name the right recovery:
+   * a stale window the runner keeps serving (home/relaunch recovers it) versus a
+   * focused application window the accessibility service could not read at all
+   * (issue #6151 — an accessibility-data-sensitive surface such as a runtime
+   * permission dialog or the Settings Wi-Fi picker, which Android 14+ withholds
+   * from a service that does not declare `isAccessibilityTool`; only a CtrlProxy
+   * update recovers it, and home/relaunch does not).
+   */
   private async resolveStatusBarOnlyHierarchy(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
     signal?: AbortSignal,
-  ): Promise<{ foreground: string } | undefined> {
+  ): Promise<{ foreground: string; ctrlProxyIncomplete: boolean } | undefined> {
     const foreground = await foregroundIdentity;
     const hierarchy = result.viewHierarchy;
 
@@ -1703,7 +1713,7 @@ export class RealObserveScreen implements ObserveScreen {
     ) {
       return undefined;
     }
-    return { foreground: confirmed };
+    return { foreground: confirmed, ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true };
   }
 
   /**

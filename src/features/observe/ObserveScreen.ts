@@ -1662,15 +1662,40 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<{ foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     const hierarchy = result.viewHierarchy;
-    if (!isStatusBarOnlyCandidate(hierarchy, foreground)) {
+
+    // Two independent entry conditions, both cheap (no device round-trip):
+    //  - package identity: a system-UI or incomplete tree is being served while a
+    //    real app is foregrounded (isStatusBarOnlyCandidate); or
+    //  - geometry: every extracted node lies within the status-bar strip. This is
+    //    the reliable signal after #5976 corrected the reported package to the
+    //    focused application — the label then matches the foreground app while the
+    //    selected window stays status-bar-only (#5981), silencing the identity
+    //    check and leaving the geometry as the only evidence.
+    const geometryStatusBarOnly = isStatusBarOnlyHierarchy(result);
+    if (!isStatusBarOnlyCandidate(hierarchy, foreground) && !geometryStatusBarOnly) {
       return undefined;
     }
-    const confirmed = await this.resolvePostCaptureForegroundIdentity(
-      foreground,
-      hierarchy?.packageName ?? "",
-      postCaptureForeground,
-      signal,
-    );
+    // A real (non-system) app must be the resumed foreground for this to be a
+    // wrong-window capture rather than a legitimate system surface (e.g. an open
+    // notification shade owned by com.android.systemui).
+    if (foreground === undefined || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
+      return undefined;
+    }
+    // When the tree is geometrically status-bar-only it carries no application
+    // content regardless of the package it is labelled with, so the observed/foreground
+    // equality that short-circuits resolvePostCaptureForegroundIdentity is exactly the
+    // #5981 shape (label corrected to the foreground app) and must not block the gate.
+    // Still take the confirming foreground read so a genuine A→B transition reports the
+    // settled app. Otherwise (identity-only candidate) confirm the foreground is stably
+    // a real app before retracting.
+    const confirmed = geometryStatusBarOnly
+      ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
+      : await this.resolvePostCaptureForegroundIdentity(
+          foreground,
+          hierarchy?.packageName ?? "",
+          postCaptureForeground,
+          signal,
+        );
     if (
       !confirmed ||
       SYSTEM_UI_WINDOW_PACKAGES.has(confirmed) ||
@@ -1679,6 +1704,23 @@ export class RealObserveScreen implements ObserveScreen {
       return undefined;
     }
     return { foreground: confirmed };
+  }
+
+  /**
+   * The confirming (post-capture) foreground read, without the observed/foreground
+   * equality short-circuit that {@link resolvePostCaptureForegroundIdentity} applies
+   * for the window-identity path. The status-bar geometry gate must fire even when the
+   * capture is labelled with the foreground app itself (#5981), so equality cannot be a
+   * reason to skip confirmation. Reuses an already-sampled read when one exists.
+   */
+  private async confirmForegroundIdentity(
+    postCaptureForeground: PostCaptureForegroundIdentity,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (postCaptureForeground.sampled) {
+      return postCaptureForeground.identity;
+    }
+    return this.deviceStateCollector.collectForegroundIdentity(signal);
   }
 
   private async resolvePostCaptureForegroundIdentity(

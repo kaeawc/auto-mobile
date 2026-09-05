@@ -548,6 +548,62 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     );
   });
 
+  test("retracts freshness when the app-labelled hierarchy is confined to the status bar", async () => {
+    // Regression for #5981 after #5976: the label half is now correct — the capture
+    // reports the focused application package (com.android.settings) — but the selected
+    // window is still the status bar, so every extracted node lies within the status-bar
+    // strip. The package-identity candidate check no longer fires (observed === foreground),
+    // so the geometric signal must carry the honesty gate on its own.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      // #5976 corrected the label: the observed package is the foreground app itself.
+      packageName: "com.android.settings",
+      foregroundActivity: "com.android.settings/.SubSettings",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          node: [
+            { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
+            { text: "Wifi signal full.", bounds: { left: 892, top: 11, right: 931, bottom: 50 } },
+          ],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("status-bar");
+    expect(result.freshness?.warning).toContain("com.android.settings");
+  });
+
   test("uses the confirmed foreground for a status-bar-only hierarchy after transition", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

@@ -177,6 +177,43 @@ describe("DefaultRetryExecutor", () => {
       expect(attempts).toBe(1);
     });
 
+    it("removes its abort listener after every retry sleep on a shared signal", async () => {
+      // #6138: the sleep/abort race registered a { once: true } listener that was
+      // only removed when the signal aborted. A long-lived signal shared across
+      // executions accumulated one listener per retry.
+      timer.enableAutoAdvance();
+      const controller = new AbortController();
+      const signal = controller.signal;
+      let added = 0;
+      let removed = 0;
+      const originalAdd = signal.addEventListener.bind(signal);
+      const originalRemove = signal.removeEventListener.bind(signal);
+      signal.addEventListener = ((...args: Parameters<AbortSignal["addEventListener"]>) => {
+        added++;
+        return originalAdd(...args);
+      }) as AbortSignal["addEventListener"];
+      signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+        removed++;
+        return originalRemove(...args);
+      }) as AbortSignal["removeEventListener"];
+
+      const executions = 20;
+      const maxAttempts = 3;
+      for (let i = 0; i < executions; i++) {
+        const result = await executor.execute(
+          async () => {
+            throw new Error("Retry");
+          },
+          { signal, delays: 10, maxAttempts },
+        );
+        expect(result.success).toBe(false);
+        expect(result.attempts).toBe(maxAttempts);
+      }
+
+      expect(added).toBe(executions * (maxAttempts - 1));
+      expect(removed).toBe(added);
+    });
+
     it("respects shouldRetry predicate", async () => {
       timer.enableAutoAdvance();
 

@@ -195,6 +195,37 @@ describe("ResourceRegistry URI-template matching", () => {
     });
   });
 
+  test("ignores an undeclared query key instead of overwriting a path-captured param (issue #6188)", () => {
+    ResourceRegistry.registerTemplate(
+      "automobile:test/{id}/data{?first}",
+      "Test",
+      "Test path/query collision",
+      "application/json",
+      async () => ({ uri: "automobile:test", text: "{}" }),
+    );
+
+    const match = ResourceRegistry.matchTemplate("automobile:test/one/data?first=a&id=two");
+
+    expect(match).toMatchObject({ params: { id: "one", first: "a" } });
+  });
+
+  test("forwards an undeclared query key that does not collide with a path param, for handler-side validation (issue #6188)", () => {
+    ResourceRegistry.registerTemplate(
+      "automobile:test{?first}",
+      "Test",
+      "Test unknown-key passthrough",
+      "application/json",
+      async () => ({ uri: "automobile:test", text: "{}" }),
+    );
+
+    // e.g. a typo'd `limt=10` — sibling handlers (parsePerformanceParams,
+    // parseTrafficParams, parseAppsQueryParams) reject unknown keys
+    // themselves and need to see them in `params` to do so.
+    const match = ResourceRegistry.matchTemplate("automobile:test?first=a&limt=10");
+
+    expect(match).toMatchObject({ params: { first: "a", limt: "10" } });
+  });
+
   test("retains the requested URI for an RFC 6570 template handler", async () => {
     const server = new FakeMcpServer();
     let handlerUri = "";

@@ -128,6 +128,8 @@ function extractTemplateParams(
     params[name] = match[index + 1];
   });
   if (template.queryParamNames.length > 0) {
+    const declaredQueryParams = new Set(template.queryParamNames);
+    const pathParamNames = new Set(template.paramNames);
     const queryStart = uri.indexOf("?");
     const query = queryStart >= 0 ? uri.slice(queryStart + 1) : "";
     const seen = new Set<string>();
@@ -136,6 +138,17 @@ function extractTemplateParams(
         return null;
       }
       seen.add(name);
+      // An undeclared query key that collides with a path-captured param
+      // name (e.g. `deviceId`) is dropped instead of silently overwriting
+      // the path capture (issue #6188). Any other undeclared key — one that
+      // doesn't collide with a path param — is still forwarded: several
+      // resource handlers (parsePerformanceParams, parseTrafficParams,
+      // parseAppsQueryParams) do their own fail-closed validation and need
+      // to see unknown keys (e.g. a typo'd param name) to reject them,
+      // rather than have the registry silently discard them first.
+      if (!declaredQueryParams.has(name) && pathParamNames.has(name)) {
+        continue;
+      }
       params[name] = value;
     }
   }

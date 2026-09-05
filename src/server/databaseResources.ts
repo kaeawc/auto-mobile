@@ -10,16 +10,42 @@ import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
+import { optionalInteger } from "./queryParamValidation";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
   DATABASES: "automobile:devices/{deviceId}/databases?appId={appId}",
   TABLES: "automobile:devices/{deviceId}/databases/{databasePath}/tables?appId={appId}",
+  // {?appId,limit,offset} is the RFC 6570 optional-query form: ResourceRegistry's
+  // compileUriTemplate parses it via URLSearchParams, so appId/limit/offset each
+  // match independently of presence or order (issue #6133). A literal
+  // "?appId={appId}&limit={limit}&offset={offset}" query string compiles to
+  // fixed-order, all-required captures instead and only matches when every
+  // param appears, in that exact order.
+  //
+  // ResourceRegistry has no way to mark one of the template's query variables
+  // required and the others optional, so `appId` matches the template even
+  // when absent/empty (issue #6188) — getTableDataResource rejects a missing
+  // or empty `appId` itself instead of forwarding it to the platform client.
   TABLE_DATA:
-    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data?appId={appId}",
+    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data{?appId,limit,offset}",
   TABLE_STRUCTURE:
     "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/structure?appId={appId}",
 } as const;
+
+// Path-captured and declared-query param names for the table-data template,
+// used to reject any other (e.g. typo'd) query key instead of silently
+// ignoring it (issue #6188) — matching the unknown-key validation in
+// parsePerformanceParams/parseTrafficParams/parseAppsQueryParams.
+const TABLE_DATA_PATH_PARAM_NAMES = new Set(["deviceId", "databasePath", "table"]);
+const TABLE_DATA_QUERY_PARAM_NAMES = new Set(["appId", "limit", "offset"]);
+
+// Android's DatabaseInspectorProvider.handleGetTableData parses limit/offset
+// with Kotlin's `toIntOrNull()` (a 32-bit signed int), silently falling back
+// to its own default when a value overflows Int32 — so a JS-safe-integer
+// value like 2147483648 would report success with the wrong effective page
+// instead of the value it claims. Bound both to the Int32 range up front.
+const INT32_MAX = 2_147_483_647;
 
 // Cache entries for change detection
 interface DatabaseCacheEntry {
@@ -294,13 +320,48 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = decodeURIComponent(databasePath);
   const decodedTable = decodeURIComponent(table);
-  const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId);
-
-  // Parse optional limit and offset from query params
-  const limit = params.limit ? parseInt(params.limit, 10) : 50;
-  const offset = params.offset ? parseInt(params.offset, 10) : 0;
+  // Always the canonical URI (no limit/offset), never the exact requested
+  // URI. notifyDatabaseChanged / table-schema invalidation both fire
+  // notifyResourceUpdated against this canonical form, and
+  // ResourceRegistry.notifyResourceUpdated requires an exact
+  // subscriptions.has(uri) match — echoing a per-page URI here would leave a
+  // client subscribed to a paginated URI never notified after a mutating
+  // sqlQuery (issue #6188). limit/offset stay valid, optional read params
+  // (issue #6133); the resource's subscribable identity is just the table,
+  // not a page of it. Distinct per-page subscription identities would need a
+  // broader resource-subscription redesign, tracked separately.
+  const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
 
   try {
+    // ResourceRegistry forwards any query key that isn't captured as a path
+    // param, including a typo'd one (e.g. `limt=10`), rather than silently
+    // dropping it — see extractTemplateParams (issue #6188). Reject one here
+    // instead of silently falling back to defaults, matching the unknown-key
+    // validation in parsePerformanceParams/parseTrafficParams/
+    // parseAppsQueryParams.
+    const unknownKeys = Object.keys(params).filter(
+      (key) => !TABLE_DATA_PATH_PARAM_NAMES.has(key) && !TABLE_DATA_QUERY_PARAM_NAMES.has(key),
+    );
+    if (unknownKeys.length > 0) {
+      throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
+    }
+
+    // appId is a required identity for the target app/database, unlike
+    // limit/offset — the `{?appId,limit,offset}` query-expansion form makes
+    // every one of its variables optional at the template level, so the
+    // handler must reject a missing or empty appId itself rather than
+    // forwarding `undefined`/"" to the platform inspector (issue #6188).
+    if (!appId) {
+      throw new Error("Missing required appId query parameter for table data");
+    }
+    // Parse optional limit and offset from query params using the repo's
+    // centralized query-validation helper (safe-integer + min-bound), rather
+    // than a second hand-rolled parser (issue #6188). Absent/empty falls
+    // back to the documented default (issue #6133). Bounded to Int32 max —
+    // see the INT32_MAX comment above.
+    const limit = optionalInteger(params.limit, "limit", { min: 0, max: INT32_MAX }) ?? 50;
+    const offset = optionalInteger(params.offset, "offset", { min: 0, max: INT32_MAX }) ?? 0;
+
     const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
@@ -470,20 +531,12 @@ export function registerDatabaseResources(): void {
     getTablesResource,
   );
 
-  // Register template for table data
+  // Register template for table data. appId, limit, and offset are all
+  // optional and order-independent (issue #6133) — see the template comment.
   ResourceRegistry.registerTemplate(
     DATABASE_RESOURCE_TEMPLATES.TABLE_DATA,
     "Table Data",
     "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
-    "application/json",
-    getTableDataResource,
-  );
-
-  // Also register with limit/offset parameters
-  ResourceRegistry.registerTemplate(
-    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data?appId={appId}&limit={limit}&offset={offset}",
-    "Table Data (Paginated)",
-    "Get rows from a database table with explicit pagination.",
     "application/json",
     getTableDataResource,
   );

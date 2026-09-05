@@ -113,7 +113,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
     // No attempt-unique temp file is left behind either.
     expect(await fs.readdir(tempDir)).toEqual([]);
-  }, 500);
+  }, 100);
 
   test("a failed attempt never removes a file another attempt already wrote to the same destination", async function () {
     // Regression guard: failure cleanup must only ever remove the failed
@@ -137,7 +137,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     await expect(result).rejects.toThrow(/premature close/i);
 
     expect(await fs.readFile(destination)).toEqual(existingPayload);
-  }, 500);
+  }, 100);
 
   test("resolves and writes the full file for a complete response", async function () {
     const payload = Buffer.from("complete download payload");
@@ -154,7 +154,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     expect(await fs.readFile(destination)).toEqual(payload);
     // No leftover attempt-unique temp file after a successful rename.
     expect(await fs.readdir(tempDir)).toEqual(["file.bin"]);
-  }, 500);
+  }, 100);
 });
 
 // A real-socket end-to-end test of downloadWithNodeHttp lives in

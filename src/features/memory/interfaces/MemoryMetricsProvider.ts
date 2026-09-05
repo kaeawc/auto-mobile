@@ -26,16 +26,21 @@ export interface MemoryMetricsProvider {
   triggerGC(packageName: string, perf?: PerformanceTracker): Promise<void>;
 
   /**
-   * Capture GC events from logcat within a time window.
+   * Capture GC events from logcat within a time window, scoped to the given app's process.
+   * @param packageName - Target app package name (resolved to a PID to scope logcat)
    * @param startTimestamp - Start of capture window
    * @param endTimestamp - End of capture window
    * @param perf - Optional performance tracker
+   * @param pid - Optional pre-resolved PID (e.g. resolved before an audited action that may
+   *   restart the process); when omitted, the PID is resolved fresh from `packageName`.
    * @returns Promise with array of GC events
    */
   captureGCEvents(
+    packageName: string,
     startTimestamp: number,
     endTimestamp: number,
     perf?: PerformanceTracker,
+    pid?: string,
   ): Promise<GCEvent[]>;
 
   /**

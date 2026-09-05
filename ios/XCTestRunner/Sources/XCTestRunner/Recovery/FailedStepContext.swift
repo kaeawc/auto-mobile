@@ -14,6 +14,13 @@ public struct FailedStepContext: Sendable {
     /// Session the failed plan ran under. Injected into recovery tool calls so they target the same
     /// device/session the plan was using.
     public let sessionUuid: String?
+    /// The concrete secret VALUES (already expanded into their NFC/NFD forms by
+    /// `SecretRedaction.secretValues`) that must never reach the LLM provider. The recovery loop
+    /// scrubs each `executeTool` / `observeDeviceState` RESULT with these before it re-enters a
+    /// `ModelRequest` (issue #6094's second-order channel). NOT sent to the provider itself — only
+    /// used to redact the dynamic tool output. The initial context fields above are already redacted
+    /// by the executor (#6092); this covers the agent loop's own tool results.
+    public let secretValues: [String]
 
     public init(
         failedStepIndex: Int,
@@ -24,7 +31,8 @@ public struct FailedStepContext: Sendable {
         platform: String,
         sessionUuid: String? = nil,
         deviceId: String? = nil,
-        failureObservation: FailureObservationSummary? = nil
+        failureObservation: FailureObservationSummary? = nil,
+        secretValues: [String] = []
     ) {
         self.failedStepIndex = failedStepIndex
         self.failedTool = failedTool
@@ -35,5 +43,6 @@ public struct FailedStepContext: Sendable {
         self.sessionUuid = sessionUuid
         self.deviceId = deviceId
         self.failureObservation = failureObservation
+        self.secretValues = secretValues
     }
 }

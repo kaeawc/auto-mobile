@@ -90,6 +90,21 @@ class AutoMobilePlanRedactionTest {
       "daemon executePlan payload must stay unredacted",
       daemonPlan!!.contains(secret),
     )
+
+    // The executor must forward the CONCRETE resolved secret values to the recovery agent so its
+    // loop can scrub the dynamic tool/observe results (issue #6094). Without this assertion,
+    // zeroing
+    // the executor's `attemptAiRecovery(context, secretValues)` argument would leave the other
+    // tests
+    // green while re-opening the model-egress leak.
+    val forwarded =
+      requireNotNull(capturingAgent.capturedSecretValues) {
+        "recovery must receive the resolved secret values"
+      }
+    assertTrue(
+      "the resolved concrete secret must reach the recovery agent",
+      forwarded.contains(secret),
+    )
   }
 
   @Test
@@ -425,9 +440,14 @@ private class CapturingAgent :
     recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true, maxToolCalls = 5)
   ) {
   var captured: FailedStepContext? = null
+  var capturedSecretValues: List<String>? = null
 
-  override fun attemptAiRecovery(context: FailedStepContext): RecoveryOutcome {
+  override fun attemptAiRecovery(
+    context: FailedStepContext,
+    secretValues: List<String>,
+  ): RecoveryOutcome {
     captured = context
+    capturedSecretValues = secretValues
     return RecoveryOutcome(success = false, recoveryTimeMs = 0)
   }
 }

@@ -529,7 +529,10 @@ internal object AutoMobilePlanExecutor {
       "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})"
     )
 
-    val recoveryOutcome = agent.attemptAiRecovery(failedStepContext)
+    // Pass the resolved secret VALUES into the recovery agent so its loop can scrub the DYNAMIC
+    // tool/observe results it feeds back to the LLM (issue #6094). The initial recovery prompt is
+    // already redacted on FailedStepContext (#6092); this covers the second-order loop channel.
+    val recoveryOutcome = agent.attemptAiRecovery(failedStepContext, secretValues)
 
     if (!recoveryOutcome.success) {
       println("AI recovery failed")

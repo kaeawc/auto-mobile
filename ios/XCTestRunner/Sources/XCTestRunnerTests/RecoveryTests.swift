@@ -774,6 +774,103 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         XCTAssertTrue(text.contains("observe"), "non-secret plan structure must be preserved")
     }
 
+    /// Issue #6094 (CWE-200, second-order channel): after the initial (redacted) recovery prompt,
+    /// the agent loop calls `observe`/tools and re-sends those RESULTS in the next `ModelRequest`. A
+    /// secret still visible on-screen at recovery time (echoed into a field, in the view hierarchy)
+    /// therefore reaches the LLM provider through the loop's own tool results unless they are
+    /// scrubbed. This drives the FULL loop with a responder that records EVERY request and asserts
+    /// the secret is absent from ALL of them — including the post-initial tool-result turns — while
+    /// non-secret context survives. The secret is placed ONLY in the tool results here (the failure
+    /// error/observation are clean), isolating this loop channel from #6092's initial-prompt fix.
+    func testSecretInToolResultIsRedactedFromEveryModelRequestInTheLoop() throws {
+        let client = RecoveryMCPClient()
+        // The live observe/tool results carry the on-screen secret plus non-secret context.
+        client.observeText = "{\"elements\":{\"field\":\"token \(secret)\"},\"env\":\"\(visible)\"}"
+        client.toolResponseText = "{\"status\":\"typed \(secret)\"}"
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "step failed"]
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 3, totalSteps: 3))
+
+        // observe -> tapOn -> finish: the 2nd and 3rd requests carry the prior tool results.
+        let captor = ScriptedCapturingModelResponder([
+            StubModelResponder.toolCall(name: "observe"),
+            StubModelResponder.toolCall(name: "tapOn", arguments: "{\"selector\":{\"text\":\"OK\"}}"),
+            StubModelResponder.final(),
+        ])
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let executor = makeExecutor(client: client, handler: handler)
+
+        _ = try executor.execute(testMetadata: nil)
+
+        XCTAssertGreaterThanOrEqual(
+            captor.captured.count, 2,
+            "the loop must issue follow-up requests carrying tool results"
+        )
+        for (offset, request) in captor.captured.enumerated() {
+            XCTAssertFalse(
+                requestText(request).contains(secret),
+                "secret leaked into ModelRequest #\(offset) via a re-sent tool/observe result"
+            )
+        }
+        let allText = captor.captured.map { requestText($0) }.joined(separator: "\n")
+        XCTAssertTrue(
+            allText.contains(SecretRedaction.placeholder),
+            "the tool-result secret must be replaced by the placeholder"
+        )
+        XCTAssertTrue(allText.contains(visible), "non-secret tool-result context must be preserved")
+
+        // The tool still EXECUTED on-device with real routing args (only the RESULT text that enters
+        // the transcript is scrubbed), and the daemon executePlan payload keeps the real secret.
+        XCTAssertTrue(client.calls.contains { $0.name == "observe" }, "the loop must have executed observe on-device")
+        let daemonPlan = try XCTUnwrap(decodedDaemonPlanContent(client.executePlanCalls.first))
+        XCTAssertTrue(daemonPlan.contains(secret), "daemon executePlan payload must stay unredacted")
+    }
+
+    /// Issue #6094 public-boundary hardening: a DIRECT caller of the handler may build a
+    /// `FailedStepContext` with RAW (unredacted) fields and RAW concrete `secretValues`. The handler
+    /// must normalize the values and scrub the static context fields itself, so the very first
+    /// ModelRequest (the prompt) does not leak — not only the executor path (which pre-redacts).
+    func testDirectCallerRawContextIsRedactedFromTheInitialPrompt() throws {
+        let client = RecoveryMCPClient()
+        let captor = ScriptedCapturingModelResponder([])
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in captor }
+        )
+        let context = FailedStepContext(
+            failedStepIndex: 1,
+            failedTool: "inputText",
+            error: "timed out entering \(secret) into field",
+            succeededSteps: [SucceededStepSummary(stepIndex: 0, tool: "observe")],
+            planContent: "name: P\nsteps:\n  - tool: inputText\n    text: \"\(secret)\"",
+            platform: "ios",
+            sessionUuid: "sess-1",
+            deviceId: "dev-1",
+            failureObservation: nil,
+            secretValues: [secret] // RAW concrete value, not pre-expanded
+        )
+
+        _ = handler.attemptRecovery(context)
+
+        let request = try XCTUnwrap(captor.captured.first, "the handler must issue the initial prompt request")
+        let text = requestText(request)
+        XCTAssertFalse(text.contains(secret), "a direct caller's raw context must not leak into the initial prompt")
+        XCTAssertTrue(text.contains(SecretRedaction.placeholder), "the secret must be replaced by the placeholder")
+    }
+
     // MARK: - Helpers
 
     private func makeCapturingHandler(
@@ -842,6 +939,12 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
                         parts.append(value)
                     }
                 }
+            case let .tool(_, _, content):
+                // Tool-result messages re-enter the next ModelRequest (issue #6094's loop channel),
+                // so they must be inspected for leaked secrets, not skipped.
+                parts.append(content)
+            case let .system(_, content):
+                parts.append(content)
             default:
                 break
             }
@@ -869,6 +972,28 @@ private final class CapturingModelResponder: ModelResponding, @unchecked Sendabl
     func respond(_ request: ModelRequest) async throws -> ModelResponse {
         captured.append(request)
         return ModelResponse(id: "resp", content: [.outputText("done")])
+    }
+}
+
+/// Fake `ModelResponding` that replays a scripted sequence of responses AND records EVERY
+/// `ModelRequest` across the whole agent loop — not just the first (issue #6094). The follow-up
+/// requests carry the tool-call results from the prior turn, which is the second-order channel this
+/// suite pins: a secret visible on-screen at recovery time must not reach the provider through those
+/// re-sent tool results.
+private final class ScriptedCapturingModelResponder: ModelResponding, @unchecked Sendable {
+    private(set) var captured: [ModelRequest] = []
+    private var scripted: [ModelResponse]
+
+    init(_ scripted: [ModelResponse]) {
+        self.scripted = scripted
+    }
+
+    func respond(_ request: ModelRequest) async throws -> ModelResponse {
+        captured.append(request)
+        if scripted.isEmpty {
+            return ModelResponse(id: "resp", content: [.outputText("recovery complete")])
+        }
+        return scripted.removeFirst()
     }
 }
 
@@ -1185,6 +1310,47 @@ final class SecretRedactionTests: XCTestCase {
             SecretRedaction.redact("unchanged", secretValues: SecretRedaction.secretValues([""])),
             "unchanged"
         )
+    }
+
+    func testRedactsJsonEscapedSecretInAToolResult() {
+        // The recovery loop's tool/observe results are JSON (issue #6094). A secret with a
+        // JSON-special character appears there only in its escaped form, which the literal raw value
+        // would not match. secretValues must emit the JSON-escaped variant so it is still scrubbed.
+        let secret = "pa\"ss\\word\nline"
+        let values = SecretRedaction.secretValues([secret])
+        // The JSON-serialized tool result carries the secret in escaped form (as JSON.stringify /
+        // JSONSerialization would produce), NOT the raw value.
+        let toolResultJSON = "{\"field\":\"token pa\\\"ss\\\\word\\nline\"}"
+        XCTAssertFalse(toolResultJSON.contains(secret), "precondition: the raw secret is not literally present")
+        let result = SecretRedaction.redact(toolResultJSON, secretValues: values)
+        XCTAssertTrue(result.contains(SecretRedaction.placeholder), "the JSON-escaped secret must be redacted")
+        XCTAssertFalse(result.contains("pa\\\"ss"), "no escaped-secret fragment may survive")
+
+        // A DOUBLE-encoded occurrence (a JSON string nested inside another JSON string, as a
+        // re-serialized MCP envelope produces) must also be scrubbed (#6094).
+        let doubleEncoded = SecretRedaction.jsonEscaped(SecretRedaction.jsonEscaped(secret))
+        let nested = "{\"text\":\"" + doubleEncoded + "\"}"
+        XCTAssertFalse(
+            nested.contains(secret),
+            "precondition: the raw secret is not present in the double-encoded text"
+        )
+        let nestedResult = SecretRedaction.redact(nested, secretValues: values)
+        XCTAssertTrue(nestedResult.contains(SecretRedaction.placeholder), "the double-encoded secret must be redacted")
+        XCTAssertFalse(nestedResult.contains("word"), "no double-escaped secret fragment may survive")
+    }
+
+    func testSecretCollidingWithTheRedactionMarkerDoesNotSurvive() {
+        // A secret whose VALUE is the marker (or a substring of it) must not be reintroduced by the
+        // replacement — e.g. replacing "REDACTED" with "***REDACTED***" would leave "REDACTED" (#6094).
+        for secret in ["REDACTED", "***REDACTED***", "***"] {
+            let values = SecretRedaction.secretValues([secret])
+            let result = SecretRedaction.redact("token " + secret + " here", secretValues: values)
+            XCTAssertFalse(
+                result.contains(secret),
+                "the marker-colliding secret \"\(secret)\" must not survive redaction"
+            )
+            XCTAssertTrue(result.contains("token "), "non-secret context is preserved")
+        }
     }
 }
 

@@ -101,7 +101,20 @@ open class AutoMobileAgent(
    * check that recovery actually worked is the caller re-running the failed step (see
    * [AutoMobilePlanExecutor]) — if the obstruction is gone that step now passes.
    */
-  open fun attemptAiRecovery(context: FailedStepContext): RecoveryOutcome {
+  /**
+   * Backwards-compatible one-argument recovery hook (the pre-#6094 signature). Kept as an explicit
+   * `open` delegating method rather than relying on a Kotlin default or `@JvmOverloads` (which
+   * would emit the one-arg overload as `final`), so a published-library subclass that overrode the
+   * original still compiles and links, and callers compiled against the one-arg descriptor keep
+   * working.
+   */
+  open fun attemptAiRecovery(context: FailedStepContext): RecoveryOutcome =
+    attemptAiRecovery(context, emptyList())
+
+  open fun attemptAiRecovery(
+    context: FailedStepContext,
+    secretValues: List<String>,
+  ): RecoveryOutcome {
     val startTime = timeProvider.currentTimeMillis()
     val maxToolCalls = recoveryConfigProvider.getMaxRecoveryToolCalls()
 
@@ -113,14 +126,46 @@ open class AutoMobileAgent(
       }
 
       val modelConfig = configProvider.getModelConfig()
-      val aiAgent = aiAgentFactory.createAIAgentWithMCPTools(modelConfig, mcpClient, maxToolCalls)
+      // Second-order redaction (issue #6094): the Koog agent loop feeds every tool/observe RESULT
+      // (including the view hierarchy from observe's `withViewHierarchy = true`) back to the LLM
+      // provider. Wrap the client the agent's tools call in a redactor so those result strings are
+      // scrubbed of secret values before they reach the model. The tool still EXECUTES on-device
+      // with the real values (the decorator forwards arguments unchanged). The initial recovery
+      // prompt is already redacted by the executor (#6092); this closes the loop channel. With no
+      // secrets the raw client is used unchanged (no wrapper allocated).
+      //
+      // Known limitation (follow-up): the wrapper also redacts the intermediate observe result that
+      // the composite WaitForTool searches locally — its own output to the model is synthesized and
+      // safe, so there is no leak, but a wait target that is a substring of an on-screen secret can
+      // falsely time out. A clean fix hands composite tools the raw client; deferred to keep this
+      // security change scoped.
+      //
+      // Normalize the incoming concrete secret values into every scrub form (NFC/NFD + the
+      // transport-encoding depths) HERE, at the public recovery entry point, so the loop is safe
+      // whether a caller passed raw or pre-expanded values: this is a public overload, so a direct
+      // caller could pass raw concrete secrets, and matching only those would miss the escaped
+      // representation in JSON tool results. Idempotent for the executor's already-expanded input.
+      val redactionValues = SecretRedactor.secretValues(secretValues)
+      val agentMcpClient =
+        if (redactionValues.isEmpty()) mcpClient else RedactingMCPClient(mcpClient, redactionValues)
+      val aiAgent =
+        aiAgentFactory.createAIAgentWithMCPTools(modelConfig, agentMcpClient, maxToolCalls)
 
+      // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
+      // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path;
+      // it
+      // makes the public entry point self-contained, so a direct caller who supplies raw context
+      // fields alongside raw secretValues cannot leak them in the first ModelRequest. Redacting an
+      // already-redacted field changes nothing.
+      val redactedFailedTool = SecretRedactor.redact(context.failedTool, redactionValues)
+      val redactedError = SecretRedactor.redact(context.error, redactionValues)
+      val redactedPlanContent = SecretRedactor.redact(context.planContent, redactionValues)
       val succeededStepsSummary =
         if (context.succeededSteps.isEmpty()) {
           "  (none — the first step failed)"
         } else {
           context.succeededSteps.joinToString("\n") { step ->
-            "  - Step ${step.stepIndex + 1}: ${step.tool} (completed)"
+            "  - Step ${step.stepIndex + 1}: ${SecretRedactor.redact(step.tool, redactionValues)} (completed)"
           }
         }
 
@@ -129,14 +174,14 @@ open class AutoMobileAgent(
         A test plan step was interrupted and failed. Your job is to CLEAR whatever is
         blocking the app — you do NOT need to perform the failed step yourself.
 
-        FAILED STEP: Step ${context.failedStepIndex + 1} using tool "${context.failedTool}"
-        ERROR: ${context.error}
+        FAILED STEP: Step ${context.failedStepIndex + 1} using tool "$redactedFailedTool"
+        ERROR: $redactedError
 
         PREVIOUSLY SUCCEEDED STEPS:
         $succeededStepsSummary
 
         PLAN YAML:
-        ${context.planContent}
+        $redactedPlanContent
 
         After you finish, the test runner will AUTOMATICALLY RE-RUN the failed step
         (step ${context.failedStepIndex + 1}) and then continue with the rest of the plan.
@@ -174,7 +219,13 @@ open class AutoMobileAgent(
           // interruption is gone — the failed-step re-run in the executor is that check.
           val observeResult =
             try {
-              mcpClient.callTool("observe", mapOf("withViewHierarchy" to true))
+              // Scrub the post-recovery liveness observe too (issue #6094): its view hierarchy can
+              // carry an on-screen secret, and it is surfaced on the RecoveryOutcome. The device is
+              // still queried with real values — only the returned text is redacted.
+              SecretRedactor.redact(
+                mcpClient.callTool("observe", mapOf("withViewHierarchy" to true)),
+                redactionValues,
+              )
             } catch (e: Exception) {
               println("Warning: Post-recovery observe failed: ${e.message}")
               null

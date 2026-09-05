@@ -370,7 +370,11 @@ public final class AutoMobilePlanExecutor {
             platform: platform.rawValue,
             sessionUuid: sessionUuid,
             deviceId: failedStep.device ?? deviceIdOverride,
-            failureObservation: SecretRedaction.redact(failedStep.failureObservation, secretValues: secretValues)
+            failureObservation: SecretRedaction.redact(failedStep.failureObservation, secretValues: secretValues),
+            // Carry the secret values into the recovery loop so it can scrub the DYNAMIC tool/observe
+            // results it re-sends to the LLM (issue #6094). These are not forwarded to the provider —
+            // only used as the redaction target for `executeTool` / `observeDeviceState` output.
+            secretValues: secretValues
         )
     }
 

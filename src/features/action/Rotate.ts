@@ -37,7 +37,36 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
+  /**
+   * Read the live device rotation from the window manager (`dumpsys window`,
+   * `mRotation=`). Unlike the `user_rotation` setting, this reflects the
+   * rotation actually applied by the sensor when auto-rotate is on, so it
+   * cannot go stale the way `user_rotation` does (issue #6129).
+   * @returns The parsed `mRotation` value, or null if it could not be read
+   */
+  private async readLiveRotation(): Promise<number | null> {
+    try {
+      const { stdout } = await this.adb.executeCommand(
+        'shell dumpsys window | grep -i "mRotation="',
+      );
+      const match = stdout.match(/mRotation=(\d+)/);
+      return match ? parseInt(match[1], 10) : null;
+    } catch (error) {
+      logger.debug(`[Rotate] Failed to read live rotation via dumpsys window: ${error}`);
+      return null;
+    }
+  }
+
   async getCurrentOrientation(): Promise<string> {
+    // Prefer the live window-manager rotation: `user_rotation` only reflects
+    // the last explicitly-requested rotation and goes stale as soon as
+    // auto-rotate applies a sensor-driven rotation on top of it (#6129).
+    const liveRotation = await this.readLiveRotation();
+    if (liveRotation !== null) {
+      // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
+      return liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape";
+    }
+
     const userRotationStr = await this.readSystemSetting("user_rotation");
 
     if (!userRotationStr || !/^\d+$/.test(userRotationStr)) {
@@ -174,14 +203,18 @@ export class Rotate extends BaseVisualChange {
           };
         }
 
-        let orientationUnlocked = false;
+        // Auto-rotate must be off for `user_rotation` writes to take effect,
+        // regardless of whether it was already off beforehand. Remember the
+        // pre-existing value so it can be restored once the forced rotation
+        // completes, instead of leaving auto-rotate permanently disabled
+        // (#6129).
+        const wasAutoRotateEnabled = !isLocked;
 
         try {
-          // If orientation is locked, unlock it temporarily
           if (isLocked) {
-            logger.info("Orientation is locked, temporarily unlocking for rotation");
-            await this.writeSystemSetting("accelerometer_rotation", "1");
-            orientationUnlocked = true;
+            logger.info("Orientation is locked; forcing the requested rotation");
+          } else {
+            logger.info("Auto-rotate is on; temporarily disabling it to force rotation");
           }
 
           await perf.track("setRotation", () =>
@@ -197,6 +230,10 @@ export class Rotate extends BaseVisualChange {
           // Note: We skip explicit verification since waitForRotation already confirms
           // the rotation completed successfully by polling dumpsys window
 
+          if (wasAutoRotateEnabled) {
+            await this.writeSystemSetting("accelerometer_rotation", "1");
+          }
+
           return {
             success: true,
             orientation,
@@ -207,17 +244,17 @@ export class Rotate extends BaseVisualChange {
             currentOrientation: orientation,
             previousOrientation: currentOrientation,
             rotationPerformed: true,
-            orientationLockHandled: orientationUnlocked,
+            orientationLockHandled: wasAutoRotateEnabled,
             message: `Successfully rotated from ${currentOrientation} to ${orientation}`,
           };
         } catch (error) {
-          // Restore orientation lock if we unlocked it
-          if (orientationUnlocked) {
+          // Restore auto-rotate if it was on before this call
+          if (wasAutoRotateEnabled) {
             try {
-              await this.writeSystemSetting("accelerometer_rotation", "0");
-              logger.info("Restored orientation lock after error");
+              await this.writeSystemSetting("accelerometer_rotation", "1");
+              logger.info("Restored auto-rotate after error");
             } catch (restoreError) {
-              logger.warn(`Failed to restore orientation lock: ${restoreError}`);
+              logger.warn(`Failed to restore auto-rotate: ${restoreError}`);
             }
           }
 
@@ -228,7 +265,7 @@ export class Rotate extends BaseVisualChange {
             currentOrientation,
             previousOrientation: currentOrientation,
             rotationPerformed: false,
-            orientationLockHandled: orientationUnlocked,
+            orientationLockHandled: wasAutoRotateEnabled,
             error: `Failed to change device orientation: ${error}`,
           };
         }

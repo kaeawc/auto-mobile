@@ -1,9 +1,33 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { registerDatabaseResources } from "../../src/server/databaseResources";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  notifyDatabaseChanged,
+  registerDatabaseResources,
+} from "../../src/server/databaseResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+
+// Minimal MCP-server stand-in, matching the pattern in
+// resourceRegistryListChanged.test.ts: registerWithServer installs request
+// handlers on `server.server`, and notifyResourceUpdated sends through it.
+class FakeUnderlyingServer {
+  notifications: Array<{ method: string; params?: unknown }> = [];
+  handlersBySchema = new Map<unknown, (request: unknown) => Promise<unknown>>();
+  onclose?: () => void;
+  setRequestHandler(schema: unknown, handler: (request: unknown) => Promise<unknown>): void {
+    this.handlersBySchema.set(schema, handler);
+  }
+  async notification(payload: { method: string; params?: unknown }): Promise<void> {
+    this.notifications.push(payload);
+  }
+}
+
+class FakeMcpServer {
+  server = new FakeUnderlyingServer();
+}
 
 // Issue #6133: the table-data resource template previously registered a
 // literal `?appId={appId}&limit={limit}&offset={offset}` query string, which
@@ -24,6 +48,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
 
   beforeEach(() => {
     ResourceRegistry.clearResources();
+    ResourceRegistry.clearServersForTesting();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
     originalGetInstance = IOSCtrlProxyClient.getInstance;
@@ -32,6 +57,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
   afterEach(() => {
     IOSCtrlProxyClient.getInstance = originalGetInstance;
     ResourceRegistry.clearResources();
+    ResourceRegistry.clearServersForTesting();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
   });
@@ -69,10 +95,13 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
 
     expect(payload.limit).toBe(expectedLimit);
     expect(payload.offset).toBe(expectedOffset);
-    // The returned uri echoes the exact request (issue #6188) rather than a
-    // canonical form without pagination, so two different pages don't come
-    // back labeled with the same URI to a URI-keyed MCP client.
-    expect(content.uri).toBe(uri);
+    // The returned uri is always the canonical form (no limit/offset),
+    // never the exact requested URI (issue #6188) — notifyDatabaseChanged
+    // fires notifyResourceUpdated against this canonical URI, and
+    // ResourceRegistry requires an exact subscription match, so a
+    // subscriber must be subscribed to this same canonical form to ever
+    // receive an update.
+    expect(content.uri).toBe(`${base}?appId=com.example.app`);
     expect(getTableDataForIos).toHaveBeenCalledWith(
       "com.example.app",
       "/app/Documents/app.db",
@@ -226,5 +255,48 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       50,
       0,
     );
+  });
+
+  // Issue #6188: notifyDatabaseChanged fires notifyResourceUpdated against the
+  // canonical table-data URI (no limit/offset), and ResourceRegistry.
+  // notifyResourceUpdated requires an exact subscriptions.has(uri) match. A
+  // client that subscribed to the same canonical URI content.uri now always
+  // returns (rather than a per-page URI) must actually receive the update
+  // after a mutating sqlQuery.
+  test("a client subscribed to the canonical content.uri is notified after a mutating change", async () => {
+    const getTableDataForIos = mock(async () => ({
+      columns: ["id"],
+      rows: [["1"]],
+      total: 1,
+    }));
+    setupDevice(getTableDataForIos);
+    registerDatabaseResources();
+
+    const uri = `${base}?appId=com.example.app&limit=10&offset=5`;
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    const content = await match!.template.handler(match!.params);
+    const canonicalUri = `${base}?appId=com.example.app`;
+    expect(content.uri).toBe(canonicalUri);
+
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    try {
+      const subscribeHandler = server.server.handlersBySchema.get(SubscribeRequestSchema);
+      expect(subscribeHandler).toBeDefined();
+      // Client subscribes to the exact URI it was handed back.
+      await subscribeHandler!({ params: { uri: content.uri } });
+
+      await notifyDatabaseChanged("ios-1", "com.example.app", "/app/Documents/app.db", ["notes"]);
+
+      const methods = server.server.notifications.map((n) => n.method);
+      const updatedUris = server.server.notifications
+        .filter((n) => n.method === "notifications/resources/updated")
+        .map((n) => (n.params as { uri: string }).uri);
+      expect(methods).toContain("notifications/resources/updated");
+      expect(updatedUris).toContain(canonicalUri);
+    } finally {
+      ResourceRegistry.clearServersForTesting();
+    }
   });
 });

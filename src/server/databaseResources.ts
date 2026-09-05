@@ -1,4 +1,4 @@
-import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   DatabaseInspector,
@@ -320,14 +320,17 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = decodeURIComponent(databasePath);
   const decodedTable = decodeURIComponent(table);
-  // Echo back the URI the client actually requested (limit/offset included)
-  // rather than a canonical one without pagination — otherwise two different
-  // pages come back labeled with the same URI, which a URI-keyed MCP client
-  // would conflate (issue #6188). Falls back to the canonical form only if
-  // this handler is ever invoked outside the registry's template-match path.
-  const uri =
-    getRequestedResourceUri(params) ??
-    buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
+  // Always the canonical URI (no limit/offset), never the exact requested
+  // URI. notifyDatabaseChanged / table-schema invalidation both fire
+  // notifyResourceUpdated against this canonical form, and
+  // ResourceRegistry.notifyResourceUpdated requires an exact
+  // subscriptions.has(uri) match — echoing a per-page URI here would leave a
+  // client subscribed to a paginated URI never notified after a mutating
+  // sqlQuery (issue #6188). limit/offset stay valid, optional read params
+  // (issue #6133); the resource's subscribable identity is just the table,
+  // not a page of it. Distinct per-page subscription identities would need a
+  // broader resource-subscription redesign, tracked separately.
+  const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
 
   try {
     // ResourceRegistry forwards any query key that isn't captured as a path

@@ -6,7 +6,11 @@ import path from "path";
 import { statAsync, renameAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
 import { pruneLogFiles } from "./logPruner";
-import { resolveAutomobileLogFormat, resolveAutomobileLogSink } from "./loggingConfig";
+import {
+  resolveAutomobileLogFormat,
+  resolveAutomobileLogSink,
+  writeEmergencyLog,
+} from "./loggingConfig";
 
 export {
   parseAutomobileLogFormat,
@@ -177,8 +181,11 @@ const openLogStream = (target: string): fs.WriteStream | undefined => {
   try {
     return fs.createWriteStream(target, { flags: "a" });
   } catch (error) {
-    // Logger init is the thing failing, so it cannot log itself — warn to stderr.
-    process.stderr.write(`Failed to open log stream ${target}: ${String(error)}\n`);
+    // Logger init is the thing failing, so it cannot log itself — route the
+    // diagnostic through the JSON-aware emergency helper so this line stays
+    // valid NDJSON in `AUTOMOBILE_LOG_FORMAT=json` mode instead of a raw-text
+    // line breaking an otherwise-NDJSON stderr stream (issue #6179).
+    writeEmergencyLog(`Failed to open log stream ${target}`, error);
     return undefined;
   }
 };
@@ -430,12 +437,27 @@ const reportLogFailure = async (context: string, error: unknown): Promise<void> 
 };
 
 const writeToFile = async (line: string): Promise<void> => {
-  if (!logStream) {
+  if (!logFilePath) {
+    // Stderr-only sink: no file stream is ever expected here.
     return;
   }
-  await checkAndRotateLog();
+  if (!logStream) {
+    // A prior open attempt failed — e.g. bun's transient EEXIST/epoll race
+    // (#5930 family). Retry lazily on the next write instead of leaving the
+    // sink permanently dead: the failure that killed it may have cleared.
+    logStream = openLogStream(logFilePath);
+  }
+  if (logStream) {
+    await checkAndRotateLog();
+  }
   const stream = logStream;
   if (!stream) {
+    // Still unavailable. When file is the only configured sink, degrade to
+    // stderr rather than silently discarding the record (issue #6179);
+    // `stderr`/`both` sinks already emit this line via writeToConfiguredStderr.
+    if (logSink === "file") {
+      await writeToStderr(line);
+    }
     return;
   }
   await new Promise<void>((resolve, reject) => {

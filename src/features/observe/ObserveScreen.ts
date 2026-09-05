@@ -217,6 +217,67 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
   return hasBounds;
 }
 
+/**
+ * The status-bar-only verdict inputs (issue #6151): whether the service itself
+ * reported the focused window as unreadable, and the device API level that
+ * decides whether that can be Android 14+ data-sensitive withholding.
+ */
+function describeStatusBarOnlyCapture(
+  hierarchy: ObserveResult["viewHierarchy"],
+  foreground: string,
+): { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } {
+  return {
+    foreground,
+    ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true,
+    sdkInt: hierarchy?.sdkInt,
+  };
+}
+
+/**
+ * The service's own incomplete-capture signal (issue #6151), scoped to whether it
+ * actually pertains to the SELECTED/focused window.
+ *
+ * `ctrlProxyIncomplete` on the wire is a single, generic flag: CtrlProxy sets it
+ * whenever ANY active window was rootless, including an unrelated active
+ * SystemUI/overlay window that has nothing to do with the focused application
+ * (#6151 follow-up). Converting that flag unconditionally into a retracted
+ * verdict over-corrects: a perfectly good, verified focused-app hierarchy would
+ * be reported `verified: false` / `isFresh: false` on every observe that happens
+ * to catch a transient rootless overlay elsewhere on screen.
+ *
+ * Correlate it the same way `resolveStatusBarOnlyHierarchy` correlates a
+ * wrong-window capture: the observed package is the selected window's own
+ * identity, so when it matches the device's current foreground app, that
+ * window's content is trustworthy and the flag does not describe it — do not
+ * retract. It only describes the selected window when the observed package is
+ * absent or does not match the foreground app (a substituted window from the
+ * incomplete-capture fallback, or no content at all) — the genuine #6151 case,
+ * where the focused app's OWN root was null.
+ *
+ * `foreground` MUST be the SETTLED/confirmed identity (the same post-capture
+ * sample `resolveWindowIdentityMismatch` and `resolveStatusBarOnlyHierarchy`
+ * trust), never the initial parallel sample taken before capture. During an
+ * A→B app transition the initial sample can still read A while the hierarchy
+ * (and the confirming read) are already on B; comparing against the stale
+ * initial sample would see `observed (B) !== initial foreground (A)` and
+ * retract freshness even though B was just confirmed as the settled foreground
+ * — discarding the very confirmation the rest of this freshness logic relies on
+ * (#6151 follow-up).
+ */
+function describeIncompleteCapture(
+  hierarchy: ObserveResult["viewHierarchy"],
+  foreground: string | undefined,
+): { sdkInt: number | undefined } | undefined {
+  if (hierarchy?.ctrlProxyIncomplete !== true) {
+    return undefined;
+  }
+  const observed = hierarchy.packageName;
+  if (foreground !== undefined && observed !== undefined && observed === foreground) {
+    return undefined;
+  }
+  return { sdkInt: hierarchy.sdkInt };
+}
+
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
   const activityName = foregroundActivity.split("/")[1] ?? "";
   return (
@@ -627,6 +688,17 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
+        // The SETTLED/confirmed foreground, not the initial parallel sample: during an
+        // A→B transition the initial sample can still read A while the hierarchy and the
+        // confirming read are already on B, and comparing against stale A would retract a
+        // capture that was just confirmed as B (#6151 follow-up). Only sampled when the
+        // flag is actually set — the common case never pays the extra device read.
+        incompleteCapture: describeIncompleteCapture(
+          result.viewHierarchy,
+          result.viewHierarchy?.ctrlProxyIncomplete === true
+            ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
+            : undefined,
+        ),
       });
 
       // Cache the result for future use
@@ -1654,12 +1726,24 @@ export class RealObserveScreen implements ObserveScreen {
     return { observed, foreground };
   }
 
+  /**
+   * Status-bar-only capture gate. The returned `ctrlProxyIncomplete` distinguishes
+   * the two device-side causes so the verdict can name the right recovery:
+   * a stale window the runner keeps serving (home/relaunch recovers it) versus a
+   * focused application window the accessibility service could not read at all
+   * (issue #6151 — an accessibility-data-sensitive surface such as a runtime
+   * permission dialog or the Settings Wi-Fi picker, which Android 14+ withholds
+   * from a service that does not declare `isAccessibilityTool`; only a CtrlProxy
+   * update recovers it, and home/relaunch does not).
+   */
   private async resolveStatusBarOnlyHierarchy(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
     signal?: AbortSignal,
-  ): Promise<{ foreground: string } | undefined> {
+  ): Promise<
+    { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } | undefined
+  > {
     const foreground = await foregroundIdentity;
     const hierarchy = result.viewHierarchy;
 
@@ -1703,7 +1787,7 @@ export class RealObserveScreen implements ObserveScreen {
     ) {
       return undefined;
     }
-    return { foreground: confirmed };
+    return describeStatusBarOnlyCapture(hierarchy, confirmed);
   }
 
   /**

@@ -8,6 +8,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -978,7 +979,33 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `pickPrimaryAppWindowId leaves active-window fallback when no app is focused or IME is present`() {
+  fun `pickPrimaryAppWindowId leaves active-window fallback when a system window owns focus`() {
+    // Genuine system UI: an expanded shade / quick settings / keyguard reports isFocused, and
+    // the app beneath it must not be promoted over it (the systemTray workflow observes the
+    // shade).
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 5,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 6,
+          hasRoot = true,
+          isFocused = true,
+        ),
+      )
+    assertNull(extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId prefers an app window with content when no window reports focus`() {
+    // Regression for #6151: when the isFocused flag is populated nowhere, the topmost application
+    // window with a root outranks a status bar that merely happens to be marked active.
     val windows =
       listOf(
         ViewHierarchyExtractor.WindowMeta(
@@ -994,7 +1021,312 @@ class ViewHierarchyExtractorTest {
           hasRoot = true,
         ),
       )
+    assertEquals(10, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId prefers the active app over a higher-layer app when no window reports focus`() {
+    // Split-screen / picture-in-picture with the focus flag populated nowhere: the resumed
+    // (active) application must win over a merely topmost one, so mainPackageName agrees with
+    // adb's resumed package and freshness is not retracted against the wrong app.
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 1,
+          hasRoot = true,
+          isActive = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 12,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 3,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 6,
+          hasRoot = true,
+        ),
+      )
+    assertEquals(10, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId selects a focused permission dialog over the app beneath it`() {
+    // API 34 shape with a runtime permission dialog in front: the permissioncontroller dialog
+    // is its own focused TYPE_APPLICATION window layered above the (unfocused) app window.
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 219,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 2,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 318,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 0,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 322,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 1,
+          hasRoot = true,
+          isFocused = true,
+        ),
+      )
+    assertEquals(322, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId selects a focused Settings sub-panel over the status bar`() {
+    // API 34 shape with the Settings Wi-Fi picker in front (dumpsys accessibility ground truth
+    // from #6151): status bar TYPE_SYSTEM layer 1, Settings window focused+active layer 0.
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 219,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 1,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 256,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 0,
+          hasRoot = true,
+          isFocused = true,
+        ),
+      )
+    assertEquals(256, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId keeps the active-window fallback for a status bar alone`() {
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 219,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 1,
+          hasRoot = true,
+        )
+      )
     assertNull(extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `extractFromAllWindows detects a notification permission dialog in a non-primary window`() {
+    // #6151: the flag exists to catch this dialog, so it must be computed from whichever window
+    // carries it. Here the app window (still focused, as observed mid-transition) is primary and
+    // the permissioncontroller dialog is a second, unfocused application window.
+    val appRoot =
+      fakeNode(
+        packageName = "com.google.android.contacts",
+        bounds = Rect(0, 0, 1080, 2400),
+        children = listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
+      )
+    val dialogRoot =
+      fakeNode(
+        packageName = "com.google.android.permissioncontroller",
+        bounds = Rect(28, 682, 1052, 1654),
+        children =
+          listOf(
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Allow Contacts to send you notifications?",
+              bounds = Rect(100, 700, 1000, 800),
+            ),
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Allow",
+              resourceId = "com.android.permissioncontroller:id/permission_allow_button",
+              bounds = Rect(100, 1500, 500, 1600),
+            ),
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Don't allow",
+              resourceId = "com.android.permissioncontroller:id/permission_deny_button",
+              bounds = Rect(600, 1500, 1000, 1600),
+            ),
+          ),
+      )
+    val windows =
+      listOf(
+        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true),
+        fakeWindow(id = 322, layer = 1, root = dialogRoot, active = true),
+      )
+
+    val result = extractor.extractFromAllWindows(windows, appRoot, occlusionEnabled = false)
+
+    assertEquals(true, result.notificationPermissionDetected)
+    assertEquals("com.google.android.contacts", result.packageName)
+    assertNull(result.ctrlProxyIncomplete)
+    val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
+    assertTrue(serialized.contains("permission_allow_button"))
+    assertTrue(serialized.contains("Allow Contacts to send you notifications?"))
+
+    // An unfocused, inactive permissioncontroller window beside the app (another app's dialog
+    // in split-screen) must not flag this app's observation as a permission dialog.
+    val bystander =
+      listOf(
+        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true, active = true),
+        fakeWindow(id = 322, layer = 1, root = dialogRoot),
+      )
+    val bystanderResult =
+      extractor.extractFromAllWindows(bystander, appRoot, occlusionEnabled = false)
+    assertEquals(false, bystanderResult.notificationPermissionDetected)
+  }
+
+  @Test
+  fun `extractFromAllWindows does not flag an unrelated app's active dialog in a split-screen pane`() {
+    // #6151 follow-up: `canCarryDialog` used to accept ANY focused-or-active permissioncontroller
+    // window, so a foreign app's own active dialog in the other split-screen pane could still set
+    // the primary app's `notificationPermissionDetected`. Here App A (primary, focused) occupies
+    // the top half of the screen; App B's own active permission dialog occupies the bottom half —
+    // a disjoint region, so it does not overlap App A's window and must not be correlated with it.
+    val appARoot =
+      fakeNode(
+        packageName = "com.google.android.contacts",
+        bounds = Rect(0, 0, 1080, 1200),
+        children = listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
+      )
+    val foreignDialogRoot =
+      fakeNode(
+        packageName = "com.google.android.permissioncontroller",
+        bounds = Rect(28, 1300, 1052, 2300),
+        children =
+          listOf(
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Allow Maps to send you notifications?",
+              bounds = Rect(100, 1350, 1000, 1450),
+            ),
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Allow",
+              resourceId = "com.android.permissioncontroller:id/permission_allow_button",
+              bounds = Rect(100, 2100, 500, 2200),
+            ),
+          ),
+      )
+    val windows =
+      listOf(
+        fakeWindow(
+          id = 318,
+          layer = 0,
+          root = appARoot,
+          focused = true,
+          bounds = Rect(0, 0, 1080, 1200),
+        ),
+        fakeWindow(
+          id = 322,
+          layer = 0,
+          root = foreignDialogRoot,
+          active = true,
+          bounds = Rect(0, 1200, 1080, 2400),
+        ),
+      )
+
+    val result = extractor.extractFromAllWindows(windows, appARoot, occlusionEnabled = false)
+
+    assertEquals(false, result.notificationPermissionDetected)
+    assertEquals("com.google.android.contacts", result.packageName)
+  }
+
+  @Test
+  fun `extractFromAllWindows reports an incomplete capture when the focused app root is withheld`() {
+    // The #6151 device shape before the isAccessibilityTool declaration: the status bar has a
+    // root, the focused Settings window does not, and rootInActiveWindow is null too. The
+    // capture must be flagged incomplete with no package rather than labelled as app content.
+    val statusBarRoot =
+      fakeNode(
+        packageName = "com.android.systemui",
+        bounds = Rect(0, 0, 1080, 63),
+        children =
+          listOf(
+            fakeNode(
+              packageName = "com.android.systemui",
+              text = "8:33",
+              resourceId = "com.android.systemui:id/clock",
+              bounds = Rect(21, 0, 107, 63),
+            )
+          ),
+      )
+    val windows =
+      listOf(
+        fakeWindow(
+          id = 219,
+          layer = 1,
+          root = statusBarRoot,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+        ),
+        fakeWindow(id = 256, layer = 0, root = null, focused = true, active = true),
+      )
+
+    val result = extractor.extractFromAllWindows(windows, null, occlusionEnabled = false)
+
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertNull(result.packageName)
+    assertNotNull(result.hierarchy)
+    val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
+    assertTrue(serialized.contains("com.android.systemui:id/clock"))
+  }
+
+  private fun fakeNode(
+    packageName: String,
+    text: String? = null,
+    resourceId: String? = null,
+    bounds: Rect = Rect(0, 100, 1080, 200),
+    children: List<android.view.accessibility.AccessibilityNodeInfo> = emptyList(),
+  ): android.view.accessibility.AccessibilityNodeInfo {
+    val node = android.view.accessibility.AccessibilityNodeInfo.obtain()
+    node.packageName = packageName
+    node.className = "android.widget.TextView"
+    node.text = text
+    node.viewIdResourceName = resourceId
+    node.setBoundsInScreen(bounds)
+    node.isVisibleToUser = true
+    val shadow = org.robolectric.Shadows.shadowOf(node)
+    for (child in children) {
+      shadow.addChild(child)
+    }
+    // The extractor calls findFocus on each window root, which the framework only allows on a
+    // sealed (service-delivered) node. setSealed is a hidden API, so seal via reflection after
+    // the setters above (which in turn require an unsealed node).
+    android.view.accessibility.AccessibilityNodeInfo::class
+      .java
+      .getMethod("setSealed", Boolean::class.javaPrimitiveType)
+      .invoke(node, true)
+    return node
+  }
+
+  private fun fakeWindow(
+    id: Int,
+    layer: Int,
+    root: android.view.accessibility.AccessibilityNodeInfo?,
+    type: Int = AccessibilityWindowInfo.TYPE_APPLICATION,
+    focused: Boolean = false,
+    active: Boolean = false,
+    bounds: Rect? = null,
+  ): AccessibilityWindowInfo {
+    val window = AccessibilityWindowInfo.obtain()
+    val shadow = org.robolectric.Shadows.shadowOf(window)
+    shadow.setId(id)
+    shadow.setLayer(layer)
+    shadow.setType(type)
+    shadow.setRoot(root)
+    shadow.setFocused(focused)
+    shadow.setActive(active)
+    shadow.setBoundsInScreen(
+      bounds ?: Rect(0, 0, 1080, if (type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400)
+    )
+    return window
   }
 
   @Test
@@ -1029,7 +1361,8 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `pickPrimaryAppWindowId ignores IME with null root`() {
     // An IME window present in the windows list but without a root cannot contribute
-    // occlusion and should not trigger the primary-window remap.
+    // occlusion and should not trigger the IME primary-window remap. The IME owns focus here
+    // (the keyboard-showing shape), so the no-focus-anywhere rule (#6151) does not apply either.
     val windows =
       listOf(
         ViewHierarchyExtractor.WindowMeta(
@@ -1043,6 +1376,7 @@ class ViewHierarchyExtractorTest {
           type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
           layer = 10,
           hasRoot = false,
+          isFocused = true,
         ),
       )
     assertNull(extractor.pickPrimaryAppWindowId(windows))

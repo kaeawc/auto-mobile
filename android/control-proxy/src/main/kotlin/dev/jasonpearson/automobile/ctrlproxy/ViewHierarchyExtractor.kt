@@ -211,6 +211,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // fall back to the topmost application window with a root.
     val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
 
+    // The primary app window's own bounds, used below to correlate a permission-controller
+    // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
+    // primary window was picked, in which case `isPrimaryWindow` already covers the active
+    // window directly and correlation is moot.
+    val primaryAppWindowBounds: Rect? = primaryAppWindowId?.let { id ->
+      windows.firstOrNull { it.id == id }?.let { w -> Rect().also(w::getBoundsInScreen) }
+    }
+
     // Extract from each window
     for (window in windows) {
       try {
@@ -305,10 +313,22 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         if (isPrimaryWindow) {
           mainHierarchy = processedElement
           mainPackageName = packageName
-          if (notificationPermissionDetected == null && processedElement != null) {
-            notificationPermissionDetected =
-              detectNotificationPermissionDialog(processedElement, packageName)
-          }
+        }
+        // A runtime permission dialog is its own permissioncontroller window. Detect it in the
+        // primary window or in a focused/active one that also overlaps the primary app window's
+        // bounds (a dialog owns focus while it is on screen, even mid-transition when selection
+        // still lands on the app beneath it), so the flag cannot read false while the dialog is
+        // up (#6151). A focused/active window that does NOT overlap the primary app — e.g.
+        // another app's own dialog in an unrelated split-screen pane — does not flag the primary
+        // app's observation (#6151 follow-up: cross-app false-positive correlation).
+        val canCarryDialog =
+          isPrimaryWindow ||
+            ((window.isFocused || window.isActive) &&
+              (primaryAppWindowBounds == null ||
+                Rect.intersects(primaryAppWindowBounds, windowBounds)))
+        if (notificationPermissionDetected != true && processedElement != null && canCarryDialog) {
+          notificationPermissionDetected =
+            detectNotificationPermissionDialog(processedElement, packageName)
         }
 
         if (processedElement != null) {
@@ -362,7 +382,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       if (!intentChooserDetected && mainHierarchy != null) {
         intentChooserDetected = detectIntentChooserIndicators(mainHierarchy!!)
       }
-      if (notificationPermissionDetected == null && mainHierarchy != null) {
+      if (notificationPermissionDetected != true && mainHierarchy != null) {
         notificationPermissionDetected =
           detectNotificationPermissionDialog(mainHierarchy!!, mainPackageName)
       }
@@ -696,13 +716,21 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   /**
    * Selects the window id hierarchy extraction should treat as the "primary" user-facing window.
    * Prefers a focused application window even when its root is temporarily unavailable. When the
-   * IME owns focus, falls back to the topmost application window with a root. Returns null when
-   * neither condition applies so callers can retain the active-window fallback for genuine system
-   * UI.
+   * IME owns focus, or when no window reports focus at all, falls back to the topmost application
+   * window with a root. Returns null when neither condition applies so callers can retain the
+   * active-window fallback for genuine system UI (a focused shade, quick settings, or keyguard).
    *
    * Android can mark a system window active while the foreground application is focused, and marks
    * the IME active/focused while the keyboard is showing. In either case, relying on
-   * [AccessibilityWindowInfo.isActive] alone can select non-app content.
+   * [AccessibilityWindowInfo.isActive] alone can select non-app content. The
+   * [AccessibilityWindowInfo.isFocused] flag is not populated on every API level either; when it is
+   * absent everywhere, an application window that has readable content still outranks a status bar
+   * that merely happens to be marked active (#6151).
+   *
+   * Note that a focused application window whose root is null is a different failure: on Android
+   * 14+ the framework hides accessibility-data-sensitive surfaces (runtime permission dialogs, the
+   * Settings Wi-Fi picker) from services that do not declare `isAccessibilityTool`, which is why
+   * the service config declares it. No ranking rule can recover content the framework withholds.
    */
   private fun pickPrimaryAppWindowId(windows: List<AccessibilityWindowInfo>): Int? =
     pickPrimaryAppWindowId(
@@ -713,6 +741,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           layer = it.layer,
           hasRoot = it.root != null,
           isFocused = it.isFocused,
+          isActive = it.isActive,
         )
       }
     )
@@ -727,19 +756,26 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val layer: Int,
     val hasRoot: Boolean,
     val isFocused: Boolean = false,
+    val isActive: Boolean = false,
   )
 
   /** Single-pass variant used by tests and by the production overload. */
   internal fun pickPrimaryAppWindowId(windows: List<WindowMeta>): Int? {
     var hasIme = false
+    var anyWindowFocused = false
     var focusedAppId: Int? = null
     var focusedAppLayer = Int.MIN_VALUE
+    var activeAppId: Int? = null
     var topAppId: Int? = null
     var topAppLayer = Int.MIN_VALUE
     for (w in windows) {
+      if (w.isFocused) anyWindowFocused = true
       when (w.type) {
         AccessibilityWindowInfo.TYPE_INPUT_METHOD -> if (w.hasRoot) hasIme = true
         AccessibilityWindowInfo.TYPE_APPLICATION -> {
+          if (w.hasRoot && w.isActive) {
+            activeAppId = w.id
+          }
           if (w.hasRoot && w.layer > topAppLayer) {
             topAppLayer = w.layer
             topAppId = w.id
@@ -751,7 +787,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         }
       }
     }
-    return focusedAppId ?: if (hasIme) topAppId else null
+    if (focusedAppId != null) {
+      return focusedAppId
+    }
+    // The IME owns focus, or the focus flag is populated nowhere: the application window with
+    // readable content is the user-facing window — the active one when several coexist
+    // (split-screen, picture-in-picture), else the topmost. A focused non-app window (shade,
+    // quick settings, keyguard) keeps the active-window fallback.
+    return if (hasIme || !anyWindowFocused) activeAppId ?: topAppId else null
   }
 
   /**

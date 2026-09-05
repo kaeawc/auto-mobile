@@ -273,23 +273,13 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       expect(events).toEqual([]);
     });
 
-    test("should count an in-window event when the device clock is skewed from the host (#5377)", async function () {
-      // Host clock (this.timer.now(), used for startTimestamp/endTimestamp)
-      // reads ~5,000,000ms; the device's own clock is 100,000,000ms (~27.8h)
-      // ahead. Without translating the host-domain bounds into the device's
-      // clock domain before comparing against the device-stamped log line,
-      // this genuinely in-window event would be wrongly rejected as "outside"
-      // the window.
-      const hostNowMs = 5_000_000;
-      const deviceNowMs = 105_000_000;
-      const fakeTimer = new FakeTimer();
-      fakeTimer.setCurrentTime(hostNowMs);
-      const skewedCollector = new MemoryMetricsCollector(
-        { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
-        fakeTimer,
-      );
-      fakeAdb.setDeviceTimestampMs(deviceNowMs);
+    test("should count an event whose device-epoch timestamp falls within the given bounds", async function () {
+      // captureGCEvents' startTimestamp/endTimestamp are now expected to
+      // already be in the DEVICE's clock domain (read via
+      // getDeviceTimestampMs at the actual audit boundaries — see
+      // collectMetrics), so no host<->device translation happens inside
+      // captureGCEvents itself; the bounds are compared directly against
+      // the device-stamped log line's epoch.
       fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1234", stderr: "" } as any);
       fakeAdb.setCommandResponse("logcat -d -v epoch", {
         stdout:
@@ -297,45 +287,47 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         stderr: "",
       } as any);
 
-      const events = await skewedCollector.captureGCEvents(
+      const events = await collector.captureGCEvents(
         "com.example.app",
-        hostNowMs - 500,
-        hostNowMs + 500,
+        105_000_000 - 500,
+        105_000_000 + 500,
       );
 
       expect(events.length).toBe(1);
       expect(events[0].freedKb).toBe(10);
     });
 
-    test("should drop an event outside the window once translated into device clock time", async function () {
-      // Same skewed device clock, but this line falls 80s after the
-      // device-time window end — it must still be rejected, proving the fix
-      // filters by a translated window rather than accepting everything once
-      // an offset is introduced.
-      const hostNowMs = 5_000_000;
-      const deviceNowMs = 105_000_000;
-      const fakeTimer = new FakeTimer();
-      fakeTimer.setCurrentTime(hostNowMs);
-      const skewedCollector = new MemoryMetricsCollector(
-        { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
-        fakeTimer,
-      );
-      fakeAdb.setDeviceTimestampMs(deviceNowMs);
+    test("should drop an event whose device-epoch timestamp falls outside the given bounds", async function () {
       fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1234", stderr: "" } as any);
       fakeAdb.setCommandResponse("logcat -d -v epoch", {
         stdout:
+          // 80s after the window end.
           "105080.000  1234  1234 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
         stderr: "",
       } as any);
 
-      const events = await skewedCollector.captureGCEvents(
+      const events = await collector.captureGCEvents(
         "com.example.app",
-        hostNowMs - 500,
-        hostNowMs + 500,
+        105_000_000 - 500,
+        105_000_000 + 500,
       );
 
       expect(events).toEqual([]);
+    });
+
+    test("should treat the device-clock window bounds as inclusive", async function () {
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1234", stderr: "" } as any);
+      fakeAdb.setCommandResponse("logcat -d -v epoch", {
+        stdout: [
+          "100.000  1234  1234 I com.example.app: Background concurrent copying GC freed 1(1KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 1us", // exactly at start
+          "200.000  1234  1234 I com.example.app: Background concurrent copying GC freed 2(2KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 1us", // exactly at end
+        ].join("\n"),
+        stderr: "",
+      } as any);
+
+      const events = await collector.captureGCEvents("com.example.app", 100_000, 200_000);
+
+      expect(events.length).toBe(2);
     });
 
     test("should use a pre-resolved pid instead of re-querying pidof (survives a mid-action process restart)", async function () {
@@ -343,14 +335,6 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       // collectMetrics now does): pid 1111 was alive during the action, but
       // if captureGCEvents queried pidof itself afterward it would get 2222
       // (the app restarted). Passing the pre-resolved pid must win.
-      const fakeTimer = new FakeTimer();
-      fakeTimer.setCurrentTime(1_000_000);
-      const restartCollector = new MemoryMetricsCollector(
-        { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
-        fakeTimer,
-      );
-      fakeAdb.setDeviceTimestampMs(1_000_000);
       fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "2222", stderr: "" } as any);
       fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
         stdout:
@@ -363,7 +347,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         stderr: "",
       } as any);
 
-      const events = await restartCollector.captureGCEvents(
+      const events = await collector.captureGCEvents(
         "com.example.app",
         999_500,
         1_000_500,
@@ -379,12 +363,24 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const gcCommand = executed.find((cmd) => cmd.includes("logcat"));
       expect(gcCommand).toContain("--pid=1111");
     });
+
+    test("should sum AllocSpace and LOS freed sizes into freedKb", function () {
+      // ART reports large-object frees as two separate scaled quantities;
+      // both must be summed rather than only the (regular-object) AllocSpace figure.
+      const output =
+        "09-05 12:00:00.000 I com.example.app: Explicit concurrent copying GC freed 123(4MB) AllocSpace objects, 45(2MB) LOS objects, 50% free, 6MB/8MB, paused 1ms";
+
+      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+
+      expect(result.length).toBe(1);
+      expect(result[0].freedKb).toBe(4 * 1024 + 2 * 1024); // 4MB AllocSpace + 2MB LOS = 6144KB
+      expect(result[0].durationMs).toBe(1);
+    });
   });
 
-  describe("collectMetrics pid retention across the audited action", function () {
-    test("scopes GC capture to the pid resolved before the action, even though a later pidof call returns a different pid", async function () {
+  describe("collectMetrics pid retention and device-clock boundary capture", function () {
+    test("scopes GC capture to the pid resolved before the action, and reads the GC window directly from device-clock boundary reads", async function () {
       const fakeTimer = new FakeTimer();
-      fakeTimer.setCurrentTime(1_000_000);
       fakeTimer.enableAutoAdvance();
       const restartCollector = new MemoryMetricsCollector(
         { deviceId: "test-device", name: "test", platform: "android" },
@@ -407,17 +403,15 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         stdout: "",
         stderr: "",
       } as any);
+      // The device clock is read once immediately before the action starts
+      // (500_000) and once immediately after it ends (500_500) — these two
+      // reads ARE the GC window, with no host-clock translation involved.
+      fakeAdb.setDeviceTimestampMsSequence([500_000, 500_500]);
       fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
         stdout:
-          "1000.000  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
+          "500.200  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
         stderr: "",
       } as any);
-      // triggerGC's sleep(500) advances the fake host clock by 500ms before
-      // captureGCEvents reads it; set the device clock to match so the
-      // (unrelated to this test) clock-skew translation is a no-op offset,
-      // keeping the fixture's "1000.000" epoch inside the [1_000_000, 1_000_000]
-      // host-domain window captured around the (instantaneous) audited action.
-      fakeAdb.setDeviceTimestampMs(1_000_500);
 
       const metrics = await restartCollector.collectMetrics("com.example.app", async () => {});
 

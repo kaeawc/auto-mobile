@@ -37,6 +37,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private usersSequence: AndroidUser[][] | null = null;
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private deviceTimestampMs: number | null = null;
+  private deviceTimestampMsSequence: number[] | null = null;
   private androidApiLevel: number | null = null;
 
   /**
@@ -152,6 +153,16 @@ export class FakeAdbExecutor implements AdbExecutor {
    */
   setDeviceTimestampMs(timestampMs: number | null): void {
     this.deviceTimestampMs = timestampMs;
+  }
+
+  /**
+   * Configure an ordered sequence of device timestamps; each call to
+   * {@link getDeviceTimestampMs} consumes the next value, and the final value
+   * repeats once exhausted. Useful for simulating the device clock advancing
+   * between two boundary reads (e.g. before/after an audited action).
+   */
+  setDeviceTimestampMsSequence(timestampsMs: number[]): void {
+    this.deviceTimestampMsSequence = [...timestampsMs];
   }
 
   /**
@@ -350,6 +361,11 @@ export class FakeAdbExecutor implements AdbExecutor {
   }
 
   async getDeviceTimestampMs(): Promise<number> {
+    if (this.deviceTimestampMsSequence && this.deviceTimestampMsSequence.length > 0) {
+      return this.deviceTimestampMsSequence.length > 1
+        ? this.deviceTimestampMsSequence.shift()!
+        : this.deviceTimestampMsSequence[0];
+    }
     return this.deviceTimestampMs ?? Date.now();
   }
 

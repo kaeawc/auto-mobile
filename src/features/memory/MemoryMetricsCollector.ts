@@ -195,6 +195,17 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    * whatever `pidof` reports afterward (which may be a new pid, or none at
    * all). A caller invoking this standalone may omit it to resolve fresh.
    *
+   * `startTimestamp`/`endTimestamp` MUST already be in the **device's** clock
+   * domain — i.e. read via {@link AdbExecutor.getDeviceTimestampMs} at the
+   * actual audit boundaries (see {@link collectMetrics}), not `this.timer.now()`
+   * host time. logcat's `-v epoch` stamps each line with the device's own
+   * clock, so comparing host-domain bounds against them directly would reject
+   * genuinely in-window events whenever the device's wall clock differs from
+   * the host's (#5377). Capturing the device clock at the boundaries — rather
+   * than reading it once here and translating a host-domain window through a
+   * single offset — also avoids baking the adb round-trip latency of that read
+   * into the window.
+   *
    * Known limitation: if the process legitimately restarts mid-audit, GC
    * events from the *new* process are not captured — only from the pid alive
    * at audit start. Tracking a restart is left as a follow-up.
@@ -216,23 +227,6 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
         return [];
       }
 
-      // Device-vs-host clock skew (#5377): startTimestamp/endTimestamp are
-      // host-clock ms (this.timer.now()), but logcat's "-v epoch" stamps each
-      // line with the DEVICE's own clock. On an emulator/device whose wall
-      // clock differs from the host, comparing them directly rejects
-      // genuinely in-window events (or admits out-of-window ones). Read the
-      // device's current epoch once via the shared getDeviceTimestampMs()
-      // helper (the same device-clock primitive observationFreshness.ts uses
-      // for #5377) and translate the host-domain bounds into the device's
-      // clock domain before comparing against the device-stamped log lines.
-      const hostNowMs = this.timer.now();
-      const deviceNowMs = await perf.track("adbDeviceTimestamp", () =>
-        this.adb.getDeviceTimestampMs(),
-      );
-      const hostToDeviceOffsetMs = deviceNowMs - hostNowMs;
-      const deviceStartTimestamp = startTimestamp + hostToDeviceOffsetMs;
-      const deviceEndTimestamp = endTimestamp + hostToDeviceOffsetMs;
-
       // ART (API 21+) logs GC lines under the app's own process tag (not a
       // dedicated "art" tag) and without the legacy "GC_" prefix, e.g.
       // "Background concurrent copying GC freed 4180(230KB) ..., paused 213us".
@@ -244,7 +238,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       // supports it; `-v epoch` gives each line a machine-parseable
       // device-clock timestamp so parseGCEvents() can both re-verify the pid
       // column (defense-in-depth for devices where `--pid` is a no-op) and
-      // drop events outside the (device-clock) capture window.
+      // drop events outside the (already device-clock) capture window.
       const { stdout } = await perf.track("adbLogcatGC", () =>
         this.adb.executeCommand(
           `shell logcat -d -v epoch --pid=${resolvedPid} | grep -iE "GC[_ ].*freed.*paused"`,
@@ -252,7 +246,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
         ),
       );
 
-      return this.parseGCEvents(stdout, deviceStartTimestamp, deviceEndTimestamp, resolvedPid);
+      return this.parseGCEvents(stdout, startTimestamp, endTimestamp, resolvedPid);
     } catch (error) {
       logger.warn(`[MemoryMetricsCollector] Failed to capture GC events: ${error}`);
       return [];
@@ -353,6 +347,12 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    */
   private parseGCEventFromMessage(message: string, timestamp: number): GCEvent | null {
     const dalvikPattern = /^GC_(\w+)\s+freed\s+(\d+)K,?.*?paused\s+(\d+)ms/i;
+    // ART reports AllocSpace and Large Object Space frees as two separate
+    // scaled quantities on large-object collections, e.g. "freed 123(4MB)
+    // AllocSpace objects, 45(2MB) LOS objects" — both must be summed into
+    // freedKb, not just the (regular-object) AllocSpace figure.
+    const artAllocLosPattern =
+      /([A-Za-z][A-Za-z ]*?)\s*GC freed\s+(?:\d+\()?([\d.]+)\s*(B|KB|MB|GB)\)?\s*AllocSpace objects,\s*(?:\d+\()?([\d.]+)\s*(B|KB|MB|GB)\)?\s*LOS objects.*?paused\s+([\d.]+(?:us|ms)(?:,\s*[\d.]+(?:us|ms))*)/i;
     const artPattern =
       /([A-Za-z][A-Za-z ]*?)\s*GC freed\s+(?:\d+\()?([\d.]+)\s*(B|KB|MB|GB)\)?.*?paused\s+([\d.]+(?:us|ms)(?:,\s*[\d.]+(?:us|ms))*)/i;
 
@@ -362,6 +362,18 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
         type: dalvikMatch[1],
         freedKb: parseInt(dalvikMatch[2], 10),
         durationMs: parseInt(dalvikMatch[3], 10),
+        timestamp,
+      };
+    }
+
+    const allocLosMatch = message.match(artAllocLosPattern);
+    if (allocLosMatch) {
+      const allocSpaceKb = this.normalizeFreedToKb(allocLosMatch[2], allocLosMatch[3]);
+      const losKb = this.normalizeFreedToKb(allocLosMatch[4], allocLosMatch[5]);
+      return {
+        type: allocLosMatch[1].trim(),
+        freedKb: allocSpaceKb + losKb,
+        durationMs: this.sumPauseComponentsMs(allocLosMatch[6]),
         timestamp,
       };
     }
@@ -499,12 +511,24 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
 
     // Take pre-action snapshot
     const preSnapshot = await this.takeSnapshot(packageName, perf);
-    const startTimestamp = this.timer.now();
+
+    // Capture the GC window bounds directly in the DEVICE's own clock,
+    // reading it right at each boundary rather than once afterward and
+    // translating a host-clock window through a single offset (which would
+    // bake the adb round-trip latency of that one read into the window).
+    // logcat's "-v epoch" stamps each line with the device's clock, so
+    // comparing these bounds against it in parseGCEvents needs no further
+    // translation (see captureGCEvents / #5377).
+    const startTimestamp = await perf.track("adbDeviceTimestampStart", () =>
+      this.adb.getDeviceTimestampMs(),
+    );
 
     // Execute the action
     await beforeAction();
 
-    const endTimestamp = this.timer.now();
+    const endTimestamp = await perf.track("adbDeviceTimestampEnd", () =>
+      this.adb.getDeviceTimestampMs(),
+    );
 
     // Trigger explicit GC to ensure we get post-GC measurements
     await this.triggerGC(packageName, perf);

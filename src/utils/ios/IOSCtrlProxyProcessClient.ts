@@ -3,6 +3,12 @@ import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import type { Timer } from "../SystemTimer";
 import { defaultTimer } from "../SystemTimer";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
+
+/** Matches a `kill -0` failure caused by the target being owned by another
+ * user/process (EPERM), not by it being gone (ESRCH). The process exists in
+ * this case, so callers must not treat the failure as "not running". */
+const PERMISSION_DENIED_PATTERN = /operation not permitted|permission denied/i;
 
 export interface CtrlProxyProcessInfo {
   readonly ppid?: number;
@@ -128,14 +134,18 @@ export class IOSCtrlProxyProcessClient {
   async isRunning(pid: number, deadline?: number): Promise<boolean> {
     try {
       const result = await this.executeCommand("kill", ["-0", String(pid)], deadline);
-      return !/operation not permitted|permission denied/i.test(result.stderr);
+      return !PERMISSION_DENIED_PATTERN.test(result.stderr);
     } catch (error) {
       // A command error means the process is unavailable only while the
       // caller's cleanup budget remains. Do not turn deadline expiry into a
       // successful exit observation.
       this.remainingTimeoutMs(deadline);
       logger.debug(`[IOSCtrlProxy] Failed to check PID ${pid}: ${error}`);
-      return false;
+      // `kill -0` exits non-zero for both EPERM (process exists, owned by
+      // another user) and ESRCH (no such process), so the exec seam's throw
+      // path can't be told apart by exit code alone. Classify from the
+      // wrapped error text: EPERM means the process is alive (#6137).
+      return PERMISSION_DENIED_PATTERN.test(errorMessage(error));
     }
   }
 

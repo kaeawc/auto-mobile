@@ -152,4 +152,38 @@ describe("IOSCtrlProxyProcessClient", () => {
     await expect(client.isRunning(77)).resolves.toBe(false);
     expect(host.getExecutedCommands()).toEqual(["kill -0 77"]);
   });
+
+  test("treats a kill -0 EPERM rejection as the process still running (#6137)", async () => {
+    const host: HostCommandExecutor = {
+      async executeCommand() {
+        throw new Error(
+          "Command failed: kill -0 77\nexit code: 1\nstderr: (last 4000 chars)\nOperation not permitted",
+        );
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    await expect(client.isRunning(77)).resolves.toBe(true);
+  });
+
+  test("treats a kill -0 ESRCH rejection as the process not running", async () => {
+    const host: HostCommandExecutor = {
+      async executeCommand() {
+        throw new Error(
+          "Command failed: kill -0 77\nexit code: 1\nstderr: (last 4000 chars)\nNo such process",
+        );
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    await expect(client.isRunning(77)).resolves.toBe(false);
+  });
+
+  test("treats a clean kill -0 exit as the process running", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("kill -0 77", result());
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    await expect(client.isRunning(77)).resolves.toBe(true);
+  });
 });

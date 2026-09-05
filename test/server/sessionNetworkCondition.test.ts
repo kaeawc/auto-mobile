@@ -345,30 +345,97 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
-  test("B's late failed re-apply does not re-arm A's TTL over C's live TTL (#6178 PR #6183 review, P1)", async () => {
+  test("serializes overlapping same-session network mutations so the second observes the first's completed state (#6178 PR #6183 review, structural fix)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedFirst = Promise.withResolvers<void>();
+    const finishFirst = Promise.withResolvers<void>();
+    const order: string[] = [];
+    try {
+      await manager.createSession("net-serialize", "emulator-5554", "android");
+
+      // First mutation starts and blocks mid-flight, HOLDING the per-session lock.
+      const first = runSessionNetworkMutation(
+        manager,
+        "net-serialize",
+        "emulator-5554",
+        true,
+        async () => {
+          order.push("first-start");
+          startedFirst.resolve();
+          await finishFirst.promise;
+          order.push("first-end");
+        },
+        30,
+      );
+      await startedFirst.promise;
+
+      // A second mutation is issued while the first is still in flight. Its
+      // critical section (bump/snapshot/cancel/mutation) must not begin until
+      // the first has fully settled, including its own TTL decision.
+      let secondStarted = false;
+      const second = runSessionNetworkMutation(
+        manager,
+        "net-serialize",
+        "emulator-5554",
+        true,
+        async () => {
+          secondStarted = true;
+          order.push("second-start");
+        },
+        60,
+      );
+
+      // Give the microtask queue every chance to run the second mutation's body
+      // if it were (incorrectly) allowed to start concurrently with the first.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(secondStarted).toBe(false);
+
+      finishFirst.resolve();
+      await first;
+      await second;
+
+      // The second only ran after the first fully completed — no interleaving.
+      expect(order).toEqual(["first-start", "first-end", "second-start"]);
+
+      // The second's own 60s TTL (armed only once both settled) is what fires.
+      timer.advanceTime(60_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("A's original TTL survives two overlapping FAILURES, B then C (#6178 PR #6183 review, structural fix)", async () => {
     const timer = new FakeTimer();
     const restored: string[] = [];
     const manager = makeManager(timer, restored);
     const startedB = Promise.withResolvers<void>();
     const finishedB = Promise.withResolvers<void>();
+    const startedC = Promise.withResolvers<void>();
+    const finishedC = Promise.withResolvers<void>();
     try {
-      await manager.createSession("net-overlap", "emulator-5554", "android");
+      await manager.createSession("net-ab-fail", "emulator-5554", "android");
 
       // A: timed degrade, 30s TTL.
       await runSessionNetworkMutation(
         manager,
-        "net-overlap",
+        "net-ab-fail",
         "emulator-5554",
         true,
         async () => {},
         30,
       );
+      timer.advanceTime(5_000); // 25s remain on A's deadline.
 
-      // B: a slow re-apply that will eventually fail. Its tracked mutation blocks
-      // partway through, snapshotting and cancelling A's TTL before it does.
+      // B: a slow re-apply that will fail. Holds the per-session lock while blocked.
       const mutationB = runSessionNetworkMutation(
         manager,
-        "net-overlap",
+        "net-ab-fail",
         "emulator-5554",
         true,
         async () => {
@@ -380,29 +447,39 @@ describe("runSessionNetworkMutation", () => {
       );
       await startedB.promise;
 
-      // C: arrives while B is still in flight and applies successfully with its
-      // own 50s TTL — this bumps the generation counter past B's.
-      await runSessionNetworkMutation(
+      // C is issued while B is still in flight. Under serialization it cannot
+      // even begin its critical section (no bump, no snapshot) until B's lock
+      // is released — this call just queues.
+      const mutationC = runSessionNetworkMutation(
         manager,
-        "net-overlap",
+        "net-ab-fail",
         "emulator-5554",
         true,
-        async () => {},
+        async () => {
+          startedC.resolve();
+          await finishedC.promise;
+          return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+        },
         50,
       );
 
-      // B now settles as a failure. Its attempt to re-arm A's original deadline
-      // must be skipped: the generation has moved on to C, so B's stale snapshot
-      // must neither resurrect A's deadline nor clobber C's live timer.
+      // B fails. With B and C serialized, B's re-arm of A's original deadline
+      // is NOT stale (nothing has bumped the generation past B's yet), so it
+      // succeeds — then B releases the lock and C's critical section begins.
       finishedB.resolve();
       await mutationB;
+      await startedC.promise;
 
-      // A's original 30s deadline passes and fires nothing.
-      timer.advanceTime(30_000);
+      // C fails too, snapshotting the deadline B just restored and re-arming it
+      // again under C's own (now-current) generation.
+      finishedC.resolve();
+      await mutationC;
+
+      // A's ORIGINAL deadline (25s remaining from the 5s mark, i.e. absolute
+      // t=30s) fires and restores — never lost between B's and C's failures.
+      timer.advanceTime(24_000);
       expect(restored).toEqual([]);
-
-      // C's own 50s TTL still fires on schedule and restores.
-      timer.advanceTime(20_000);
+      timer.advanceTime(1_000);
       await manager.getPendingDeviceCleanup("emulator-5554");
       expect(restored).toEqual(["none"]);
     } finally {

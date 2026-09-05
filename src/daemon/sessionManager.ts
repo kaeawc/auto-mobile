@@ -354,6 +354,18 @@ export class SessionManager {
    * on — so it can detect it was superseded and must not clear B's restore slot.
    */
   private readonly networkConditionGeneration: Map<string, number> = new Map();
+  /**
+   * Per-session tail of the promise chain serializing
+   * {@link runNetworkConditionMutationExclusive} critical sections (issue #6178
+   * PR #6183 review, structural fix). The generation guard alone cannot
+   * preserve a displaced expiry: a later generation only proves a mutation was
+   * ATTEMPTED, not that it succeeded, so two overlapping FAILURES (B then C)
+   * could each see nothing to restore while a timed degrade's (A's) original
+   * deadline is lost between them. Serializing the whole apply/reset + TTL
+   * arm/cancel/re-arm sequence per session removes the race family outright —
+   * see {@link runNetworkConditionMutationExclusive}.
+   */
+  private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
   /** Automatic device assignments that have not yet started their creation write. */
@@ -2481,6 +2493,40 @@ export class SessionManager {
     return next;
   }
 
+  /**
+   * Run `fn` as the next link in a per-session promise-chain mutex, so that
+   * `runSessionNetworkMutation`'s ENTIRE critical section — generation bump,
+   * TTL snapshot/cancel, the mutation itself, and its TTL re-arm/schedule
+   * decision — never overlaps another same-session networkCondition mutation
+   * (issue #6178 PR #6183 review). This is the structural fix for a family of
+   * races the generation guard alone could not close: a later generation only
+   * proves a mutation was ATTEMPTED, not that it succeeded, so two overlapping
+   * FAILURES could each observe nothing to restore while a displaced TTL is
+   * lost between them. With this lock, a later mutation's snapshot always sees
+   * the FULLY SETTLED state (including any prior mutation's own re-arm) of the
+   * one before it — the whole interleaving family becomes impossible, not just
+   * the specific cases already patched.
+   *
+   * Scoped narrowly and reentrancy-safe by construction: keyed per session id
+   * (never blocks a different session's mutations, or unrelated session work
+   * like release/rebind — those act on the timer/session maps directly), and
+   * `fn` is the caller's entire body, so nothing outside this one critical
+   * section is ever held across an await. `.catch(() => undefined)` on the
+   * chain tail ensures one mutation's rejection cannot wedge the queue for the
+   * next; the `finally` drops the map entry once nothing is queued behind it,
+   * so a dead session leaves no residue.
+   */
+  runNetworkConditionMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.networkConditionMutationQueues.get(sessionId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(fn);
+    this.networkConditionMutationQueues.set(sessionId, next);
+    return next.finally(() => {
+      if (this.networkConditionMutationQueues.get(sessionId) === next) {
+        this.networkConditionMutationQueues.delete(sessionId);
+      }
+    });
+  }
+
   private currentNetworkConditionGeneration(sessionId: string): number {
     return this.networkConditionGeneration.get(sessionId) ?? 0;
   }
@@ -2663,6 +2709,7 @@ export class SessionManager {
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);
     this.networkConditionGeneration.delete(sessionId);
+    this.networkConditionMutationQueues.delete(sessionId);
     return true;
   }
 

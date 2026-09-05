@@ -52,6 +52,38 @@ function wordBoundaryPattern(keywords: string[]): RegExp {
   return new RegExp(`\\b(?:${keywords.join("|")})\\b`);
 }
 
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Turn a (possibly multi-word) keyword into a pattern fragment whose internal
+ * spaces also accept `_`/`-`/`.`/`/` as separators, so "not now" matches
+ * "not_now" the same way a single-word keyword like "ok" matches "ok_button".
+ */
+function keywordToPatternFragment(keyword: string): string {
+  return keyword.split(" ").map(escapeRegExp).join("[\\s_./-]+");
+}
+
+/**
+ * Build a keyword pattern bounded by non-alphanumeric separators instead of
+ * `\b`.
+ *
+ * JS `\b` treats `_` as a word character, so `\bok\b` does not match inside
+ * machine-style accessibility ids like `ok_button`/`not_now`/`skip_action` —
+ * the old substring check accepted those, so boundary-matching regressed
+ * them (issue #6122 follow-up). Lookarounds that exclude only `[a-z0-9]`
+ * treat `_`, `-`, `.`, `/`, whitespace, punctuation, and string start/end as
+ * separators, so `ok` still matches at the start of `ok_button` while
+ * `bookmark`/`token`/`accessibility`/`disallowance` still don't match. A
+ * multi-word keyword's internal space is likewise separator-tolerant, so
+ * "not now" also matches the machine-id spelling "not_now".
+ */
+function separatorBoundaryPattern(keywords: string[]): RegExp {
+  const alternation = keywords.map(keywordToPatternFragment).join("|");
+  return new RegExp(`(?<![a-z0-9])(?:${alternation})(?![a-z0-9])`, "i");
+}
+
 /**
  * Test a keyword pattern against `text` and `content-desc` independently,
  * never against them joined.
@@ -71,7 +103,8 @@ function matchesInAnyField(pattern: RegExp, el: Element): boolean {
 const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
 
 /**
- * Permission-dialog keywords, matched on word boundaries.
+ * Permission-dialog keywords, matched on separator boundaries (see
+ * `separatorBoundaryPattern`).
  *
  * Substring matching misclassified ordinary UI text — "access" matched
  * "Accessibility", and (in `handlePermissionDialog`) "ok" matched
@@ -92,7 +125,7 @@ const PERMISSION_KEYWORDS = [
   "only this time",
 ];
 
-const PERMISSION_KEYWORD_PATTERN = wordBoundaryPattern(PERMISSION_KEYWORDS);
+const PERMISSION_KEYWORD_PATTERN = separatorBoundaryPattern(PERMISSION_KEYWORDS);
 
 /**
  * Check if screen is a permission dialog
@@ -125,12 +158,14 @@ export function isRatingDialog(elements: Element[]): boolean {
 }
 
 /**
- * "Allow"-button keywords, matched on word boundaries (issue #6122): bare
- * "ok" as a substring matched "Bookmarks"/"Look up"/"Cookies"/"Tokens".
+ * "Allow"-button keywords, matched on separator boundaries (issue #6122):
+ * bare "ok" as a substring matched "Bookmarks"/"Look up"/"Cookies"/"Tokens",
+ * while separator-boundary matching still accepts machine ids like
+ * "ok_button".
  */
 const ALLOW_KEYWORDS = ["allow", "while using", "only this time", "ok"];
 
-const ALLOW_KEYWORD_PATTERN = wordBoundaryPattern(ALLOW_KEYWORDS);
+const ALLOW_KEYWORD_PATTERN = separatorBoundaryPattern(ALLOW_KEYWORDS);
 
 /**
  * Handle permission dialog by clicking "Allow" or similar
@@ -168,7 +203,7 @@ export async function handlePermissionDialog(
 
 const DISMISS_KEYWORDS = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
 
-const DISMISS_KEYWORD_PATTERN = wordBoundaryPattern(DISMISS_KEYWORDS);
+const DISMISS_KEYWORD_PATTERN = separatorBoundaryPattern(DISMISS_KEYWORDS);
 
 /**
  * Dismiss dialog by clicking dismiss/close/later buttons

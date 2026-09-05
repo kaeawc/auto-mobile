@@ -92,6 +92,7 @@ describe("ExploreBlockerDetection", () => {
       ["Accessible", false],
       ["Disallow", false],
       ["Allowance", false],
+      ["disallowance", false],
       ["Bookmarks", false],
       ["Home", false],
       ["Settings", false],
@@ -105,6 +106,12 @@ describe("ExploreBlockerDetection", () => {
       ["While using the app", true],
       ["Only this time", true],
       ["Don't allow", true],
+      // machine-style accessibility ids (issue #6122 follow-up): "_"/"-"/"."
+      // are separators, not word characters, so a plain `\b` boundary would
+      // wrongly reject these even though the old substring check accepted
+      // them.
+      ["allow_button", true],
+      ["permission_denied", true],
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
     });
@@ -459,6 +466,38 @@ describe("ExploreBlockerDetection", () => {
       expect(calls).toEqual([]);
     });
 
+    // Issue #6122 follow-up: JS `\b` treats "_"/"-"/"." as word characters,
+    // so a plain word-boundary pattern would wrongly reject machine-style
+    // accessibility descriptions like "ok_button" even though the old
+    // substring check accepted them.
+    test("handlePermissionDialog taps machine-style 'ok_button'/'allow_button'/'ok.button' content-desc ids", async () => {
+      for (const machineId of ["ok_button", "allow_button", "ok.button"]) {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({
+            text: "",
+            "content-desc": machineId,
+            "resource-id": "com.test:id/ok_button",
+          }),
+        ];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+      }
+    });
+
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
       const { calls, restore } = captureTapOptions();
       const elements = [
@@ -520,6 +559,42 @@ describe("ExploreBlockerDetection", () => {
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/skip_button", action: "tap" }]);
+    });
+
+    // Issue #6122 follow-up: machine-style content-desc ids using "_"/"-"/"."
+    // separators must still be tapped as dismiss buttons.
+    test("dismissDialog taps machine-style 'not_now'/'skip-action'/'skip.action' content-desc ids", async () => {
+      for (const machineId of ["not_now", "skip-action", "skip.action"]) {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+          createMockElement({
+            text: "",
+            "content-desc": machineId,
+            "resource-id": "com.test:id/dismiss_button",
+          }),
+        ];
+        const parser = {
+          flattenViewHierarchy: () =>
+            elements.map((element, index) => ({ element, index, depth: 0 })),
+        } as unknown as ElementParser;
+
+        let handled: boolean;
+        try {
+          handled = await detectAndHandleBlockers(
+            { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+            androidDevice,
+            null,
+            parser,
+            async () => {},
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
+      }
     });
 
     test("dismissDialog does not tap when only 'close'/'skip' substrings are present", async () => {

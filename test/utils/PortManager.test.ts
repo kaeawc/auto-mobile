@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  BunPortAvailabilityChecker,
+  type BunRuntime,
   computeConfiguredScanEnd,
   IOS_CTRL_PROXY_RESERVED_PORTS,
   PortManager,
@@ -243,77 +245,85 @@ describe("PortManager", () => {
   });
 });
 
-describe("BunPortAvailabilityChecker (real checker, fake Bun.listen)", () => {
-  const originalListen = Bun.listen;
-
+describe("BunPortAvailabilityChecker (real checker, injected fake BunRuntime)", () => {
   function fakeErrno(code: string): Error {
     const error = new Error(`Failed to listen: ${code}`);
     (error as { code?: string }).code = code;
     return error;
   }
 
-  function installFakeBunListen(behaviors: Record<string, "ok" | Error>): void {
-    (Bun as { listen: typeof Bun.listen }).listen = ((options: { hostname: string }) => {
-      const behavior = behaviors[options.hostname];
-      if (behavior instanceof Error) {
-        throw behavior;
-      }
-      return { stop() {} };
-    }) as typeof Bun.listen;
+  function fakeRuntime(behaviors: Record<string, "ok" | Error>): BunRuntime {
+    return {
+      listen({ hostname }: { hostname: string }) {
+        const behavior = behaviors[hostname];
+        if (behavior instanceof Error) {
+          throw behavior;
+        }
+        return { stop() {} };
+      },
+    } as BunRuntime;
   }
 
-  beforeEach(() => {
-    PortManager.setPortAvailabilityCheckerForTesting(null);
-  });
-
-  afterEach(() => {
-    (Bun as { listen: typeof Bun.listen }).listen = originalListen;
-    PortManager.setPortAvailabilityCheckerForTesting(null);
-  });
-
   test("reports the port available when ::1 fails with EADDRNOTAVAIL but 127.0.0.1 succeeds", () => {
-    installFakeBunListen({
-      "127.0.0.1": "ok",
-      "::1": fakeErrno("EADDRNOTAVAIL"),
-    });
+    const checker = new BunPortAvailabilityChecker(
+      fakeRuntime({ "127.0.0.1": "ok", "::1": fakeErrno("EADDRNOTAVAIL") }),
+    );
 
-    expect(PortManager.isPortAvailable(9999)).toBe(true);
+    expect(checker.isPortAvailable(9999)).toBe(true);
+  });
+
+  test("does NOT allocate when 127.0.0.1 fails with EADDRNOTAVAIL, even though ::1 binds (IPv4 is required)", () => {
+    const checker = new BunPortAvailabilityChecker(
+      fakeRuntime({ "127.0.0.1": fakeErrno("EADDRNOTAVAIL"), "::1": "ok" }),
+    );
+
+    expect(checker.isPortAvailable(9999)).toBe(false);
   });
 
   test("reports the port busy when ::1 fails with EADDRINUSE even though 127.0.0.1 succeeds", () => {
-    installFakeBunListen({
-      "127.0.0.1": "ok",
-      "::1": fakeErrno("EADDRINUSE"),
-    });
+    const checker = new BunPortAvailabilityChecker(
+      fakeRuntime({ "127.0.0.1": "ok", "::1": fakeErrno("EADDRINUSE") }),
+    );
 
-    expect(PortManager.isPortAvailable(9999)).toBe(false);
+    expect(checker.isPortAvailable(9999)).toBe(false);
   });
 
   test("reports the port busy when 127.0.0.1 fails with EADDRINUSE", () => {
-    installFakeBunListen({
-      "127.0.0.1": fakeErrno("EADDRINUSE"),
-      "::1": "ok",
-    });
+    const checker = new BunPortAvailabilityChecker(
+      fakeRuntime({ "127.0.0.1": fakeErrno("EADDRINUSE"), "::1": "ok" }),
+    );
 
-    expect(PortManager.isPortAvailable(9999)).toBe(false);
+    expect(checker.isPortAvailable(9999)).toBe(false);
   });
 
   test("reports the port available when both loopback families succeed", () => {
-    installFakeBunListen({
-      "127.0.0.1": "ok",
-      "::1": "ok",
-    });
+    const checker = new BunPortAvailabilityChecker(fakeRuntime({ "127.0.0.1": "ok", "::1": "ok" }));
 
-    expect(PortManager.isPortAvailable(9999)).toBe(true);
+    expect(checker.isPortAvailable(9999)).toBe(true);
   });
 
   test("reports the port busy when 127.0.0.1 fails with EACCES", () => {
-    installFakeBunListen({
-      "127.0.0.1": fakeErrno("EACCES"),
-      "::1": "ok",
-    });
+    const checker = new BunPortAvailabilityChecker(
+      fakeRuntime({ "127.0.0.1": fakeErrno("EACCES"), "::1": "ok" }),
+    );
 
-    expect(PortManager.isPortAvailable(9999)).toBe(false);
+    expect(checker.isPortAvailable(9999)).toBe(false);
+  });
+
+  test("fails closed on an unrelated resource error (EMFILE) on the optional ::1 probe, not treated as family-unavailable", () => {
+    const checker = new BunPortAvailabilityChecker(
+      fakeRuntime({ "127.0.0.1": "ok", "::1": fakeErrno("EMFILE") }),
+    );
+
+    expect(checker.isPortAvailable(9999)).toBe(false);
+  });
+
+  test("uses the real globalThis.Bun when no runtime is injected", () => {
+    const checker = new BunPortAvailabilityChecker();
+
+    // Bun IS present in the test runtime, so this exercises the real bind
+    // path end to end against an arbitrary high port.
+    expect(typeof checker.isPortAvailable(59999)).toBe("boolean");
   });
 });
 

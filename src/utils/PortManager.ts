@@ -19,7 +19,7 @@ type BunTcpServer = {
   stop(force?: boolean): void;
 };
 
-type BunRuntime = {
+export type BunRuntime = {
   listen(options: {
     hostname: string;
     port: number;
@@ -66,8 +66,14 @@ export function computeConfiguredScanEnd(
   return undefined;
 }
 
-/** Errno codes that mean "something else is already bound here". */
-const PORT_IN_USE_CODES = new Set(["EADDRINUSE", "EACCES"]);
+/**
+ * Errno codes that mean "the address family itself isn't available on this
+ * host" (no IPv6 loopback configured, etc.) as opposed to "something else is
+ * bound to this port". Only these are safe to shrug off on the *optional*
+ * IPv6 probe — anything else (including resource errors like `EMFILE`) must
+ * fail closed rather than being read as "family unavailable, so allocate".
+ */
+const FAMILY_UNAVAILABLE_CODES = new Set(["EADDRNOTAVAIL", "EAFNOSUPPORT"]);
 
 function errnoCode(error: unknown): string | undefined {
   if (error && typeof error === "object" && "code" in error) {
@@ -77,34 +83,62 @@ function errnoCode(error: unknown): string | undefined {
   return undefined;
 }
 
-class BunPortAvailabilityChecker implements PortAvailabilityChecker {
+/**
+ * Bind-probe based `PortAvailabilityChecker`. Takes the `BunRuntime` as a
+ * constructor seam (defaulting to `globalThis.Bun`) so tests can inject a
+ * fake runtime instead of mutating the process-global `Bun.listen`.
+ */
+export class BunPortAvailabilityChecker implements PortAvailabilityChecker {
+  public constructor(
+    private readonly bun: BunRuntime | undefined = (globalThis as { Bun?: BunRuntime }).Bun,
+  ) {}
+
   public isPortAvailable(port: number): boolean {
-    const bun = (globalThis as { Bun?: BunRuntime }).Bun;
+    const bun = this.bun;
     if (!bun) {
       return true;
     }
 
-    // Probe each loopback family independently: a host with no IPv6 loopback
-    // configured (Docker with IPv6 disabled, some CI runners) throws
-    // EADDRNOTAVAIL for every ::1 bind, which is "that family is unavailable
-    // here" — not "the port is busy" — and must not fail the whole port.
-    if (!this.probe(bun, "127.0.0.1", port)) {
+    // Clients always dial 127.0.0.1 (AndroidCtrlProxyClient.getWebSocketUrl,
+    // PortManager.getWebSocketUrl), so IPv4 is REQUIRED: any bind failure
+    // here — busy or otherwise — means the port isn't usable and must fail
+    // closed. IPv6 is best-effort: a host with no IPv6 loopback configured
+    // (Docker with IPv6 disabled, some CI runners) throws EADDRNOTAVAIL for
+    // every ::1 bind, which is "that family is unavailable here", not "the
+    // port is busy" — but only for that narrow, recognized set of errnos.
+    if (!this.probeRequired(bun, "127.0.0.1", port)) {
       return false;
     }
-    return this.probe(bun, "::1", port);
+    return this.probeOptionalFamily(bun, "::1", port);
   }
 
-  /** Returns false only when the bind failure means the port is genuinely busy. */
-  private probe(bun: BunRuntime, hostname: string, port: number): boolean {
+  /** IPv4: any bind failure means the port cannot be used, full stop. */
+  private probeRequired(bun: BunRuntime, hostname: string, port: number): boolean {
+    let server: BunTcpServer | undefined;
+    try {
+      server = bun.listen({ hostname, port, socket: noopSocketHandler });
+      return true;
+    } catch (error) {
+      logger.debug(`[PortManager] Port ${port} is not available on ${hostname}: ${error}`);
+      return false;
+    } finally {
+      server?.stop(true);
+    }
+  }
+
+  /**
+   * IPv6: a recognized "address family unavailable" errno is skipped rather
+   * than treated as busy; every other failure (including a busy port, or an
+   * unrelated resource error such as `EMFILE`) fails closed.
+   */
+  private probeOptionalFamily(bun: BunRuntime, hostname: string, port: number): boolean {
     let server: BunTcpServer | undefined;
     try {
       server = bun.listen({ hostname, port, socket: noopSocketHandler });
       return true;
     } catch (error) {
       const code = errnoCode(error);
-      if (code && !PORT_IN_USE_CODES.has(code)) {
-        // e.g. EADDRNOTAVAIL: this address family isn't available on this
-        // host at all, so it can't tell us anything about the port.
+      if (code && FAMILY_UNAVAILABLE_CODES.has(code)) {
         logger.debug(`[PortManager] ${hostname} unavailable on this host, skipping: ${error}`);
         return true;
       }

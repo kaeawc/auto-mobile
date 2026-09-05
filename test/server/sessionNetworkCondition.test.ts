@@ -581,6 +581,142 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("a mutation queued behind release aborts without touching a same-UUID replacement's generation/timer (#6178 PR #6183 review, P1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedA = Promise.withResolvers<void>();
+    const finishedA = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-release-race", "emulator-5554", "android");
+
+      // A: a mutation that runs long enough to outlast release's ~1s setup
+      // drain. No restore slot (registerRestore=false) so release's OWN
+      // teardown does not also touch the network condition for this device —
+      // this test is about the QUEUE/identity race, not release's restore path.
+      const mutationA = runSessionNetworkMutation(
+        manager,
+        "net-release-race",
+        "emulator-5554",
+        false,
+        async () => {
+          startedA.resolve();
+          await finishedA.promise;
+        },
+      );
+      await startedA.promise;
+
+      // B is issued while A is still in flight — queued behind it on the
+      // per-session mutation lock.
+      let bStarted = false;
+      const mutationB = runSessionNetworkMutation(
+        manager,
+        "net-release-race",
+        "emulator-5554",
+        true,
+        async () => {
+          bStarted = true;
+        },
+        999,
+      );
+
+      // Release begins. It cancels any pending TTL (none right now) and waits
+      // up to 1s for A's tracked setup, which never comes since A is still
+      // blocked — the drain times out and release removes the session anyway.
+      const release = manager.releaseSession("net-release-race");
+      await timer.advanceTimeAsync(1_000);
+      await release;
+
+      // A same-UUID REPLACEMENT session is created and successfully applies
+      // its own condition with its own TTL, all while A (and queued B) are
+      // still unresolved.
+      await manager.createSession("net-release-race", "emulator-5556", "android");
+      await runSessionNetworkMutation(
+        manager,
+        "net-release-race",
+        "emulator-5556",
+        true,
+        async () => {},
+        20,
+      );
+
+      // A finally completes, unblocking B. B must abort — it captured the OLD
+      // (now-dead) session — WITHOUT bumping the replacement's generation or
+      // touching its timer.
+      finishedA.resolve();
+      await mutationA;
+      await expect(mutationB).rejects.toThrow(/no longer the live session/);
+      expect(bStarted).toBe(false);
+
+      // The replacement's own 20s TTL still fires untouched.
+      timer.advanceTime(20_000);
+      await manager.getPendingDeviceCleanup("emulator-5556");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("release rejects a re-arm from a mutation that throws while draining, so no timer is left armed (#6178 PR #6183 review, P2)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedB = Promise.withResolvers<void>();
+    const failB = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-release-throw", "emulator-5554", "android");
+
+      // A: 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-release-throw",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // B: a re-apply that will THROW. Blocks mid-mutation, having already
+      // snapshotted and cancelled A's TTL.
+      const mutationB = runSessionNetworkMutation(
+        manager,
+        "net-release-throw",
+        "emulator-5554",
+        true,
+        async () => {
+          startedB.resolve();
+          await failB.promise;
+          throw new Error("emulator console rejected re-apply");
+        },
+        40,
+      );
+      await startedB.promise;
+
+      // Release begins WHILE B's mutation is still tracked/in-flight.
+      const release = manager.releaseSession("net-release-throw");
+
+      // B's mutation now throws. Its catch block attempts to re-arm A's
+      // original deadline — but the session is already releasing, so the
+      // re-arm must be skipped.
+      failB.resolve();
+      await expect(mutationB).rejects.toThrow("emulator console rejected re-apply");
+
+      await release;
+
+      // Release's own restoration ran exactly once — no interference from a
+      // resurrected TTL, and no timer was left armed for the (now-released)
+      // session.
+      expect(restored).toEqual(["none"]);
+      expect(manager.peekNetworkConditionExpiry("net-release-throw")).toBeUndefined();
+
+      // Advancing time arbitrarily confirms nothing was pinned/hidden.
+      timer.advanceTime(100_000_000);
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

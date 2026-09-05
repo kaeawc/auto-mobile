@@ -2201,6 +2201,17 @@ export class SessionManager {
    * TTL"). Skipping whenever the generation has moved on avoids both
    * resurrecting a deadline C already retired AND clobbering C's live timer
    * handle without cancelling it.
+   *
+   * Also refuses to re-arm a releasing/released session (issue #6178 PR #6183
+   * review, P2): `releaseSessionInternal` cancels any pending TTL BEFORE
+   * awaiting the tracked mutation that may still be in flight. If that
+   * mutation then throws (or otherwise triggers a re-arm) while release is
+   * still draining, blindly re-arming here would undo release's cancellation
+   * — either running a stale timer concurrently with release's own
+   * restoration, or pinning a released session's timer-map entry for up to
+   * `MAX_NETWORK_CONDITION_TTL_SECONDS` (~24.8 days). Release's cancellation
+   * must be the last word, so a releasing/no-longer-current session is never
+   * re-armed.
    */
   rearmNetworkConditionExpiry(
     session: Session,
@@ -2211,6 +2222,13 @@ export class SessionManager {
       logger.debug(
         `Skipping network-condition TTL re-arm for session ${sessionId}: generation ` +
           `${snapshot.generation} has been superseded by a later mutation`,
+      );
+      return;
+    }
+    if (!this.isAdmittedForAutomation(session)) {
+      logger.debug(
+        `Skipping network-condition TTL re-arm for session ${sessionId}: session is releasing ` +
+          `or no longer live`,
       );
       return;
     }

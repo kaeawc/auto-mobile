@@ -81,6 +81,23 @@ export async function runSessionNetworkMutation<T>(
   // (including any earlier mutation's own re-arm) rather than a window where
   // it has been cancelled but not yet resolved one way or the other.
   return sessionManager.runNetworkConditionMutationExclusive(sessionUuid, async () => {
+    // Re-validate the captured session is STILL the live one before touching
+    // any shared state (issue #6178 PR #6183 review, P1 release race):
+    // `session` was captured above, before waiting for this per-session queue
+    // slot. A predecessor mutation can run long enough to outlast a session
+    // release — if this call was queued behind it, by the time this callback
+    // finally runs the session may have been released and a same-UUID
+    // REPLACEMENT session may already be live and mutating its own TTL, or
+    // this session may simply be draining. Aborting here — before any
+    // generation bump, TTL snapshot/cancel, or mutation — guarantees a stale
+    // queued mutation never bumps the replacement's generation or cancels its
+    // timer.
+    if (!sessionManager.isAdmittedForAutomation(session)) {
+      throw new Error(
+        `Cannot mutate network condition: session ${sessionUuid} is no longer the live session ` +
+          `(released, replaced, or releasing).`,
+      );
+    }
     // Bump the network-condition generation BEFORE mutating (issue #6177), and
     // CAPTURE the value THIS mutation was assigned into a local. This condition
     // (B) may be applied while an earlier condition's (A's) TTL expiry is still

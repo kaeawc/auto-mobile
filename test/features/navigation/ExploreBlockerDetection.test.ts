@@ -1,4 +1,4 @@
-import { expect, describe, test } from "bun:test";
+import { expect, describe, test, spyOn } from "bun:test";
 import { Element } from "../../../src/models";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
@@ -7,7 +7,10 @@ import {
   isLoginScreen,
   isRatingDialog,
   detectAndHandleBlockers,
+  handlePermissionDialog,
 } from "../../../src/features/navigation/ExploreBlockerDetection";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 describe("ExploreBlockerDetection", () => {
   function createMockElement(overrides: Partial<Element> = {}): Element {
@@ -275,6 +278,86 @@ describe("ExploreBlockerDetection", () => {
       expect(isPermissionDialog(elements)).toBe(false);
       expect(isLoginScreen(elements)).toBe(false);
       expect(isRatingDialog(elements)).toBe(false);
+    });
+  });
+
+  describe("dialog tap selector", () => {
+    // TapOnElement.validateOptions rejects a call carrying both text and
+    // elementId, so an Allow / dismiss button that has both must be tapped
+    // with exactly one selector (issue #6121). The handlers hard-sleep 1s
+    // after a tap via defaultTimer, so that is stubbed to keep the test fast.
+    function captureTapOptions(): { calls: unknown[]; restore: () => void } {
+      const calls: unknown[] = [];
+      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockImplementation(
+        async (options: unknown) => {
+          calls.push(options);
+          return { success: true, action: "tap" } as never;
+        },
+      );
+      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
+      return {
+        calls,
+        restore: () => {
+          tapSpy.mockRestore();
+          sleepSpy.mockRestore();
+        },
+      };
+    }
+
+    const androidDevice = { deviceId: "emulator-5554", platform: "android" } as BootedDevice;
+
+    test("handlePermissionDialog taps an Allow button with text and resource-id by id only", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Allow camera access?", clickable: false }),
+        createMockElement({
+          text: "Allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+        }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(elements, androidDevice, null);
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([
+        {
+          elementId: "com.android.permissioncontroller:id/permission_allow_button",
+          action: "tap",
+        },
+      ]);
+    });
+
+    test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
+      ];
+      const parser = {
+        flattenViewHierarchy: () =>
+          elements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let handled: boolean;
+      try {
+        handled = await detectAndHandleBlockers(
+          { viewHierarchy: { hierarchy: {}, packageName: "com.test" } } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          parser,
+          async () => {},
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
     });
   });
 

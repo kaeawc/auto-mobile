@@ -29,6 +29,8 @@ import {
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { LaunchApp } from "../../../src/features/action/LaunchApp";
 
 describe("Explore", () => {
   let explore: Explore;
@@ -344,6 +346,167 @@ describe("Explore", () => {
     });
   });
 
+  describe("performInteraction tap selector", () => {
+    // TapOnElement.validateOptions rejects any call carrying more than one
+    // selector, so an element with both text and resource-id must reach tapOn
+    // with exactly one of them (issue #6121).
+    function captureTapOptions(): { calls: unknown[]; restore: () => void } {
+      const calls: unknown[] = [];
+      const spy = spyOn(TapOnElement.prototype, "execute").mockImplementation(
+        async (options: unknown) => {
+          calls.push(options);
+          return { success: true, action: "tap" } as never;
+        },
+      );
+      return { calls, restore: () => spy.mockRestore() };
+    }
+
+    test("taps an element with both text and resource-id once, by id only", async () => {
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        const success = await (explore as any).performInteraction(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+        expect(success).toBe(true);
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([{ elementId: "com.test:id/settings_btn", action: "tap" }]);
+    });
+
+    test("falls back to text, then content-desc, when no resource-id is present", async () => {
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({ text: "Settings", "resource-id": undefined }),
+          createMockObservation(),
+        );
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: undefined,
+            "resource-id": undefined,
+            "content-desc": "Open settings",
+          }),
+          createMockObservation(),
+        );
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([
+        { text: "Settings", action: "tap" },
+        { text: "Open settings", action: "tap" },
+      ]);
+    });
+  });
+
+  describe("periodic reset to home", () => {
+    // resetToHome is gated on interactionCount, which only advances on a
+    // successful interaction, so the gate must not re-fire while the count sits
+    // on a multiple of resetInterval — including 0 (issue #6126).
+    test("resets once per resetInterval successful interactions and never at count 0", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = {
+        execute: async () => createMockObservation(),
+      };
+      const outcomes = [false, true, true, false, true];
+      const log: string[] = [];
+      (explore as any).performInteraction = async () => {
+        const success = outcomes.shift() ?? true;
+        log.push(success ? "interaction:ok" : "interaction:fail");
+        return success;
+      };
+      (explore as any).resetToHome = async () => {
+        log.push("reset");
+      };
+
+      const result = await explore.execute({
+        maxInteractions: 3,
+        timeoutMs: 5000,
+        packageName: "com.test.app",
+        resetToHome: true,
+        resetInterval: 2,
+      });
+
+      expect(result.interactionsPerformed).toBe(3);
+      expect(log).toEqual([
+        "interaction:fail",
+        "interaction:ok",
+        "interaction:ok",
+        "reset",
+        "interaction:fail",
+        "interaction:ok",
+      ]);
+    });
+
+    test("relaunches the target app after pressing home on Android", async () => {
+      const commands: string[] = [];
+      const adb = {
+        execute: async (args: string[]) => {
+          commands.push(args.join(" "));
+          return "";
+        },
+      } as AdbClient;
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
+      } as never);
+      const launchSpy = spyOn(LaunchApp.prototype, "execute").mockImplementation(
+        async (packageName: string) => {
+          commands.push(`launch ${packageName}`);
+          return { success: true, packageName } as never;
+        },
+      );
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+      (explore as any).targetPackageName = "com.test.app";
+
+      try {
+        await (explore as any).resetToHome();
+      } finally {
+        launchSpy.mockRestore();
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect(commands).toEqual(["shell input keyevent 3", "launch com.test.app"]);
+      expect((explore as any).stopReason).toBe("");
+    });
+
+    test("relaunches the target app through the internal launchApp tool on iOS", async () => {
+      const iOSDevice = {
+        deviceId: "ios-simulator-123",
+        platform: "ios",
+        source: "local",
+      } as BootedDevice;
+      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async (args) => {
+        calls.push({ name: "homeScreen", args });
+        return { success: true };
+      });
+      ToolRegistry.register("launchApp", "launchApp", {}, async (args) => {
+        calls.push({ name: "launchApp", args });
+        return { success: true };
+      });
+      explore = new Explore(iOSDevice, null, fakeTimer, fakeGraph, "session-1");
+      (explore as any).targetPackageName = "com.test.app";
+
+      await (explore as any).resetToHome();
+
+      expect(calls.map((call) => call.name)).toEqual(["homeScreen", "launchApp"]);
+      expect(calls[1].args).toEqual({
+        appId: "com.test.app",
+        platform: "ios",
+        deviceId: "ios-simulator-123",
+        sessionUuid: "session-1",
+        [INTERNAL_NO_DIFF_PARAM]: true,
+      });
+    });
+  });
+
   // Exploration strategies and modes are tested through unit tests
   // Full device integration tests are in JUnitRunner and XCTestRunner
 
@@ -367,6 +530,9 @@ describe("Explore", () => {
       (explore as any).handleDeadEnd = async () => {
         backPresses.push("back");
       };
+      // The first observation is in-app, so the loop reaches performInteraction;
+      // stub it so the test stays on the enforcement path and off the tap pipeline.
+      (explore as any).performInteraction = async () => true;
 
       let observeCount = 0;
       (explore as any).observeScreen = {

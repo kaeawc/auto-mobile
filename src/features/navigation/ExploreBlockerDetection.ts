@@ -4,7 +4,7 @@ import type { ProgressCallback } from "../action/BaseVisualChange";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { TapOnElement } from "../action/TapOnElement";
 import { logger } from "../../utils/logger";
-import { extractAllElements } from "./ExploreElementExtraction";
+import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
 import { defaultTimer } from "../../utils/SystemTimer";
 
 /**
@@ -109,16 +109,13 @@ export async function handlePermissionDialog(
       (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
     if (allowKeywords.some((keyword) => text.includes(keyword))) {
+      const selector = tapSelectorFor(element);
+      if (!selector) {
+        continue;
+      }
       try {
         const tapOn = new TapOnElement(device, adb);
-        await tapOn.execute(
-          {
-            text: element.text,
-            elementId: element["resource-id"],
-            action: "tap",
-          },
-          progress,
-        );
+        await tapOn.execute({ ...selector, action: "tap" }, progress);
         await defaultTimer.sleep(1000);
         return true;
       } catch (error) {
@@ -150,16 +147,13 @@ async function dismissDialog(
       (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
     if (dismissKeywords.some((keyword) => text.includes(keyword))) {
+      const selector = tapSelectorFor(element);
+      if (!selector) {
+        continue;
+      }
       try {
         const tapOn = new TapOnElement(device, adb);
-        await tapOn.execute(
-          {
-            text: element.text,
-            elementId: element["resource-id"],
-            action: "tap",
-          },
-          progress,
-        );
+        await tapOn.execute({ ...selector, action: "tap" }, progress);
         await defaultTimer.sleep(1000);
         return true;
       } catch (error) {

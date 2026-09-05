@@ -15,6 +15,7 @@ import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
 import { PressButton } from "../action/PressButton";
+import { LaunchApp } from "../action/LaunchApp";
 import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -44,6 +45,7 @@ import {
   extractAllElements,
   getElementKey,
   filterUnexhaustedElements,
+  tapSelectorFor,
 } from "./ExploreElementExtraction";
 
 // Import element scoring functions
@@ -83,6 +85,7 @@ export class Explore extends BaseVisualChange {
   private navigationManager: NavigationGraphService;
   private exploredElements: Map<string, TrackedElement>;
   private interactionCount: number = 0;
+  private lastResetAt: number = 0;
   private explorationPath: string[] = [];
   private elementSelections: ElementSelectionStats[] = [];
   private consecutiveBackCount: number = 0;
@@ -151,6 +154,7 @@ export class Explore extends BaseVisualChange {
       this.elementSelections = [];
       this.explorationPath = [];
       this.interactionCount = 0;
+      this.lastResetAt = 0;
       this.consecutiveBackCount = 0;
       this.consecutiveNoChangeCount = 0;
       this.stopReason = "";
@@ -345,7 +349,8 @@ export class Explore extends BaseVisualChange {
         }
 
         // Periodic reset if configured
-        if (options.resetToHome && this.interactionCount % resetInterval === 0) {
+        if (options.resetToHome && this.isResetDue(resetInterval)) {
+          this.lastResetAt = this.interactionCount;
           await this.resetToHome(progress);
         }
       }
@@ -744,17 +749,14 @@ export class Explore extends BaseVisualChange {
         return swipeResult.success;
       } else {
         // Perform tap interaction
+        const selector = tapSelectorFor(element);
+        if (!selector) {
+          logger.warn(`[Explore] Element has no tap selector: ${elementKey}`);
+          return false;
+        }
         const tapOn = new TapOnElement(this.device, this.adb);
 
-        const tapResult = await tapOn.execute(
-          {
-            text: element.text,
-            elementId: element["resource-id"],
-            action: "tap",
-          },
-          progress,
-          signal,
-        );
+        const tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress, signal);
 
         // Reset consecutive back count since we did a tap
         this.consecutiveBackCount = 0;
@@ -842,11 +844,57 @@ export class Explore extends BaseVisualChange {
       // Wait for home screen
       await this.timer.sleep(2000);
 
+      // Home alone leaves the launcher in the foreground, which the next
+      // observation would treat as having left the target app (issue #6126).
+      if (this.targetPackageName) {
+        await this.relaunchTargetApp(this.targetPackageName);
+      }
+
       // Reset consecutive back count
       this.consecutiveBackCount = 0;
     } catch (error) {
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
       this.stopReason = `Home-screen recovery failed: ${errorMessage(error)}`;
+    }
+  }
+
+  /**
+   * A periodic reset is due once per resetInterval successful interactions.
+   * interactionCount only advances on success, so the modulo check alone would
+   * re-fire on every iteration the count sits on a multiple, including 0
+   * before anything was explored (issue #6126).
+   */
+  private isResetDue(resetInterval: number): boolean {
+    return (
+      this.interactionCount > 0 &&
+      this.interactionCount !== this.lastResetAt &&
+      this.interactionCount % resetInterval === 0
+    );
+  }
+
+  /**
+   * Bring the target app back to the foreground after a home reset.
+   */
+  private async relaunchTargetApp(packageName: string): Promise<void> {
+    if (this.device.platform === "android") {
+      // Same injected transport and timer as the home press above.
+      const result = await new LaunchApp(this.device, this.adb, null, this.timer).execute(
+        packageName,
+        false,
+        false,
+      );
+      if (!result.success) {
+        throw new Error(result.error ?? `Android relaunch of ${packageName} failed`);
+      }
+    } else {
+      // Keep iOS recovery session/device-aware without nested progress.
+      const response = await ToolRegistry.callInternal("launchApp", {
+        appId: packageName,
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+      });
+      throwIfInternalToolFailed(response, "launchApp", this.device.platform);
     }
   }
 

@@ -182,6 +182,21 @@ export function getElementKey(element: Element): string {
 /**
  * Filter out elements that have been exhausted
  */
+/**
+ * Single tapOn selector for an element.
+ *
+ * tapOn rejects any call carrying more than one selector (issue #6121), so
+ * prefer the stable resource-id, then text, then content-desc (which the text
+ * selector also matches). Returns null when the element has none of them.
+ */
+export function tapSelectorFor(element: Element): { elementId: string } | { text: string } | null {
+  if (element["resource-id"]) {
+    return { elementId: element["resource-id"] };
+  }
+  const text = element.text || element["content-desc"];
+  return text ? { text } : null;
+}
+
 export function filterUnexhaustedElements(
   elements: Element[],
   exploredElements: Map<string, TrackedElement>,

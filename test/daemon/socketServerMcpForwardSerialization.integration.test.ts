@@ -53,6 +53,7 @@ function createFakeDaemonState(
   sessionDevices: Map<string, string>,
   sessionDeviceLabels: Map<string, DeviceLabelMap>,
   mcpAutolockSessions: Map<string, string>,
+  onHeartbeat?: (sessionId: string) => void,
 ) {
   return {
     isInitialized: () => true,
@@ -65,6 +66,7 @@ function createFakeDaemonState(
       },
       getDeviceLabels: (sessionId: string) => sessionDeviceLabels.get(sessionId),
       releaseSession: async () => null,
+      recordHeartbeat: (sessionId: string) => onHeartbeat?.(sessionId),
     }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
@@ -308,6 +310,72 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("answers daemon/heartbeat immediately instead of queueing it behind an in-flight tools/call on the same socket (issue #6135)", async () => {
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-heartbeat-hol-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    sessionDevices.set("session-a", "device-a");
+    const order: string[] = [];
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions, (sessionId) =>
+        order.push(`heartbeat:${sessionId}`),
+      ),
+      fakeTimer,
+    );
+    await server.start();
+
+    const toolCallStarted = Promise.withResolvers<void>();
+    const releaseToolCall = Promise.withResolvers<void>();
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        order.push("toolCall:start");
+        toolCallStarted.resolve();
+        await releaseToolCall.promise;
+        order.push("toolCall:end");
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      // A long-running tools/call occupies this socket's request queue — the
+      // same socket the MCP proxy's bound-session heartbeat keeper uses.
+      const longCall = client.request("tools/call", {
+        name: "startDevice",
+        arguments: { sessionUuid: "session-a", deviceId: "device-b" },
+      });
+      await toolCallStarted.promise;
+
+      // A heartbeat sent while that call is still in flight must be answered
+      // (and recorded) right away, not after the tools/call finishes.
+      const heartbeat = await client.request("daemon/heartbeat", {
+        sessionId: "session-a",
+      });
+
+      expect(heartbeat.success).toBe(true);
+      // The heartbeat was recorded BEFORE the blocked tools/call released —
+      // proving it was not queued behind it (pre-fix, this order would be
+      // toolCall:start, toolCall:end, heartbeat:session-a).
+      expect(order).toEqual(["toolCall:start", "heartbeat:session-a"]);
+
+      releaseToolCall.resolve();
+      const longResult = await longCall;
+      expect(longResult.success).toBe(true);
+      expect(order).toEqual(["toolCall:start", "heartbeat:session-a", "toolCall:end"]);
+    } finally {
+      releaseToolCall.resolve();
+      client.close();
+    }
   });
 
   test("forwards the socket timeout budget to IDE navigation graph calls", async () => {

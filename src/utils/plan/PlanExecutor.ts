@@ -266,16 +266,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
       const parsedParams = observeTool.schema.parse(enhancedParams) as Record<string, unknown>;
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-      const response = await Promise.race([
-        ToolRegistry.callInternal(observeTool, parsedParams),
-        new Promise<never>((_, reject) => {
-          timeoutHandle = this.timer.setTimeout(() => {
-            reject(new Error("failure observation timed out"));
-          }, DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS);
-        }),
-      ]);
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
+      let response: unknown;
+      try {
+        response = await Promise.race([
+          ToolRegistry.callInternal(observeTool, parsedParams),
+          new Promise<never>((_, reject) => {
+            timeoutHandle = this.timer.setTimeout(() => {
+              reject(new Error("failure observation timed out"));
+            }, DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timeoutHandle) {
+          this.timer.clearTimeout(timeoutHandle);
+        }
       }
 
       const raw = this.parseStructuredToolPayload(response);

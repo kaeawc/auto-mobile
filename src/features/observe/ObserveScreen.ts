@@ -217,6 +217,22 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
   return hasBounds;
 }
 
+/**
+ * The status-bar-only verdict inputs (issue #6151): whether the service itself
+ * reported the focused window as unreadable, and the device API level that
+ * decides whether that can be Android 14+ data-sensitive withholding.
+ */
+function describeStatusBarOnlyCapture(
+  hierarchy: ObserveResult["viewHierarchy"],
+  foreground: string,
+): { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } {
+  return {
+    foreground,
+    ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true,
+    sdkInt: hierarchy?.sdkInt,
+  };
+}
+
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
   const activityName = foregroundActivity.split("/")[1] ?? "";
   return (
@@ -1669,7 +1685,9 @@ export class RealObserveScreen implements ObserveScreen {
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
     signal?: AbortSignal,
-  ): Promise<{ foreground: string; ctrlProxyIncomplete: boolean } | undefined> {
+  ): Promise<
+    { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } | undefined
+  > {
     const foreground = await foregroundIdentity;
     const hierarchy = result.viewHierarchy;
 
@@ -1713,7 +1731,7 @@ export class RealObserveScreen implements ObserveScreen {
     ) {
       return undefined;
     }
-    return { foreground: confirmed, ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true };
+    return describeStatusBarOnlyCapture(hierarchy, confirmed);
   }
 
   /**

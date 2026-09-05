@@ -672,6 +672,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     screenHeight: 2400,
     systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
     ctrlProxyIncomplete: true,
+    sdkInt: 34,
     windows: [
       {
         id: 219,
@@ -733,6 +734,45 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain("isAccessibilityTool");
     // The stale-window recovery advice is wrong for this cause and must not be given.
     expect(result.freshness?.warning).not.toContain("pressButton");
+    expect(result.freshness?.warning).not.toContain("stale wrong-window");
+  });
+
+  test("keeps the incomplete-capture verdict generic below Android 14 (#6151)", async () => {
+    // `ctrlProxyIncomplete` is a generic null-root signal (transient root, an app that
+    // restricts accessibility). Only Android 14+ can withhold a data-sensitive window, so on
+    // an older API the verdict must not attribute the cause to isAccessibilityTool.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...unreadableFocusedWindowHierarchy(now),
+      sdkInt: 31,
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("unreadable");
+    expect(result.freshness?.warning).toContain("Observe again");
+    expect(result.freshness?.warning).not.toContain("isAccessibilityTool");
     expect(result.freshness?.warning).not.toContain("stale wrong-window");
   });
 

@@ -83,8 +83,11 @@ export interface FreshnessInputs {
    * accessibility window. `ctrlProxyIncomplete` is set when the accessibility service itself
    * reported that it could not read the focused application window (a null root), which is an
    * incomplete capture rather than a stale one and needs a different recovery (issue #6151).
+   * `sdkInt` is the device API level when the capture reported one: the null root is a generic
+   * signal (transient, app-restricted, or withheld), and only on Android 14+ can it be the
+   * accessibility-data-sensitive withholding that a CtrlProxy update fixes.
    */
-  statusBarOnlyHierarchy?: { foreground: string; ctrlProxyIncomplete?: boolean };
+  statusBarOnlyHierarchy?: { foreground: string; ctrlProxyIncomplete?: boolean; sdkInt?: number };
   /**
    * ADB and CtrlProxy disagree about the current activity within the same
    * application, and a forced recapture could not safely reconcile them.
@@ -166,6 +169,28 @@ function resolveAgeMs(
   return ageBasis !== undefined ? Math.max(0, now - ageBasis) : undefined;
 }
 
+/**
+ * First API level on which the framework withholds accessibility-data-sensitive
+ * views (and so whole windows such as runtime permission dialogs) from an
+ * accessibility service that does not declare `isAccessibilityTool`.
+ */
+const ACCESSIBILITY_DATA_SENSITIVE_MIN_SDK = 34;
+
+/**
+ * The service could not read the focused application window (issue #6151). The
+ * null root is a generic signal — it also covers a transient root and an app
+ * that restricts accessibility — so the advice is to retry first; only on
+ * Android 14+ is the persistent case attributable to data-sensitive withholding,
+ * which a CtrlProxy update (not home/relaunch) recovers.
+ */
+function unreadableFocusedWindowWarning(foreground: string, sdkInt: number | undefined): string {
+  const generic = `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete rather than a stale window: the foreground window's content did not reach the service. Observe again; if it stays unreadable after relaunching the app, the window's content is being withheld from the service.`;
+  if (sdkInt === undefined || sdkInt < ACCESSIBILITY_DATA_SENSITIVE_MIN_SDK) {
+    return generic;
+  }
+  return `${generic} On Android 14+ a persistently unreadable focused window is the shape of an accessibility-data-sensitive surface (a runtime permission dialog, the Settings Wi-Fi picker) read by a CtrlProxy build that does not declare isAccessibilityTool; pressing home or relaunching does not recover that case. Update CtrlProxy to a build that declares isAccessibilityTool (fix for #6151) and observe again.`;
+}
+
 function resolveIdentityMismatch(
   inputs: FreshnessInputs,
   ageMs: number | undefined,
@@ -183,7 +208,7 @@ function resolveIdentityMismatch(
     };
   }
   if (inputs.statusBarOnlyHierarchy) {
-    const { foreground, ctrlProxyIncomplete } = inputs.statusBarOnlyHierarchy;
+    const { foreground, ctrlProxyIncomplete, sdkInt } = inputs.statusBarOnlyHierarchy;
     return {
       requestedAfter,
       actualTimestamp,
@@ -191,9 +216,7 @@ function resolveIdentityMismatch(
       verified: false,
       isFresh: false,
       warning: ctrlProxyIncomplete
-        ? // The service could not read the focused window at all: home/relaunch does not
-          // recover it (issue #6151), so do not send the client down that path.
-          `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete, not stale: the foreground window's content was withheld from the service. On Android 14+ this is the shape of an accessibility-data-sensitive surface (a runtime permission dialog, the Settings Wi-Fi picker) read by a CtrlProxy build that does not declare isAccessibilityTool; pressing home or relaunching the app will not recover it. Update CtrlProxy to a build that declares isAccessibilityTool (fix for #6151) and observe again.`
+        ? unreadableFocusedWindowWarning(foreground, sdkInt)
         : `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
     };
   }

@@ -2163,8 +2163,8 @@ export function parseDaemonArgs(
       const host = args[i + 1];
       if (host && !host.startsWith("--")) {
         options.host = host;
+        i++;
       }
-      i++;
     } else if (args[i] === "--debug") {
       options.debug = true;
     } else if (args[i] === "--debug-perf" || args[i] === "--ui-perf-debug") {
@@ -2173,8 +2173,8 @@ export function parseDaemonArgs(
       const scope = args[i + 1];
       if (scope === "global" || scope === "session") {
         options.planExecutionLockScope = scope;
+        i++;
       }
-      i++;
     } else if (args[i] === RUNNER_READINESS_TIMEOUT_FLAG) {
       const timeoutMs = parseRunnerReadinessTimeout(args[i + 1]);
       if (timeoutMs !== undefined) {
@@ -2203,8 +2203,8 @@ export function parseDaemonArgs(
       const toolOutputsDir = args[i + 1];
       if (toolOutputsDir && !toolOutputsDir.startsWith("--")) {
         options.toolOutputsDir = toolOutputsDir;
+        i++;
       }
-      i++;
     } else if (args[i] === "--network-mockable") {
       options.networkMockable = true;
     } else if (args[i] === "--embedded-sdk") {

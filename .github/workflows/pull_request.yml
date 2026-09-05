@@ -1676,7 +1676,11 @@ jobs:
   swift-code-coverage:
     timeout-minutes: 20
     name: "Swift Code Coverage"
-    runs-on: macos-14
+    # macos-26 + Xcode 26.5 (Swift 6.3): the sole coverage package, control-proxy,
+    # declares swift-tools-version 6.3 (its strict-concurrency floor, matching the
+    # repo-wide iOS 6.3 migration), which the Swift 5.10 toolchain on macos-14 /
+    # Xcode 15.4 cannot even parse. Mirrors the other Swift-6.3 jobs' toolchain.
+    runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -1685,10 +1689,10 @@ jobs:
         with:
           lfs: false
 
-      - name: "Select Xcode 15.4"
+      - name: "Select Xcode 26.5"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "15.4"
+          xcode-version: "26.5"
 
       - name: "Generate Swift Coverage Badge"
         run: bash scripts/coverage/generate-swift-coverage.sh
@@ -2017,12 +2021,16 @@ jobs:
             exit 1
           fi
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          # The Swift-6 rewrite retired the CtrlProxyTests bundle and did not carry over
+          # PrivacyResourceMappingTests; the rotation gesture-orientation assertion moved to the
+          # SPM-only, `#if os(iOS)` CtrlProxyRewriteTests, which has no simulator xctestrun vehicle
+          # yet (porting the richer tests onto the rewrite's sim setup is the follow-up tracked in
+          # Tests/CtrlProxyUITests/CtrlProxyUITests.swift). Only the ported hierarchy integration
+          # test survives in the on-simulator CtrlProxyUITests bundle, now in HierarchyIntegrationTests.
           xcodebuild test-without-building \
             -xctestrun "${XCTESTRUN}" \
             -destination "id=${SIMULATOR_UDID}" \
-            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
-            -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp \
-            -only-testing:CtrlProxyUITests/CtrlProxyUITests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
 
       # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
       # BEFORE any simulator workflow that opens an in-process session — including

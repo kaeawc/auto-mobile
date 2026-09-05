@@ -23,9 +23,15 @@ KEYCHAIN_PATH="${IOS_KEYCHAIN_PATH:-}"
 STRICT_MODE="${IOS_SIGNING_STRICT:-false}"
 
 # Format: "directory:scheme"  (scheme matches the Swift package/target name)
+#
+# control-proxy is intentionally absent: Phase 7E retired the standalone CtrlProxy
+# SPM framework product/target, so there is no control-proxy .framework for this
+# SPM-framework signing script to build. The shippable CtrlProxy artifact is the
+# CtrlProxyApp / CtrlProxyUITests bundle, built via the CtrlProxyApp scheme and
+# signed by that build's own Automatic code-signing (see project.yml /
+# IOSCtrlProxyBuilder), not here.
 PACKAGES=(
   "XCTestRunner:XCTestRunner"
-  "control-proxy:CtrlProxy"
 )
 
 for entry in "${PACKAGES[@]}"; do

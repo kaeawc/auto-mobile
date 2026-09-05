@@ -16,6 +16,12 @@ const EXCLUDED_FILES = new Set([
   "design-docs/mcp/system-design.md",
   "design-docs/mcp/vision-fallback.md",
   "design-docs/plat/android/docker.md",
+  // Internal Swift-6 rewrite working docs (status/resume guide + deferred-fixup
+  // notes), not user-facing site pages — excluded like the other internal
+  // design-docs above rather than published to the MkDocs nav.
+  "design-docs/plat/ios/ctrlproxy-rewrite/README.md",
+  "design-docs/plat/ios/ctrlproxy-rewrite/STATUS.md",
+  "design-docs/plat/ios/ctrlproxy-rewrite/fixup-hierarchy-merger-geometry.md",
   "using/perf-analysis.md",
 ]);
 const TODO_IGNORED_FILES = new Set(["contributing.md"]);

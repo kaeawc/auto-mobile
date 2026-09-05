@@ -22,7 +22,8 @@ const ensureDebugEnabled = () => {
 
 // Type definitions for tool arguments
 export interface DebugSearchArgs {
-  platform: Platform;
+  // #6154: optional — resolved from deviceId/session when omitted.
+  platform?: Platform;
   text?: string;
   elementId?: string;
   container?: {
@@ -38,7 +39,10 @@ export interface DebugSearchArgs {
 // Schema definitions
 const debugSearchBaseSchema = z
   .object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     text: z.string().optional().describe("Text to search for in elements"),
     elementId: elementIdTextFieldsSchema.shape.elementId.describe(
       "Element resource ID / accessibility identifier to search for",

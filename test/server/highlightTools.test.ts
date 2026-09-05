@@ -51,11 +51,14 @@ describe("Highlight Tools Registration", () => {
       }),
     ).toThrow();
 
+    // #6154: platform is optional wherever deviceId/session resolves it, so
+    // omitting it (with a valid shape) no longer throws — only `shape` is
+    // actually required.
     expect(() =>
       tool!.schema.parse({
         shape: validShape,
       }),
-    ).toThrow();
+    ).not.toThrow();
   });
 
   test("rejects invalid highlight shapes", () => {

@@ -2,7 +2,12 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  platformSchema,
+  withAppIdAliases,
+  withJsonSchemaOverride,
+} from "./toolSchemaHelpers";
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   PostNotification,
@@ -11,7 +16,8 @@ import {
 import { NotificationPolicy } from "../features/utility/NotificationPolicy";
 
 export interface PostNotificationArgs extends PostNotificationOptions {
-  platform: Platform;
+  // #6154: optional — resolved from deviceId/session when omitted.
+  platform?: Platform;
 }
 
 const iosAppIdRequiredMessage = "appId is required when platform is ios";
@@ -36,31 +42,63 @@ const postNotificationCommonShape = {
 const postNotificationAppIdDescription =
   "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted";
 
+const androidAppIdInvalidMessage = "appId must be an Android package name";
+
+/**
+ * #6154 follow-up: `postNotification` used a `z.discriminatedUnion("platform", ...)`,
+ * which requires the discriminator field to be present to pick a branch — so
+ * `platform` could not be made optional (resolved from deviceId/session) without
+ * restructuring away from the union. These per-platform appId rules (iOS requires
+ * it, Android's must look like a package name) now run through this single
+ * checker: from the schema's `superRefine` when the caller provided an explicit
+ * `platform` (fast, parse-time feedback), and from `postNotificationHandler`
+ * against the resolved `device.platform` when the caller omitted it — mirroring
+ * the pattern used for `changeLocalization`/`observe`.
+ */
+export function checkPostNotificationPlatformConstraints(
+  platform: Platform | undefined,
+  args: Pick<PostNotificationArgs, "appId">,
+): { path: "appId"; message: string } | null {
+  if (platform === "ios" && !args.appId) {
+    return { path: "appId", message: iosAppIdRequiredMessage };
+  }
+  if (platform === "android" && args.appId && !ANDROID_PACKAGE_NAME_PATTERN.test(args.appId)) {
+    return { path: "appId", message: androidAppIdInvalidMessage };
+  }
+  return null;
+}
+
 export const postNotificationSchema = withAppIdAliases(
-  z.discriminatedUnion("platform", [
+  withJsonSchemaOverride(
     addDeviceTargetingToSchema(
       z.object({
         ...postNotificationCommonShape,
-        appId: z
-          .string({ error: iosAppIdRequiredMessage })
-          .min(1, iosAppIdRequiredMessage)
-          .describe(postNotificationAppIdDescription),
-        platform: z.literal("ios"),
+        appId: z.string().min(1).optional().describe(postNotificationAppIdDescription),
+        // #5870/#6154: a `sessionUuid`/`deviceId` resolves the platform, so
+        // `platform` is not required — a device handle from getAndroid/getApple
+        // is sufficient on its own. The per-platform appId rules below only
+        // fire when the caller provided an explicit `platform`; the omitted
+        // case is enforced post-resolution in postNotificationHandler.
+        platform: platformSchema.optional(),
       }),
-    ),
-    addDeviceTargetingToSchema(
-      z.object({
-        ...postNotificationCommonShape,
-        appId: z
-          .string()
-          .min(1)
-          .regex(ANDROID_PACKAGE_NAME_PATTERN, "appId must be an Android package name")
-          .optional()
-          .describe(postNotificationAppIdDescription),
-        platform: z.literal("android"),
-      }),
-    ),
-  ]),
+    ).superRefine((values, ctx) => {
+      const violation = checkPostNotificationPlatformConstraints(values.platform, values);
+      if (violation) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [violation.path],
+          message: violation.message,
+        });
+      }
+    }),
+    (jsonSchema) => {
+      jsonSchema.if = {
+        properties: { platform: { const: "ios" } },
+        required: ["platform"],
+      };
+      jsonSchema.then = { required: ["appId"] };
+    },
+  ),
 );
 
 export const getNotificationPolicySchema = withAppIdAliases(
@@ -86,6 +124,16 @@ export type SetNotificationPolicyArgs = z.infer<typeof setNotificationPolicySche
 
 export function registerNotificationTools() {
   const postNotificationHandler = async (device: BootedDevice, args: PostNotificationArgs) => {
+    // #6154 follow-up: `platform` is optional on the wire, so the schema's
+    // per-platform appId checks (raw request platform) are skipped entirely
+    // when the caller omitted it. Re-validate against the resolved
+    // `device.platform`, before the try/catch below so the actionable message
+    // isn't re-wrapped as a generic execution failure.
+    const violation = checkPostNotificationPlatformConstraints(device.platform, args);
+    if (violation) {
+      throw new ActionableError(violation.message);
+    }
+
     try {
       const postNotification = new PostNotification(device);
       const result = await postNotification.execute({

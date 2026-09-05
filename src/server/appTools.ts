@@ -241,12 +241,22 @@ export const crashAppResultSchema = z.object({
 
 export const launchAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      clearAppData: z.boolean().optional().describe("Clear app data before launch (default false)"),
-      coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        appId: z.string(),
+        clearAppData: z
+          .boolean()
+          .optional()
+          .describe("Clear app data before launch (default false)"),
+        coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
+        ...responseShapeControlFields,
+      })
+      // #6154: the advertised `additionalProperties: false` was not actually
+      // enforced at runtime — `.strict()` closes that gap. `withAppIdAliases`
+      // runs its `z.preprocess` normalization (packageName -> appId, alias
+      // deleted) before this schema ever parses, so the documented alias still
+      // works under strict mode.
+      .strict(),
   ),
 );
 

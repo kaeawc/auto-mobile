@@ -56,24 +56,26 @@ function wordBoundaryPattern(keywords: string[]): RegExp {
  * Tokenize accessibility field text into lowercase word tokens.
  *
  * Splits on every non-alphanumeric character (whitespace, underscore,
- * hyphen, dot, slash, apostrophe, punctuation) AND at camelCase boundaries
- * (a lowercase letter or digit followed by an uppercase letter), so
- * "ok_button", "okButton", and "OK Button" all tokenize to the same
- * `["ok", "button"]`.
+ * hyphen, dot, slash, apostrophe, punctuation) AND at camelCase boundaries —
+ * both a lowercase/digit-to-uppercase transition ("okButton" -> "ok
+ * Button") and an acronym-to-titlecase transition ("OKButton" ->
+ * "OK Button", "HTTPServer" -> "HTTP Server") — so "ok_button", "okButton",
+ * "OKButton", and "OK Button" all tokenize to the same `["ok", "button"]`.
  *
  * This replaces regex-boundary keyword matching (`\b`, then a
  * non-alphanumeric lookaround), which needed a new boundary rule for every
  * separator style real apps use — underscore ids in one #6122 follow-up,
- * camelCase ids in the next. Tokenizing once and comparing whole tokens ends
- * that per-case patching: a keyword matches iff it equals a token (or, for a
- * multi-word keyword, a contiguous run of tokens), so "ok" never matches
- * inside "token" or "bookmark", and "allow" never matches inside
- * "disallowance", regardless of how the surrounding text is punctuated or
- * cased.
+ * plain camelCase ids in the next, acronym-prefixed camelCase in this one.
+ * Tokenizing once and comparing whole tokens ends that per-case patching: a
+ * keyword matches iff it equals a token (or, for a multi-word keyword, a
+ * contiguous run of tokens), so "ok" never matches inside "token" or
+ * "bookmark", and "allow" never matches inside "disallowance", regardless of
+ * how the surrounding text is punctuated or cased.
  */
 function tokenize(field: string): string[] {
   return field
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .split(/[^A-Za-z0-9]+/)
     .filter((token) => token.length > 0)
     .map((token) => token.toLowerCase());

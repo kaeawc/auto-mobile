@@ -531,6 +531,33 @@ describe("ExploreBlockerDetection", () => {
       }
     });
 
+    // Issue #6122 follow-up round 4: an acronym-prefixed camelCase id like
+    // "OKButton" has no lowercase-to-uppercase transition (the whole prefix
+    // "OKB" is capitals), so it needs the acronym-to-titlecase split too —
+    // otherwise it tokenizes as a single "okbutton" token that matches
+    // nothing.
+    test("handlePermissionDialog taps acronym-prefixed camelCase 'OKButton' content-desc", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "OKButton", "resource-id": "com.test:id/ok_button" }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+    });
+
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
       const { calls, restore } = captureTapOptions();
       const elements = [

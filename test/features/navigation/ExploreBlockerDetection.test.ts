@@ -77,18 +77,17 @@ describe("ExploreBlockerDetection", () => {
     });
 
     // Issue #6122: keywords were matched as bare substrings, so ordinary UI
-    // text containing "access" ("Accessibility", "Quick access") was
-    // misclassified as a permission dialog — same defect class as #4190.
-    // "access" is dropped from the keyword list entirely (see
-    // PERMISSION_KEYWORDS) rather than boundary-matched, because as a whole
-    // word it still appears in ambient, non-permission UI.
+    // text containing "access" ("Accessibility") was misclassified as a
+    // permission dialog — same defect class as #4190. Tokenizing splits
+    // "Accessibility" into the single token ["accessibility"], distinct from
+    // ["access"], so "access" is safely kept as its own exact keyword (an
+    // earlier revision dropped it defensively before the tokenizer existed
+    // to make that distinction — see PERMISSION_KEYWORDS).
     test.each([
       // [text, expected]
       ["Accessibility", false],
       ["ACCESSIBILITY", false],
       ["Accessibility settings", false],
-      ["Quick access", false],
-      ["Access your library", false],
       ["Accessible", false],
       ["Disallow", false],
       ["Allowance", false],
@@ -100,12 +99,21 @@ describe("ExploreBlockerDetection", () => {
       ["Allow", true],
       ["allow", true],
       ["ALLOW", true],
-      ["Allow access to your location?", true], // matches via "allow", not "access"
+      ["Allow access to your location?", true], // matches via "allow" and "access"
       ["Deny", true],
       ["This app needs permission to access your camera", true], // matches via "permission"
       ["While using the app", true],
       ["Only this time", true],
       ["Don't allow", true],
+      // "access" is a real exact-token keyword again (issue #6122 follow-up
+      // round 6): tokenizing keeps it distinct from "accessibility", so
+      // "Camera access required" is correctly detected, and "Quick
+      // access"/"Access your library" — real ambient UI, but genuinely
+      // containing the standalone word "access" — now match too, which is
+      // the accepted tradeoff of restoring this keyword.
+      ["Camera access required", true],
+      ["Quick access", true],
+      ["Access your library", true],
       // machine-style accessibility ids (issue #6122 follow-up): "_"/"-"/"."
       // are separators, not word characters, so a plain `\b` boundary would
       // wrongly reject these even though the old substring check accepted
@@ -118,10 +126,10 @@ describe("ExploreBlockerDetection", () => {
       // boundary, not just a boundary regex.
       ["allowButton", true],
       ["denyButton", true],
-      // inflected forms (issue #6122 follow-up round 5): exact-token matching
-      // dropped ordinary plurals/inflections the old substring matcher
-      // caught — "Permissions required" tokenizes to "permissions", which no
-      // longer equals the keyword "permission" without stem tolerance.
+      // Explicit inflected forms (issue #6122 follow-up round 6): matching
+      // is exact-token-only (no stemming — see `containsTokenSequence`), so
+      // "permissions"/"allows" match only because they're listed explicitly
+      // in PERMISSION_KEYWORDS, not derived from "permission"/"allow".
       ["Permissions required", true],
       ["Allows access", true],
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
@@ -690,6 +698,66 @@ describe("ExploreBlockerDetection", () => {
 
       expect(handled).toBe(false);
       expect(calls).toEqual([]);
+    });
+
+    // Issue #6122 follow-up round 6: an earlier inflection-tolerant matcher
+    // stripped a trailing "s" before comparing tokens, so "notes" stripped
+    // to "not" and falsely satisfied the dismiss phrase "not now" — a live
+    // regression on any screen with a "Notes" button next to a "Now"/similar
+    // label. Exact-token matching must reject this while still accepting a
+    // genuine "Not now".
+    test("dismissDialog does not tap a 'Notes now' false positive but taps a genuine 'Not now'", async () => {
+      const { calls: notesCalls, restore: restoreNotes } = captureTapOptions();
+      const notesElements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Notes now", "resource-id": "com.test:id/notes_now" }),
+      ];
+      const notesParser = {
+        flattenViewHierarchy: () =>
+          notesElements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let notesHandled: boolean;
+      try {
+        notesHandled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(notesElements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          notesParser,
+          async () => {},
+        );
+      } finally {
+        restoreNotes();
+      }
+
+      expect(notesHandled).toBe(false);
+      expect(notesCalls).toEqual([]);
+
+      const { calls: genuineCalls, restore: restoreGenuine } = captureTapOptions();
+      const genuineElements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
+      ];
+      const genuineParser = {
+        flattenViewHierarchy: () =>
+          genuineElements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let genuineHandled: boolean;
+      try {
+        genuineHandled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(genuineElements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          genuineParser,
+          async () => {},
+        );
+      } finally {
+        restoreGenuine();
+      }
+
+      expect(genuineHandled).toBe(true);
+      expect(genuineCalls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
     });
   });
 

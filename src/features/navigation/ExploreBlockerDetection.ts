@@ -82,50 +82,26 @@ function tokenize(field: string): string[] {
 }
 
 /**
- * Common inflection suffixes stripped when comparing a field token against a
- * keyword token, longest first so "closing" tries "ing" before "s".
- */
-const INFLECTION_SUFFIXES = ["ing", "es", "ed", "s"];
-
-/**
- * True if `token` is `keywordToken`, or `keywordToken` plus one of the common
- * inflection suffixes above.
- *
- * Exact-token matching dropped ordinary inflections the old substring
- * matcher caught — "Permissions required" tokenizes to
- * `["permissions", ...]`, which no longer equals the keyword "permission"
- * (issue #6122 follow-up). Stripping a trailing "s"/"es"/"ing"/"ed" before
- * comparing restores "permissions"/"allows"/"denies" while still rejecting
- * "bookmark"/"token"/"accessibility" — none of those have a keyword as their
- * stem.
- */
-function tokenMatchesKeyword(token: string, keywordToken: string): boolean {
-  if (token === keywordToken) {
-    return true;
-  }
-  return INFLECTION_SUFFIXES.some(
-    (suffix) =>
-      token.length > suffix.length &&
-      token.endsWith(suffix) &&
-      token.slice(0, -suffix.length) === keywordToken,
-  );
-}
-
-/**
  * True if `keywordTokens` (itself tokenized, so "don't allow" -> ["don", "t",
- * "allow"]) appears, inflection-tolerant, as a contiguous run inside
+ * "allow"]) appears, by exact token equality, as a contiguous run inside
  * `fieldTokens`.
+ *
+ * An earlier revision stripped a trailing "s"/"es"/"ing"/"ed" from a field
+ * token before comparing, to accept plurals like "permissions" without
+ * listing them explicitly. That algorithmic stemming traded one false
+ * negative for a false positive: "notes" strips to "not", so "Notes now"
+ * satisfied the dismiss phrase "not now" (issue #6122 follow-up). Matching
+ * stays exact-token-only; any inflected form a real dialog uses (e.g.
+ * "permissions", "allows") is listed explicitly in the keyword set instead
+ * (see `PERMISSION_KEYWORDS`), so the match surface is exactly what was
+ * asked for, never a guess.
  */
 function containsTokenSequence(fieldTokens: string[], keywordTokens: string[]): boolean {
   if (keywordTokens.length === 0) {
     return false;
   }
   for (let start = 0; start + keywordTokens.length <= fieldTokens.length; start++) {
-    if (
-      keywordTokens.every((keywordToken, offset) =>
-        tokenMatchesKeyword(fieldTokens[start + offset], keywordToken),
-      )
-    ) {
+    if (keywordTokens.every((token, offset) => fieldTokens[start + offset] === token)) {
       return true;
     }
   }
@@ -166,16 +142,22 @@ const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
  * Substring matching misclassified ordinary UI text — "access" matched
  * "Accessibility", and (in `handlePermissionDialog`) "ok" matched
  * "Bookmarks"/"Cookies"/"Tokens" (issue #6122, same defect class as #4190).
- * "access" is dropped entirely rather than token-matched: as a whole word it
- * still shows up in ambient, non-permission UI ("Quick access", "Access your
- * library" as a bookmarks/history shortcut). Real permission dialogs always
- * carry "allow"/"permission"/"deny" alongside it, so those keywords cover the
- * case ("Allow access to your location?" still matches via "allow") without
- * the false positives.
+ * "access" is included as its own exact token: tokenizing "Accessibility"
+ * yields the single token `["accessibility"]`, distinct from `["access"]`,
+ * so it no longer collides the way the old substring check did — an earlier
+ * revision dropped "access" from this list defensively, before the
+ * tokenizer existed to make that distinction safely, which regressed
+ * "Camera access required" to a miss. Plurals actually seen on real dialogs
+ * ("permissions", "allows") are listed explicitly rather than derived by
+ * stemming — stemming previously turned "Notes now" into a false dismiss
+ * match ("notes" -> "not").
  */
 const PERMISSION_KEYWORDS = [
   "allow",
+  "allows",
   "permission",
+  "permissions",
+  "access",
   "deny",
   "don't allow",
   "while using",
@@ -218,9 +200,10 @@ export function isRatingDialog(elements: Element[]): boolean {
  * "Allow"-button keywords, matched by whole tokens (issue #6122): bare "ok"
  * as a substring matched "Bookmarks"/"Look up"/"Cookies"/"Tokens", while
  * token matching still accepts machine ids like "ok_button"/"okButton" and
- * "okay" as its own affirmative.
+ * "okay" as its own affirmative. "ok"/"okay" are never inflected — "notes"
+ * must never satisfy "not", so no keyword here is derived by stemming.
  */
-const ALLOW_KEYWORDS = ["allow", "while using", "only this time", "ok", "okay"];
+const ALLOW_KEYWORDS = ["allow", "allows", "while using", "only this time", "ok", "okay"];
 
 const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
 

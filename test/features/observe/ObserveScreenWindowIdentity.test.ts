@@ -934,6 +934,50 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("REGRESSION: an incomplete-capture flag from an unrelated overlay is not retracted against a stale initial sample during an A→B transition (#6151 follow-up)", async () => {
+    // Same A→B transition shape as the test above (initial sample lags on A =
+    // settings, the hierarchy and confirming read are already on B = calendar),
+    // but this time the hierarchy ALSO carries `ctrlProxyIncomplete: true` (an
+    // unrelated overlay was transiently rootless). Correlating that flag
+    // against the STALE INITIAL sample (A) would see observed(B) != initial(A)
+    // and wrongly retract freshness even though B was just confirmed as the
+    // settled foreground — discarding the very confirmation
+    // `resolveWindowIdentityMismatch` already trusts.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      // CtrlProxy has not yet updated the active window from Settings.
+      foregroundActivity: "com.android.settings/.Settings",
+      ctrlProxyIncomplete: true,
+      sdkInt: 34,
+    }); // observed = calendar (B), fully readable
+
+    // First getForegroundApp read lags (still reports settings = A); the
+    // confirming read reports calendar (B), matching the observed hierarchy.
+    const sequence = [
+      { packageName: "com.android.settings", userId: 0 },
+      { packageName: "com.google.android.calendar", userId: 0 },
+    ];
+    class SequencedForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return sequence.shift() ?? { packageName: "com.google.android.calendar", userId: 0 };
+      }
+    }
+    const fakeAdb = new SequencedForegroundAdb();
+
+    const screen = makeScreen(viewHierarchy, fakeAdb);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.google.android.calendar");
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
   test("does not overwrite a newer active window with a stale hierarchy", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

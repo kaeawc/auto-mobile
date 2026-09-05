@@ -253,6 +253,16 @@ function describeStatusBarOnlyCapture(
  * absent or does not match the foreground app (a substituted window from the
  * incomplete-capture fallback, or no content at all) — the genuine #6151 case,
  * where the focused app's OWN root was null.
+ *
+ * `foreground` MUST be the SETTLED/confirmed identity (the same post-capture
+ * sample `resolveWindowIdentityMismatch` and `resolveStatusBarOnlyHierarchy`
+ * trust), never the initial parallel sample taken before capture. During an
+ * A→B app transition the initial sample can still read A while the hierarchy
+ * (and the confirming read) are already on B; comparing against the stale
+ * initial sample would see `observed (B) !== initial foreground (A)` and
+ * retract freshness even though B was just confirmed as the settled foreground
+ * — discarding the very confirmation the rest of this freshness logic relies on
+ * (#6151 follow-up).
  */
 function describeIncompleteCapture(
   hierarchy: ObserveResult["viewHierarchy"],
@@ -678,9 +688,16 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
+        // The SETTLED/confirmed foreground, not the initial parallel sample: during an
+        // A→B transition the initial sample can still read A while the hierarchy and the
+        // confirming read are already on B, and comparing against stale A would retract a
+        // capture that was just confirmed as B (#6151 follow-up). Only sampled when the
+        // flag is actually set — the common case never pays the extra device read.
         incompleteCapture: describeIncompleteCapture(
           result.viewHierarchy,
-          await foregroundIdentity,
+          result.viewHierarchy?.ctrlProxyIncomplete === true
+            ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
+            : undefined,
         ),
       });
 

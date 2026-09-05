@@ -123,6 +123,32 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result).toBeNull();
   });
 
+  it("rejects a point release under a dotted maxOsVersion bound (does not widen)", () => {
+    // A dotted bound like "17.2" names an exact inclusive endpoint -- unlike
+    // a major-only bound, it must NOT gain wildcard/prefix semantics. A
+    // device reporting "17.2.1" (e.g. iOS's three-component os_version) is
+    // genuinely newer than "17.2" and must be rejected.
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17.2.1" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17.2" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("accepts an exact match under a dotted maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17.2" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17.2" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
   it("filters by minOsVersion and maxOsVersion together", () => {
     const devices = [
       bootedDevice({ deviceId: "1", osVersion: "13" }),

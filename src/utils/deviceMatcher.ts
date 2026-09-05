@@ -115,18 +115,26 @@ function compareVersionToBound(version: string, bound: string): number {
   const parsedVersion = parseDeviceVersion(version);
   const parsedBound = parseDeviceVersion(bound);
   if (parsedVersion && parsedBound) {
-    // A major-only bound ("8") spans every point release of that major
-    // (8.0, 8.1, ...), matching AvdConfigReader.versionToApiLevelRange, which
-    // resolves such a bound to the full API-level span for the major release
-    // when provisioning (#6132/#6132-followup). Comparing only the prefix
-    // shared with the bound's own precision -- instead of zero-padding the
-    // bound out to the version's length -- keeps "8.1" equal to "8", so a
-    // matcher against maxOsVersion:"8" accepts an AVD that provisioning
-    // widened to 8.1 instead of rejecting it and re-provisioning forever.
-    const delta = compareParsedVersions(
-      parsedVersion.components.slice(0, parsedBound.components.length),
-      parsedBound.components,
-    );
+    // A major-only bound ("8", one component, no dot) spans every point
+    // release of that major (8.0, 8.1, ...), matching
+    // AvdConfigReader.versionToApiLevelRange, which resolves such a bound to
+    // the full API-level span for the major release when provisioning
+    // (#6132). Comparing only the version's leading component against it --
+    // instead of zero-padding the bound out to the version's length --
+    // keeps "8.1" equal to "8", so a matcher against maxOsVersion:"8"
+    // accepts an AVD that provisioning widened to 8.1 instead of rejecting
+    // it and re-provisioning forever.
+    //
+    // A bound with its own dotted precision (e.g. "17.2") is NOT widened
+    // this way: it names an exact inclusive endpoint, so "17.2.1" must
+    // still compare greater than it and be rejected by a maxOsVersion of
+    // "17.2" (regression caught in review: widening every bound made a
+    // dotted maxOsVersion match any longer version sharing its prefix).
+    const comparableVersion =
+      parsedBound.components.length === 1
+        ? parsedVersion.components.slice(0, 1)
+        : parsedVersion.components;
+    const delta = compareParsedVersions(comparableVersion, parsedBound.components);
     if (delta !== 0) {
       return delta;
     }

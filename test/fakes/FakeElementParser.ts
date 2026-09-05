@@ -1,44 +1,72 @@
 import type { Element } from "../../src/models/Element";
 import type { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../../src/models";
 import type { ElementParser } from "../../src/utils/interfaces/ElementParser";
+import { parseBounds as parseBoundsValue } from "../../src/utils/bounds";
+import { DefaultElementParser } from "../../src/features/utility/ElementParser";
 
+// undefined (the default) on any `next*` field below means "delegate to a
+// real DefaultElementParser" rather than return a canned value. Hierarchy
+// parsing (bounds, node properties, tree walking) is a pure, deterministic
+// utility with no I/O or timing dependency, so a caller exercising real
+// tree-walking logic (e.g. OverlayDetector's container-identity resolution)
+// gets correct behavior without every test having to hand-roll a full
+// parser. Set a field explicitly (including to an empty array or null) to
+// force a specific result for a test that wants that instead.
 export class FakeElementParser implements ElementParser {
-  nextNodeProperties: any = {};
-  nextParsedBounds: ElementBounds | null = null;
-  nextParsedNode: Element | null = null;
-  nextRootNodes: ViewHierarchyNode[] = [];
-  nextWindowRootGroups: ViewHierarchyNode[][] = [];
-  nextFlattenedElements: Array<{ element: Element; index: number; depth: number; text?: string }> =
-    [];
+  private readonly real = new DefaultElementParser();
 
-  extractNodeProperties(_node: ViewHierarchyNode): any {
-    return this.nextNodeProperties;
+  nextNodeProperties: any = undefined;
+  nextParsedBounds: ElementBounds | null | undefined = undefined;
+  nextParsedNode: Element | null | undefined = undefined;
+  nextRootNodes: ViewHierarchyNode[] | undefined = undefined;
+  nextWindowRootGroups: ViewHierarchyNode[][] | undefined = undefined;
+  nextFlattenedElements:
+    | Array<{ element: Element; index: number; depth: number; text?: string }>
+    | undefined = undefined;
+
+  extractNodeProperties(node: ViewHierarchyNode): any {
+    if (this.nextNodeProperties !== undefined) {
+      return this.nextNodeProperties;
+    }
+    return this.real.extractNodeProperties(node);
   }
 
-  parseBounds(_bounds: unknown): ElementBounds | null {
-    return this.nextParsedBounds;
+  parseBounds(bounds: unknown): ElementBounds | null {
+    if (this.nextParsedBounds !== undefined) {
+      return this.nextParsedBounds;
+    }
+    return parseBoundsValue(bounds);
   }
 
-  parseNodeBounds(_node: ViewHierarchyNode): Element | null {
-    return this.nextParsedNode;
+  parseNodeBounds(node: ViewHierarchyNode): Element | null {
+    if (this.nextParsedNode !== undefined) {
+      return this.nextParsedNode;
+    }
+    return this.real.parseNodeBounds(node);
   }
 
-  extractRootNodes(_viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[] {
-    return this.nextRootNodes;
+  extractRootNodes(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[] {
+    if (this.nextRootNodes !== undefined) {
+      return this.nextRootNodes;
+    }
+    return this.real.extractRootNodes(viewHierarchy);
   }
 
   extractWindowRootGroups(
-    _viewHierarchy: ViewHierarchyResult,
-    _order?: "topmost-first" | "bottommost-first",
+    viewHierarchy: ViewHierarchyResult,
+    order?: "topmost-first" | "bottommost-first",
   ): ViewHierarchyNode[][] {
-    return this.nextWindowRootGroups;
+    if (this.nextWindowRootGroups !== undefined) {
+      return this.nextWindowRootGroups;
+    }
+    return this.real.extractWindowRootGroups(viewHierarchy, order);
   }
 
   extractWindowRootNodes(
-    _viewHierarchy: ViewHierarchyResult,
-    _order?: "topmost-first" | "bottommost-first",
+    viewHierarchy: ViewHierarchyResult,
+    order?: "topmost-first" | "bottommost-first",
   ): ViewHierarchyNode[] {
-    return this.nextWindowRootGroups.flat();
+    return this.extractWindowRootGroups(viewHierarchy, order).flat();
   }
 
   traverseNode(node: any, callback: (node: any, depth: number) => void, depth: number = 0): void {
@@ -56,9 +84,12 @@ export class FakeElementParser implements ElementParser {
   }
 
   flattenViewHierarchy(
-    _viewHierarchy: ViewHierarchyResult,
-    _options?: { includeWindows?: boolean; windowOrder?: "topmost-first" | "bottommost-first" },
+    viewHierarchy: ViewHierarchyResult,
+    options?: { includeWindows?: boolean; windowOrder?: "topmost-first" | "bottommost-first" },
   ): Array<{ element: Element; index: number; depth: number; text?: string }> {
-    return this.nextFlattenedElements;
+    if (this.nextFlattenedElements !== undefined) {
+      return this.nextFlattenedElements;
+    }
+    return this.real.flattenViewHierarchy(viewHierarchy, options);
   }
 }

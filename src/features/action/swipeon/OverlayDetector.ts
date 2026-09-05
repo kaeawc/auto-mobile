@@ -365,8 +365,13 @@ export class OverlayDetector implements OverlayAnalyzer {
           path[depth] = node;
 
           const nodeProperties = parser.extractNodeProperties(node);
+          // Accept only a node whose bounds equal the selected element's. A
+          // look-alike with unequal, missing, or malformed bounds must not be
+          // taken as the container — and the finder's own `containerNode` is not
+          // a substitute, since it too is resolved topmost-first and can be the
+          // look-alike.
           const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
-          if (parsedBounds && !boundsEqual(parsedBounds, containerBounds)) {
+          if (parsedBounds === null || !boundsEqual(parsedBounds, containerBounds)) {
             return;
           }
           if (

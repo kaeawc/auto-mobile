@@ -128,6 +128,48 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     expect(overlays[0].bounds).toEqual(popupBounds);
     expect(overlays[0].overlapBounds).toEqual(popupBounds);
   });
+
+  test("a same-id look-alike with missing or malformed bounds is not taken as the container either", () => {
+    // Unparseable bounds must not fall through to the id/text match: the
+    // popup's clickable root is still the one overlay in both variants.
+    const popupBounds = b(100, 600, 900, 1400);
+    const makeHierarchy = (lookAlikeAttrs: Record<string, string>) => ({
+      hierarchy: { node: [] },
+      windows: [
+        {
+          windowLayer: 0,
+          hierarchy: {
+            node: [
+              node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [
+                node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
+              ]),
+            ],
+          },
+        },
+        {
+          windowLayer: 5,
+          hierarchy: {
+            node: [
+              node(popupBounds, { "resource-id": "popup", clickable: "true" }, [
+                { $: { "resource-id": "list", scrollable: "true", ...lookAlikeAttrs }, node: [] },
+              ]),
+            ],
+          },
+        },
+      ],
+    });
+
+    for (const lookAlike of [{}, { bounds: "not-a-rect" }]) {
+      const overlays = detector().collectOverlayCandidates(
+        makeHierarchy(lookAlike) as any,
+        { elementId: "list" },
+        listElement,
+      );
+
+      expect(overlays).toHaveLength(1);
+      expect(overlays[0].bounds).toEqual(popupBounds);
+    }
+  });
 });
 
 describe("SwipeOn container overlays", () => {

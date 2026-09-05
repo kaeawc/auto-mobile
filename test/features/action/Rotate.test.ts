@@ -116,6 +116,33 @@ describe("Rotate", () => {
       expect(orientation).toBe("landscape");
     });
 
+    test("should prefer live mRotation over stale user_rotation (#6129)", async () => {
+      // Auto-rotate has physically rotated the device to landscape, but the
+      // `user_rotation` setting (only meaningful while auto-rotate is off)
+      // is still stuck at its old portrait value.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=1"),
+      );
+
+      const orientation = await rotate.getCurrentOrientation();
+
+      expect(orientation).toBe("landscape");
+    });
+
+    test("should fall back to user_rotation when dumpsys window has no mRotation", async () => {
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult(""),
+      );
+
+      const orientation = await rotate.getCurrentOrientation();
+
+      expect(orientation).toBe("portrait");
+    });
+
     test("should return portrait as default when ADB command fails", async () => {
       fakeAdb.setDefaultResponse({
         stdout: "",
@@ -202,9 +229,126 @@ describe("Rotate", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(false);
     });
 
+    test("should rotate a physically-landscape auto-rotated device instead of no-oping (#6129)", async () => {
+      // Auto-rotate is on; the device is physically landscape (mRotation=1)
+      // but `user_rotation` is stale at 0 (portrait). A prior bug trusted
+      // `user_rotation` here and reported "already in portrait", never rotating.
+      // The sensor settles on portrait once auto-rotate is restored (no override).
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"),
+        createExecResult("mRotation=0"),
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.previousOrientation).toBe("landscape");
+      expect(result.currentOrientation).toBe("portrait");
+      expect(result.warning).toBeUndefined();
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
+    });
+
+    test("should select the LIVE display mRotation over a stale TaskSnapshot mRotation in realistic dumpsys output (#6199)", async () => {
+      // Realistic `dumpsys window | grep -i "mRotation="` output: a cached
+      // SnapshotCache entry embeds a historical (stale) TaskSnapshot rotation
+      // BEFORE the authoritative WindowManagerService rotation line. A naive
+      // "first match anywhere" parse picks the stale value and defeats #6129.
+      const dumpsysWindowGrepOutput = [
+        "     snapshot=TaskSnapshot{ mId=1749551414267 mCaptureTime=1748344877515 mTopActivityComponent=com.android.settings/.SubSettings mSnapshot=android.hardware.HardwareBuffer@d8e7fad (864x1920) mColorSpace=sRGB IEC61966-2.1 (id=0, model=RGB) mOrientation=1 mRotation=0 mTaskSize=Point(1080, 2400) mContentInsets=[0,74][0,63] mLetterboxInsets=[0,0][0,0] mIsLowResolution=false mIsRealSnapshot=true mWindowingMode=1 mAppearance=24 mIsTranslucent=false mHasImeSurface=false mInternalReferences=2",
+        "  mRotation=1",
+      ].join("\n");
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult(dumpsysWindowGrepOutput),
+      );
+
+      const orientation = await rotate.getCurrentOrientation();
+
+      // The authoritative live rotation (1 = landscape) must win over the
+      // stale TaskSnapshot rotation (0 = portrait).
+      expect(orientation).toBe("landscape");
+    });
+
+    test("should honestly report the sensor-held orientation when auto-rotate overrides the forced rotation (#6199)", async () => {
+      // Auto-rotate is on and the physical sensor stays landscape throughout
+      // (e.g. the device is physically held sideways) — restoring auto-rotate
+      // after forcing portrait immediately snaps it back to landscape. The
+      // result must report the ACHIEVED orientation and warn, not falsely
+      // claim portrait succeeded.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      // mRotation reads landscape both before AND after the forced rotation +
+      // restore — the sensor never let go of landscape.
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=1"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.previousOrientation).toBe("landscape");
+      // Must report what is ACTUALLY held, not a false "portrait" success.
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/auto-rotate/i);
+      expect(result.warning ?? "").toContain("landscape");
+    });
+
+    test("should report the achieved orientation as unconfirmed when the post-restore live read is unparseable, never falling back to user_rotation (#6199)", async () => {
+      // Auto-rotate is on; the device is physically landscape. The FIRST
+      // dumpsys read (pre-rotation state check) succeeds and reports
+      // landscape. After forcing portrait and restoring auto-rotate, the
+      // confirmation dumpsys read is transiently unparseable (e.g. a
+      // momentary empty/garbled `dumpsys window` response) — the code must
+      // NOT fall back to the just-written `user_rotation` (which would
+      // dishonestly echo "portrait" as if the sensor had held it) and must
+      // NOT silently report the requested orientation as achieved.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"),
+        createExecResult(""),
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.previousOrientation).toBe("landscape");
+      // Must NOT falsely report the requested orientation as achieved/held.
+      expect(result.currentOrientation).not.toBe("portrait");
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+    });
+
     test("should report achieved orientation as currentOrientation for landscape->portrait (#6057)", async () => {
-      // Device starts in landscape (user_rotation 1), rotates to portrait.
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
+      // Device starts in landscape (live mRotation=1), rotates to portrait
+      // and the sensor settles on portrait (live mRotation=0) once
+      // auto-rotate is restored. The post-restore confirmation read is LIVE
+      // (mRotation), never a fallback to user_rotation (#6199 review).
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"),
+        createExecResult("mRotation=0"),
+      ]);
       fakeAdb.setCommandResponse(
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
@@ -224,8 +368,14 @@ describe("Rotate", () => {
     });
 
     test("should report achieved orientation as currentOrientation for portrait->landscape (#6057)", async () => {
-      // Device starts in portrait (user_rotation 0), rotates to landscape.
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      // Device starts in portrait (live mRotation=0), rotates to landscape
+      // and the sensor settles on landscape (live mRotation=1) once
+      // auto-rotate is restored. The post-restore confirmation read is LIVE
+      // (mRotation), never a fallback to user_rotation (#6199 review).
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+        createExecResult("mRotation=1"),
+      ]);
       fakeAdb.setCommandResponse(
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
@@ -296,17 +446,13 @@ describe("Rotate", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 1")).toBe(true);
     });
 
-    test("should unlock orientation if locked before rotation", async () => {
+    test("should rotate directly (without unlocking) when orientation is already locked", async () => {
       // Setup: device is landscape with orientation locked
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
       fakeAdb.setCommandResponse(
         "shell settings get system accelerometer_rotation",
         createExecResult("0"),
       ); // Locked
-      fakeAdb.setCommandResponse(
-        "shell settings put system accelerometer_rotation 1",
-        createExecResult(),
-      ); // Unlock
       fakeAdb.setCommandResponse(
         "shell settings put system accelerometer_rotation 0",
         createExecResult(),
@@ -316,15 +462,160 @@ describe("Rotate", () => {
       const result = await rotate.execute("portrait");
 
       expect(result.success).toBe(true);
-      // Verify that the unlock command was executed
-      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
-        true,
-      );
       // Verify the rotation commands were executed
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(
         true,
       );
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
+      // Locked devices stay locked (to the newly-requested orientation) rather
+      // than being unlocked then immediately re-locked, which was a no-op.
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
+        false,
+      );
+      expect(result.orientationLockHandled).toBe(false);
+    });
+
+    test("should restore auto-rotate after forcing a rotation while it was enabled (#6129)", async () => {
+      // Device starts landscape with auto-rotate ON (unlocked); the sensor
+      // settles on portrait (live mRotation=0) once auto-rotate is restored
+      // (no override). The post-restore confirmation read is LIVE
+      // (mRotation), never a fallback to user_rotation (#6199 review).
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"),
+        createExecResult("mRotation=0"),
+      ]);
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.orientationLockHandled).toBe(true);
+      expect(result.warning).toBeUndefined();
+      // Auto-rotate must be forced off to apply user_rotation, then restored.
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(
+        true,
+      );
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
+        true,
+      );
+      // The restore ("1") must be the LAST accelerometer_rotation write, not left at 0.
+      const accelWrites = fakeAdb
+        .getExecutedCommands()
+        .filter((cmd) => cmd.includes("settings put system accelerometer_rotation"));
+      expect(accelWrites.at(-1)).toContain("accelerometer_rotation 1");
+    });
+
+    test("should not mutate accelerometer_rotation at all when it is unreadable (#6199)", async () => {
+      // accelerometer_rotation is malformed/unreadable — this must be treated
+      // as "unknown". We must not force it off (no confirmed prior value to
+      // restore afterward), so user_rotation is written on its own and
+      // whatever the real device does with it is reported honestly by
+      // waitForRotation rather than covered up with a guessed restore.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("not-a-number"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.orientationLockHandled).toBe(false);
+      // user_rotation is still written...
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
+      // ...but accelerometer_rotation is never mutated in either direction:
+      // no disable, and (necessarily) no unconfirmed "restore" either.
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(
+        false,
+      );
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
+        false,
+      );
+    });
+
+    test("serializes concurrent rotations on the same device so auto-rotate restore is not corrupted (#6199)", async () => {
+      // Device starts portrait with auto-rotate ON.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+
+      // Gate the FIRST rotation's waitForRotation call so it parks mid-flight
+      // — after reading state and writing accelerometer_rotation=0, but
+      // before restoring it — giving a concurrent second rotation on the same
+      // device a window to race it if the critical section is not serialized.
+      let releaseFirstWait: (() => void) | undefined;
+      const firstWaitGate = new Promise<void>((resolve) => {
+        releaseFirstWait = resolve;
+      });
+      let waitForRotationCalls = 0;
+      const gatedAwaitIdle = {
+        waitForRotation: async () => {
+          waitForRotationCalls++;
+          if (waitForRotationCalls === 1) {
+            await firstWaitGate;
+          }
+        },
+      };
+      (rotate as any).awaitIdle = gatedAwaitIdle;
+
+      const secondRotate = new Rotate(mockDevice, fakeAdb, fakeTimer);
+      (secondRotate as any).awaitIdle = gatedAwaitIdle;
+      (secondRotate as any).observeScreen = fakeObserveScreen;
+      (secondRotate as any).window = fakeWindow;
+
+      const lock = (rotate as any).getRotationLock();
+      // Same deviceId -> the second instance must resolve to the SAME lock.
+      expect((secondRotate as any).getRotationLock()).toBe(lock);
+
+      const firstCall = rotate.execute("landscape");
+
+      // Let the first call's microtasks run until it holds the lock and is
+      // parked at the gate.
+      for (let i = 0; i < 50 && !lock.isLocked(); i++) {
+        await Promise.resolve();
+      }
+      expect(lock.isLocked()).toBe(true);
+
+      // Same requested orientation as the first call: `user_rotation` is
+      // stubbed at a constant stale "0" (portrait) regardless of what either
+      // call writes, so both calls see "not yet landscape" and must go
+      // through the full write/restore flow rather than short-circuiting.
+      const secondCall = secondRotate.execute("landscape");
+
+      // Give the second call every chance to run if it were (incorrectly)
+      // unserialized; it must still be blocked on the lock, so it must not
+      // have read device state yet.
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      const accelGetsWhileFirstHoldsLock = fakeAdb
+        .getExecutedCommands()
+        .filter((cmd) => cmd.includes("settings get system accelerometer_rotation")).length;
+      expect(accelGetsWhileFirstHoldsLock).toBe(1);
+
+      releaseFirstWait!();
+      const [firstResult, secondResult] = await Promise.all([firstCall, secondCall]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(true);
+      expect(firstResult.orientationLockHandled).toBe(true);
+      expect(secondResult.orientationLockHandled).toBe(true);
+
+      // The second rotation must observe the FIRST rotation's fully-restored
+      // state, not its transient accelerometer_rotation=0 — and must end up
+      // restoring auto-rotate itself, not stuck at 0.
+      const accelWrites = fakeAdb
+        .getExecutedCommands()
+        .filter((cmd) => cmd.includes("settings put system accelerometer_rotation"));
+      expect(accelWrites.at(-1)).toContain("accelerometer_rotation 1");
+      expect(lock.isLocked()).toBe(false);
     });
   });
 

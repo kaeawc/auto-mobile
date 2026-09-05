@@ -12,6 +12,7 @@ import {
 } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
 
 export class Idle {
   private adb: AdbExecutor;
@@ -117,10 +118,12 @@ export class Idle {
       const { stdout } = await perf.track("adbDumpsysWindowRotation", () =>
         this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="'),
       );
-      const rotationMatch = stdout.match(/mRotation=(\d+)/);
+      // parseWindowManagerRotation selects the authoritative display rotation
+      // and skips stale/unrelated `mRotation=` occurrences elsewhere in the
+      // dump (e.g. a cached TaskSnapshot) — see issue #6199.
+      const currentRotation = parseWindowManagerRotation(stdout);
 
-      if (rotationMatch) {
-        const currentRotation = parseInt(rotationMatch[1], 10);
+      if (currentRotation !== null) {
         logger.debug(`Current rotation: ${currentRotation}, target: ${targetRotation}`);
 
         if (currentRotation === targetRotation) {

@@ -13,4 +13,5 @@ export interface RotateResult extends BaseActionResult {
   rotationPerformed?: boolean;
   orientationLockHandled?: boolean;
   message?: string;
+  warning?: string;
 }

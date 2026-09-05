@@ -10,6 +10,7 @@ import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
+import { optionalInteger } from "./queryParamValidation";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
@@ -299,32 +300,6 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
 }
 
 /**
- * Parse an optional pagination query param (limit/offset) as a non-negative
- * safe integer. Returns `defaultValue` when the param is absent or empty;
- * throws a descriptive error for anything else that isn't a non-negative
- * safe integer (issue #6133 — previously `parseInt` silently produced `NaN`;
- * an all-digit string outside Number.MAX_SAFE_INTEGER would otherwise round
- * or overflow to `Infinity`).
- */
-function parsePaginationParam(
-  raw: string | undefined,
-  defaultValue: number,
-  paramName: string,
-): number {
-  if (raw === undefined || raw === "") {
-    return defaultValue;
-  }
-  if (!/^\d+$/.test(raw)) {
-    throw new Error(`Invalid ${paramName} "${raw}": must be a non-negative integer`);
-  }
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value)) {
-    throw new Error(`Invalid ${paramName} "${raw}": must be a safe integer`);
-  }
-  return value;
-}
-
-/**
  * Get table data resource content
  */
 async function getTableDataResource(params: Record<string, string>): Promise<ResourceContent> {
@@ -342,11 +317,12 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
     if (!appId) {
       throw new Error("Missing required appId query parameter for table data");
     }
-    // Parse optional limit and offset from query params. Each is validated as
-    // a non-negative integer when present; absent falls back to the
-    // documented default (issue #6133).
-    const limit = parsePaginationParam(params.limit, 50, "limit");
-    const offset = parsePaginationParam(params.offset, 0, "offset");
+    // Parse optional limit and offset from query params using the repo's
+    // centralized query-validation helper (safe-integer + min-bound), rather
+    // than a second hand-rolled parser (issue #6188). Absent/empty falls
+    // back to the documented default (issue #6133).
+    const limit = optionalInteger(params.limit, "limit", { min: 0 }) ?? 50;
+    const offset = optionalInteger(params.offset, "offset", { min: 0 }) ?? 0;
 
     const device = await findBootedDevice(deviceId);
     if (!device) {

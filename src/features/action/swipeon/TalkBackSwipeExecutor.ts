@@ -15,6 +15,29 @@ import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
+export type AccessibilityScrollAction = "scroll_forward" | "scroll_backward";
+
+/**
+ * Map a FINGER swipe direction to the `AccessibilityNodeInfo` scroll action that
+ * moves the content the same way the coordinate swipe would.
+ *
+ * Every caller of `executeSwipeGesture` passes the finger direction (`SwipeOn`
+ * resolves `gestureType` into a finger direction before dispatch, and the
+ * non-TalkBack path feeds the same value to `getSwipeWithinBounds`). A finger
+ * moving UP (or LEFT) reveals the content BELOW (or to the RIGHT), which is
+ * `ACTION_SCROLL_FORWARD`; a finger moving DOWN (or RIGHT) reveals content
+ * ABOVE (or to the LEFT), which is `ACTION_SCROLL_BACKWARD`. The previous
+ * mapping was inverted, so `lookFor` under TalkBack scrolled away from the
+ * target (#6116).
+ */
+export function scrollActionForFingerDirection(
+  fingerDirection: SwipeDirection,
+): AccessibilityScrollAction {
+  return fingerDirection === "up" || fingerDirection === "left"
+    ? "scroll_forward"
+    : "scroll_backward";
+}
+
 export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   private static readonly DEFAULT_APEX_PAUSE_MS = 100;
   private static readonly DEFAULT_RETURN_SPEED = 1;
@@ -218,9 +241,8 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   ): Promise<SwipeResult> {
     // Try accessibility scroll actions if container is known and has resource-id
     if (containerElement && containerElement["resource-id"]) {
-      // Map swipe direction to ACTION_SCROLL semantics (forward = down/right, backward = up/left).
-      const scrollAction =
-        direction === "down" || direction === "right" ? "scroll_forward" : "scroll_backward";
+      // `direction` is the FINGER direction; see scrollActionForFingerDirection.
+      const scrollAction = scrollActionForFingerDirection(direction);
 
       logger.info(
         `[SwipeOn] Attempting ACTION_SCROLL (${scrollAction}) on container: ${containerElement["resource-id"]}`,

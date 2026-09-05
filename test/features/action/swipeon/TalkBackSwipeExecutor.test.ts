@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
+import {
+  TalkBackSwipeExecutor,
+  scrollActionForFingerDirection,
+} from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -419,7 +422,10 @@ describe("TalkBackSwipeExecutor", () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
     });
 
-    test("tries ACTION_SCROLL (scroll_forward) when container has resource-id and direction is down", async () => {
+    // `direction` is the FINGER direction (what the coordinate path feeds to
+    // getSwipeWithinBounds). Finger UP reveals the content BELOW, which is
+    // ACTION_SCROLL_FORWARD — the mapping used to be inverted (#6116).
+    test("tries ACTION_SCROLL (scroll_forward) when container has resource-id and finger swipes up", async () => {
       const containerElement = {
         bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
@@ -431,7 +437,7 @@ describe("TalkBackSwipeExecutor", () => {
         500,
         100,
         200,
-        "down" as SwipeDirection,
+        "up" as SwipeDirection,
         containerElement,
         { duration: 300 },
         perf,
@@ -446,17 +452,17 @@ describe("TalkBackSwipeExecutor", () => {
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
     });
 
-    test("maps up direction to scroll_backward", async () => {
+    test("maps finger-down direction to scroll_backward (reveals content above)", async () => {
       const containerElement = {
         "resource-id": "test:id/scrollView",
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
         100,
-        500,
+        200,
         100,
         700,
-        "up" as SwipeDirection,
+        "down" as SwipeDirection,
         containerElement,
         { duration: 300 },
         perf,
@@ -469,28 +475,7 @@ describe("TalkBackSwipeExecutor", () => {
       });
     });
 
-    test("maps right direction to scroll_forward", async () => {
-      const containerElement = {
-        "resource-id": "test:id/scrollView",
-      } as any;
-
-      await executor.executeAndroidSwipeWithAccessibility(
-        100,
-        200,
-        300,
-        200,
-        "right" as SwipeDirection,
-        containerElement,
-        { duration: 300 },
-        perf,
-      );
-
-      expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
-        action: "scroll_forward",
-      });
-    });
-
-    test("maps left direction to scroll_backward", async () => {
+    test("maps finger-left direction to scroll_forward (reveals content to the right)", async () => {
       const containerElement = {
         "resource-id": "test:id/scrollView",
       } as any;
@@ -507,14 +492,49 @@ describe("TalkBackSwipeExecutor", () => {
       );
 
       expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
+        action: "scroll_forward",
+      });
+    });
+
+    test("maps finger-right direction to scroll_backward (reveals content to the left)", async () => {
+      const containerElement = {
+        "resource-id": "test:id/scrollView",
+      } as any;
+
+      await executor.executeAndroidSwipeWithAccessibility(
+        100,
+        200,
+        300,
+        200,
+        "right" as SwipeDirection,
+        containerElement,
+        { duration: 300 },
+        perf,
+      );
+
+      expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
         action: "scroll_backward",
       });
     });
 
+    test.each([
+      ["up", "scroll_forward"],
+      ["down", "scroll_backward"],
+      ["left", "scroll_forward"],
+      ["right", "scroll_backward"],
+    ] as Array<[SwipeDirection, string]>)(
+      "scrollActionForFingerDirection(%s) is %s, matching the coordinate-swipe content motion (#6116)",
+      (fingerDirection, expectedAction) => {
+        // The non-TalkBack path moves the finger in `fingerDirection`; the
+        // TalkBack ACTION_SCROLL must move the content the same way.
+        expect(scrollActionForFingerDirection(fingerDirection)).toBe(expectedAction);
+      },
+    );
+
     test("falls back to two-finger swipe when ACTION_SCROLL fails", async () => {
       fakeCtrlProxy.setActionResult({
         success: false,
-        action: "scroll_backward",
+        action: "scroll_forward",
         totalTimeMs: 100,
         error: "Scroll not supported",
       });

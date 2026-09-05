@@ -40,7 +40,7 @@ export interface HierarchyDiffResult {
 /**
  * Canonical `l,t,r,b` form of a bounds value. Accepts the typed `node.bounds` struct, the iOS
  * converter's `{left,top,right,bottom}` object under `$.bounds` (it never sets the typed slot), and
- * Android's `"l,t,r,b"` string attribute — so equal coordinates compare equal across sources.
+ * a pre-joined `"l,t,r,b"` string attribute — so equal coordinates compare equal across sources.
  * Stringifying the object form directly gave "[object Object]" for every iOS node, which made a
  * pure move/resize invisible to the diff (#6134).
  */

@@ -20,13 +20,17 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
 
   const base = "automobile:devices/ios-1/databases/%2Fapp%2FDocuments%2Fapp.db/tables/notes/data";
 
+  let originalGetInstance: typeof IOSCtrlProxyClient.getInstance;
+
   beforeEach(() => {
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
+    originalGetInstance = IOSCtrlProxyClient.getInstance;
   });
 
   afterEach(() => {
+    IOSCtrlProxyClient.getInstance = originalGetInstance;
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();

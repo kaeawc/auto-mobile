@@ -15,8 +15,14 @@ import type { TableDataResult } from "../features/database/DatabaseInspector";
 const DATABASE_RESOURCE_TEMPLATES = {
   DATABASES: "automobile:devices/{deviceId}/databases?appId={appId}",
   TABLES: "automobile:devices/{deviceId}/databases/{databasePath}/tables?appId={appId}",
+  // {?appId,limit,offset} is the RFC 6570 optional-query form: ResourceRegistry's
+  // compileUriTemplate parses it via URLSearchParams, so appId/limit/offset each
+  // match independently of presence or order (issue #6133). A literal
+  // "?appId={appId}&limit={limit}&offset={offset}" query string compiles to
+  // fixed-order, all-required captures instead and only matches when every
+  // param appears, in that exact order.
   TABLE_DATA:
-    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data?appId={appId}",
+    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data{?appId,limit,offset}",
   TABLE_STRUCTURE:
     "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/structure?appId={appId}",
 } as const;
@@ -288,6 +294,26 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
 }
 
 /**
+ * Parse an optional pagination query param (limit/offset) as a non-negative
+ * integer. Returns `defaultValue` when the param is absent or empty; throws
+ * a descriptive error for anything else that isn't a non-negative integer
+ * (issue #6133 — previously `parseInt` silently produced `NaN`).
+ */
+function parsePaginationParam(
+  raw: string | undefined,
+  defaultValue: number,
+  paramName: string,
+): number {
+  if (raw === undefined || raw === "") {
+    return defaultValue;
+  }
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`Invalid ${paramName} "${raw}": must be a non-negative integer`);
+  }
+  return Number.parseInt(raw, 10);
+}
+
+/**
  * Get table data resource content
  */
 async function getTableDataResource(params: Record<string, string>): Promise<ResourceContent> {
@@ -296,11 +322,13 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const decodedTable = decodeURIComponent(table);
   const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId);
 
-  // Parse optional limit and offset from query params
-  const limit = params.limit ? parseInt(params.limit, 10) : 50;
-  const offset = params.offset ? parseInt(params.offset, 10) : 0;
-
   try {
+    // Parse optional limit and offset from query params. Each is validated as
+    // a non-negative integer when present; absent falls back to the
+    // documented default (issue #6133).
+    const limit = parsePaginationParam(params.limit, 50, "limit");
+    const offset = parsePaginationParam(params.offset, 0, "offset");
+
     const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
@@ -470,20 +498,12 @@ export function registerDatabaseResources(): void {
     getTablesResource,
   );
 
-  // Register template for table data
+  // Register template for table data. appId, limit, and offset are all
+  // optional and order-independent (issue #6133) — see the template comment.
   ResourceRegistry.registerTemplate(
     DATABASE_RESOURCE_TEMPLATES.TABLE_DATA,
     "Table Data",
     "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
-    "application/json",
-    getTableDataResource,
-  );
-
-  // Also register with limit/offset parameters
-  ResourceRegistry.registerTemplate(
-    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data?appId={appId}&limit={limit}&offset={offset}",
-    "Table Data (Paginated)",
-    "Get rows from a database table with explicit pagination.",
     "application/json",
     getTableDataResource,
   );

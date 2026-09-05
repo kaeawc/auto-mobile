@@ -2,6 +2,7 @@ import { afterEach, describe, it, expect } from "bun:test";
 import {
   parseAvdConfig,
   apiLevelToVersion,
+  versionToApiLevelRange,
   FileAvdConfigReader,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
@@ -206,6 +207,43 @@ describe("apiLevelToVersion", () => {
   for (const apiLevel of unknownRows) {
     it(`returns undefined for unmapped API ${apiLevel}`, () => {
       expect(apiLevelToVersion(apiLevel)).toBeUndefined();
+    });
+  }
+});
+
+describe("versionToApiLevelRange", () => {
+  // Inverse of apiLevelToVersion for the release-version bounds startDevice
+  // documents (#6132). Every table row must round-trip.
+  for (const apiLevel of Array.from({ length: 16 }, (_, index) => 21 + index)) {
+    it(`round-trips API ${apiLevel} through its release version`, () => {
+      const version = apiLevelToVersion(apiLevel);
+      expect(version).toBeDefined();
+      expect(versionToApiLevelRange(version as string)).toEqual({ min: apiLevel, max: apiLevel });
+    });
+  }
+
+  it("spans every point release when only the major is given", () => {
+    expect(versionToApiLevelRange("8")).toEqual({ min: 26, max: 27 });
+    expect(versionToApiLevelRange("5")).toEqual({ min: 21, max: 22 });
+  });
+
+  it("treats a trailing .0 as the bare major", () => {
+    expect(versionToApiLevelRange("14.0")).toEqual({ min: 34, max: 34 });
+    expect(versionToApiLevelRange("9.0")).toEqual({ min: 28, max: 28 });
+  });
+
+  it("does not fold 12L into 12", () => {
+    expect(versionToApiLevelRange("12")).toEqual({ min: 31, max: 31 });
+    expect(versionToApiLevelRange("12l")).toEqual({ min: 32, max: 32 });
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    expect(versionToApiLevelRange(" 14 ")).toEqual({ min: 34, max: 34 });
+  });
+
+  for (const unknown of ["17", "4.4", "8.2", "", "abc", "14-QPR1"]) {
+    it(`returns undefined for unmapped release version '${unknown}'`, () => {
+      expect(versionToApiLevelRange(unknown)).toBeUndefined();
     });
   }
 });

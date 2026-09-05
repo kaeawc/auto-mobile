@@ -15,6 +15,7 @@ import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { AppleDeviceType } from "./ios-cmdline-tools/SimCtlClient";
 import type { CreateAvdParams, SystemImage } from "./android-cmdline-tools/avdmanager";
 import { createAvd, listInstalledSystemImages } from "./android-cmdline-tools/avdmanager";
+import { versionToApiLevelRange } from "./android-cmdline-tools/AvdConfigReader";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
@@ -196,12 +197,45 @@ function abiRank(abi: string, preferences: string[]): number {
   return index === -1 ? preferences.length : index;
 }
 
-function parseApiLevel(version: string | undefined): number | undefined {
-  if (!version) {
+/**
+ * Lowest API level the release table knows. A bare integer at or above it can
+ * only be an API level (no Android release is numbered that high yet), so the
+ * provisioner keeps accepting the `minOsVersion: "34"` form; anything below it,
+ * or dotted / lettered, is a release version.
+ */
+const LOWEST_KNOWN_API_LEVEL = 21;
+
+/**
+ * Resolve one `minOsVersion` / `maxOsVersion` bound to an API level. The
+ * matcher compares these bounds against the AVD's release version and the
+ * provisioner compares them against `SystemImage.apiLevel`, and both receive
+ * the same criteria, so the documented release-version form ("14") must mean
+ * Android 14 (API 34) here too, not API 14 (#6132).
+ */
+function resolveApiLevelBound(bound: string | undefined, edge: "min" | "max"): number | undefined {
+  if (!bound) {
     return undefined;
   }
-  const parsed = Number.parseInt(version.trim().split(".")[0], 10);
-  return Number.isNaN(parsed) ? undefined : parsed;
+  const trimmed = bound.trim();
+  if (/^\d+$/.test(trimmed) && Number(trimmed) >= LOWEST_KNOWN_API_LEVEL) {
+    logger.debug(`[DeviceProvisioner] Treating ${edge}OsVersion '${trimmed}' as an API level`);
+    return Number(trimmed);
+  }
+  const range = versionToApiLevelRange(trimmed);
+  if (!range) {
+    throw new ActionableError(
+      `Unrecognized Android ${edge}OsVersion '${bound}'. ` +
+        "Pass a release version such as '14' (Android 14) or an API level such as 34.",
+    );
+  }
+  return edge === "min" ? range.min : range.max;
+}
+
+function describeBound(bound: string | undefined, apiLevel: number | undefined): string {
+  if (bound === undefined || apiLevel === undefined) {
+    return "any";
+  }
+  return bound.trim() === String(apiLevel) ? bound : `${bound} (API ${apiLevel})`;
 }
 
 /**
@@ -213,8 +247,8 @@ export function pickAndroidSystemImage(
   criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion">,
   architecture: string,
 ): SystemImage {
-  const min = parseApiLevel(criteria.minOsVersion);
-  const max = parseApiLevel(criteria.maxOsVersion);
+  const min = resolveApiLevelBound(criteria.minOsVersion, "min");
+  const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
   const inRange = images.filter((image) => {
     if (min !== undefined && image.apiLevel < min) {
@@ -229,7 +263,7 @@ export function pickAndroidSystemImage(
   if (inRange.length === 0) {
     throw new ActionableError(
       "No installed Android system image matches the requested API range " +
-        `(min=${criteria.minOsVersion ?? "any"}, max=${criteria.maxOsVersion ?? "any"}). ` +
+        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
         `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
         "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
     );

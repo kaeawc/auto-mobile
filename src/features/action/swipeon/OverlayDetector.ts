@@ -55,12 +55,22 @@ export class OverlayDetector implements OverlayAnalyzer {
     // exact "No unobstructed swipe area" fallback this file exists to avoid.
     // Resolving strictly against containerElement's own bounds (requiring a
     // unique match) anchors identity to the node actually being swiped.
-    const containerNode = this.resolveSelectedContainerNode(
+    //
+    // resolveSelectedContainerNode also hands back the exact root-node list
+    // the identified node came from (main hierarchy, or one specific
+    // window). The ancestor walk MUST run over that same source tree, not
+    // `rootGroups`: `rootGroups` holds only the per-window trees once any
+    // window exists, so a node the finder resolved from the main hierarchy
+    // would never be found there by identity, always yielding an empty
+    // (safe-fallback) ancestor set — silently reintroducing the full-cover
+    // overlay / blocked-swipe bug for every main-hierarchy selection.
+    const selectedContainer = this.resolveSelectedContainerNode(
       viewHierarchy,
       parser,
       containerElement,
       containerBounds,
     );
+    const containerNode = selectedContainer?.node ?? null;
 
     // The container's own ancestors are visited before the container in the
     // pre-order walk below and always geometrically contain it, so a
@@ -68,7 +78,11 @@ export class OverlayDetector implements OverlayAnalyzer {
     // overlay covering the whole container, which left no safe swipe area and
     // forced the "No unobstructed swipe area" fallback (#6128). Ancestors are
     // never overlays — only siblings and other windows are.
-    const containerAncestors = this.collectContainerAncestors(rootGroups, parser, containerNode);
+    const containerAncestors = this.collectContainerAncestors(
+      selectedContainer?.roots ?? null,
+      parser,
+      containerNode,
+    );
 
     rootGroups.forEach((rootNodes, windowIndex) => {
       const windowRank = totalWindows - windowIndex;
@@ -343,8 +357,10 @@ export class OverlayDetector implements OverlayAnalyzer {
   }
 
   /**
-   * Pre-order walk of the same root groups that records the ancestor chain of
-   * the *specific* hierarchy node the finder resolved for the selected
+   * Pre-order walk of the SAME source tree `resolveSelectedContainerNode`
+   * identified the container node from (the main hierarchy's root list, or
+   * the specific window's root list) that records the ancestor chain of the
+   * *specific* hierarchy node the finder resolved for the selected
    * container. Only strict object identity (`===`) anchors the walk: a
    * look-alike node elsewhere in the tree — same resource-id, text, or even
    * identical bounds — is still a distinct parsed object and can never match
@@ -352,19 +368,25 @@ export class OverlayDetector implements OverlayAnalyzer {
    * the skip set (the earlier resource-id/text/bounds heuristic could still
    * be fooled by such a look-alike sharing the real container's bounds).
    *
-   * When the finder did not resolve a container node at all, there is no
-   * identity to anchor the walk to, so this returns an empty skip set rather
-   * than falling back to a selector guess. Missing a real ancestor here is
-   * safe (worst case: a slightly smaller safe-swipe area); suppressing a
-   * genuine overlay is not.
+   * Walking any OTHER source tree than the one the node actually came from
+   * — e.g. `rootGroups`, which holds only the per-window trees once any
+   * window exists — can never find the node by identity even though it was
+   * correctly resolved, silently reintroducing the full-cover-overlay /
+   * blocked-swipe bug for containers selected from the main hierarchy.
+   *
+   * When the finder did not resolve a container node at all (no roots, or
+   * no `containerNode`), there is no identity to anchor the walk to, so this
+   * returns an empty skip set rather than falling back to a selector guess.
+   * Missing a real ancestor here is safe (worst case: a slightly smaller
+   * safe-swipe area); suppressing a genuine overlay is not.
    */
   private collectContainerAncestors(
-    rootGroups: ViewHierarchyNode[][],
+    containerRoots: ViewHierarchyNode[] | null,
     parser: ElementParser,
     containerNode: ViewHierarchyNode | null,
   ): Set<ViewHierarchyNode> {
     const ancestors = new Set<ViewHierarchyNode>();
-    if (!containerNode) {
+    if (!containerNode || !containerRoots) {
       return ancestors;
     }
 
@@ -372,25 +394,23 @@ export class OverlayDetector implements OverlayAnalyzer {
     const path: ViewHierarchyNode[] = [];
     let found = false;
 
-    for (const rootNodes of rootGroups) {
-      for (const rootNode of rootNodes) {
-        parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
-          if (found) {
-            return;
-          }
-          path.length = depth;
-          path[depth] = node;
-
-          if (node === containerNode) {
-            for (const ancestor of path.slice(0, depth)) {
-              ancestors.add(ancestor);
-            }
-            found = true;
-          }
-        });
+    for (const rootNode of containerRoots) {
+      parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
         if (found) {
-          return ancestors;
+          return;
         }
+        path.length = depth;
+        path[depth] = node;
+
+        if (node === containerNode) {
+          for (const ancestor of path.slice(0, depth)) {
+            ancestors.add(ancestor);
+          }
+          found = true;
+        }
+      });
+      if (found) {
+        return ancestors;
       }
     }
 
@@ -407,6 +427,10 @@ export class OverlayDetector implements OverlayAnalyzer {
    * carries none of those) and the exact bounds of the already-selected
    * `containerElement` — i.e. the specific node findTargetElement's
    * area-sorted resolution picked, not merely "a" node sharing its selector.
+   * Returns that node together with the root-node list it was found in, so
+   * callers (see collectContainerAncestors) can walk the SAME source tree
+   * the node actually lives in rather than a different one that would never
+   * contain it.
    *
    * Searches the SAME source set in the SAME order ElementFinder itself
    * uses to resolve an element: the main hierarchy first, then the
@@ -419,16 +443,16 @@ export class OverlayDetector implements OverlayAnalyzer {
    *
    * When more than one node satisfies both the selector and those exact
    * bounds within the chosen source, or none does anywhere, identity is
-   * ambiguous: callers (see collectContainerAncestors) must treat that the
-   * same as "not found" rather than guess, since guessing wrong donates a
-   * stranger's ancestors to the skip set instead of the real target's.
+   * ambiguous: callers must treat that the same as "not found" rather than
+   * guess, since guessing wrong donates a stranger's ancestors to the skip
+   * set instead of the real target's.
    */
   private resolveSelectedContainerNode(
     viewHierarchy: ViewHierarchyResult,
     parser: ElementParser,
     containerElement: Element,
     containerBounds: Element["bounds"],
-  ): ViewHierarchyNode | null {
+  ): { node: ViewHierarchyNode; roots: ViewHierarchyNode[] } | null {
     const mainRootNodes = parser.extractRootNodes(viewHierarchy);
     const mainResult = this.findSelectorBoundsMatch(
       mainRootNodes,
@@ -437,7 +461,9 @@ export class OverlayDetector implements OverlayAnalyzer {
       containerBounds,
     );
     if (mainResult.matchCount > 0) {
-      return mainResult.matchCount === 1 ? mainResult.match : null;
+      return mainResult.matchCount === 1 && mainResult.match
+        ? { node: mainResult.match, roots: mainRootNodes }
+        : null;
     }
 
     const windowRootGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
@@ -449,7 +475,9 @@ export class OverlayDetector implements OverlayAnalyzer {
         containerBounds,
       );
       if (windowResult.matchCount > 0) {
-        return windowResult.matchCount === 1 ? windowResult.match : null;
+        return windowResult.matchCount === 1 && windowResult.match
+          ? { node: windowResult.match, roots: windowRoots }
+          : null;
       }
     }
 
@@ -501,38 +529,44 @@ export class OverlayDetector implements OverlayAnalyzer {
     return this.matchesContainerSelector(node, nodeProperties, containerElement, containerBounds);
   }
 
+  /**
+   * A node matches the selected `containerElement` only when EVERY one of
+   * its populated identifying fields (resource-id, text, content-desc)
+   * agrees — AND, not OR. OR-matching on any single populated field meant a
+   * sibling sharing only one of several identifying fields (e.g. the same
+   * resource-id but different text) counted as a match too. During identity
+   * resolution that turns a genuinely unique node into a false second match
+   * (ambiguous → the safe empty-ancestor fallback → the full-cover-overlay
+   * bug resurfaces for a case that was never actually ambiguous).
+   *
+   * Bounds-only fallback matching applies only when containerElement carries
+   * none of resource-id/text/content-desc at all — an anonymous element
+   * identified purely by position.
+   */
   private matchesContainerSelector(
     node: ViewHierarchyNode,
     nodeProperties: Record<string, unknown>,
     containerElement: Element,
     containerBounds: Element["bounds"],
   ): boolean {
-    const resourceId = nodeProperties["resource-id"];
-    if (containerElement["resource-id"] && resourceId === containerElement["resource-id"]) {
-      return true;
-    }
+    const hasResourceId = Boolean(containerElement["resource-id"]);
+    const hasText = Boolean(containerElement.text);
+    const hasContentDesc = Boolean(containerElement["content-desc"]);
 
-    const nodeText = nodeProperties.text;
-    if (containerElement.text && nodeText === containerElement.text) {
-      return true;
-    }
-
-    const nodeContentDesc = nodeProperties["content-desc"];
-    if (containerElement["content-desc"] && nodeContentDesc === containerElement["content-desc"]) {
-      return true;
-    }
-
-    if (
-      !containerElement["resource-id"] &&
-      !containerElement.text &&
-      !containerElement["content-desc"]
-    ) {
-      const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
-      if (parsedBounds && boundsEqual(parsedBounds, containerBounds)) {
-        return true;
+    if (hasResourceId || hasText || hasContentDesc) {
+      if (hasResourceId && nodeProperties["resource-id"] !== containerElement["resource-id"]) {
+        return false;
       }
+      if (hasText && nodeProperties.text !== containerElement.text) {
+        return false;
+      }
+      if (hasContentDesc && nodeProperties["content-desc"] !== containerElement["content-desc"]) {
+        return false;
+      }
+      return true;
     }
 
-    return false;
+    const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
+    return parsedBounds !== null && boundsEqual(parsedBounds, containerBounds);
   }
 }

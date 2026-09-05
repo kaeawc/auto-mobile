@@ -321,6 +321,84 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(b(0, 0, 1000, 2000));
   });
+
+  test("a container selected from the MAIN hierarchy has its clickable ancestor exempted even when window hierarchies also exist (terminal #6128 follow-up: ancestor walk source-tree fix)", () => {
+    // The container resolves from the MAIN hierarchy (resolveSelectedContainerNode's
+    // main-first precedence), but the ancestor walk used to always run over
+    // `rootGroups`, which is window-only once ANY window exists — excluding
+    // the main hierarchy the identified node actually lives in. The node was
+    // therefore never found by identity in that walk, so its real clickable
+    // ancestor (a full-screen app-root) went unexempted and was reported as
+    // a full-cover overlay, reproducing the exact blocked-swipe bug this PR
+    // removes, just for main-hierarchy-selected containers specifically.
+    const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
+    const toastBounds = b(0, 1800, 1000, 2000);
+    const hierarchy = {
+      hierarchy: {
+        node: [
+          node(b(0, 0, 1000, 2000), { "resource-id": "appRoot", clickable: "true" }, [
+            realListNode,
+          ]),
+        ],
+      },
+      windows: [
+        {
+          windowLayer: 5,
+          hierarchy: {
+            node: [node(toastBounds, { "resource-id": "toast", clickable: "true" })],
+          },
+        },
+      ],
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    // appRoot (the real, main-hierarchy ancestor) must be exempted; only the
+    // genuine, unrelated window overlay (the toast) is reported.
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0].bounds).toEqual(toastBounds);
+  });
+
+  test("a same-bounds sibling sharing only an incidental resource-id (different text) does not cause ambiguity (terminal #6128 follow-up: AND, not OR, identity matching)", () => {
+    // containerElement carries BOTH a resource-id and text. A sibling node
+    // happens to share the same resource-id and even the same bounds, but
+    // has different text. Under OR-matching (any single populated field is
+    // enough) that sibling would count as a second match, making identity
+    // resolution "ambiguous" and forcing the safe empty-ancestor fallback —
+    // resurfacing the full-cover-overlay/blocked-swipe bug for a case that
+    // isn't actually ambiguous once the full identity (id AND text) must
+    // agree.
+    const selected: Element = {
+      bounds: LIST_BOUNDS,
+      "resource-id": "list",
+      text: "Groceries",
+    } as unknown as Element;
+
+    const hierarchy = {
+      hierarchy: {
+        node: [
+          node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+            node(LIST_BOUNDS, { "resource-id": "list", text: "Groceries", scrollable: "true" }),
+            node(LIST_BOUNDS, { "resource-id": "list", text: "Recents", scrollable: "true" }),
+          ]),
+        ],
+      },
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list", text: "Groceries" },
+      selected,
+    );
+
+    // root is the real, uniquely-identified target's genuine ancestor and
+    // must be exempted — not reported as a full-cover overlay.
+    expect(overlays).toEqual([]);
+  });
 });
 
 describe("SwipeOn container overlays", () => {

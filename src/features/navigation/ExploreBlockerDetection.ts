@@ -82,15 +82,50 @@ function tokenize(field: string): string[] {
 }
 
 /**
+ * Common inflection suffixes stripped when comparing a field token against a
+ * keyword token, longest first so "closing" tries "ing" before "s".
+ */
+const INFLECTION_SUFFIXES = ["ing", "es", "ed", "s"];
+
+/**
+ * True if `token` is `keywordToken`, or `keywordToken` plus one of the common
+ * inflection suffixes above.
+ *
+ * Exact-token matching dropped ordinary inflections the old substring
+ * matcher caught — "Permissions required" tokenizes to
+ * `["permissions", ...]`, which no longer equals the keyword "permission"
+ * (issue #6122 follow-up). Stripping a trailing "s"/"es"/"ing"/"ed" before
+ * comparing restores "permissions"/"allows"/"denies" while still rejecting
+ * "bookmark"/"token"/"accessibility" — none of those have a keyword as their
+ * stem.
+ */
+function tokenMatchesKeyword(token: string, keywordToken: string): boolean {
+  if (token === keywordToken) {
+    return true;
+  }
+  return INFLECTION_SUFFIXES.some(
+    (suffix) =>
+      token.length > suffix.length &&
+      token.endsWith(suffix) &&
+      token.slice(0, -suffix.length) === keywordToken,
+  );
+}
+
+/**
  * True if `keywordTokens` (itself tokenized, so "don't allow" -> ["don", "t",
- * "allow"]) appears as a contiguous run inside `fieldTokens`.
+ * "allow"]) appears, inflection-tolerant, as a contiguous run inside
+ * `fieldTokens`.
  */
 function containsTokenSequence(fieldTokens: string[], keywordTokens: string[]): boolean {
   if (keywordTokens.length === 0) {
     return false;
   }
   for (let start = 0; start + keywordTokens.length <= fieldTokens.length; start++) {
-    if (keywordTokens.every((token, offset) => fieldTokens[start + offset] === token)) {
+    if (
+      keywordTokens.every((keywordToken, offset) =>
+        tokenMatchesKeyword(fieldTokens[start + offset], keywordToken),
+      )
+    ) {
       return true;
     }
   }

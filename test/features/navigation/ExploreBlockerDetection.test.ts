@@ -118,6 +118,12 @@ describe("ExploreBlockerDetection", () => {
       // boundary, not just a boundary regex.
       ["allowButton", true],
       ["denyButton", true],
+      // inflected forms (issue #6122 follow-up round 5): exact-token matching
+      // dropped ordinary plurals/inflections the old substring matcher
+      // caught — "Permissions required" tokenizes to "permissions", which no
+      // longer equals the keyword "permission" without stem tolerance.
+      ["Permissions required", true],
+      ["Allows access", true],
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
     });

@@ -30,11 +30,24 @@ function defaultIsProcessAlive(pid: number): boolean {
 
 /**
  * Whether `file` belongs to `ownPrefix`, matched on an exact PID boundary so
- * `stdio-12` never claims `stdio-123`'s files. Filenames are
- * `<prefix>.log` (active) and `<prefix>-<ts>.log` (rotated).
+ * `stdio-12` never claims `stdio-123`'s files. Filenames are `<prefix>.log`
+ * (active) and `<prefix>-<rotation suffix>.log` (rotated).
+ *
+ * `daemon-launch-<pid>.log` is the manager's launch-capture log — owned by
+ * whichever process spawned it, not the daemon — but it textually starts with
+ * `daemon-` too, so a bare `startsWith(\`${ownPrefix}-\`)` wrongly claims it for
+ * the `daemon` owner. Excluding that one named sub-role keeps the exact-PID-
+ * boundary match for everything else (issue #6120).
  */
 function isOwnedBy(file: string, ownPrefix: string): boolean {
-  return file === `${ownPrefix}.log` || file.startsWith(`${ownPrefix}-`);
+  if (file === `${ownPrefix}.log`) {
+    return true;
+  }
+  if (!file.startsWith(`${ownPrefix}-`)) {
+    return false;
+  }
+  const rest = file.slice(ownPrefix.length + 1);
+  return !/^launch-\d+\.log$/.test(rest);
 }
 
 /**

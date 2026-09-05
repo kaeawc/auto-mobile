@@ -43,26 +43,46 @@ const RATING_KEYWORDS = [
   "stars",
 ];
 
-const RATING_KEYWORD_PATTERN = new RegExp(`\\b(?:${RATING_KEYWORDS.join("|")})\\b`);
+/**
+ * Build a case-sensitive word-boundary pattern from already-lowercased
+ * keywords. Callers must lowercase input text before testing (see
+ * `elementText`) since the pattern itself carries no `i` flag.
+ */
+function wordBoundaryPattern(keywords: string[]): RegExp {
+  return new RegExp(`\\b(?:${keywords.join("|")})\\b`);
+}
+
+const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
+
+/**
+ * Permission-dialog keywords, matched on word boundaries.
+ *
+ * Substring matching misclassified ordinary UI text — "access" matched
+ * "Accessibility", and (in `handlePermissionDialog`) "ok" matched
+ * "Bookmarks"/"Cookies"/"Tokens" (issue #6122, same defect class as #4190).
+ * "access" is dropped entirely rather than boundary-matched: as a whole word
+ * it still shows up in ambient, non-permission UI ("Quick access", "Access
+ * your library" as a bookmarks/history shortcut). Real permission dialogs
+ * always carry "allow"/"permission"/"deny" alongside it, so those keywords
+ * cover the case ("Allow access to your location?" still matches via
+ * "allow") without the false positives.
+ */
+const PERMISSION_KEYWORDS = [
+  "allow",
+  "permission",
+  "deny",
+  "don't allow",
+  "while using",
+  "only this time",
+];
+
+const PERMISSION_KEYWORD_PATTERN = wordBoundaryPattern(PERMISSION_KEYWORDS);
 
 /**
  * Check if screen is a permission dialog
  */
 export function isPermissionDialog(elements: Element[]): boolean {
-  const permissionKeywords = [
-    "allow",
-    "permission",
-    "access",
-    "deny",
-    "don't allow",
-    "while using",
-    "only this time",
-  ];
-
-  return elements.some((el) => {
-    const text = (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
-    return permissionKeywords.some((keyword) => text.includes(keyword));
-  });
+  return elements.some((el) => PERMISSION_KEYWORD_PATTERN.test(elementText(el)));
 }
 
 /**
@@ -89,6 +109,14 @@ export function isRatingDialog(elements: Element[]): boolean {
 }
 
 /**
+ * "Allow"-button keywords, matched on word boundaries (issue #6122): bare
+ * "ok" as a substring matched "Bookmarks"/"Look up"/"Cookies"/"Tokens".
+ */
+const ALLOW_KEYWORDS = ["allow", "while using", "only this time", "ok"];
+
+const ALLOW_KEYWORD_PATTERN = wordBoundaryPattern(ALLOW_KEYWORDS);
+
+/**
  * Handle permission dialog by clicking "Allow" or similar
  */
 export async function handlePermissionDialog(
@@ -98,18 +126,12 @@ export async function handlePermissionDialog(
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
 ): Promise<boolean> {
-  // Look for "Allow" or "While using" buttons
-  const allowKeywords = ["allow", "while using", "only this time", "ok"];
-
   for (const element of elements) {
     if (!element.clickable) {
       continue;
     }
 
-    const text =
-      (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
-
-    if (allowKeywords.some((keyword) => text.includes(keyword))) {
+    if (ALLOW_KEYWORD_PATTERN.test(elementText(element))) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;
@@ -128,6 +150,10 @@ export async function handlePermissionDialog(
   return false;
 }
 
+const DISMISS_KEYWORDS = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
+
+const DISMISS_KEYWORD_PATTERN = wordBoundaryPattern(DISMISS_KEYWORDS);
+
 /**
  * Dismiss dialog by clicking dismiss/close/later buttons
  */
@@ -138,17 +164,12 @@ async function dismissDialog(
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
 ): Promise<boolean> {
-  const dismissKeywords = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
-
   for (const element of elements) {
     if (!element.clickable) {
       continue;
     }
 
-    const text =
-      (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
-
-    if (dismissKeywords.some((keyword) => text.includes(keyword))) {
+    if (DISMISS_KEYWORD_PATTERN.test(elementText(element))) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;

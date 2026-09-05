@@ -75,6 +75,39 @@ describe("ExploreBlockerDetection", () => {
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
+
+    // Issue #6122: keywords were matched as bare substrings, so ordinary UI
+    // text containing "access" ("Accessibility", "Quick access") was
+    // misclassified as a permission dialog — same defect class as #4190.
+    // "access" is dropped from the keyword list entirely (see
+    // PERMISSION_KEYWORDS) rather than boundary-matched, because as a whole
+    // word it still appears in ambient, non-permission UI.
+    test.each([
+      // [text, expected]
+      ["Accessibility", false],
+      ["ACCESSIBILITY", false],
+      ["Accessibility settings", false],
+      ["Quick access", false],
+      ["Access your library", false],
+      ["Accessible", false],
+      ["Disallow", false],
+      ["Allowance", false],
+      ["Bookmarks", false],
+      ["Home", false],
+      ["Settings", false],
+      // positive controls: real permission dialogs must still match
+      ["Allow", true],
+      ["allow", true],
+      ["ALLOW", true],
+      ["Allow access to your location?", true], // matches via "allow", not "access"
+      ["Deny", true],
+      ["This app needs permission to access your camera", true], // matches via "permission"
+      ["While using the app", true],
+      ["Only this time", true],
+      ["Don't allow", true],
+    ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
+      expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
+    });
   });
 
   describe("isLoginScreen", () => {
@@ -356,6 +389,58 @@ describe("ExploreBlockerDetection", () => {
           action: "tap",
         },
       ]);
+    });
+
+    // Issue #6122: the allow-button keyword "ok" was matched as a bare
+    // substring, so "Bookmarks"/"Look up"/"Cookies"/"Tokens" were tapped as
+    // if they were the dialog's Allow button, before a genuine "OK" was ever
+    // reached.
+    test("handlePermissionDialog skips 'ok'-substring buttons and taps the real OK button", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Bookmarks", "resource-id": "com.test:id/bookmarks" }),
+        createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
+        createMockElement({ text: "Tokens", "resource-id": "com.test:id/tokens" }),
+        createMockElement({ text: "OK", "resource-id": "com.test:id/ok_button" }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+    });
+
+    test("handlePermissionDialog does not tap when only 'ok'-substring buttons are present", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Bookmarks", "resource-id": "com.test:id/bookmarks" }),
+        createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(false);
+      expect(calls).toEqual([]);
     });
 
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {

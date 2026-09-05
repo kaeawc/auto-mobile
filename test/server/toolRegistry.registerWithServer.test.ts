@@ -124,8 +124,8 @@ describe("ToolRegistry.registerWithServer", () => {
     });
   });
 
-  test("progress callback uses generated token when _meta.progressToken is absent", async () => {
-    let capturedProgress: ProgressCallback | undefined;
+  test("does not fabricate a token or pass a progress callback when _meta.progressToken is absent", async () => {
+    let capturedProgress: ProgressCallback | undefined = undefined;
     const sentNotifications: any[] = [];
 
     ToolRegistry.register(
@@ -152,17 +152,11 @@ describe("ToolRegistry.registerWithServer", () => {
     };
 
     await handler!({}, fakeExtra);
-    await capturedProgress!(10, 50);
 
-    expect(sentNotifications).toHaveLength(1);
-    const params = sentNotifications[0].params;
-    expect(params.progress).toBe(10);
-    expect(params.total).toBe(50);
-    // Token should be a generated string starting with tool name
-    expect(typeof params.progressToken).toBe("string");
-    expect(params.progressToken).toMatch(/^noTokenTool-/);
-    // message should not be present when not provided
-    expect(params.message).toBeUndefined();
+    // No client-supplied token: the handler must not fabricate one (#6118),
+    // so the tool never receives a progress callback to invoke.
+    expect(capturedProgress).toBeUndefined();
+    expect(sentNotifications).toHaveLength(0);
   });
 
   test("does not pass progress callback for tools without supportsProgress", async () => {

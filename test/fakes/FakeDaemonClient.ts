@@ -67,10 +67,17 @@ export class FakeDaemonClient implements DaemonClientLike {
     this.connected = false;
   }
 
-  async callTool(toolName: string, params: Record<string, any>): Promise<any> {
+  readonly callToolProgressTokens: Array<string | number | undefined> = [];
+
+  async callTool(
+    toolName: string,
+    params: Record<string, any>,
+    progressToken?: string | number,
+  ): Promise<any> {
     const recordedParams = { ...params };
     delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
     this.callToolCalls.push({ toolName, params: recordedParams });
+    this.callToolProgressTokens.push(progressToken);
     if (this.onCallTool) {
       await this.onCallTool(toolName, params);
     }
@@ -125,6 +132,30 @@ export class FakeDaemonClient implements DaemonClientLike {
     this.subscribeToNotificationsCalls += 1;
     if (this.shouldFailSubscribe) {
       throw new Error("Unsupported daemon method: daemon/subscribe-notifications");
+    }
+  }
+
+  /**
+   * Test hook (issue #6205): simulate the daemon relaying a
+   * `notifications/progress` tick for an in-flight `callTool`, tagged with the
+   * SAME `progressToken` the fake received — mirrors what
+   * `UnixSocketServer.pushProgressNotification` does for real.
+   */
+  emitProgress(
+    progressToken: string | number,
+    progress: number,
+    total?: number,
+    message?: string,
+  ): void {
+    for (const handler of this.notificationHandlers) {
+      handler({
+        type: "daemon_notification",
+        method: "notifications/progress",
+        progressToken,
+        progress,
+        ...(total !== undefined ? { total } : {}),
+        ...(message !== undefined ? { message } : {}),
+      });
     }
   }
 

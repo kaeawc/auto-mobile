@@ -1452,8 +1452,11 @@ export class ToolRegistryClass {
       const wrappedHandler = async (args: any, extra: any) => {
         const signal: AbortSignal | undefined = extra?.signal;
 
-        if (tool.supportsProgress) {
-          const progressToken = extra?._meta?.progressToken ?? `${tool.name}-${this.timer.now()}`;
+        // Only echo the client's own token (issue #6118) — never fabricate
+        // one, since the client has no handler registered for a token it
+        // never sent and would surface a spurious protocol error.
+        const progressToken: string | number | undefined = extra?._meta?.progressToken;
+        if (tool.supportsProgress && progressToken !== undefined) {
           const progressCallback: ProgressCallback = async (
             progress: number,
             total?: number,

@@ -631,25 +631,32 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           }
         : parsedParams;
 
-    // Create progress callback if tool supports progress
-    const progressCallback = tool.supportsProgress
-      ? async (progress: number, total?: number, message?: string) => {
-          try {
-            await server.server.notification({
-              method: "notifications/progress",
-              params: {
-                progressToken: `${name}-${defaultTimer.now()}`,
-                progress,
-                total,
-                ...(message && { message }),
-              },
-            });
-          } catch (error) {
-            // Log progress notification errors but don't fail the tool execution
-            logger.warn(`Failed to send progress notification: ${error}`);
+    // Create progress callback if the tool supports progress AND the client
+    // asked for it. Per the MCP spec, progress notifications must echo the
+    // token the client supplied in `params._meta.progressToken` — a
+    // server-fabricated token has no registered handler on the client, so
+    // sending one for a request that never asked is worse than sending none
+    // (issue #6118).
+    const requestProgressToken = extra._meta?.progressToken;
+    const progressCallback =
+      tool.supportsProgress && requestProgressToken !== undefined
+        ? async (progress: number, total?: number, message?: string) => {
+            try {
+              await extra.sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken: requestProgressToken,
+                  progress,
+                  total,
+                  ...(message && { message }),
+                },
+              });
+            } catch (error) {
+              // Log progress notification errors but don't fail the tool execution
+              logger.warn(`Failed to send progress notification: ${error}`);
+            }
           }
-        }
-      : undefined;
+        : undefined;
 
     try {
       if (

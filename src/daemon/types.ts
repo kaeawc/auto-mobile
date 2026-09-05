@@ -28,6 +28,14 @@ export interface DaemonRequest {
   clientBuildId?: string;
   /** Absolute path to the client's entry script (build-identity fallback). */
   clientEntryScript?: string;
+  /**
+   * Echo of the MCP client's own `params._meta.progressToken` for a `tools/call`
+   * request (issue #6205). When present the daemon relays `notifications/progress`
+   * ticks for this call back to the requesting socket session carrying this SAME
+   * token, mirroring the direct-server fix (#6118); when absent no progress is
+   * relayed, never fabricated.
+   */
+  progressToken?: string | number;
 }
 
 /**
@@ -59,6 +67,13 @@ export interface DaemonResponse {
 }
 
 /**
+ * Wire method for a relayed progress tick (issue #6205). Shared by the socket
+ * server's push (`pushProgressNotification`) and the proxy's inbound dispatch
+ * (`handleDaemonNotification`) so the two ends can never drift.
+ */
+export const PROGRESS_NOTIFICATION_METHOD = "notifications/progress";
+
+/**
  * Server-pushed notification frame sent from daemon to a subscribed CLI client
  * over the control socket (issue #3223). Unlike {@link DaemonResponse} it has no
  * `id` — it does not correlate to a request. Clients discriminate on `type`.
@@ -79,6 +94,19 @@ export interface DaemonNotification {
   reason?: string;
   /** Authoritative terminal state captured before SessionManager removed it. */
   release?: SessionReleaseSnapshot;
+  /**
+   * The client-supplied progress token this tick belongs to, for
+   * `notifications/progress` frames (issue #6205) — echoed verbatim from the
+   * `tools/call` {@link DaemonRequest.progressToken} that requested it, never a
+   * daemon-fabricated value. Absent for every other notification method.
+   */
+  progressToken?: string | number;
+  /** Progress value for `notifications/progress` frames. */
+  progress?: number;
+  /** Optional total for `notifications/progress` frames. */
+  total?: number;
+  /** Optional human-readable status for `notifications/progress` frames. */
+  message?: string;
 }
 
 /** Discriminates a daemon socket frame as a server-pushed notification. */

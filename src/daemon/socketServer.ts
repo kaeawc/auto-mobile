@@ -13,7 +13,13 @@ import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
-import { DaemonNotification, DaemonRequest, DaemonResponse, SessionContext } from "./types";
+import {
+  DaemonNotification,
+  DaemonRequest,
+  DaemonResponse,
+  PROGRESS_NOTIFICATION_METHOD,
+  SessionContext,
+} from "./types";
 import {
   SOCKET_PATH,
   DAEMON_HANDSHAKE_ENABLED,
@@ -603,6 +609,41 @@ export class UnixSocketServer {
       }
       this.writeFrame(socket, sessionId, notification);
     }
+  }
+
+  /**
+   * Push one `notifications/progress` tick to the SINGLE socket session that
+   * requested it (issue #6205), carrying the SAME `progressToken` that
+   * session's `tools/call` request declared. Unlike the broadcast helpers
+   * above, this targets exactly one socket rather than every subscriber — the
+   * per-session request queue serializes `tools/call`s, so at most one call is
+   * ever in flight per session and no correlation beyond the token is needed.
+   * Best-effort and gated on the opt-in subscription, matching the broadcast
+   * helpers: an unsubscribed or already-torn-down socket is silently skipped.
+   */
+  private pushProgressNotification(
+    sessionId: string,
+    progressToken: string | number,
+    progress: number,
+    total?: number,
+    message?: string,
+  ): void {
+    if (!this.notificationSubscribers.has(sessionId)) {
+      return;
+    }
+    const socket = this.clientSockets.get(sessionId);
+    if (!socket) {
+      return;
+    }
+    const notification: DaemonNotification = {
+      type: "daemon_notification",
+      method: PROGRESS_NOTIFICATION_METHOD,
+      progressToken,
+      progress,
+      ...(total !== undefined ? { total } : {}),
+      ...(message !== undefined ? { message } : {}),
+    };
+    this.writeFrame(socket, sessionId, notification);
   }
 
   private writeFrame(
@@ -3910,6 +3951,7 @@ export class UnixSocketServer {
         return await mcpClient.listTools();
       }
       case "tools/call": {
+        const progressToken = request.progressToken;
         return await mcpClient.callTool(
           {
             name: request.params.name,
@@ -3920,7 +3962,28 @@ export class UnixSocketServer {
             ),
           },
           undefined,
-          requestOptions,
+          {
+            ...requestOptions,
+            // Relay progress ticks back to the ORIGINATING socket session,
+            // tagged with the client's own token — never a daemon-fabricated
+            // one, and never sent when the client asked for none (#6205).
+            ...(progressToken !== undefined
+              ? {
+                  onprogress: (notification: {
+                    progress: number;
+                    total?: number;
+                    message?: string;
+                  }) =>
+                    this.pushProgressNotification(
+                      socketSessionId,
+                      progressToken,
+                      notification.progress,
+                      notification.total,
+                      notification.message,
+                    ),
+                }
+              : {}),
+          },
         );
       }
       case "resources/list": {

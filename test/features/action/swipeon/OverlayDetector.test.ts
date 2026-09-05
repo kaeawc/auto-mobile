@@ -85,6 +85,49 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     expect(overlays[0].bounds).toEqual(fabBounds);
     expect(overlays[0].overlapBounds).toEqual(fabBounds);
   });
+
+  test("a same-id node inside a topmost popup window does not donate its clickable ancestors to the skip set", () => {
+    // The popup window is walked first (topmost-first). Its `list` shares the
+    // container's resource-id but not its bounds, so it must not be taken as
+    // the selected container — otherwise the clickable popup root (a genuine
+    // overlay covering the list) would be suppressed as an "ancestor".
+    const popupBounds = b(100, 600, 900, 1400);
+    const hierarchy = {
+      hierarchy: { node: [] },
+      windows: [
+        {
+          windowLayer: 0,
+          hierarchy: {
+            node: [
+              node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [
+                node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
+              ]),
+            ],
+          },
+        },
+        {
+          windowLayer: 5,
+          hierarchy: {
+            node: [
+              node(popupBounds, { "resource-id": "popup", clickable: "true" }, [
+                node(b(100, 700, 900, 1300), { "resource-id": "list", scrollable: "true" }),
+              ]),
+            ],
+          },
+        },
+      ],
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0].bounds).toEqual(popupBounds);
+    expect(overlays[0].overlapBounds).toEqual(popupBounds);
+  });
 });
 
 describe("SwipeOn container overlays", () => {

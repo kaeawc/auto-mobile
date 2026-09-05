@@ -336,6 +336,12 @@ export class OverlayDetector implements OverlayAnalyzer {
    * the first node matching the container (same matching as the main walk, so
    * the resource-id / text / content-desc / bounds fallbacks all apply).
    * Returns an empty set when the container is not found in the hierarchy.
+   *
+   * The chain must belong to the *selected* element: windows are walked
+   * topmost-first, and a popup may carry a node sharing the container's id or
+   * text. Such a look-alike would donate its clickable ancestors — genuine
+   * overlays — to the skip set, so a candidate whose bounds are parseable must
+   * also match the selected element's bounds.
    */
   private collectContainerAncestors(
     rootGroups: ViewHierarchyNode[][],
@@ -359,6 +365,10 @@ export class OverlayDetector implements OverlayAnalyzer {
           path[depth] = node;
 
           const nodeProperties = parser.extractNodeProperties(node);
+          const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
+          if (parsedBounds && !boundsEqual(parsedBounds, containerBounds)) {
+            return;
+          }
           if (
             this.isContainerNode(
               node,

@@ -41,6 +41,42 @@ const noopSocketHandler = {
   error(): void {},
 };
 
+/**
+ * Pure computation of the port-scan upper bound from raw env values, split
+ * out from `PortManager.resolveConfiguredScanEnd` so it can be unit tested
+ * without touching the module-load-time singleton config (issue #6119).
+ * Returns `undefined` when no range was explicitly configured, leaving the
+ * scan unbounded (up to 65535) to preserve existing default behavior.
+ */
+export function computeConfiguredScanEnd(
+  basePort: number,
+  rangeEndEnv: string | undefined,
+  rangeSizeEnv: string | undefined,
+): number | undefined {
+  if (rangeEndEnv) {
+    const parsedEnd = Number.parseInt(rangeEndEnv, 10);
+    return !Number.isNaN(parsedEnd) && parsedEnd >= basePort ? parsedEnd : undefined;
+  }
+
+  if (rangeSizeEnv) {
+    const parsedSize = Number.parseInt(rangeSizeEnv, 10);
+    return !Number.isNaN(parsedSize) && parsedSize > 0 ? basePort + parsedSize - 1 : undefined;
+  }
+
+  return undefined;
+}
+
+/** Errno codes that mean "something else is already bound here". */
+const PORT_IN_USE_CODES = new Set(["EADDRINUSE", "EACCES"]);
+
+function errnoCode(error: unknown): string | undefined {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
 class BunPortAvailabilityChecker implements PortAvailabilityChecker {
   public isPortAvailable(port: number): boolean {
     const bun = (globalThis as { Bun?: BunRuntime }).Bun;
@@ -48,25 +84,34 @@ class BunPortAvailabilityChecker implements PortAvailabilityChecker {
       return true;
     }
 
-    const servers: BunTcpServer[] = [];
+    // Probe each loopback family independently: a host with no IPv6 loopback
+    // configured (Docker with IPv6 disabled, some CI runners) throws
+    // EADDRNOTAVAIL for every ::1 bind, which is "that family is unavailable
+    // here" — not "the port is busy" — and must not fail the whole port.
+    if (!this.probe(bun, "127.0.0.1", port)) {
+      return false;
+    }
+    return this.probe(bun, "::1", port);
+  }
+
+  /** Returns false only when the bind failure means the port is genuinely busy. */
+  private probe(bun: BunRuntime, hostname: string, port: number): boolean {
+    let server: BunTcpServer | undefined;
     try {
-      for (const hostname of ["127.0.0.1", "::1"]) {
-        servers.push(
-          bun.listen({
-            hostname,
-            port,
-            socket: noopSocketHandler,
-          }),
-        );
-      }
+      server = bun.listen({ hostname, port, socket: noopSocketHandler });
       return true;
     } catch (error) {
-      logger.debug(`[PortManager] Port ${port} is not available: ${error}`);
+      const code = errnoCode(error);
+      if (code && !PORT_IN_USE_CODES.has(code)) {
+        // e.g. EADDRNOTAVAIL: this address family isn't available on this
+        // host at all, so it can't tell us anything about the port.
+        logger.debug(`[PortManager] ${hostname} unavailable on this host, skipping: ${error}`);
+        return true;
+      }
+      logger.debug(`[PortManager] Port ${port} is not available on ${hostname}: ${error}`);
       return false;
     } finally {
-      for (const server of servers) {
-        server.stop(true);
-      }
+      server?.stop(true);
     }
   }
 }
@@ -83,6 +128,13 @@ export class PortManager {
   private static readonly DEFAULT_MAX_DEVICES = 100;
   private static readonly basePort = PortManager.resolveBasePort();
   private static readonly maxDevices = PortManager.resolveMaxDevices();
+  /**
+   * Explicit upper bound on the port *scan* window, distinct from
+   * `maxDevices` (a simultaneous-allocation count). Only set when
+   * `AUTOMOBILE_PORT_RANGE_END`/`SIZE` is explicitly configured, so the
+   * default scan keeps walking to 65535 as before.
+   */
+  private static readonly configuredScanEnd = PortManager.resolveConfiguredScanEnd();
   private static portAvailabilityChecker: PortAvailabilityChecker =
     new BunPortAvailabilityChecker();
 
@@ -110,7 +162,8 @@ export class PortManager {
     const usedPorts = new Set([...this.allocatedPorts.values(), ...this.cleanupHeldPorts]);
     const reservedPorts = new Set(options.reservedPorts ?? []);
     const availabilityChecker = options.availabilityChecker ?? this.portAvailabilityChecker;
-    for (let port = this.basePort; port <= 65535; port++) {
+    const scanEnd = Math.min(65535, this.configuredScanEnd ?? 65535);
+    for (let port = this.basePort; port <= scanEnd; port++) {
       if (usedPorts.has(port) || reservedPorts.has(port)) {
         continue;
       }
@@ -306,5 +359,23 @@ export class PortManager {
       return this.DEFAULT_MAX_DEVICES;
     }
     return parsedSize;
+  }
+
+  /**
+   * The last port the allocation scan should consider, when the caller has
+   * explicitly bounded the range via `AUTOMOBILE_PORT_RANGE_END`/`SIZE`.
+   * `maxDevices` alone only limits how many *simultaneous* allocations are
+   * permitted (`allocatedPorts.size`, checked above) — it does not stop the
+   * scan loop from wandering past a configured range while hunting for a
+   * free port, so an explicit range leaks past its upper bound. Returns
+   * `undefined` when no range was configured, leaving the scan unbounded
+   * (up to 65535) as before.
+   */
+  private static resolveConfiguredScanEnd(): number | undefined {
+    return computeConfiguredScanEnd(
+      this.basePort,
+      process.env.AUTOMOBILE_PORT_RANGE_END ?? process.env.AUTO_MOBILE_PORT_RANGE_END,
+      process.env.AUTOMOBILE_PORT_RANGE_SIZE ?? process.env.AUTO_MOBILE_PORT_RANGE_SIZE,
+    );
   }
 }

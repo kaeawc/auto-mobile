@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  computeConfiguredScanEnd,
   IOS_CTRL_PROXY_RESERVED_PORTS,
   PortManager,
   type PortAvailabilityChecker,
@@ -239,5 +240,110 @@ describe("PortManager", () => {
     expect(ports).not.toContain(8765);
     expect(ports[0]).toBe(8767);
     expect(ports[99]).toBe(8865);
+  });
+});
+
+describe("BunPortAvailabilityChecker (real checker, fake Bun.listen)", () => {
+  const originalListen = Bun.listen;
+
+  function fakeErrno(code: string): Error {
+    const error = new Error(`Failed to listen: ${code}`);
+    (error as { code?: string }).code = code;
+    return error;
+  }
+
+  function installFakeBunListen(behaviors: Record<string, "ok" | Error>): void {
+    (Bun as { listen: typeof Bun.listen }).listen = ((options: { hostname: string }) => {
+      const behavior = behaviors[options.hostname];
+      if (behavior instanceof Error) {
+        throw behavior;
+      }
+      return { stop() {} };
+    }) as typeof Bun.listen;
+  }
+
+  beforeEach(() => {
+    PortManager.setPortAvailabilityCheckerForTesting(null);
+  });
+
+  afterEach(() => {
+    (Bun as { listen: typeof Bun.listen }).listen = originalListen;
+    PortManager.setPortAvailabilityCheckerForTesting(null);
+  });
+
+  test("reports the port available when ::1 fails with EADDRNOTAVAIL but 127.0.0.1 succeeds", () => {
+    installFakeBunListen({
+      "127.0.0.1": "ok",
+      "::1": fakeErrno("EADDRNOTAVAIL"),
+    });
+
+    expect(PortManager.isPortAvailable(9999)).toBe(true);
+  });
+
+  test("reports the port busy when ::1 fails with EADDRINUSE even though 127.0.0.1 succeeds", () => {
+    installFakeBunListen({
+      "127.0.0.1": "ok",
+      "::1": fakeErrno("EADDRINUSE"),
+    });
+
+    expect(PortManager.isPortAvailable(9999)).toBe(false);
+  });
+
+  test("reports the port busy when 127.0.0.1 fails with EADDRINUSE", () => {
+    installFakeBunListen({
+      "127.0.0.1": fakeErrno("EADDRINUSE"),
+      "::1": "ok",
+    });
+
+    expect(PortManager.isPortAvailable(9999)).toBe(false);
+  });
+
+  test("reports the port available when both loopback families succeed", () => {
+    installFakeBunListen({
+      "127.0.0.1": "ok",
+      "::1": "ok",
+    });
+
+    expect(PortManager.isPortAvailable(9999)).toBe(true);
+  });
+
+  test("reports the port busy when 127.0.0.1 fails with EACCES", () => {
+    installFakeBunListen({
+      "127.0.0.1": fakeErrno("EACCES"),
+      "::1": "ok",
+    });
+
+    expect(PortManager.isPortAvailable(9999)).toBe(false);
+  });
+});
+
+describe("computeConfiguredScanEnd (AUTOMOBILE_PORT_RANGE_END scan bound, #6119)", () => {
+  test("bounds the scan at the configured range end", () => {
+    expect(computeConfiguredScanEnd(9000, "9001", undefined)).toBe(9001);
+  });
+
+  test("bounds the scan from a configured range size", () => {
+    expect(computeConfiguredScanEnd(9000, undefined, "2")).toBe(9001);
+  });
+
+  test("leaves the scan unbounded when neither env var is set", () => {
+    expect(computeConfiguredScanEnd(8765, undefined, undefined)).toBeUndefined();
+  });
+
+  test("leaves the scan unbounded when the range end is below the base port", () => {
+    expect(computeConfiguredScanEnd(9000, "8999", undefined)).toBeUndefined();
+  });
+
+  test("leaves the scan unbounded when the range end is not a number", () => {
+    expect(computeConfiguredScanEnd(9000, "not-a-number", undefined)).toBeUndefined();
+  });
+
+  test("leaves the scan unbounded when the range size is zero or negative", () => {
+    expect(computeConfiguredScanEnd(9000, undefined, "0")).toBeUndefined();
+    expect(computeConfiguredScanEnd(9000, undefined, "-5")).toBeUndefined();
+  });
+
+  test("prefers range end over range size when both are set", () => {
+    expect(computeConfiguredScanEnd(9000, "9001", "50")).toBe(9001);
   });
 });

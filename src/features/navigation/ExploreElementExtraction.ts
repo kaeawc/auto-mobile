@@ -2,6 +2,9 @@ import type { Element, ViewHierarchyResult } from "../../models";
 import { isTruthy, isFalsy } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
+import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
+import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { boundsEqual } from "../../utils/bounds";
 
 /**
@@ -161,49 +164,70 @@ export function extractAllElements(
 /** A single tapOn selector; `index` pins one occurrence when the selector is not unique. */
 export type TapSelector = { elementId: string; index?: number } | { text: string; index?: number };
 
+type SelectOccurrence = (index?: number) => ElementSelectionResult;
+
 /**
- * Single tapOn selector for an element among the elements currently on screen.
+ * Single tapOn selector for an element on the given screen.
  *
  * tapOn rejects any call carrying more than one selector (issue #6121), and its
  * first-match default would collapse repeated controls that share a resource-id
- * (list rows) onto the first row. So prefer a resource-id that is unique on
- * screen, then unique text or content-desc (the text selector matches both),
- * and otherwise pin the occurrence with tapOn's hierarchy-order `index`.
+ * (list rows) onto the first row. Uniqueness and occurrence are measured through
+ * the same {@link ElementSelector} tapOn uses, with tapOn's own options, so they
+ * see exactly its matches: a bare Compose id matching a qualified one, and
+ * off-screen matches dropped before `index` applies. Prefer a unique resource-id,
+ * then unique text / content-desc / iOS label (all matched by the text selector),
+ * and otherwise pin the occurrence with tapOn's on-screen `index`.
  * Returns null when the element has no selector at all.
  */
-export function tapSelectorFor(element: Element, onScreen: Element[]): TapSelector | null {
+export function tapSelectorFor(
+  element: Element,
+  viewHierarchy: ViewHierarchyResult,
+  selector: ElementSelector = new DefaultElementSelector(),
+): TapSelector | null {
   const id = element["resource-id"];
-  const text = textSelectorValue(element);
-  const sharingId = id ? onScreen.filter((other) => other["resource-id"] === id) : [];
-  if (id && sharingId.length <= 1) {
-    return { elementId: id };
-  }
-  const sharingText = text
-    ? onScreen.filter(
-        (other) =>
-          other.text === text ||
-          other["content-desc"] === text ||
-          other["ios-accessibility-label"] === text,
-      )
-    : [];
-  if (text && sharingText.length <= 1) {
-    return { text };
-  }
+  const text = element.text || element["content-desc"] || element["ios-accessibility-label"];
+  const candidates: Array<{ selector: TapSelector; select: SelectOccurrence }> = [];
   if (id) {
-    return { elementId: id, ...occurrenceIndex(sharingId, element) };
+    candidates.push({
+      selector: { elementId: id },
+      select: (index) =>
+        selector.selectByResourceId(viewHierarchy, id, { partialMatch: false, index }),
+    });
   }
-  return text ? { text, ...occurrenceIndex(sharingText, element) } : null;
+  if (text) {
+    candidates.push({
+      selector: { text },
+      select: (index) =>
+        selector.selectByText(viewHierarchy, text, {
+          partialMatch: true,
+          caseSensitive: false,
+          index,
+        }),
+    });
+  }
+  const unique = candidates.find((candidate) => candidate.select().totalMatches <= 1);
+  if (unique) {
+    return unique.selector;
+  }
+  const [preferred] = candidates;
+  return preferred
+    ? { ...preferred.selector, ...occurrenceIndex(preferred.select, element) }
+    : null;
 }
 
-/** The value tapOn's text selector would match for this element, if any. */
-function textSelectorValue(element: Element): string | undefined {
-  return element.text || element["content-desc"] || element["ios-accessibility-label"];
-}
-
-/** Position of `element` among `matches` in hierarchy order, located by bounds. */
-function occurrenceIndex(matches: Element[], element: Element): { index?: number } {
-  const index = matches.findIndex((match) => boundsEqual(match.bounds, element.bounds));
-  return index >= 0 ? { index } : {};
+/** Position of `element` among the selector's on-screen matches, located by bounds. */
+function occurrenceIndex(select: SelectOccurrence, element: Element): { index?: number } {
+  const total = select().totalMatches;
+  for (let index = 0; index < total; index++) {
+    const match = select(index).element;
+    if (!match) {
+      break;
+    }
+    if (boundsEqual(match.bounds, element.bounds)) {
+      return { index };
+    }
+  }
+  return {};
 }
 
 /**

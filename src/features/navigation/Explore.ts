@@ -196,7 +196,7 @@ export class Explore extends BaseVisualChange {
           const elements = extractAllElements(viewHierarchy, this.elementParser);
           if (isPermissionDialog(elements)) {
             logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-            await handlePermissionDialog(elements, this.device, this.adb, progress);
+            await handlePermissionDialog(elements, viewHierarchy, this.device, this.adb, progress);
             continue;
           }
         }
@@ -749,10 +749,9 @@ export class Explore extends BaseVisualChange {
         return swipeResult.success;
       } else {
         // Perform tap interaction
-        const onScreen = observation.viewHierarchy
-          ? extractAllElements(observation.viewHierarchy, this.elementParser)
-          : [];
-        const selector = tapSelectorFor(element, onScreen);
+        const selector = observation.viewHierarchy
+          ? tapSelectorFor(element, observation.viewHierarchy)
+          : null;
         if (!selector) {
           logger.warn(`[Explore] Element has no tap selector: ${elementKey}`);
           return false;

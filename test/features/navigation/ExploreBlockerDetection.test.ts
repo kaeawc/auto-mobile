@@ -1,6 +1,6 @@
 import { expect, describe, test, spyOn } from "bun:test";
 import { Element } from "../../../src/models";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import {
   isPermissionDialog,
@@ -306,6 +306,27 @@ describe("ExploreBlockerDetection", () => {
 
     const androidDevice = { deviceId: "emulator-5554", platform: "android" } as BootedDevice;
 
+    // The selector is chosen against the real hierarchy (tapOn's own finder
+    // decides uniqueness), so give the handlers one built from the elements.
+    function hierarchyOf(elements: Element[]): ViewHierarchyResult {
+      return {
+        hierarchy: {
+          node: elements.map((element) => ({
+            $: {
+              class: element.class,
+              text: element.text,
+              "resource-id": element["resource-id"],
+              "content-desc": element["content-desc"],
+              clickable: String(element.clickable ?? false),
+              enabled: "true",
+            },
+            bounds: element.bounds,
+          })),
+        },
+        packageName: "com.test",
+      } as unknown as ViewHierarchyResult;
+    }
+
     test("handlePermissionDialog taps an Allow button with text and resource-id by id only", async () => {
       const { calls, restore } = captureTapOptions();
       const elements = [
@@ -318,7 +339,12 @@ describe("ExploreBlockerDetection", () => {
 
       let handled: boolean;
       try {
-        handled = await handlePermissionDialog(elements, androidDevice, null);
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
       } finally {
         restore();
       }
@@ -346,7 +372,7 @@ describe("ExploreBlockerDetection", () => {
       let handled: boolean;
       try {
         handled = await detectAndHandleBlockers(
-          { viewHierarchy: { hierarchy: {}, packageName: "com.test" } } as unknown as ObserveResult,
+          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
           androidDevice,
           null,
           parser,

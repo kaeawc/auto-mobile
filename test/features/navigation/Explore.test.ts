@@ -454,6 +454,67 @@ describe("Explore", () => {
         { elementId: rowId, index: 2, action: "tap" },
       ]);
     });
+
+    test("counts the occurrence index over tapOn's on-screen matches, skipping off-screen rows", async () => {
+      // tapOn drops matches whose center is off screen before applying `index`,
+      // so a scrolled-away duplicate row above the target must not shift it.
+      const rowId = "com.test:id/row_title";
+      const row = (text: string, top: number) => ({
+        $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
+        bounds: { left: 0, top, right: 100, bottom: top + 50 },
+      });
+      const observation = {
+        viewHierarchy: {
+          hierarchy: {
+            node: [row("Beta", -100), row("Alpha", 0), row("Beta", 50), row("Beta", 100)],
+          },
+          packageName: "com.test.app",
+          screenWidth: 100,
+          screenHeight: 200,
+        },
+      } as unknown as ObserveResult;
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: "Beta",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+          }),
+          observation,
+        );
+      } finally {
+        restore();
+      }
+
+      // Visible matches in hierarchy order: Alpha, Beta@50, Beta@100 -> index 2
+      // (a raw count over the hierarchy would say 3 and miss the row).
+      expect(calls).toEqual([{ elementId: rowId, index: 2, action: "tap" }]);
+    });
+
+    test("treats a qualified id as shared with a bare Compose id, as tapOn's finder does", async () => {
+      // The finder matches "pkg:id/row" against a bare "row" node, so the
+      // qualified id is not unique on this screen and unique text must win.
+      const observation = createMockObservation([
+        createMockViewHierarchyNode({ text: "Alpha", "resource-id": "com.test:id/row" }),
+        createMockViewHierarchyNode({ text: "Beta", "resource-id": "row" }),
+      ]);
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({ text: "Alpha", "resource-id": "com.test:id/row" }),
+          observation,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([{ text: "Alpha", action: "tap" }]);
+    });
   });
 
   describe("periodic reset to home", () => {

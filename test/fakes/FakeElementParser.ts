@@ -1,10 +1,17 @@
 import type { Element } from "../../src/models/Element";
 import type { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../../src/models";
 import type { ElementParser } from "../../src/utils/interfaces/ElementParser";
+import { parseBounds as parseBoundsValue } from "../../src/utils/bounds";
 
 export class FakeElementParser implements ElementParser {
   nextNodeProperties: any = {};
-  nextParsedBounds: ElementBounds | null = null;
+  // undefined (the default) means "parse for real" — bounds parsing is a
+  // pure, deterministic utility (src/utils/bounds.ts), not an I/O or timing
+  // dependency, so callers exercising real bounds equality (e.g.
+  // OverlayDetector's container-identity resolution) get correct behavior
+  // without every test having to stub bounds per node. Set this explicitly
+  // to force a specific parseBounds result (including null) for a test.
+  nextParsedBounds: ElementBounds | null | undefined = undefined;
   nextParsedNode: Element | null = null;
   nextRootNodes: ViewHierarchyNode[] = [];
   nextWindowRootGroups: ViewHierarchyNode[][] = [];
@@ -15,8 +22,11 @@ export class FakeElementParser implements ElementParser {
     return this.nextNodeProperties;
   }
 
-  parseBounds(_bounds: unknown): ElementBounds | null {
-    return this.nextParsedBounds;
+  parseBounds(bounds: unknown): ElementBounds | null {
+    if (this.nextParsedBounds !== undefined) {
+      return this.nextParsedBounds;
+    }
+    return parseBoundsValue(bounds);
   }
 
   parseNodeBounds(_node: ViewHierarchyNode): Element | null {

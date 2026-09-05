@@ -33,7 +33,6 @@ export class OverlayDetector implements OverlayAnalyzer {
       return [];
     }
 
-    const containerNode = this.finder.findContainerNode(viewHierarchy, containerSelector);
     const parser = new DefaultElementParser();
 
     const windowRootGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
@@ -44,6 +43,25 @@ export class OverlayDetector implements OverlayAnalyzer {
     const overlays: OverlayCandidate[] = [];
     const seenNodes = new Set<ViewHierarchyNode>();
     const containerBounds = containerElement.bounds;
+
+    // `containerElement` is whatever findTargetElement's own resolution
+    // (ElementFinder.findElementByResourceId/findElementByText) already
+    // selected for the swipe — an area-sorted pick among possibly several
+    // same-selector matches. finder.findContainerNode() answers a different
+    // question (the first traversal match, used elsewhere to scope nested
+    // searches) and can name a different node than the one actually being
+    // swiped when the selector is ambiguous. Anchoring ancestor-exemption to
+    // that other node exempted the wrong element's ancestors while treating
+    // the real target's ancestor as a full-cover overlay — reproducing the
+    // exact "No unobstructed swipe area" fallback this file exists to avoid.
+    // Resolving strictly against containerElement's own bounds (requiring a
+    // unique match) anchors identity to the node actually being swiped.
+    const containerNode = this.resolveSelectedContainerNode(
+      rootGroups,
+      parser,
+      containerElement,
+      containerBounds,
+    );
 
     // The container's own ancestors are visited before the container in the
     // pre-order walk below and always geometrically contain it, so a
@@ -384,6 +402,52 @@ export class OverlayDetector implements OverlayAnalyzer {
     return isTruthyFlag(nodeProperties.clickable) || isTruthyFlag(nodeProperties.focusable);
   }
 
+  /**
+   * Finds the single hierarchy node matching both the container selector
+   * (resource-id / text / content-desc, or bounds alone when the selector
+   * carries none of those) and the exact bounds of the already-selected
+   * `containerElement` — i.e. the specific node findTargetElement's
+   * area-sorted resolution picked, not merely "a" node sharing its selector.
+   *
+   * When more than one node satisfies both the selector and those exact
+   * bounds, or none does, identity is ambiguous: callers (see
+   * collectContainerAncestors) must treat that the same as "not found"
+   * rather than guess, since guessing wrong donates a stranger's ancestors
+   * to the skip set instead of the real target's.
+   */
+  private resolveSelectedContainerNode(
+    rootGroups: ViewHierarchyNode[][],
+    parser: DefaultElementParser,
+    containerElement: Element,
+    containerBounds: Element["bounds"],
+  ): ViewHierarchyNode | null {
+    let match: ViewHierarchyNode | null = null;
+    let matchCount = 0;
+
+    for (const rootNodes of rootGroups) {
+      for (const rootNode of rootNodes) {
+        parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+          const nodeProperties = parser.extractNodeProperties(node);
+          if (
+            !this.matchesContainerSelector(node, nodeProperties, containerElement, containerBounds)
+          ) {
+            return;
+          }
+
+          const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
+          if (parsedBounds === null || !boundsEqual(parsedBounds, containerBounds)) {
+            return;
+          }
+
+          matchCount++;
+          match = node;
+        });
+      }
+    }
+
+    return matchCount === 1 ? match : null;
+  }
+
   private isContainerNode(
     node: ViewHierarchyNode,
     nodeProperties: Record<string, unknown>,
@@ -395,6 +459,15 @@ export class OverlayDetector implements OverlayAnalyzer {
       return true;
     }
 
+    return this.matchesContainerSelector(node, nodeProperties, containerElement, containerBounds);
+  }
+
+  private matchesContainerSelector(
+    node: ViewHierarchyNode,
+    nodeProperties: Record<string, unknown>,
+    containerElement: Element,
+    containerBounds: Element["bounds"],
+  ): boolean {
     const resourceId = nodeProperties["resource-id"];
     if (containerElement["resource-id"] && resourceId === containerElement["resource-id"]) {
       return true;

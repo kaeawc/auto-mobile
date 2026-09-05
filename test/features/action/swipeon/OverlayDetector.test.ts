@@ -31,18 +31,21 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     "resource-id": "list",
     scrollable: true,
   } as unknown as Element;
-  // The finder is faked so the test controls exactly which parsed hierarchy
-  // node it hands back as the selected container — that reference is what
-  // the ancestor walk now anchors to via strict identity (`===`). Geometry
-  // and the bounds parser are not exercised by collectOverlayCandidates (the
-  // internal tree walk always uses a real DefaultElementParser instance for
-  // traversal), so plain fakes stand in for them per the repo's
-  // interfaces-and-fakes convention.
-  const detector = (containerNode: object | null) => {
-    const finder = new FakeElementFinder();
-    finder.nextContainerNode = containerNode as any;
-    return new OverlayDetector(finder, new FakeElementGeometry(), new FakeElementParser());
-  };
+  // OverlayDetector resolves the selected container node itself (by
+  // requiring a unique selector+exact-bounds match against the passed-in
+  // containerElement — see resolveSelectedContainerNode) rather than
+  // consulting the finder, so the finder is a bare, unconfigured fake here.
+  // The bounds parser is faked too but delegates to the real, pure
+  // src/utils/bounds parseBounds by default (see FakeElementParser), since
+  // that logic is exactly what's under test. Geometry is never exercised by
+  // collectOverlayCandidates. Per the repo's interfaces-and-fakes
+  // convention, OverlayDetector remains the only concrete collaborator.
+  const detector = () =>
+    new OverlayDetector(
+      new FakeElementFinder(),
+      new FakeElementGeometry(),
+      new FakeElementParser(),
+    );
 
   test("a clickable ancestor of the container is not an overlay (issue repro: root(clickable) > list > row(clickable))", () => {
     const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }, [
@@ -54,7 +57,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector(listNode).collectOverlayCandidates(
+    const overlays = detector().collectOverlayCandidates(
       hierarchy as any,
       { elementId: "list" },
       listElement,
@@ -77,7 +80,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector(listNode).collectOverlayCandidates(
+    const overlays = detector().collectOverlayCandidates(
       hierarchy as any,
       { elementId: "list" },
       listElement,
@@ -117,7 +120,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector(realListNode).collectOverlayCandidates(
+    const overlays = detector().collectOverlayCandidates(
       hierarchy as any,
       { elementId: "list" },
       listElement,
@@ -132,41 +135,35 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // Unparseable bounds must not fall through to an id-only match: the
     // popup's clickable root is still the one overlay in both variants.
     const popupBounds = b(100, 600, 900, 1400);
-    const makeHierarchy = (lookAlikeAttrs: Record<string, string>) => {
-      const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
-      return {
-        realListNode,
-        hierarchy: {
-          hierarchy: { node: [] },
-          windows: [
-            {
-              windowLayer: 0,
-              hierarchy: {
-                node: [node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [realListNode])],
-              },
-            },
-            {
-              windowLayer: 5,
-              hierarchy: {
-                node: [
-                  node(popupBounds, { "resource-id": "popup", clickable: "true" }, [
-                    {
-                      $: { "resource-id": "list", scrollable: "true", ...lookAlikeAttrs },
-                      node: [],
-                    },
-                  ]),
-                ],
-              },
-            },
-          ],
+    const makeHierarchy = (lookAlikeAttrs: Record<string, string>) => ({
+      hierarchy: { node: [] },
+      windows: [
+        {
+          windowLayer: 0,
+          hierarchy: {
+            node: [
+              node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [
+                node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
+              ]),
+            ],
+          },
         },
-      };
-    };
+        {
+          windowLayer: 5,
+          hierarchy: {
+            node: [
+              node(popupBounds, { "resource-id": "popup", clickable: "true" }, [
+                { $: { "resource-id": "list", scrollable: "true", ...lookAlikeAttrs }, node: [] },
+              ]),
+            ],
+          },
+        },
+      ],
+    });
 
     for (const lookAlike of [{}, { bounds: "not-a-rect" }]) {
-      const { realListNode, hierarchy } = makeHierarchy(lookAlike);
-      const overlays = detector(realListNode).collectOverlayCandidates(
-        hierarchy as any,
+      const overlays = detector().collectOverlayCandidates(
+        makeHierarchy(lookAlike) as any,
         { elementId: "list" },
         listElement,
       );
@@ -209,7 +206,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector(realListNode).collectOverlayCandidates(
+    const overlays = detector().collectOverlayCandidates(
       hierarchy as any,
       { elementId: "list" },
       listElement,
@@ -219,22 +216,106 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     expect(overlays[0].bounds).toEqual(LIST_BOUNDS);
   });
 
-  test("returns no ancestor skip set when the finder cannot resolve the container node", () => {
-    // No identity to anchor the walk to: a clickable ancestor of a
-    // same-selector node elsewhere in the tree must not be silently
-    // exempted, so it is still reported as an overlay candidate rather than
-    // risking suppression of a genuine one.
+  test("anchors identity to the area-sorted selected match, not the first traversal match, when two `list` nodes share the id (terminal #6128 follow-up)", () => {
+    // Two `list` nodes share the resource-id. The real ElementFinder resolves
+    // the swipe target by AREA-SORTING matches and picking the smallest — here
+    // listB, under cardB — while a first-match traversal (the earlier,
+    // now-removed reliance on finder.findContainerNode) would instead land on
+    // listA, under cardA, which is visited first and is larger.
+    //
+    // Anchoring ancestor-collection to the wrong node (listA) would exempt
+    // cardA — a stranger to listB, not really its ancestor — while leaving
+    // cardB, listB's REAL and fully-covering parent, unexempted: exactly the
+    // "full-cover overlay blocks the whole swipe" bug this file exists to
+    // prevent, just reintroduced via node-identity instead of selector+bounds.
+    const cardABounds = b(0, 0, 1000, 1000);
+    const listABounds = b(0, 0, 1000, 1000);
+    const cardBBounds = b(0, 900, 1000, 1300);
+    const listBBounds = b(100, 950, 900, 1250);
+
+    const hierarchy = {
+      hierarchy: {
+        node: [
+          node(cardABounds, { "resource-id": "cardA", clickable: "true" }, [
+            node(listABounds, { "resource-id": "list", scrollable: "true" }),
+          ]),
+          node(cardBBounds, { "resource-id": "cardB", clickable: "true" }, [
+            node(listBBounds, { "resource-id": "list", scrollable: "true" }),
+          ]),
+        ],
+      },
+    };
+
+    // Mirrors what the real, area-sorted ElementFinder.findElementByResourceId
+    // hands back as the swipe target: the smaller of the two `list` matches
+    // (listB, area 640,000 vs listA's 1,000,000) — not the first one visited.
+    const selectedListElement: Element = {
+      bounds: listBBounds,
+      "resource-id": "list",
+      scrollable: true,
+    } as unknown as Element;
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      selectedListElement,
+    );
+
+    // cardB truly contains listB and must be exempted as its ancestor, not
+    // reported as a full-cover overlay that would block the swipe outright.
+    // cardA is a stranger to listB (not its ancestor) and clips the top of
+    // its bounds; it must still be reported as a genuine overlay, not wrongly
+    // exempted because identity was anchored to listA instead of listB.
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0].overlapBounds).toEqual(b(100, 950, 900, 1000));
+  });
+
+  test("returns no ancestor skip set when no node has both the selector and the target's exact bounds", () => {
+    // The `list` node's bounds don't match containerElement's bounds — as if
+    // the resolved target and this hierarchy snapshot diverged. With no node
+    // satisfying both the selector and the exact bounds, identity cannot be
+    // anchored, so the safe fallback (no ancestor skip set) applies: the
+    // clickable root is still reported as an overlay candidate rather than
+    // risking exemption of the wrong node's ancestors.
+    const mismatchedBounds = b(0, 0, 500, 500);
     const hierarchy = {
       hierarchy: {
         node: [
           node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+            node(mismatchedBounds, { "resource-id": "list", scrollable: "true" }),
+          ]),
+        ],
+      },
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0].bounds).toEqual(b(0, 0, 1000, 2000));
+  });
+
+  test("returns no ancestor skip set when two nodes tie on the selector and the target's exact bounds", () => {
+    // Two `list` nodes share both the resource-id and the exact bounds of
+    // containerElement: resolveSelectedContainerNode cannot pick one over the
+    // other, so identity is ambiguous. The safe fallback applies — no
+    // ancestor is exempted — rather than risking anchoring to whichever tied
+    // node happens to be visited.
+    const hierarchy = {
+      hierarchy: {
+        node: [
+          node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+            node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
             node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
           ]),
         ],
       },
     };
 
-    const overlays = detector(null).collectOverlayCandidates(
+    const overlays = detector().collectOverlayCandidates(
       hierarchy as any,
       { elementId: "list" },
       listElement,

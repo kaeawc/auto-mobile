@@ -1031,10 +1031,11 @@ export async function tapOnHandler(
   // A selector miss must not read as a completed tap: gate the message on the
   // outcome and mark the MCP envelope `isError`, exactly as inputText does since
   // #5902 (#6152). `||` not `??`: an empty-string error must still yield the
-  // non-empty fallback (#4183 P4).
+  // non-empty fallback (#4183 P4). The failure keeps the search summary so the
+  // user still sees how long the selector was looked for before it missed.
   const message = result.success
     ? buildTapOnResultMessage(result.selectedElement, searchSummary, result.activatedSubtext)
-    : `Failed to tap: ${result.error || "unknown error"}`;
+    : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
   const payload = { message, observation: result.observation, ...result };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =
     createStructuredToolResponse(payload);

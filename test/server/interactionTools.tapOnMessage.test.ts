@@ -2,10 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   buildInputTextResultMessage,
   buildTapOnResultMessage,
+  registerInteractionTools,
   resetTapOnElementFactory,
   setTapOnElementFactory,
   tapOnHandler,
 } from "../../src/server/interactionTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { TapOnArgs } from "../../src/server/interactionToolTypes";
 import { getStructuredField } from "../../src/utils/toolUtils";
 import type { BootedDevice, TapOnElementResult, TapOnSelectedElement } from "../../src/models";
@@ -176,6 +178,15 @@ describe("tapOnHandler (registered handler wiring)", () => {
 
   afterEach(() => {
     resetTapOnElementFactory();
+    ToolRegistry.clearTools();
+  });
+
+  // The direct-call tests below only pin the wiring if the handler they call is
+  // the one registered for "tapOn" — pin that identity so the two cannot drift.
+  test("the module-scope handler is the one registered for tapOn", () => {
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    expect(ToolRegistry.getTool("tapOn")?.deviceAwareHandler).toBe(tapOnHandler);
   });
 
   const fakeResult = (overrides: Partial<TapOnElementResult>): TapOnElementResult =>
@@ -202,13 +213,27 @@ describe("tapOnHandler (registered handler wiring)", () => {
     const response = await tapOnHandler(fakeDevice, args);
     expect(response.isError).toBe(true);
     const message = parseMessage(response);
+    // The failure keeps the search summary: the user sees both that nothing
+    // matched and how long the selector was looked for.
     expect(message).toBe(
-      "Failed to tap: Failed to perform tap on element: Element not found with provided text 'ZZZ_NO_SUCH_TEXT_ZZZ'",
+      "Failed to tap: Failed to perform tap on element: Element not found with provided text 'ZZZ_NO_SUCH_TEXT_ZZZ' (0 view hierarchy changes over 29 requests within 1521ms)",
     );
     expect(message).not.toContain("Tapped on element");
     // The failure message must also be the one on the wire (structuredContent).
     expect(getStructuredField(response, "message")).toBe(message);
     expect(getStructuredField(response, "success")).toBe(false);
+  });
+
+  test("a failure without search stats carries no empty summary parenthetical", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () => fakeResult({ error: "Element not found with provided text 'Missing'" }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, args);
+    expect(response.isError).toBe(true);
+    expect(parseMessage(response)).toBe(
+      "Failed to tap: Element not found with provided text 'Missing'",
+    );
   });
 
   // `||` not `??`: an empty-string error must still yield a non-empty failure

@@ -181,18 +181,15 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // pass through it. Only object identity to the finder-resolved node must
     // decide this: the popup's look-alike is a different parsed object, so
     // it can never match, and the popup's clickable root remains a detected
-    // overlay (the finder — faked here — is what a real ElementFinder would
-    // resolve to the main-hierarchy `list`, not the popup look-alike).
+    // overlay. The real container lives in the MAIN hierarchy, which a real
+    // ElementFinder always searches before any window — see
+    // resolveSelectedContainerNode's main-first precedence.
     const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
     const hierarchy = {
-      hierarchy: { node: [] },
+      hierarchy: {
+        node: [node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [realListNode])],
+      },
       windows: [
-        {
-          windowLayer: 0,
-          hierarchy: {
-            node: [node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [realListNode])],
-          },
-        },
         {
           windowLayer: 5,
           hierarchy: {

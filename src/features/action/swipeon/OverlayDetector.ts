@@ -8,7 +8,6 @@ import {
 import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
-import { DefaultElementParser } from "../../utility/ElementParser";
 import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
 import { boundsArea, boundsEqual, clamp } from "../../../utils/bounds";
 import { isTruthyFlag, buildContainerFromElement } from "../../../utils/elementProperties";
@@ -33,7 +32,7 @@ export class OverlayDetector implements OverlayAnalyzer {
       return [];
     }
 
-    const parser = new DefaultElementParser();
+    const parser = this.elementParser;
 
     const windowRootGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     const rootGroups =
@@ -57,7 +56,7 @@ export class OverlayDetector implements OverlayAnalyzer {
     // Resolving strictly against containerElement's own bounds (requiring a
     // unique match) anchors identity to the node actually being swiped.
     const containerNode = this.resolveSelectedContainerNode(
-      rootGroups,
+      viewHierarchy,
       parser,
       containerElement,
       containerBounds,
@@ -361,7 +360,7 @@ export class OverlayDetector implements OverlayAnalyzer {
    */
   private collectContainerAncestors(
     rootGroups: ViewHierarchyNode[][],
-    parser: DefaultElementParser,
+    parser: ElementParser,
     containerNode: ViewHierarchyNode | null,
   ): Set<ViewHierarchyNode> {
     const ancestors = new Set<ViewHierarchyNode>();
@@ -409,43 +408,83 @@ export class OverlayDetector implements OverlayAnalyzer {
    * `containerElement` — i.e. the specific node findTargetElement's
    * area-sorted resolution picked, not merely "a" node sharing its selector.
    *
+   * Searches the SAME source set in the SAME order ElementFinder itself
+   * uses to resolve an element: the main hierarchy first, then the
+   * per-window hierarchies (topmost-first), stopping at the first source
+   * that has any match at all. Scanning only the per-window hierarchies —
+   * which is all `rootGroups` holds once any window exists — would miss a
+   * container that the finder actually resolved from the main hierarchy,
+   * and a same-id/same-bounds look-alike sitting in a popup window could
+   * then be mistaken for the (never-checked) real match.
+   *
    * When more than one node satisfies both the selector and those exact
-   * bounds, or none does, identity is ambiguous: callers (see
-   * collectContainerAncestors) must treat that the same as "not found"
-   * rather than guess, since guessing wrong donates a stranger's ancestors
-   * to the skip set instead of the real target's.
+   * bounds within the chosen source, or none does anywhere, identity is
+   * ambiguous: callers (see collectContainerAncestors) must treat that the
+   * same as "not found" rather than guess, since guessing wrong donates a
+   * stranger's ancestors to the skip set instead of the real target's.
    */
   private resolveSelectedContainerNode(
-    rootGroups: ViewHierarchyNode[][],
-    parser: DefaultElementParser,
+    viewHierarchy: ViewHierarchyResult,
+    parser: ElementParser,
     containerElement: Element,
     containerBounds: Element["bounds"],
   ): ViewHierarchyNode | null {
-    let match: ViewHierarchyNode | null = null;
-    let matchCount = 0;
+    const mainRootNodes = parser.extractRootNodes(viewHierarchy);
+    const mainResult = this.findSelectorBoundsMatch(
+      mainRootNodes,
+      parser,
+      containerElement,
+      containerBounds,
+    );
+    if (mainResult.matchCount > 0) {
+      return mainResult.matchCount === 1 ? mainResult.match : null;
+    }
 
-    for (const rootNodes of rootGroups) {
-      for (const rootNode of rootNodes) {
-        parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
-          const nodeProperties = parser.extractNodeProperties(node);
-          if (
-            !this.matchesContainerSelector(node, nodeProperties, containerElement, containerBounds)
-          ) {
-            return;
-          }
-
-          const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
-          if (parsedBounds === null || !boundsEqual(parsedBounds, containerBounds)) {
-            return;
-          }
-
-          matchCount++;
-          match = node;
-        });
+    const windowRootGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    for (const windowRoots of windowRootGroups) {
+      const windowResult = this.findSelectorBoundsMatch(
+        windowRoots,
+        parser,
+        containerElement,
+        containerBounds,
+      );
+      if (windowResult.matchCount > 0) {
+        return windowResult.matchCount === 1 ? windowResult.match : null;
       }
     }
 
-    return matchCount === 1 ? match : null;
+    return null;
+  }
+
+  private findSelectorBoundsMatch(
+    rootNodes: ViewHierarchyNode[],
+    parser: ElementParser,
+    containerElement: Element,
+    containerBounds: Element["bounds"],
+  ): { match: ViewHierarchyNode | null; matchCount: number } {
+    let match: ViewHierarchyNode | null = null;
+    let matchCount = 0;
+
+    for (const rootNode of rootNodes) {
+      parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+        const nodeProperties = parser.extractNodeProperties(node);
+        if (
+          !this.matchesContainerSelector(node, nodeProperties, containerElement, containerBounds)
+        ) {
+          return;
+        }
+
+        const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
+        if (parsedBounds === null || !boundsEqual(parsedBounds, containerBounds)) {
+          return;
+        }
+
+        matchCount++;
+        match = node;
+      });
+    }
+
+    return { match, matchCount };
   }
 
   private isContainerNode(

@@ -399,7 +399,7 @@ async function main() {
     if (noWaitForPollingOverhead) {
       serverConfig.setWaitForPollingOverheadEnabled(false);
       logger.info(
-        "WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling",
+        "WaitFor polling overhead disabled (--no-waitfor-polling-overhead): back stack skipped during observe waitFor polling",
       );
     }
 

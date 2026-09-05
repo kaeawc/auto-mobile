@@ -1,6 +1,10 @@
 import Ajv2020 from "ajv/dist/2020";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
+import {
+  OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV,
+  shouldSkipObserveWaitForScreenshot,
+} from "../../src/features/observe/automaticScreenshotPolicy";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import {
@@ -32,6 +36,16 @@ const makeHierarchy = (
   },
   screenWidth: screenSize.width,
   screenHeight: screenSize.height,
+});
+
+const originalWaitForScreenshotPolicy = process.env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV];
+
+afterEach(() => {
+  if (originalWaitForScreenshotPolicy === undefined) {
+    delete process.env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV];
+  } else {
+    process.env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV] = originalWaitForScreenshotPolicy;
+  }
 });
 
 describe("observeSchema waitFor.container", () => {
@@ -1052,6 +1066,73 @@ describe("waitForObservation activeWindow", () => {
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.observation.activeWindow?.appId).toBe("com.example.app");
     expect(observeScreen.getExecuteCallCount()).toBe(2);
+    expect(
+      observeScreen.getExecuteOptions().every((options) => options.skipScreenshot === true),
+    ).toBe(true);
+    expect(observeScreen.getCaptureScreenshotCallCount()).toBe(0);
+    expect(shouldSkipObserveWaitForScreenshot()).toBe(true);
+  });
+
+  test("opt-in captures one terminal screenshot while every poll remains suppressed", async () => {
+    process.env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV] = "0";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observations = [
+      makeObservation("com.browser", "", [
+        { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
+      ]),
+      makeObservation("com.example.app", "com.example.app.HomeActivity", [
+        { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
+      ]),
+    ];
+    observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: { appId: "com.example.app" },
+        className: "UITabBar",
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+    expect(observeScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(true);
+    expect(observeScreen.getCaptureScreenshotCallCount()).toBe(1);
+    expect(shouldSkipObserveWaitForScreenshot()).toBe(false);
+  });
+
+  test("the declarative waitFor path also captures only its terminal screenshot", async () => {
+    process.env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV] = "false";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveSequence([
+      makeObservation("com.example.app", "com.example.app.HomeActivity"),
+      makeObservation("com.example.app", "com.example.app.HomeActivity"),
+    ]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        for: "stable",
+        timeout: 500,
+        stableReads: 2,
+      } as any,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.settled).toBe(true);
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+    expect(observeScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(true);
+    expect(observeScreen.getCaptureScreenshotCallCount()).toBe(1);
   });
 
   test("keeps polling until Android activityName matches", async () => {

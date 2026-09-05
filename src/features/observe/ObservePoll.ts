@@ -97,6 +97,9 @@ export async function pollObserveUntil(
       minTimestamp,
       skipWaitForFresh: false,
       signal: options.signal,
+      // Polls are intermediate state only. Public callers that opt into
+      // automatic evidence capture it once after this loop completes.
+      skipScreenshot: true,
     });
     polls++;
     throwIfAborted(options.signal);

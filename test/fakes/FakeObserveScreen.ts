@@ -15,6 +15,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private observeResultFactory: ((index: number) => ObserveResult) | null = null;
   private observeSequence: ObserveResult[] | null = null;
   private executeCallCount: number = 0;
+  private captureScreenshotCallCount: number = 0;
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
@@ -142,6 +143,7 @@ export class FakeObserveScreen implements ObserveScreen {
   clearHistory(): void {
     this.executedOperations = [];
     this.executeCallCount = 0;
+    this.captureScreenshotCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
     this.executeOptionsHistory.length = 0;
@@ -152,6 +154,11 @@ export class FakeObserveScreen implements ObserveScreen {
    */
   getExecuteCallCount(): number {
     return this.executeCallCount;
+  }
+
+  /** Total captureScreenshot() calls. */
+  getCaptureScreenshotCallCount(): number {
+    return this.captureScreenshotCallCount;
   }
 
   /**
@@ -174,6 +181,16 @@ export class FakeObserveScreen implements ObserveScreen {
     }
 
     return this.getNextObserveResult();
+  }
+
+  async captureScreenshot(): Promise<void> {
+    this.executedOperations.push("captureScreenshot");
+    this.captureScreenshotCallCount++;
+
+    const error = this.failures.get("captureScreenshot");
+    if (error) {
+      throw error;
+    }
   }
 
   /** Options passed to each `execute()` call, in order. */

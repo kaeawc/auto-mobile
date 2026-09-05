@@ -748,6 +748,18 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
+   * Capture visual evidence without re-reading the hierarchy. Automatic
+   * post-action and waitFor flows use this after their final observation so a
+   * retry/poll loop creates at most one screenshot.
+   */
+  async captureScreenshot(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.screenshotRecorder.capture(perf, signal);
+  }
+
+  /**
    * Attach a windowed performance snapshot to the result when the
    * `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT` opt-in is enabled. Ensures per-device
    * sampling is running (so the window fills across successive observes) and

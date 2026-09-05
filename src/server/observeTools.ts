@@ -56,6 +56,7 @@ import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
 import { NodeCryptoService } from "../utils/crypto";
+import { shouldSkipObserveWaitForScreenshot } from "../features/observe/automaticScreenshotPolicy";
 
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
@@ -1042,10 +1043,19 @@ export const waitForObservation = async (
   timer: Timer = defaultTimer,
   platform?: BootedDevice["platform"],
 ): Promise<WaitForObservationOutcome> => {
+  const complete = async (
+    outcome: WaitForObservationOutcome,
+  ): Promise<WaitForObservationOutcome> => {
+    if (!shouldSkipObserveWaitForScreenshot()) {
+      await observeScreen.captureScreenshot?.(createGlobalPerformanceTracker(), signal);
+    }
+    return outcome;
+  };
+
   // Declarative `for` DSL (issue #4398) routes to the #4389 primitives; the
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
-    return runWaitForConditionDsl(observeScreen, waitFor, signal, timer);
+    return complete(await runWaitForConditionDsl(observeScreen, waitFor, signal, timer));
   }
 
   const startTime = timer.now();
@@ -1057,11 +1067,9 @@ export const waitForObservation = async (
     elementId: waitFor.elementId,
   };
 
-  // When overhead is disabled, skip screenshots and back stack during ALL waitFor
-  // observations (including the initial one) to reduce ADB contention. This prevents
-  // slow back stack fetches (dumpsys activity) and screenshots (screencap) from
-  // consuming the timeout budget. Trade-off: LATEST_SCREENSHOT will not reflect the
-  // exact screen state when waitFor resolved.
+  // Back-stack collection may stay disabled during waitFor polling to preserve its
+  // timeout budget. Screenshots always stay suppressed during polls; when opted
+  // in, `complete` captures exactly one screenshot from the terminal state.
   const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
   const observeOnce = () =>
@@ -1072,7 +1080,7 @@ export const waitForObservation = async (
       minTimestamp: startTime,
       signal,
       skipBackStack: skipPollingOverhead || skipBackStack,
-      skipScreenshot: skipPollingOverhead,
+      skipScreenshot: true,
     });
 
   // Settle gate (issue #3490 §3): once the predicate matches, hold until the
@@ -1102,7 +1110,7 @@ export const waitForObservation = async (
 
   if (waitEvaluation.matched && settleReady(observation)) {
     const waitMs = timer.now() - startTime;
-    return {
+    return complete({
       observation,
       awaitedElement: waitEvaluation.awaitedElement,
       awaitDuration: waitMs,
@@ -1113,7 +1121,7 @@ export const waitForObservation = async (
       polls,
       waitMs,
       matchedElement: waitEvaluation.awaitedElement,
-    };
+    });
   }
   if (!waitEvaluation.matched) {
     matchedHash = null;
@@ -1121,7 +1129,7 @@ export const waitForObservation = async (
 
   if (timer.now() - startTime >= timeoutMs) {
     const waitMs = timer.now() - startTime;
-    return {
+    return complete({
       observation,
       awaitDuration: waitMs,
       awaitTimeout: true,
@@ -1130,7 +1138,7 @@ export const waitForObservation = async (
       timedOut: true,
       polls,
       waitMs,
-    };
+    });
   }
 
   while (timer.now() - startTime < timeoutMs) {
@@ -1144,7 +1152,7 @@ export const waitForObservation = async (
     if (waitEvaluation.matched) {
       if (settleReady(observation)) {
         const waitMs = timer.now() - startTime;
-        return {
+        return complete({
           observation,
           awaitedElement: waitEvaluation.awaitedElement,
           awaitDuration: waitMs,
@@ -1155,7 +1163,7 @@ export const waitForObservation = async (
           polls,
           waitMs,
           matchedElement: waitEvaluation.awaitedElement,
-        };
+        });
       }
     } else {
       matchedHash = null;
@@ -1163,7 +1171,7 @@ export const waitForObservation = async (
   }
 
   const waitMs = timer.now() - startTime;
-  return {
+  return complete({
     observation,
     awaitDuration: waitMs,
     awaitTimeout: true,
@@ -1172,7 +1180,7 @@ export const waitForObservation = async (
     timedOut: true,
     polls,
     waitMs,
-  };
+  });
 };
 
 // Register tools (this will be called when this file is imported)

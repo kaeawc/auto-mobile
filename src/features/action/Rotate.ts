@@ -83,17 +83,29 @@ export class Rotate extends BaseVisualChange {
   }
 
   /**
+   * Read the `accelerometer_rotation` setting as a tri-state: "locked" and
+   * "enabled" are CONFIRMED readings, "unknown" means the setting was absent,
+   * unreadable, or malformed. Callers must not treat "unknown" as either
+   * confirmed state — in particular, auto-rotate must only be restored after
+   * a rotation when it was CONFIRMED enabled beforehand (#6199 review).
+   * @returns "locked" (auto-rotation disabled), "enabled" (auto-rotation on),
+   *   or "unknown" when the setting could not be confirmed
+   */
+  private async getAutoRotateState(): Promise<"locked" | "enabled" | "unknown"> {
+    const val = await this.readSystemSetting("accelerometer_rotation");
+    if (val === null || !/^\d+$/.test(val)) {
+      return "unknown";
+    }
+    // 0 = locked (auto-rotation disabled), 1 = unlocked (auto-rotation enabled)
+    return parseInt(val, 10) === 0 ? "locked" : "enabled";
+  }
+
+  /**
    * Check if orientation is locked
    * @returns Promise with boolean indicating if auto-rotation is disabled
    */
   async isOrientationLocked(): Promise<boolean> {
-    const val = await this.readSystemSetting("accelerometer_rotation");
-    if (val === null) {
-      return false;
-    }
-    const autoRotate = parseInt(val, 10);
-    // 0 = locked (auto-rotation disabled), 1 = unlocked (auto-rotation enabled)
-    return autoRotate === 0;
+    return (await this.getAutoRotateState()) === "locked";
   }
 
   private async writeSystemSetting(key: string, value: string): Promise<void> {
@@ -184,9 +196,9 @@ export class Rotate extends BaseVisualChange {
       async () => {
         const value = orientation === "portrait" ? 0 : 1;
 
-        // Run getCurrentOrientation and isOrientationLocked in parallel
-        const [currentOrientation, isLocked] = await perf.track("getOrientationState", () =>
-          Promise.all([this.getCurrentOrientation(), this.isOrientationLocked()]),
+        // Run getCurrentOrientation and getAutoRotateState in parallel
+        const [currentOrientation, autoRotateState] = await perf.track("getOrientationState", () =>
+          Promise.all([this.getCurrentOrientation(), this.getAutoRotateState()]),
         );
 
         // Check if device is already in the desired orientation
@@ -207,14 +219,20 @@ export class Rotate extends BaseVisualChange {
         // regardless of whether it was already off beforehand. Remember the
         // pre-existing value so it can be restored once the forced rotation
         // completes, instead of leaving auto-rotate permanently disabled
-        // (#6129).
-        const wasAutoRotateEnabled = !isLocked;
+        // (#6129). Only restore when we CONFIRMED auto-rotate was on beforehand
+        // — an unreadable/malformed reading must never be fabricated into a
+        // state to restore (#6199 review).
+        const wasAutoRotateEnabled = autoRotateState === "enabled";
 
         try {
-          if (isLocked) {
+          if (autoRotateState === "locked") {
             logger.info("Orientation is locked; forcing the requested rotation");
-          } else {
+          } else if (autoRotateState === "enabled") {
             logger.info("Auto-rotate is on; temporarily disabling it to force rotation");
+          } else {
+            logger.info(
+              "accelerometer_rotation is unreadable; forcing rotation without restoring it afterward",
+            );
           }
 
           await perf.track("setRotation", () =>
@@ -230,22 +248,38 @@ export class Rotate extends BaseVisualChange {
           // Note: We skip explicit verification since waitForRotation already confirms
           // the rotation completed successfully by polling dumpsys window
 
+          // waitForRotation(value) above already confirmed the device reached the
+          // requested orientation while auto-rotate was forced off. The local
+          // `currentOrientation` remains the legitimate prior value (see #6057).
+          let achievedOrientation: string = orientation;
+          let warning: string | undefined;
+
           if (wasAutoRotateEnabled) {
             await this.writeSystemSetting("accelerometer_rotation", "1");
+
+            // Restoring auto-rotate can let the physical sensor immediately
+            // re-apply its own orientation, overriding the one we just forced.
+            // Re-read the live orientation so we report what actually ended up
+            // held, rather than blindly claiming the requested orientation
+            // stuck (#6199 review).
+            achievedOrientation = await this.getCurrentOrientation();
+            if (achievedOrientation !== orientation) {
+              warning = `Auto-rotate is enabled and immediately reverted the device to ${achievedOrientation} based on the physical sensor; the requested ${orientation} orientation is not held.`;
+            }
           }
 
           return {
             success: true,
             orientation,
             value,
-            // waitForRotation(value) above already confirmed the device reached the
-            // requested orientation, so report the achieved orientation here. The local
-            // `currentOrientation` remains the legitimate prior value (see #6057).
-            currentOrientation: orientation,
+            currentOrientation: achievedOrientation,
             previousOrientation: currentOrientation,
             rotationPerformed: true,
             orientationLockHandled: wasAutoRotateEnabled,
-            message: `Successfully rotated from ${currentOrientation} to ${orientation}`,
+            warning,
+            message: warning
+              ? `Rotated to ${orientation}, but auto-rotate reverted the device to ${achievedOrientation}`
+              : `Successfully rotated from ${currentOrientation} to ${orientation}`,
           };
         } catch (error) {
           // Restore auto-rotate if it was on before this call

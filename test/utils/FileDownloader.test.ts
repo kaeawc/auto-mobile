@@ -80,15 +80,21 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
 
   test("rejects promptly and removes the partial file when the response closes mid-body", async function () {
     // Regression repro for issue #6131: the response stream receives some
-    // data, then is destroyed WITHOUT ending — the exact shape of a peer
-    // closing the connection before Content-Length bytes arrive. The
-    // pre-fix implementation (`response.pipe(fileStream)`, settling only
-    // on the file stream's 'finish'/'error') never observes this and
-    // hangs forever; verified directly against the pre-fix code, which
-    // timed out well past this test's bound.
+    // data, then is destroyed WITHOUT ending and WITHOUT an error — the
+    // exact shape of a peer closing the connection before Content-Length
+    // bytes arrive with no socket-level error surfacing. Only a 'close'
+    // event fires here, never 'error', so this exercises `stream.pipeline`
+    // itself detecting the premature EOF (`ERR_STREAM_PREMATURE_CLOSE`)
+    // rather than an error listener relaying a supplied error message. A
+    // fix that only listens for response 'error'/'aborted' would still
+    // hang on this input. The pre-fix implementation
+    // (`response.pipe(fileStream)`, settling only on the file stream's
+    // 'finish'/'error') never observes this and hangs forever; verified
+    // directly against the pre-fix code, which timed out well past this
+    // test's bound.
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
-    queueMicrotask(() => response.destroy(new Error("simulated premature close")));
+    queueMicrotask(() => response.destroy());
 
     tempDir = await makeScratchTempDir("pipe-response-mid-close-");
     const destination = path.join(tempDir, "file.bin");
@@ -108,9 +114,10 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     // attempt's own temp file, never the shared `destination` — otherwise a
     // slow-to-settle failed attempt can delete a concurrent/retried
     // download's completed file out from under it (issue #6131 review).
+    // Same close-only shape as above: no error emitted, only 'close'.
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
-    queueMicrotask(() => response.destroy(new Error("simulated premature close")));
+    queueMicrotask(() => response.destroy());
 
     tempDir = await makeScratchTempDir("pipe-response-mid-close-race-");
     const destination = path.join(tempDir, "file.bin");

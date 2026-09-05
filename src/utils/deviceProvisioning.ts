@@ -206,6 +206,34 @@ function abiRank(abi: string, preferences: string[]): number {
 const LOWEST_KNOWN_API_LEVEL = 21;
 
 /**
+ * A bound shaped exactly like a release version `versionToApiLevelRange`
+ * knows how to parse: an integer major, optional dotted point-release
+ * components, and an optional single trailing release letter (`"17"`,
+ * `"4.4"`, `"12L"`). A bound with this shape that still fails to resolve
+ * names a release the table has no entry for and must be rejected outright
+ * -- #6132's "no silent widening" guarantee. A bound that does NOT have this
+ * shape carries some other qualifier syntax the table was never meant to
+ * parse (a QPR suffix, say); see {@link leadingMajorFallback}.
+ */
+const CLEAN_RELEASE_VERSION_SHAPE = /^\d+(?:\.\d+)*[A-Za-z]?$/;
+
+/**
+ * Last-resort fallback for a bound the structured release-version parser
+ * cannot fully recognize (e.g. `"14-QPR2"`): extract its leading integer and
+ * use it directly as an API level, exactly like the `parseInt`-based
+ * resolver this replaced. That old resolver was unconditionally lenient, so
+ * any bound with a leading digit "worked" (if loosely) before this file
+ * started resolving release versions through the table; this fallback keeps
+ * that leniency for inputs the table's grammar doesn't cover, so provisioning
+ * never regresses a bound that used to work (review follow-up on #6132).
+ * Precise ordering of QPR/lettered qualifiers stays out of scope -- #6182.
+ */
+function leadingMajorFallback(trimmed: string): number | undefined {
+  const match = /^(\d+)/.exec(trimmed);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
  * Resolve one `minOsVersion` / `maxOsVersion` bound to an API level. The
  * matcher compares these bounds against the AVD's release version and the
  * provisioner compares them against `SystemImage.apiLevel`, and both receive
@@ -222,13 +250,24 @@ function resolveApiLevelBound(bound: string | undefined, edge: "min" | "max"): n
     return Number(trimmed);
   }
   const range = versionToApiLevelRange(trimmed);
-  if (!range) {
-    throw new ActionableError(
-      `Unrecognized Android ${edge}OsVersion '${bound}'. ` +
-        "Pass a release version such as '14' (Android 14) or an API level such as 34.",
-    );
+  if (range) {
+    return edge === "min" ? range.min : range.max;
   }
-  return edge === "min" ? range.min : range.max;
+  if (!CLEAN_RELEASE_VERSION_SHAPE.test(trimmed)) {
+    const fallback = leadingMajorFallback(trimmed);
+    if (fallback !== undefined) {
+      logger.debug(
+        `[DeviceProvisioner] ${edge}OsVersion '${trimmed}' carries a qualifier the release table ` +
+          `doesn't parse; falling back to its leading major ${fallback} as an API level (pre-#6132 ` +
+          "lenient behavior; full qualifier ordering is tracked in #6182).",
+      );
+      return fallback;
+    }
+  }
+  throw new ActionableError(
+    `Unrecognized Android ${edge}OsVersion '${bound}'. ` +
+      "Pass a release version such as '14' (Android 14) or an API level such as 34.",
+  );
 }
 
 function describeBound(bound: string | undefined, apiLevel: number | undefined): string {

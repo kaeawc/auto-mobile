@@ -169,6 +169,25 @@ describe("pickAndroidSystemImage", () => {
     expect(pickAndroidSystemImage(images, { minOsVersion: "35" }, "x64").apiLevel).toBe(35);
   });
 
+  it("does not throw on a QPR-qualified bound, falling back to its leading major (regression)", () => {
+    // The pre-#6132 resolver used parseInt on the leading digits of any
+    // bound, so minOsVersion:"14-QPR2" always "worked" (loosely) -- an
+    // installed API 35 image safely satisfies a min of 14. The structured
+    // release-version resolver must not be stricter than that: it should
+    // fall back to the leading major instead of throwing "Unrecognized
+    // Android minOsVersion" for a qualifier syntax it doesn't parse.
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "14-QPR2" }, "x64")).not.toThrow();
+    expect(pickAndroidSystemImage(images, { minOsVersion: "14-QPR2" }, "x64").apiLevel).toBe(35);
+  });
+
+  for (const qualifiedBound of ["14-QPR2", "15-QPR1", "13-QPR3", "9-QPR1"]) {
+    it(`does not throw at provisioning for the qualified bound '${qualifiedBound}'`, () => {
+      expect(() =>
+        pickAndroidSystemImage(images, { minOsVersion: qualifiedBound }, "x64"),
+      ).not.toThrow();
+    });
+  }
+
   it("rejects a release version it cannot map instead of silently widening the range", () => {
     expect(() => pickAndroidSystemImage(images, { minOsVersion: "17" }, "x64")).toThrow(
       ActionableError,

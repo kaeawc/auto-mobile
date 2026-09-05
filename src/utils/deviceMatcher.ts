@@ -115,7 +115,18 @@ function compareVersionToBound(version: string, bound: string): number {
   const parsedVersion = parseDeviceVersion(version);
   const parsedBound = parseDeviceVersion(bound);
   if (parsedVersion && parsedBound) {
-    const delta = compareParsedVersions(parsedVersion.components, parsedBound.components);
+    // A major-only bound ("8") spans every point release of that major
+    // (8.0, 8.1, ...), matching AvdConfigReader.versionToApiLevelRange, which
+    // resolves such a bound to the full API-level span for the major release
+    // when provisioning (#6132/#6132-followup). Comparing only the prefix
+    // shared with the bound's own precision -- instead of zero-padding the
+    // bound out to the version's length -- keeps "8.1" equal to "8", so a
+    // matcher against maxOsVersion:"8" accepts an AVD that provisioning
+    // widened to 8.1 instead of rejecting it and re-provisioning forever.
+    const delta = compareParsedVersions(
+      parsedVersion.components.slice(0, parsedBound.components.length),
+      parsedBound.components,
+    );
     if (delta !== 0) {
       return delta;
     }

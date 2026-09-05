@@ -95,6 +95,34 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("2");
   });
 
+  it("accepts a point release under a major-only maxOsVersion bound (#6132)", () => {
+    // AvdConfigReader.versionToApiLevelRange widens a major-only maxOsVersion
+    // like "8" to the whole API-level span for that major (26-27), so
+    // provisioning with only android-27 installed can create an "8.1" AVD.
+    // The matcher must accept that AVD on the identical follow-up
+    // createIfMissing request instead of rejecting it as 8.1 > 8 and
+    // re-provisioning forever.
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "8.1" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "8" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("still rejects a later major under a major-only maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "9" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "8" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
   it("filters by minOsVersion and maxOsVersion together", () => {
     const devices = [
       bootedDevice({ deviceId: "1", osVersion: "13" }),

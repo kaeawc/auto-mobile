@@ -318,13 +318,12 @@ describe("BunPortAvailabilityChecker (real checker, injected fake BunRuntime)", 
     expect(checker.isPortAvailable(9999)).toBe(false);
   });
 
-  test("uses the real globalThis.Bun when no runtime is injected", () => {
-    const checker = new BunPortAvailabilityChecker();
-
-    // Bun IS present in the test runtime, so this exercises the real bind
-    // path end to end against an arbitrary high port.
-    expect(typeof checker.isPortAvailable(59999)).toBe("boolean");
-  });
+  // No test exercises the `new BunPortAvailabilityChecker()` (no-arg) default
+  // path against the real `globalThis.Bun`: that global is non-configurable
+  // in the Bun test runtime (can't be swapped for a fake), and binding a real
+  // socket on a fixed port here would be flaky (contends with host activity)
+  // and asserted nothing regression-worthy — every other test above injects
+  // a fake `BunRuntime` and covers the actual probe logic.
 });
 
 describe("computeConfiguredScanEnd (AUTOMOBILE_PORT_RANGE_END scan bound, #6119)", () => {

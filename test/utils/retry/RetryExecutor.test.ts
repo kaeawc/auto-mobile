@@ -177,6 +177,107 @@ describe("DefaultRetryExecutor", () => {
       expect(attempts).toBe(1);
     });
 
+    it("removes its abort listener after every retry sleep on a shared signal", async () => {
+      // #6138: the sleep/abort race registered a { once: true } listener that was
+      // only removed when the signal aborted. A long-lived signal shared across
+      // executions accumulated one listener per retry.
+      timer.enableAutoAdvance();
+      const controller = new AbortController();
+      const signal = controller.signal;
+      let added = 0;
+      let removed = 0;
+      const originalAdd = signal.addEventListener.bind(signal);
+      const originalRemove = signal.removeEventListener.bind(signal);
+      signal.addEventListener = ((...args: Parameters<AbortSignal["addEventListener"]>) => {
+        added++;
+        return originalAdd(...args);
+      }) as AbortSignal["addEventListener"];
+      signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+        removed++;
+        return originalRemove(...args);
+      }) as AbortSignal["removeEventListener"];
+
+      const executions = 20;
+      const maxAttempts = 3;
+      for (let i = 0; i < executions; i++) {
+        const result = await executor.execute(
+          async () => {
+            throw new Error("Retry");
+          },
+          { signal, delays: 10, maxAttempts },
+        );
+        expect(result.success).toBe(false);
+        expect(result.attempts).toBe(maxAttempts);
+      }
+
+      expect(added).toBe(executions * (maxAttempts - 1));
+      expect(removed).toBe(added);
+    });
+
+    it("removes the abort listener when abort wins the race mid-sleep", async () => {
+      // Manual FakeTimer: the sleep never resolves, so the only way execute()
+      // settles is via the abort listener. This pins that `finally` runs after
+      // the race settles (a `return Promise.race` without `await` would remove
+      // the listener before it could fire and hang here).
+      const controller = new AbortController();
+      const signal = controller.signal;
+      let removed = 0;
+      const originalRemove = signal.removeEventListener.bind(signal);
+      signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+        removed++;
+        return originalRemove(...args);
+      }) as AbortSignal["removeEventListener"];
+
+      const resultPromise = executor.execute(
+        async () => {
+          throw new Error("Retry");
+        },
+        { signal, delays: 100, maxAttempts: 3 },
+      );
+
+      await Promise.resolve();
+      expect(timer.getPendingSleepCount()).toBe(1);
+
+      controller.abort();
+      const result = await resultPromise;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe("Operation aborted");
+      expect(result.attempts).toBe(1);
+      expect(removed).toBe(1);
+      // The losing sleep stays registered on the fake timer; it is bounded
+      // (one per abort) and pre-existing behavior.
+      expect(timer.getPendingSleepCount()).toBe(1);
+    });
+
+    it("settles when the injected sleep aborts the signal synchronously", async () => {
+      // timer.sleep() is evaluated before the abort-promise executor runs, so a
+      // Timer that aborts synchronously must be caught by the recheck inside the
+      // executor; otherwise the listener registers after the event already fired
+      // and execute() never settles.
+      const controller = new AbortController();
+      class SyncAbortingTimer extends FakeTimer {
+        override sleep(ms: number): Promise<void> {
+          controller.abort();
+          return super.sleep(ms);
+        }
+      }
+      const abortingExecutor = new DefaultRetryExecutor(new SyncAbortingTimer());
+      let attempts = 0;
+
+      const result = await abortingExecutor.execute(
+        async () => {
+          attempts++;
+          throw new Error("Retry");
+        },
+        { signal: controller.signal, delays: 100, maxAttempts: 3 },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe("Operation aborted");
+      expect(attempts).toBe(1);
+    });
+
     it("respects shouldRetry predicate", async () => {
       timer.enableAutoAdvance();
 

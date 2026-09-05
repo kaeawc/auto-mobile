@@ -146,30 +146,13 @@ export class DefaultRetryExecutor implements RetryExecutor {
           const delay = delayForAttempt(delays, attempt);
           onRetry?.(lastError, attempt, delay);
 
-          if (delay > 0) {
-            // Race sleep against abort signal for prompt cancellation
-            if (signal) {
-              const aborted = await Promise.race([
-                this.timer.sleep(delay).then(() => false),
-                new Promise<boolean>((resolve) => {
-                  if (signal.aborted) {
-                    resolve(true);
-                    return;
-                  }
-                  signal.addEventListener("abort", () => resolve(true), { once: true });
-                }),
-              ]);
-              if (aborted) {
-                return {
-                  success: false,
-                  error: new Error("Operation aborted"),
-                  attempts: attempt,
-                  totalTimeMs: this.timer.now() - startTime,
-                };
-              }
-            } else {
-              await this.timer.sleep(delay);
-            }
+          if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
+            return {
+              success: false,
+              error: new Error("Operation aborted"),
+              attempts: attempt,
+              totalTimeMs: this.timer.now() - startTime,
+            };
           }
         }
       }
@@ -181,6 +164,45 @@ export class DefaultRetryExecutor implements RetryExecutor {
       attempts: maxAttempts,
       totalTimeMs: this.timer.now() - startTime,
     };
+  }
+
+  /**
+   * Sleep for `delay` ms, racing against `signal` for prompt cancellation.
+   * Resolves `true` if the signal aborted before the sleep completed.
+   */
+  private async sleepUnlessAborted(delay: number, signal?: AbortSignal): Promise<boolean> {
+    if (!signal) {
+      await this.timer.sleep(delay);
+      return false;
+    }
+    if (signal.aborted) {
+      return true;
+    }
+    // Keep the listener reference so it can be removed once the race settles
+    // either way; { once: true } alone only cleans up on abort, which leaked
+    // one listener per retry on a long-lived signal (#6138).
+    let onAbort: (() => void) | undefined;
+    try {
+      // The `await` is load-bearing: it keeps `finally` from running until the
+      // race settles, so the listener is removed after (not before) it can fire.
+      return await Promise.race([
+        this.timer.sleep(delay).then(() => false),
+        new Promise<boolean>((resolve) => {
+          // Recheck: timer.sleep() above runs first and may abort synchronously,
+          // after which the event has already fired and a listener would hang.
+          if (signal.aborted) {
+            resolve(true);
+            return;
+          }
+          onAbort = () => resolve(true);
+          signal.addEventListener("abort", onAbort, { once: true });
+        }),
+      ]);
+    } finally {
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+      }
+    }
   }
 
   async executeOrThrow<T>(

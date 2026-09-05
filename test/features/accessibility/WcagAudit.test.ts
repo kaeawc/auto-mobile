@@ -598,6 +598,28 @@ describe("WcagAudit", function () {
 
       expect(sizeViolations).toHaveLength(0);
     });
+
+    it("never rounds a failing dimension's reported dp up to the minimum", async function () {
+      // 115px at 420 DPI is 43.81dp — under the 44dp gate (115.5px), so this
+      // must violate. Rounding to nearest would display "44x44dp", which
+      // reads as meeting "minimum: 44x44dp" right next to it.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 115, bottom: 115 },
+          clickable: true,
+          text: "Borderline",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 420);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(1);
+      expect(sizeViolations[0].message).toBe(
+        "Touch target is too small: 43x43dp (minimum: 44x44dp)",
+      );
+      expect(sizeViolations[0].details.actualSize).toEqual({ width: 43, height: 43 });
+    });
   });
 
   describe("Heading Hierarchy", function () {

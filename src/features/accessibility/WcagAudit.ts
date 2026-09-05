@@ -235,9 +235,13 @@ export class WcagAudit {
 
       if (widthPx < minSizePx || heightPx < minSizePx) {
         // Report the measured size in dp, not raw px, so the message is
-        // labeled correctly regardless of device density.
-        const widthDp = Math.round((widthPx * WcagAudit.BASELINE_DENSITY_DPI) / dpi);
-        const heightDp = Math.round((heightPx * WcagAudit.BASELINE_DENSITY_DPI) / dpi);
+        // labeled correctly regardless of device density. Round DOWN rather
+        // than to nearest: a violation's exact dp size is always < minSizeDp
+        // (that's why it violated), and rounding to nearest can carry a
+        // fractional dp (e.g. 43.81dp) up to display as the minimum itself
+        // (44dp), which reads as passing next to "minimum: 44x44dp".
+        const widthDp = Math.floor((widthPx * WcagAudit.BASELINE_DENSITY_DPI) / dpi);
+        const heightDp = Math.floor((heightPx * WcagAudit.BASELINE_DENSITY_DPI) / dpi);
 
         violations.push({
           type: "touch-target-too-small",

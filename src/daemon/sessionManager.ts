@@ -2085,8 +2085,24 @@ export class SessionManager {
    * timed-out setup cannot arm or fire a TTL against a same-UUID REPLACEMENT
    * session. The TTL is clamped to `MAX_NETWORK_CONDITION_TTL_SECONDS` so the
    * millisecond product cannot overflow `setTimeout`'s signed 32-bit delay (item 4).
+   *
+   * `generation` MUST be the value the caller's own `bumpNetworkConditionGeneration`
+   * call returned for the mutation this TTL belongs to (issue #6181 review) — NOT
+   * re-read from the session's current generation here. Two mutations (B, C) can
+   * bump the shared counter before either reaches this call (B under `await
+   * trackSessionSetup`, C right behind it), so reading "current" at schedule time
+   * can tag B's timer with C's generation. Comparing against a per-call, per-mutation
+   * value closes that window: a timer only ever matches the generation it actually
+   * belongs to. Callers that don't track their own generation (tests, and any
+   * caller predating this parameter) may omit it, falling back to the session's
+   * current generation at schedule time — safe as long as no concurrent mutation is
+   * in flight for that call.
    */
-  scheduleNetworkConditionExpiry(session: Session, expiresInSeconds: number): void {
+  scheduleNetworkConditionExpiry(
+    session: Session,
+    expiresInSeconds: number,
+    generation?: number,
+  ): void {
     const sessionId = session.sessionId;
     this.cancelNetworkConditionExpiry(sessionId);
     if (!(expiresInSeconds > 0)) {
@@ -2105,14 +2121,13 @@ export class SessionManager {
           `setTimeout limit for session ${sessionId}; clamping to ${effectiveSeconds}s`,
       );
     }
-    // Capture the CURRENT generation into the closure (issue #6177): this is the
-    // generation of the condition this TTL belongs to. If a newer condition
-    // supersedes it before this timer's awaited restore settles, the generation
-    // check in restoreNetworkConditionOnExpiry detects the mismatch and skips
-    // clearing the newer condition's restore slot.
-    const generation = this.currentNetworkConditionGeneration(sessionId);
+    // Capture the OWNING mutation's generation into the closure (issue #6177,
+    // hardened #6181): if a newer condition supersedes it before this timer's
+    // awaited restore settles, the generation check in restoreNetworkConditionOnExpiry
+    // detects the mismatch and skips clearing the newer condition's restore slot.
+    const effectiveGeneration = generation ?? this.currentNetworkConditionGeneration(sessionId);
     const handle = this.timer.setTimeout(() => {
-      this.handleNetworkConditionExpiry(session, generation);
+      this.handleNetworkConditionExpiry(session, effectiveGeneration);
     }, effectiveSeconds * 1000);
     this.networkConditionExpiryTimers.set(sessionId, { handle, session });
   }

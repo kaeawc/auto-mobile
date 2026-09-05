@@ -2356,6 +2356,83 @@ describe("SessionManager", () => {
         manager.stopCleanupTimer();
       }
     });
+
+    test("a TTL captures the OWNING mutation's generation, not the shared counter re-read after a later mutation bumps it, across a three-way A/B/C overlap (#6181 review)", async () => {
+      const timer = new FakeTimer();
+      const restoreCalls: string[] = [];
+      let releaseDeferredRestore: (() => void) | undefined;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restoreCalls.push(profile);
+            if (restoreCalls.length === 1) {
+              // Condition B's TTL-expiry restore: deferred so condition C can be
+              // applied while it is still in flight.
+              await new Promise<void>((resolve) => {
+                releaseDeferredRestore = resolve;
+              });
+            }
+          },
+        }),
+      );
+      try {
+        const sessionId = "net-ttl-three-way-generation";
+        const session = await manager.createSession(sessionId, "emulator-5554", "android");
+
+        // Condition A: establishes the restore slot at generation 1.
+        manager.bumpNetworkConditionGeneration(sessionId);
+        manager.setNetworkCondition(sessionId, { initialProfile: "none" });
+
+        // Condition B's mutation begins: it bumps to generation 2 and captures
+        // that value — exactly as runSessionNetworkMutation does — BEFORE its
+        // own (slow) mutation resolves.
+        const genB = manager.bumpNetworkConditionGeneration(sessionId);
+        expect(genB).toBe(2);
+
+        // Condition C's mutation ALSO begins and bumps to generation 3 while
+        // B's mutation is still conceptually in flight — the exact interleaving
+        // the review flagged: the shared counter has moved past B's own value
+        // before B ever reaches its schedule call.
+        const genC = manager.bumpNetworkConditionGeneration(sessionId);
+        expect(genC).toBe(3);
+
+        // B's mutation resolves first and arms a short TTL. It must be tagged
+        // with B's OWN captured generation (2) — a re-read of "current" here
+        // would wrongly pick up 3.
+        manager.scheduleNetworkConditionExpiry(session, 10, genB);
+
+        // B's TTL fires: its restore starts but hangs (deferred above). This
+        // also removes B's timer entry, so there is nothing left to cancel.
+        timer.advanceTime(10_000);
+        const bCleanup = manager.getPendingDeviceCleanup("emulator-5554");
+        expect(bCleanup).not.toBeNull();
+        expect(restoreCalls).toEqual(["none"]);
+
+        // C's mutation resolves after B's TTL has already fired and is still
+        // awaiting its restore, and arms its own TTL at its own generation.
+        manager.scheduleNetworkConditionExpiry(session, 100, genC);
+
+        // B's deferred restore now settles. With the OWNING generation (2)
+        // correctly captured, it must detect the mismatch against the current
+        // generation (3) and NOT clear C's restore slot.
+        releaseDeferredRestore?.();
+        await bCleanup;
+        expect(manager.getNetworkCondition(sessionId)).toEqual({ initialProfile: "none" });
+
+        // A later release must still restore the device — C's slot survived, so
+        // the device is not handed back to the pool still shaped.
+        await manager.releaseSession(sessionId);
+        expect(restoreCalls).toEqual(["none", "none"]);
+        expect(manager.getNetworkCondition(sessionId)).toBeUndefined();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
   });
 
   describe("statistics", () => {

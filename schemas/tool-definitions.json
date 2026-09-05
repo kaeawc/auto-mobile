@@ -7272,7 +7272,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["ios", "android"]
+          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7286,7 +7286,7 @@
           "type": "string"
         }
       },
-      "required": ["title", "body", "platform"],
+      "required": ["title", "body"],
       "additionalProperties": false,
       "if": {
         "properties": {

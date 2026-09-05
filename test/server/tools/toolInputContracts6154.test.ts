@@ -13,6 +13,10 @@ import {
 import { launchAppSchema } from "../../../src/server/appTools";
 import { highlightSchema, resolveHighlightClientOptions } from "../../../src/server/highlightTools";
 import { assertChangeLocalizationPlatformConstraints } from "../../../src/server/utilityTools";
+import {
+  checkPostNotificationPlatformConstraints,
+  postNotificationSchema,
+} from "../../../src/server/notificationTools";
 import type { BootedDevice } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 
@@ -100,6 +104,21 @@ describe("issue #6154: platform is optional wherever deviceId/session resolves i
     expect(result.platform).toBeUndefined();
     expect(result.deviceId).toBeUndefined();
     expect(result.sessionUuid).toBe("session-123");
+  });
+
+  // Coordinator follow-up: postNotification used a z.discriminatedUnion on
+  // `platform`, which forces the discriminator to be present — it was missed
+  // by the original #6154 sweep and still required platform even with a
+  // resolvable deviceId. Restructured off the union; assert it now matches
+  // the rest of the action-tool family.
+  test("postNotification parses with platform omitted and deviceId present", () => {
+    const result = postNotificationSchema.parse({
+      deviceId: "emulator-5554",
+      title: "T",
+      body: "B",
+    });
+    expect(result.platform).toBeUndefined();
+    expect(result.deviceId).toBe("emulator-5554");
   });
 });
 
@@ -233,6 +252,46 @@ describe("issue #6154 follow-up: handlers use the resolved platform, not the raw
       expect(() =>
         assertActiveWindowWaitForSupportedOnPlatform(iosDevice.platform, undefined),
       ).not.toThrow();
+    });
+  });
+
+  describe("postNotification (Codex P2, follow-up sweep miss)", () => {
+    test("iOS device via deviceId with no appId (no platform param) is rejected post-resolution", () => {
+      const violation = checkPostNotificationPlatformConstraints(iosDevice.platform, {});
+      expect(violation).toEqual({
+        path: "appId",
+        message: "appId is required when platform is ios",
+      });
+    });
+
+    test("iOS device via deviceId with appId (no platform param) is accepted", () => {
+      expect(
+        checkPostNotificationPlatformConstraints(iosDevice.platform, {
+          appId: "com.example.app",
+        }),
+      ).toBeNull();
+    });
+
+    test("Android device via deviceId with a malformed appId (no platform param) is rejected post-resolution", () => {
+      const violation = checkPostNotificationPlatformConstraints(androidDevice.platform, {
+        appId: "not a package name; rm -rf",
+      });
+      expect(violation).toEqual({
+        path: "appId",
+        message: "appId must be an Android package name",
+      });
+    });
+
+    test("Android device via deviceId with a valid appId (no platform param) is accepted", () => {
+      expect(
+        checkPostNotificationPlatformConstraints(androidDevice.platform, {
+          appId: "com.example.app",
+        }),
+      ).toBeNull();
+    });
+
+    test("Android device via deviceId with no appId at all (no platform param) is accepted", () => {
+      expect(checkPostNotificationPlatformConstraints(androidDevice.platform, {})).toBeNull();
     });
   });
 });

@@ -103,8 +103,11 @@ describe("notification tools", () => {
 
     expect(toolDefinition).toBeDefined();
     const schema = toolDefinition!.inputSchema as any;
-    expect(schema.required).toEqual(["title", "body", "platform"]);
-    expect(schema.properties.platform.enum).toEqual(["ios", "android"]);
+    // #6154: platform is optional wherever deviceId/session resolves it.
+    expect(schema.required).toEqual(["title", "body"]);
+    // #6154: platform now comes from the shared `platformSchema` (android, ios)
+    // instead of a per-branch literal union, so the enum order flipped.
+    expect(schema.properties.platform.enum).toEqual(["android", "ios"]);
     expect(schema.properties.appId.description).toContain(
       "Android defaults to the live foreground app",
     );
@@ -120,7 +123,8 @@ describe("notification tools", () => {
 
     expect(toolDefinition).toBeDefined();
     const schema = toolDefinition!.inputSchema as any;
-    expect(schema.required).toEqual(["title", "body", "platform"]);
+    // #6154: platform is optional wherever deviceId/session resolves it.
+    expect(schema.required).toEqual(["title", "body"]);
     expect(schema.if).toEqual({
       properties: {
         platform: { const: "ios" },

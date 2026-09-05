@@ -147,6 +147,53 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     expect(getTableDataForIos).not.toHaveBeenCalled();
   });
 
+  // Issue #6188: ResourceRegistry.extractTemplateParams forwards any query
+  // key that isn't a path capture — including a typo like `limt` — instead
+  // of silently dropping it, so getTableDataResource must reject unknown
+  // keys itself rather than silently falling back to defaults.
+  test("rejects an unknown/typo'd query parameter instead of silently defaulting", async () => {
+    const getTableDataForIos = mock(async () => ({ columns: [], rows: [], total: 0 }));
+    setupDevice(getTableDataForIos);
+    registerDatabaseResources();
+
+    const uri = `${base}?appId=com.example.app&limt=10`;
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    expect(match!.params.limt).toBe("10");
+
+    const content = await match!.template.handler(match!.params);
+    const payload = JSON.parse(content.text!);
+
+    expect(payload.error).toContain("Unknown query parameters");
+    expect(payload.error).toContain("limt");
+    expect(getTableDataForIos).not.toHaveBeenCalled();
+  });
+
+  // Issue #6188: Android's DatabaseInspectorProvider.handleGetTableData
+  // parses limit/offset with Kotlin's `toIntOrNull()` (32-bit signed), so a
+  // JS-safe-integer value beyond Int32 max would silently fall back to the
+  // Android-side default instead of the value the resource response claims.
+  test.each([
+    ["limit", `${base}?appId=com.example.app&limit=2147483648`],
+    ["offset", `${base}?appId=com.example.app&offset=2147483648`],
+  ])(
+    "rejects an out-of-Int32-range %s instead of silently mismatching Android",
+    async (paramName, uri) => {
+      const getTableDataForIos = mock(async () => ({ columns: [], rows: [], total: 0 }));
+      setupDevice(getTableDataForIos);
+      registerDatabaseResources();
+
+      const match = ResourceRegistry.matchTemplate(uri);
+      expect(match).toBeDefined();
+
+      const content = await match!.template.handler(match!.params);
+      const payload = JSON.parse(content.text!);
+
+      expect(payload.error).toContain(`Invalid ${paramName}`);
+      expect(getTableDataForIos).not.toHaveBeenCalled();
+    },
+  );
+
   // Issue #6188: extractTemplateParams previously copied every query pair,
   // so a query key colliding with a path-captured param name (deviceId,
   // databasePath, table) silently overrode the path-selected value.

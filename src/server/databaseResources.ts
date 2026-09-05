@@ -33,6 +33,20 @@ const DATABASE_RESOURCE_TEMPLATES = {
     "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/structure?appId={appId}",
 } as const;
 
+// Path-captured and declared-query param names for the table-data template,
+// used to reject any other (e.g. typo'd) query key instead of silently
+// ignoring it (issue #6188) — matching the unknown-key validation in
+// parsePerformanceParams/parseTrafficParams/parseAppsQueryParams.
+const TABLE_DATA_PATH_PARAM_NAMES = new Set(["deviceId", "databasePath", "table"]);
+const TABLE_DATA_QUERY_PARAM_NAMES = new Set(["appId", "limit", "offset"]);
+
+// Android's DatabaseInspectorProvider.handleGetTableData parses limit/offset
+// with Kotlin's `toIntOrNull()` (a 32-bit signed int), silently falling back
+// to its own default when a value overflows Int32 — so a JS-safe-integer
+// value like 2147483648 would report success with the wrong effective page
+// instead of the value it claims. Bound both to the Int32 range up front.
+const INT32_MAX = 2_147_483_647;
+
 // Cache entries for change detection
 interface DatabaseCacheEntry {
   databases: DatabaseInfo[];
@@ -309,6 +323,19 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
 
   try {
+    // ResourceRegistry forwards any query key that isn't captured as a path
+    // param, including a typo'd one (e.g. `limt=10`), rather than silently
+    // dropping it — see extractTemplateParams (issue #6188). Reject one here
+    // instead of silently falling back to defaults, matching the unknown-key
+    // validation in parsePerformanceParams/parseTrafficParams/
+    // parseAppsQueryParams.
+    const unknownKeys = Object.keys(params).filter(
+      (key) => !TABLE_DATA_PATH_PARAM_NAMES.has(key) && !TABLE_DATA_QUERY_PARAM_NAMES.has(key),
+    );
+    if (unknownKeys.length > 0) {
+      throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
+    }
+
     // appId is a required identity for the target app/database, unlike
     // limit/offset — the `{?appId,limit,offset}` query-expansion form makes
     // every one of its variables optional at the template level, so the
@@ -320,9 +347,10 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
     // Parse optional limit and offset from query params using the repo's
     // centralized query-validation helper (safe-integer + min-bound), rather
     // than a second hand-rolled parser (issue #6188). Absent/empty falls
-    // back to the documented default (issue #6133).
-    const limit = optionalInteger(params.limit, "limit", { min: 0 }) ?? 50;
-    const offset = optionalInteger(params.offset, "offset", { min: 0 }) ?? 0;
+    // back to the documented default (issue #6133). Bounded to Int32 max —
+    // see the INT32_MAX comment above.
+    const limit = optionalInteger(params.limit, "limit", { min: 0, max: INT32_MAX }) ?? 50;
+    const offset = optionalInteger(params.offset, "offset", { min: 0, max: INT32_MAX }) ?? 0;
 
     const device = await findBootedDevice(deviceId);
     if (!device) {

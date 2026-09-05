@@ -79,6 +79,37 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
+  /**
+   * After restoring auto-rotate, determine what orientation the device
+   * actually ended up in. Restoring auto-rotate can let the physical sensor
+   * immediately re-apply its own orientation, overriding the one just
+   * forced, so this confirmation read MUST be LIVE (mRotation from dumpsys
+   * window) — falling back to `user_rotation` here would just echo the
+   * value this same call wrote a moment ago and silently recreate the false
+   * "requested orientation held" success this fix exists to prevent. If the
+   * live read is unavailable, the achieved orientation is reported as
+   * unconfirmed rather than guessed (#6199 review).
+   */
+  private async confirmOrientationAfterAutoRotateRestore(
+    requestedOrientation: "portrait" | "landscape",
+  ): Promise<{ achievedOrientation: string; warning: string | undefined }> {
+    const liveRotationValue = await this.readLiveRotation();
+    if (liveRotationValue === null) {
+      return {
+        achievedOrientation: "unknown",
+        warning: `Auto-rotate is enabled and the device's orientation after restoring it could not be confirmed (live rotation read failed); the requested ${requestedOrientation} orientation may not be held.`,
+      };
+    }
+
+    const achievedOrientation =
+      liveRotationValue === 0 || liveRotationValue === 2 ? "portrait" : "landscape";
+    const warning =
+      achievedOrientation === requestedOrientation
+        ? undefined
+        : `Auto-rotate is enabled and immediately reverted the device to ${achievedOrientation} based on the physical sensor; the requested ${requestedOrientation} orientation is not held.`;
+    return { achievedOrientation, warning };
+  }
+
   async getCurrentOrientation(): Promise<string> {
     // Prefer the live window-manager rotation: `user_rotation` only reflects
     // the last explicitly-requested rotation and goes stale as soon as
@@ -316,16 +347,8 @@ export class Rotate extends BaseVisualChange {
 
       if (wasAutoRotateEnabled) {
         await this.writeSystemSetting("accelerometer_rotation", "1");
-
-        // Restoring auto-rotate can let the physical sensor immediately
-        // re-apply its own orientation, overriding the one we just forced.
-        // Re-read the live orientation so we report what actually ended up
-        // held, rather than blindly claiming the requested orientation
-        // stuck (#6199 review).
-        achievedOrientation = await this.getCurrentOrientation();
-        if (achievedOrientation !== orientation) {
-          warning = `Auto-rotate is enabled and immediately reverted the device to ${achievedOrientation} based on the physical sensor; the requested ${orientation} orientation is not held.`;
-        }
+        ({ achievedOrientation, warning } =
+          await this.confirmOrientationAfterAutoRotateRestore(orientation));
       }
 
       return {
@@ -338,7 +361,9 @@ export class Rotate extends BaseVisualChange {
         orientationLockHandled: wasAutoRotateEnabled,
         warning,
         message: warning
-          ? `Rotated to ${orientation}, but auto-rotate reverted the device to ${achievedOrientation}`
+          ? achievedOrientation === "unknown"
+            ? `Rotated to ${orientation}, but the device's orientation after auto-rotate restore could not be confirmed`
+            : `Rotated to ${orientation}, but auto-rotate reverted the device to ${achievedOrientation}`
           : `Successfully rotated from ${currentOrientation} to ${orientation}`,
       };
     } catch (error) {

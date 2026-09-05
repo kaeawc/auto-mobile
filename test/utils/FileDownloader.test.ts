@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
@@ -18,19 +19,31 @@ const asNodeHttpDownloader = (downloader: DefaultFileDownloader): NodeHttpDownlo
   downloader as unknown as NodeHttpDownloader;
 
 /**
- * Starts a local server that writes `sentBytes` of a declared
- * `declaredLength`-byte body, then destroys the socket before the response
- * completes — simulating a peer that closes the connection mid-body
- * (issue #6131).
+ * Starts a bare TCP server that writes HTTP/1.1 response headers plus
+ * `sentBytes` of a declared `declaredLength`-byte body, then gracefully
+ * half-closes the socket (FIN, not RST) before the body completes —
+ * simulating a peer that closes the connection mid-body (issue #6131).
+ *
+ * A real `http.createServer` + `response.socket.destroy()` sends a TCP
+ * RST, which Node's http client surfaces as a `request` "error" — the
+ * pre-existing handler this bug report says is NOT the gap. A graceful
+ * half-close only ever reaches the client as a `response` "aborted"/
+ * "error"/"close" event, which is exactly the gap `downloadWithNodeHttp`
+ * had: a repro that instead triggers `request` "error" would still pass
+ * against the unfixed code and prove nothing.
  */
 const createMidBodyCloseServer = async (
   sentBytes: number,
   declaredLength: number,
 ): Promise<{ url: string; close: () => Promise<void> }> => {
-  const server = http.createServer((_request, response) => {
-    response.writeHead(200, { "content-length": String(declaredLength) });
-    response.write(Buffer.alloc(sentBytes, "a"));
-    response.socket?.destroy();
+  const server = net.createServer((socket) => {
+    socket.once("data", () => {
+      socket.write(
+        `HTTP/1.1 200 OK\r\nContent-Length: ${declaredLength}\r\nConnection: close\r\n\r\n`,
+      );
+      socket.write(Buffer.alloc(sentBytes, "a"));
+      socket.end();
+    });
   });
 
   await new Promise<void>((resolve) => {
@@ -39,7 +52,7 @@ const createMidBodyCloseServer = async (
 
   const address = server.address();
   if (address === null || typeof address === "string") {
-    throw new Error("Expected local HTTP server to listen on a TCP address");
+    throw new Error("Expected local TCP server to listen on a TCP address");
   }
 
   return {
@@ -114,6 +127,29 @@ describe("DefaultFileDownloader downloadWithNodeHttp", function () {
     }
 
     expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
+    // No attempt-unique temp file is left behind either.
+    expect(await fs.readdir(tempDir)).toEqual([]);
+  }, 2000);
+
+  test("a failed attempt never removes a file another attempt already wrote to the same destination", async function () {
+    // Regression guard: failure cleanup must only ever remove the failed
+    // attempt's own temp file, never the shared `destination` — otherwise a
+    // slow-to-settle failed attempt can delete a concurrent/retried
+    // download's completed file out from under it (issue #6131 review).
+    const server = await createMidBodyCloseServer(1000, 1_000_000);
+    tempDir = await makeScratchTempDir("node-http-mid-close-race-");
+    const destination = path.join(tempDir, "file.bin");
+    const existingPayload = Buffer.from("already downloaded by another attempt");
+    await fs.writeFile(destination, existingPayload);
+    const downloader = asNodeHttpDownloader(new DefaultFileDownloader());
+
+    try {
+      await expect(downloader.downloadWithNodeHttp(server.url, destination, 0)).rejects.toThrow();
+    } finally {
+      await server.close();
+    }
+
+    expect(await fs.readFile(destination)).toEqual(existingPayload);
   }, 2000);
 
   test("resolves with the full file for a complete response", async function () {

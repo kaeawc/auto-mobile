@@ -10,6 +10,7 @@ import { promisify } from "util";
 import { logger } from "./logger";
 import { getAbortSignal } from "./AbortContext";
 import { toActionableError } from "../models/ActionableError";
+import { type IdGenerator, defaultIdGenerator } from "./IdGenerator";
 
 const execFileAsync = promisify(execFile);
 
@@ -18,6 +19,8 @@ export interface FileDownloader {
 }
 
 export class DefaultFileDownloader implements FileDownloader {
+  constructor(private readonly idGenerator: IdGenerator = defaultIdGenerator) {}
+
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     signal ??= getAbortSignal();
     if (signal?.aborted) {
@@ -123,22 +126,28 @@ export class DefaultFileDownloader implements FileDownloader {
             return;
           }
 
-          const fileStream = createWriteStream(destination);
+          // Write to an attempt-unique temp path and rename on success, so
+          // failure cleanup only ever removes bytes this attempt wrote — a
+          // concurrent or retried download to the same `destination` can
+          // never have its file deleted out from under it (issue #6131).
+          const tempDestination = `${destination}.download-${this.idGenerator.next()}.tmp`;
+          const fileStream = createWriteStream(tempDestination);
           // stream.pipeline (not response.pipe) so a mid-body socket close
-          // (server FIN before Content-Length bytes arrive) surfaces as
-          // ERR_STREAM_PREMATURE_CLOSE instead of silently stalling forever:
-          // pipe() only reacts to 'end'/'error', neither of which fires when
-          // the peer just closes the connection (issue #6131).
+          // (server FIN before Content-Length bytes arrive) surfaces as a
+          // rejection instead of stalling forever: pipe() only reacts to
+          // 'end'/'error', neither of which fires when the peer just closes
+          // the connection.
           void pipeline(response, fileStream)
+            .then(() => fs.rename(tempDestination, destination))
             .then(() => resolve())
             .catch((err: unknown) => {
               void fs
-                .rm(destination, { force: true })
+                .rm(tempDestination, { force: true })
                 .catch((rmError: unknown) => {
                   // Best-effort cleanup of the partial file; failing to
                   // remove it must not mask the original download error.
                   logger.debug(
-                    `[FileDownloader] failed to remove partial download at ${destination}: ${errorMessage(rmError)}`,
+                    `[FileDownloader] failed to remove partial download at ${tempDestination}: ${errorMessage(rmError)}`,
                   );
                 })
                 .finally(() => {

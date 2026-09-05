@@ -1,3 +1,4 @@
+import { Mutex } from "async-mutex";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, RotateResult } from "../../models";
@@ -7,10 +8,29 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
 
 export class Rotate extends BaseVisualChange {
+  // Serializes the read-auto-rotate -> disable -> rotate -> restore-auto-rotate
+  // critical section per device, so two concurrent rotations against the SAME
+  // device cannot interleave: without this, one rotation could read the
+  // other's temporary `accelerometer_rotation=0` as the "prior state" and
+  // later restore auto-rotate to the wrong value (#6199 review). Keyed by
+  // deviceId (not per-instance) since a new Rotate is constructed per tool
+  // call. Deliberately NOT shared across different devices.
+  private static readonly rotationLocks = new Map<string, Mutex>();
+
   constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
+  }
+
+  private getRotationLock(): Mutex {
+    let lock = Rotate.rotationLocks.get(this.device.deviceId);
+    if (!lock) {
+      lock = new Mutex();
+      Rotate.rotationLocks.set(this.device.deviceId, lock);
+    }
+    return lock;
   }
 
   /**
@@ -38,19 +58,21 @@ export class Rotate extends BaseVisualChange {
   }
 
   /**
-   * Read the live device rotation from the window manager (`dumpsys window`,
-   * `mRotation=`). Unlike the `user_rotation` setting, this reflects the
-   * rotation actually applied by the sensor when auto-rotate is on, so it
-   * cannot go stale the way `user_rotation` does (issue #6129).
-   * @returns The parsed `mRotation` value, or null if it could not be read
+   * Read the live device rotation from the window manager (`dumpsys window`).
+   * Unlike the `user_rotation` setting, this reflects the rotation actually
+   * applied by the sensor when auto-rotate is on, so it cannot go stale the
+   * way `user_rotation` does (issue #6129). Parsing is delegated to
+   * {@link parseWindowManagerRotation}, which selects the authoritative
+   * display rotation and skips stale/unrelated `mRotation=` occurrences
+   * (e.g. a cached TaskSnapshot) elsewhere in the dump (issue #6199).
+   * @returns The parsed rotation value, or null if it could not be read
    */
   private async readLiveRotation(): Promise<number | null> {
     try {
       const { stdout } = await this.adb.executeCommand(
         'shell dumpsys window | grep -i "mRotation="',
       );
-      const match = stdout.match(/mRotation=(\d+)/);
-      return match ? parseInt(match[1], 10) : null;
+      return parseWindowManagerRotation(stdout);
     } catch (error) {
       logger.debug(`[Rotate] Failed to read live rotation via dumpsys window: ${error}`);
       return null;
@@ -193,117 +215,14 @@ export class Rotate extends BaseVisualChange {
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<RotateResult> {
     return this.observedInteraction(
-      async () => {
-        const value = orientation === "portrait" ? 0 : 1;
-
-        // Run getCurrentOrientation and getAutoRotateState in parallel
-        const [currentOrientation, autoRotateState] = await perf.track("getOrientationState", () =>
-          Promise.all([this.getCurrentOrientation(), this.getAutoRotateState()]),
-        );
-
-        // Check if device is already in the desired orientation
-        if (currentOrientation === orientation) {
-          return {
-            success: true,
-            orientation,
-            value,
-            currentOrientation,
-            previousOrientation: currentOrientation,
-            rotationPerformed: false,
-            orientationLockHandled: false,
-            message: `Device is already in ${orientation} orientation`,
-          };
-        }
-
-        // Auto-rotate must be off for `user_rotation` writes to take effect,
-        // regardless of whether it was already off beforehand. Remember the
-        // pre-existing value so it can be restored once the forced rotation
-        // completes, instead of leaving auto-rotate permanently disabled
-        // (#6129). Only restore when we CONFIRMED auto-rotate was on beforehand
-        // — an unreadable/malformed reading must never be fabricated into a
-        // state to restore (#6199 review).
-        const wasAutoRotateEnabled = autoRotateState === "enabled";
-
-        try {
-          if (autoRotateState === "locked") {
-            logger.info("Orientation is locked; forcing the requested rotation");
-          } else if (autoRotateState === "enabled") {
-            logger.info("Auto-rotate is on; temporarily disabling it to force rotation");
-          } else {
-            logger.info(
-              "accelerometer_rotation is unreadable; forcing rotation without restoring it afterward",
-            );
-          }
-
-          await perf.track("setRotation", () =>
-            Promise.all([
-              this.writeSystemSetting("accelerometer_rotation", "0"),
-              this.writeSystemSetting("user_rotation", String(value)),
-            ]),
-          );
-
-          // Wait for rotation to complete (also serves as verification)
-          await perf.track("waitForRotation", () => this.awaitIdle.waitForRotation(value));
-
-          // Note: We skip explicit verification since waitForRotation already confirms
-          // the rotation completed successfully by polling dumpsys window
-
-          // waitForRotation(value) above already confirmed the device reached the
-          // requested orientation while auto-rotate was forced off. The local
-          // `currentOrientation` remains the legitimate prior value (see #6057).
-          let achievedOrientation: string = orientation;
-          let warning: string | undefined;
-
-          if (wasAutoRotateEnabled) {
-            await this.writeSystemSetting("accelerometer_rotation", "1");
-
-            // Restoring auto-rotate can let the physical sensor immediately
-            // re-apply its own orientation, overriding the one we just forced.
-            // Re-read the live orientation so we report what actually ended up
-            // held, rather than blindly claiming the requested orientation
-            // stuck (#6199 review).
-            achievedOrientation = await this.getCurrentOrientation();
-            if (achievedOrientation !== orientation) {
-              warning = `Auto-rotate is enabled and immediately reverted the device to ${achievedOrientation} based on the physical sensor; the requested ${orientation} orientation is not held.`;
-            }
-          }
-
-          return {
-            success: true,
-            orientation,
-            value,
-            currentOrientation: achievedOrientation,
-            previousOrientation: currentOrientation,
-            rotationPerformed: true,
-            orientationLockHandled: wasAutoRotateEnabled,
-            warning,
-            message: warning
-              ? `Rotated to ${orientation}, but auto-rotate reverted the device to ${achievedOrientation}`
-              : `Successfully rotated from ${currentOrientation} to ${orientation}`,
-          };
-        } catch (error) {
-          // Restore auto-rotate if it was on before this call
-          if (wasAutoRotateEnabled) {
-            try {
-              await this.writeSystemSetting("accelerometer_rotation", "1");
-              logger.info("Restored auto-rotate after error");
-            } catch (restoreError) {
-              logger.warn(`Failed to restore auto-rotate: ${restoreError}`);
-            }
-          }
-
-          return {
-            success: false,
-            orientation,
-            value,
-            currentOrientation,
-            previousOrientation: currentOrientation,
-            rotationPerformed: false,
-            orientationLockHandled: wasAutoRotateEnabled,
-            error: `Failed to change device orientation: ${error}`,
-          };
-        }
-      },
+      // The read-auto-rotate -> disable -> rotate -> restore-auto-rotate
+      // sequence below must run atomically per device: interleaving it with
+      // a concurrent rotation on the same device would let one call observe
+      // the other's temporary accelerometer_rotation=0 as the "prior state"
+      // (#6199 review). Different devices use independent locks and never
+      // wait on each other.
+      () =>
+        this.getRotationLock().runExclusive(() => this.performAndroidRotation(orientation, perf)),
       {
         changeExpected: true,
         timeoutMs: 5000,
@@ -314,5 +233,125 @@ export class Rotate extends BaseVisualChange {
         skipUiStability: true,
       },
     );
+  }
+
+  /**
+   * The read-auto-rotate -> disable -> rotate -> restore-auto-rotate critical
+   * section for Android rotation. Callers MUST run this under
+   * {@link getRotationLock} to serialize it per device (#6199 review).
+   */
+  private async performAndroidRotation(
+    orientation: "portrait" | "landscape",
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+  ): Promise<RotateResult> {
+    const value = orientation === "portrait" ? 0 : 1;
+
+    // Run getCurrentOrientation and getAutoRotateState in parallel
+    const [currentOrientation, autoRotateState] = await perf.track("getOrientationState", () =>
+      Promise.all([this.getCurrentOrientation(), this.getAutoRotateState()]),
+    );
+
+    // Check if device is already in the desired orientation
+    if (currentOrientation === orientation) {
+      return {
+        success: true,
+        orientation,
+        value,
+        currentOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: false,
+        orientationLockHandled: false,
+        message: `Device is already in ${orientation} orientation`,
+      };
+    }
+
+    // Auto-rotate must be off for `user_rotation` writes to take effect,
+    // regardless of whether it was already off beforehand. Remember the
+    // pre-existing value so it can be restored once the forced rotation
+    // completes, instead of leaving auto-rotate permanently disabled
+    // (#6129). Only restore when we CONFIRMED auto-rotate was on beforehand
+    // — an unreadable/malformed reading must never be fabricated into a
+    // state to restore (#6199 review).
+    const wasAutoRotateEnabled = autoRotateState === "enabled";
+
+    try {
+      if (autoRotateState === "locked") {
+        logger.info("Orientation is locked; forcing the requested rotation");
+      } else if (autoRotateState === "enabled") {
+        logger.info("Auto-rotate is on; temporarily disabling it to force rotation");
+      } else {
+        logger.info(
+          "accelerometer_rotation is unreadable; forcing rotation without restoring it afterward",
+        );
+      }
+
+      await perf.track("setRotation", () =>
+        Promise.all([
+          this.writeSystemSetting("accelerometer_rotation", "0"),
+          this.writeSystemSetting("user_rotation", String(value)),
+        ]),
+      );
+
+      // Wait for rotation to complete (also serves as verification)
+      await perf.track("waitForRotation", () => this.awaitIdle.waitForRotation(value));
+
+      // Note: We skip explicit verification since waitForRotation already confirms
+      // the rotation completed successfully by polling dumpsys window
+
+      // waitForRotation(value) above already confirmed the device reached the
+      // requested orientation while auto-rotate was forced off. The local
+      // `currentOrientation` remains the legitimate prior value (see #6057).
+      let achievedOrientation: string = orientation;
+      let warning: string | undefined;
+
+      if (wasAutoRotateEnabled) {
+        await this.writeSystemSetting("accelerometer_rotation", "1");
+
+        // Restoring auto-rotate can let the physical sensor immediately
+        // re-apply its own orientation, overriding the one we just forced.
+        // Re-read the live orientation so we report what actually ended up
+        // held, rather than blindly claiming the requested orientation
+        // stuck (#6199 review).
+        achievedOrientation = await this.getCurrentOrientation();
+        if (achievedOrientation !== orientation) {
+          warning = `Auto-rotate is enabled and immediately reverted the device to ${achievedOrientation} based on the physical sensor; the requested ${orientation} orientation is not held.`;
+        }
+      }
+
+      return {
+        success: true,
+        orientation,
+        value,
+        currentOrientation: achievedOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: true,
+        orientationLockHandled: wasAutoRotateEnabled,
+        warning,
+        message: warning
+          ? `Rotated to ${orientation}, but auto-rotate reverted the device to ${achievedOrientation}`
+          : `Successfully rotated from ${currentOrientation} to ${orientation}`,
+      };
+    } catch (error) {
+      // Restore auto-rotate if it was on before this call
+      if (wasAutoRotateEnabled) {
+        try {
+          await this.writeSystemSetting("accelerometer_rotation", "1");
+          logger.info("Restored auto-rotate after error");
+        } catch (restoreError) {
+          logger.warn(`Failed to restore auto-rotate: ${restoreError}`);
+        }
+      }
+
+      return {
+        success: false,
+        orientation,
+        value,
+        currentOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: false,
+        orientationLockHandled: wasAutoRotateEnabled,
+        error: `Failed to change device orientation: ${error}`,
+      };
+    }
   }
 }

@@ -253,6 +253,32 @@ describe("Rotate", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
     });
 
+    test("should select the LIVE display mRotation over a stale TaskSnapshot mRotation in realistic dumpsys output (#6199)", async () => {
+      // Realistic `dumpsys window | grep -i "mRotation="` output: a cached
+      // SnapshotCache entry embeds a historical (stale) TaskSnapshot rotation
+      // BEFORE the authoritative WindowManagerService rotation line. A naive
+      // "first match anywhere" parse picks the stale value and defeats #6129.
+      const dumpsysWindowGrepOutput = [
+        "     snapshot=TaskSnapshot{ mId=1749551414267 mCaptureTime=1748344877515 mTopActivityComponent=com.android.settings/.SubSettings mSnapshot=android.hardware.HardwareBuffer@d8e7fad (864x1920) mColorSpace=sRGB IEC61966-2.1 (id=0, model=RGB) mOrientation=1 mRotation=0 mTaskSize=Point(1080, 2400) mContentInsets=[0,74][0,63] mLetterboxInsets=[0,0][0,0] mIsLowResolution=false mIsRealSnapshot=true mWindowingMode=1 mAppearance=24 mIsTranslucent=false mHasImeSurface=false mInternalReferences=2",
+        "  mRotation=1",
+      ].join("\n");
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult(dumpsysWindowGrepOutput),
+      );
+
+      const orientation = await rotate.getCurrentOrientation();
+
+      // The authoritative live rotation (1 = landscape) must win over the
+      // stale TaskSnapshot rotation (0 = portrait).
+      expect(orientation).toBe("landscape");
+    });
+
     test("should honestly report the sensor-held orientation when auto-rotate overrides the forced rotation (#6199)", async () => {
       // Auto-rotate is on and the physical sensor stays landscape throughout
       // (e.g. the device is physically held sideways) — restoring auto-rotate
@@ -468,6 +494,86 @@ describe("Rotate", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
         false,
       );
+    });
+
+    test("serializes concurrent rotations on the same device so auto-rotate restore is not corrupted (#6199)", async () => {
+      // Device starts portrait with auto-rotate ON.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+
+      // Gate the FIRST rotation's waitForRotation call so it parks mid-flight
+      // — after reading state and writing accelerometer_rotation=0, but
+      // before restoring it — giving a concurrent second rotation on the same
+      // device a window to race it if the critical section is not serialized.
+      let releaseFirstWait: (() => void) | undefined;
+      const firstWaitGate = new Promise<void>((resolve) => {
+        releaseFirstWait = resolve;
+      });
+      let waitForRotationCalls = 0;
+      const gatedAwaitIdle = {
+        waitForRotation: async () => {
+          waitForRotationCalls++;
+          if (waitForRotationCalls === 1) {
+            await firstWaitGate;
+          }
+        },
+      };
+      (rotate as any).awaitIdle = gatedAwaitIdle;
+
+      const secondRotate = new Rotate(mockDevice, fakeAdb, fakeTimer);
+      (secondRotate as any).awaitIdle = gatedAwaitIdle;
+      (secondRotate as any).observeScreen = fakeObserveScreen;
+      (secondRotate as any).window = fakeWindow;
+
+      const lock = (rotate as any).getRotationLock();
+      // Same deviceId -> the second instance must resolve to the SAME lock.
+      expect((secondRotate as any).getRotationLock()).toBe(lock);
+
+      const firstCall = rotate.execute("landscape");
+
+      // Let the first call's microtasks run until it holds the lock and is
+      // parked at the gate.
+      for (let i = 0; i < 50 && !lock.isLocked(); i++) {
+        await Promise.resolve();
+      }
+      expect(lock.isLocked()).toBe(true);
+
+      // Same requested orientation as the first call: `user_rotation` is
+      // stubbed at a constant stale "0" (portrait) regardless of what either
+      // call writes, so both calls see "not yet landscape" and must go
+      // through the full write/restore flow rather than short-circuiting.
+      const secondCall = secondRotate.execute("landscape");
+
+      // Give the second call every chance to run if it were (incorrectly)
+      // unserialized; it must still be blocked on the lock, so it must not
+      // have read device state yet.
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      const accelGetsWhileFirstHoldsLock = fakeAdb
+        .getExecutedCommands()
+        .filter((cmd) => cmd.includes("settings get system accelerometer_rotation")).length;
+      expect(accelGetsWhileFirstHoldsLock).toBe(1);
+
+      releaseFirstWait!();
+      const [firstResult, secondResult] = await Promise.all([firstCall, secondCall]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(true);
+      expect(firstResult.orientationLockHandled).toBe(true);
+      expect(secondResult.orientationLockHandled).toBe(true);
+
+      // The second rotation must observe the FIRST rotation's fully-restored
+      // state, not its transient accelerometer_rotation=0 — and must end up
+      // restoring auto-rotate itself, not stuck at 0.
+      const accelWrites = fakeAdb
+        .getExecutedCommands()
+        .filter((cmd) => cmd.includes("settings put system accelerometer_rotation"));
+      expect(accelWrites.at(-1)).toContain("accelerometer_rotation 1");
+      expect(lock.isLocked()).toBe(false);
     });
   });
 

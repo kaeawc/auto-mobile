@@ -1,7 +1,61 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
+import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
+
+type NodeHttpDownloader = {
+  downloadWithNodeHttp(
+    url: string,
+    destination: string,
+    redirectCount: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
+};
+
+const asNodeHttpDownloader = (downloader: DefaultFileDownloader): NodeHttpDownloader =>
+  downloader as unknown as NodeHttpDownloader;
+
+/**
+ * Starts a local server that writes `sentBytes` of a declared
+ * `declaredLength`-byte body, then destroys the socket before the response
+ * completes — simulating a peer that closes the connection mid-body
+ * (issue #6131).
+ */
+const createMidBodyCloseServer = async (
+  sentBytes: number,
+  declaredLength: number,
+): Promise<{ url: string; close: () => Promise<void> }> => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-length": String(declaredLength) });
+    response.write(Buffer.alloc(sentBytes, "a"));
+    response.socket?.destroy();
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Expected local HTTP server to listen on a TCP address");
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}/payload`,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      }),
+  };
+};
 
 describe("FakeFileDownloader", function () {
   let tempDir: string | null = null;
@@ -35,6 +89,58 @@ describe("FakeFileDownloader", function () {
       "download failed",
     );
   });
+});
+
+describe("DefaultFileDownloader downloadWithNodeHttp", function () {
+  let tempDir: string | null = null;
+
+  afterEach(async function () {
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+      tempDir = null;
+    }
+  });
+
+  test("rejects promptly and removes the partial file when the server closes mid-body", async function () {
+    const server = await createMidBodyCloseServer(1000, 1_000_000);
+    tempDir = await makeScratchTempDir("node-http-mid-close-");
+    const destination = path.join(tempDir, "file.bin");
+    const downloader = asNodeHttpDownloader(new DefaultFileDownloader());
+
+    try {
+      await expect(downloader.downloadWithNodeHttp(server.url, destination, 0)).rejects.toThrow();
+    } finally {
+      await server.close();
+    }
+
+    expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
+  }, 2000);
+
+  test("resolves with the full file for a complete response", async function () {
+    const payload = Buffer.from("complete download payload");
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { "content-length": String(payload.length) });
+      response.end(payload);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Expected local HTTP server to listen on a TCP address");
+    }
+    const url = `http://127.0.0.1:${address.port}/payload`;
+
+    tempDir = await makeScratchTempDir("node-http-complete-");
+    const destination = path.join(tempDir, "file.bin");
+    const downloader = asNodeHttpDownloader(new DefaultFileDownloader());
+
+    try {
+      await downloader.downloadWithNodeHttp(url, destination, 0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+
+    expect(await fs.readFile(destination)).toEqual(payload);
+  }, 2000);
 });
 
 const makeScratchTempDir = async (prefix: string): Promise<string> => {

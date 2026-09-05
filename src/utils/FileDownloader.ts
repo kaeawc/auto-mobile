@@ -5,9 +5,11 @@ import * as fs from "fs/promises";
 import http from "http";
 import https from "https";
 import * as path from "path";
+import { pipeline } from "stream/promises";
 import { promisify } from "util";
 import { logger } from "./logger";
 import { getAbortSignal } from "./AbortContext";
+import { toActionableError } from "../models/ActionableError";
 
 const execFileAsync = promisify(execFile);
 
@@ -122,12 +124,27 @@ export class DefaultFileDownloader implements FileDownloader {
           }
 
           const fileStream = createWriteStream(destination);
-          response.pipe(fileStream);
-          fileStream.on("finish", () => fileStream.close(() => resolve()));
-          fileStream.on("error", (err) => {
-            fileStream.close();
-            reject(err);
-          });
+          // stream.pipeline (not response.pipe) so a mid-body socket close
+          // (server FIN before Content-Length bytes arrive) surfaces as
+          // ERR_STREAM_PREMATURE_CLOSE instead of silently stalling forever:
+          // pipe() only reacts to 'end'/'error', neither of which fires when
+          // the peer just closes the connection (issue #6131).
+          void pipeline(response, fileStream)
+            .then(() => resolve())
+            .catch((err: unknown) => {
+              void fs
+                .rm(destination, { force: true })
+                .catch((rmError: unknown) => {
+                  // Best-effort cleanup of the partial file; failing to
+                  // remove it must not mask the original download error.
+                  logger.debug(
+                    `[FileDownloader] failed to remove partial download at ${destination}: ${errorMessage(rmError)}`,
+                  );
+                })
+                .finally(() => {
+                  reject(toActionableError(err, `Download failed for ${url}`));
+                });
+            });
         },
       );
 

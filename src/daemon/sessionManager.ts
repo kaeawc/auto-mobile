@@ -2177,11 +2177,31 @@ export class SessionManager {
    * preserving its original deadline and generation exactly (issue #6178 item
    * 1). A deadline already in the past fires on the next tick rather than
    * being dropped, matching a TTL that elapsed while the failed mutation ran.
+   *
+   * Generation-guarded (issue #6178 PR #6183 review, P1): the caller's own
+   * mutation attempt already bumped the counter to `snapshot.generation`
+   * before it ran, so an UNCHANGED current generation means nothing else has
+   * mutated since. But three overlapping requests on one session (A's timed
+   * degrade, B's slow failing re-apply, C's later successful re-apply) can
+   * settle out of order — B's failure must not blindly re-arm A's deadline
+   * once C has already bumped the counter again and established its own
+   * state (its own fresh TTL, live in the timer map, or a deliberate "no
+   * TTL"). Skipping whenever the generation has moved on avoids both
+   * resurrecting a deadline C already retired AND clobbering C's live timer
+   * handle without cancelling it.
    */
   rearmNetworkConditionExpiry(
     session: Session,
     snapshot: { deadlineMs: number; generation: number },
   ): void {
+    const sessionId = session.sessionId;
+    if (this.currentNetworkConditionGeneration(sessionId) !== snapshot.generation) {
+      logger.debug(
+        `Skipping network-condition TTL re-arm for session ${sessionId}: generation ` +
+          `${snapshot.generation} has been superseded by a later mutation`,
+      );
+      return;
+    }
     this.armNetworkConditionExpiryAt(session, snapshot.deadlineMs, snapshot.generation);
   }
 

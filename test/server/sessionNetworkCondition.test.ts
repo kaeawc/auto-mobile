@@ -345,6 +345,165 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("B's late failed re-apply does not re-arm A's TTL over C's live TTL (#6178 PR #6183 review, P1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedB = Promise.withResolvers<void>();
+    const finishedB = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-overlap", "emulator-5554", "android");
+
+      // A: timed degrade, 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-overlap",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // B: a slow re-apply that will eventually fail. Its tracked mutation blocks
+      // partway through, snapshotting and cancelling A's TTL before it does.
+      const mutationB = runSessionNetworkMutation(
+        manager,
+        "net-overlap",
+        "emulator-5554",
+        true,
+        async () => {
+          startedB.resolve();
+          await finishedB.promise;
+          return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+        },
+        40,
+      );
+      await startedB.promise;
+
+      // C: arrives while B is still in flight and applies successfully with its
+      // own 50s TTL — this bumps the generation counter past B's.
+      await runSessionNetworkMutation(
+        manager,
+        "net-overlap",
+        "emulator-5554",
+        true,
+        async () => {},
+        50,
+      );
+
+      // B now settles as a failure. Its attempt to re-arm A's original deadline
+      // must be skipped: the generation has moved on to C, so B's stale snapshot
+      // must neither resurrect A's deadline nor clobber C's live timer.
+      finishedB.resolve();
+      await mutationB;
+
+      // A's original 30s deadline passes and fires nothing.
+      timer.advanceTime(30_000);
+      expect(restored).toEqual([]);
+
+      // C's own 50s TTL still fires on schedule and restores.
+      timer.advanceTime(20_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a failed re-apply restores the prior deadline and does not arm a fresh TTL of its own (#6178 PR #6183 review, P2)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-reapply-fail", "emulator-5554", "android");
+      // A: 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-reapply-fail",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      timer.advanceTime(10_000);
+
+      // A failing re-apply that ALSO carries its own (very different) TTL. If the
+      // failure path fell through to schedule a fresh TTL for it, the device
+      // would instead be reset ~999s from now rather than at the ORIGINAL
+      // 20s-remaining deadline.
+      const result = await runSessionNetworkMutation(
+        manager,
+        "net-reapply-fail",
+        "emulator-5554",
+        true,
+        async () => ({ success: false, deviceId: "emulator-5554", platform: "android" as const }),
+        999,
+      );
+      expect(result.success).toBe(false);
+
+      // The ORIGINAL deadline (20s remaining) fires — not a fresh 999s TTL from
+      // the failed re-apply, and not never.
+      timer.advanceTime(19_000);
+      expect(restored).toEqual([]);
+      timer.advanceTime(1_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a combined request where DND fails but networkCondition succeeds is not treated as a network failure (#6178 PR #6183 review, P3)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-combined", "emulator-5554", "android");
+      // A: 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-combined",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      timer.advanceTime(10_000);
+
+      // A combined request with NO TTL of its own: the TOP-LEVEL aggregate is
+      // success:false because DND failed, but the networkCondition sub-result
+      // applied cleanly. (No expiresInSeconds is deliberate: it isolates this
+      // case from the #6178 item 2 fix — a wrongly-triggered rearm is the ONLY
+      // thing that could still fire below.)
+      const combined: DeviceStateResult = {
+        success: false,
+        deviceId: "emulator-5554",
+        platform: "android",
+        doNotDisturb: { supported: true, enabled: false, error: "DND toggle rejected" },
+        networkCondition: { supported: true, capability: "partial", appliedProfile: "3g" },
+        error: "DND toggle rejected",
+      };
+      const result = await runSessionNetworkMutation(
+        manager,
+        "net-combined",
+        "emulator-5554",
+        true,
+        async () => combined,
+      );
+      expect(result).toEqual(combined);
+
+      // The network mutation is judged a SUCCESS from its own sub-result, so A's
+      // original TTL is correctly retired (not revived) — and since this request
+      // carried no TTL of its own, nothing is ever scheduled to fire again.
+      timer.advanceTime(1_000_000);
+      expect(restored).toEqual([]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

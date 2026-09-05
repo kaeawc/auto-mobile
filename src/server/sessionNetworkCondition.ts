@@ -1,19 +1,38 @@
 import type { SessionManager } from "../daemon/sessionManager";
 
 /**
- * True when `value` is a typed `{ success: false, ... }` result (e.g.
- * `DeviceStateResult`) rather than a thrown error or an untyped void return.
- * `DeviceState` converts a failed emulator command into a resolved
- * `success: false` rather than throwing (issue #6178 item 1), so a caller
- * that only watches for a rejection misses it.
+ * True when `value` shows the network-condition mutation itself did not
+ * succeed — a typed failure (`DeviceState` converts a failed emulator command
+ * into a resolved result rather than throwing) rather than a thrown error or
+ * an untyped void return.
+ *
+ * A combined `setDeviceState` request (e.g. `networkCondition` + `doNotDisturb`
+ * in one call) can report a `success: false` TOP-LEVEL aggregate because a
+ * DIFFERENT field failed while `networkCondition` itself applied cleanly
+ * (issue #6178 PR #6183 review, P2): re-arming the prior TTL on that aggregate
+ * flag would wrongly revive a deadline the network mutation already retired.
+ * So when a `networkCondition` sub-result is present, judge success from IT
+ * specifically, using the same predicate `DeviceState.setState` folds into its
+ * own aggregate (`supported && !error && verified !== false`) — never the
+ * top-level flag. Only a result with no `networkCondition` sub-result (a bare
+ * reset outcome with no per-field breakdown) falls back to the top-level flag.
  */
 function isTypedFailureResult(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "success" in value &&
-    (value as Record<string, unknown>).success === false
-  );
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if ("networkCondition" in record && typeof record.networkCondition === "object") {
+    const networkCondition = record.networkCondition as Record<string, unknown> | null;
+    if (networkCondition !== null) {
+      const succeeded =
+        networkCondition.supported === true &&
+        !networkCondition.error &&
+        networkCondition.verified !== false;
+      return !succeeded;
+    }
+  }
+  return "success" in record && record.success === false;
 }
 
 /**
@@ -126,7 +145,12 @@ export async function runSessionNetworkMutation<T>(
     );
   }
   if (isTypedFailureResult(result)) {
+    // Restore the prior deadline and STOP (issue #6178 PR #6183 review, P2): a
+    // failed re-apply must not fall through to the schedule below, which would
+    // immediately cancel the just-restored timer and arm a fresh TTL for a
+    // mutation that never actually took effect.
     rearmPriorExpiry();
+    return result;
   }
   // Arm the standalone per-condition TTL (issue #6085 item 2) for a degrade that
   // registered a restore slot AND carries a positive TTL. Pass the CAPTURED

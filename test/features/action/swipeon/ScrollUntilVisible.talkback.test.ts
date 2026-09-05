@@ -11,9 +11,14 @@ import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
 import type {
   SwipeOnResolvedOptions,
+  TalkBackSwipeRunner,
   VoiceOverSwipeRunner,
 } from "../../../../src/features/action/swipeon/types";
 import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
+import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
+import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
+import type { ViewHierarchyResult } from "../../../../src/models";
 
 const DEVICE: BootedDevice = {
   name: "test-device",
@@ -51,6 +56,7 @@ function makeScrollUntilVisible({
   timer,
   accessibilityService,
   observeResults,
+  resolveObservation,
   talkBackExecutor,
   featureFlags,
   device = DEVICE,
@@ -61,17 +67,26 @@ function makeScrollUntilVisible({
   timer: FakeTimer;
   accessibilityService: FakeScrollAccessibilityService;
   observeResults: ObserveResult[];
-  talkBackExecutor: FakeTalkBackSwipeExecutor;
+  /**
+   * Optional override for what the device "shows" at a given interaction index
+   * (0 = before any swipe). Lets a test derive the observation from side effects
+   * (e.g. which ACTION_SCROLL the fake service received) instead of a fixed list.
+   */
+  resolveObservation?: (callIdx: number) => ObserveResult;
+  talkBackExecutor: TalkBackSwipeRunner;
   featureFlags?: FeatureFlagService;
   device?: BootedDevice;
   voiceOverExecutor?: VoiceOverSwipeRunner;
 }): ScrollUntilVisible {
   let callIdx = 0;
+  const observationAt = (idx: number): ObserveResult =>
+    resolveObservation
+      ? resolveObservation(idx)
+      : observeResults[Math.min(idx, observeResults.length - 1)];
 
   const fakeObserveScreen = {
-    execute: async () => observeResults[Math.min(callIdx, observeResults.length - 1)],
-    getMostRecentCachedObserveResult: async () =>
-      observeResults[Math.min(callIdx, observeResults.length - 1)],
+    execute: async () => observationAt(callIdx),
+    getMostRecentCachedObserveResult: async () => observationAt(callIdx),
   };
 
   const fakeGeometry = new FakeElementGeometry();
@@ -80,10 +95,10 @@ function makeScrollUntilVisible({
 
   // Each observedInteraction call advances to the next observation
   const observedInteraction = async (action: (obs: ObserveResult) => Promise<any>, _opts: any) => {
-    const obs = observeResults[Math.min(callIdx, observeResults.length - 1)];
+    const obs = observationAt(callIdx);
     const result = await action(obs);
     callIdx++;
-    const nextObs = observeResults[Math.min(callIdx, observeResults.length - 1)];
+    const nextObs = observationAt(callIdx);
     return { ...result, observation: nextObs };
   };
 
@@ -398,6 +413,77 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
       expect(result.success).toBe(true);
       expect(result.found).toBe(true);
     });
+  });
+});
+
+describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
+  // Marker the fake device puts on the hierarchy once the list has actually
+  // scrolled forward (finger up) far enough to bring the target on screen.
+  const TARGET_REVEALED = "target-revealed";
+
+  const hierarchyShowsTarget = (hierarchy: ViewHierarchyResult): boolean =>
+    (hierarchy.hierarchy as { node?: { $?: { _id?: string } } })?.node?.$?._id === TARGET_REVEALED;
+
+  const makeRevealedObserveResult = (): ObserveResult => ({
+    ...makeObserveResult(0),
+    viewHierarchy: { hierarchy: { node: { $: { _id: TARGET_REVEALED } } } },
+  });
+
+  test("lookFor below the viewport (finger up) issues scroll_forward and finds the target on the first scroll", async () => {
+    const detector = new FakeAccessibilityDetector();
+    detector.setTalkBackEnabled(true);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fakeCtrlProxy = new FakeCtrlProxy();
+    const finder = new FakeElementFinder();
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    // The target is only in the hierarchy once the device has scrolled forward.
+    finder.findElementByText = (hierarchy: ViewHierarchyResult, _text: string) =>
+      hierarchyShowsTarget(hierarchy) ? TARGET_ELEMENT : null;
+
+    // Real executor + fake accessibility service: the fake "device" reveals the
+    // target only after it receives scroll_forward. Anything else (the inverted
+    // scroll_backward) leaves the list where it was.
+    const talkBackExecutor = new TalkBackSwipeExecutor(
+      DEVICE,
+      new FakeGestureExecutor(),
+      fakeCtrlProxy as any,
+      detector,
+      new FakeAdbClient() as any,
+      timer,
+    );
+    const scrolledForward = () =>
+      fakeCtrlProxy.getActionHistory().some((call) => call.action === "scroll_forward");
+    const resolveObservation = (callIdx: number): ObserveResult =>
+      callIdx > 0 && scrolledForward() ? makeRevealedObserveResult() : makeObserveResult(0);
+
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService: new FakeScrollAccessibilityService(),
+      observeResults: [],
+      resolveObservation,
+      talkBackExecutor,
+    });
+
+    // direction is the FINGER direction: swiping up reveals the content below.
+    const result = await suv.execute({
+      direction: "up",
+      lookFor: { text: "Target Item", maxTime: 3000 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.found).toBe(true);
+    // Toward the target on the very first scroll — no scroll_backward, and no
+    // overshoot-recovery reversal needed to stumble onto it.
+    expect(result.scrollIterations).toBe(1);
+    expect(fakeCtrlProxy.getActionHistory().map((call) => call.action)).toEqual(["scroll_forward"]);
+    expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
+      resourceId: "test:id/list",
+      timeoutMs: 5000,
+    });
+    expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
   });
 });
 

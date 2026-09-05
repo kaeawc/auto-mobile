@@ -51,13 +51,7 @@ export class OverlayDetector implements OverlayAnalyzer {
     // overlay covering the whole container, which left no safe swipe area and
     // forced the "No unobstructed swipe area" fallback (#6128). Ancestors are
     // never overlays — only siblings and other windows are.
-    const containerAncestors = this.collectContainerAncestors(
-      rootGroups,
-      parser,
-      containerNode,
-      containerElement,
-      containerBounds,
-    );
+    const containerAncestors = this.collectContainerAncestors(rootGroups, parser, containerNode);
 
     rootGroups.forEach((rootNodes, windowIndex) => {
       const windowRank = totalWindows - windowIndex;
@@ -333,24 +327,30 @@ export class OverlayDetector implements OverlayAnalyzer {
 
   /**
    * Pre-order walk of the same root groups that records the ancestor chain of
-   * the first node matching the container (same matching as the main walk, so
-   * the resource-id / text / content-desc / bounds fallbacks all apply).
-   * Returns an empty set when the container is not found in the hierarchy.
+   * the *specific* hierarchy node the finder resolved for the selected
+   * container. Only strict object identity (`===`) anchors the walk: a
+   * look-alike node elsewhere in the tree — same resource-id, text, or even
+   * identical bounds — is still a distinct parsed object and can never match
+   * by reference, so it can no longer donate its own clickable ancestors to
+   * the skip set (the earlier resource-id/text/bounds heuristic could still
+   * be fooled by such a look-alike sharing the real container's bounds).
    *
-   * The chain must belong to the *selected* element: windows are walked
-   * topmost-first, and a popup may carry a node sharing the container's id or
-   * text. Such a look-alike would donate its clickable ancestors — genuine
-   * overlays — to the skip set, so a candidate whose bounds are parseable must
-   * also match the selected element's bounds.
+   * When the finder did not resolve a container node at all, there is no
+   * identity to anchor the walk to, so this returns an empty skip set rather
+   * than falling back to a selector guess. Missing a real ancestor here is
+   * safe (worst case: a slightly smaller safe-swipe area); suppressing a
+   * genuine overlay is not.
    */
   private collectContainerAncestors(
     rootGroups: ViewHierarchyNode[][],
     parser: DefaultElementParser,
     containerNode: ViewHierarchyNode | null,
-    containerElement: Element,
-    containerBounds: Element["bounds"],
   ): Set<ViewHierarchyNode> {
     const ancestors = new Set<ViewHierarchyNode>();
+    if (!containerNode) {
+      return ancestors;
+    }
+
     // path[depth] is the node currently open at that depth of the pre-order walk.
     const path: ViewHierarchyNode[] = [];
     let found = false;
@@ -364,25 +364,7 @@ export class OverlayDetector implements OverlayAnalyzer {
           path.length = depth;
           path[depth] = node;
 
-          const nodeProperties = parser.extractNodeProperties(node);
-          // Accept only a node whose bounds equal the selected element's. A
-          // look-alike with unequal, missing, or malformed bounds must not be
-          // taken as the container — and the finder's own `containerNode` is not
-          // a substitute, since it too is resolved topmost-first and can be the
-          // look-alike.
-          const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
-          if (parsedBounds === null || !boundsEqual(parsedBounds, containerBounds)) {
-            return;
-          }
-          if (
-            this.isContainerNode(
-              node,
-              nodeProperties,
-              containerNode,
-              containerElement,
-              containerBounds,
-            )
-          ) {
+          if (node === containerNode) {
             for (const ancestor of path.slice(0, depth)) {
               ancestors.add(ancestor);
             }

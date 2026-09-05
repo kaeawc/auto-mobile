@@ -1025,6 +1025,36 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `pickPrimaryAppWindowId prefers the active app over a higher-layer app when no window reports focus`() {
+    // Split-screen / picture-in-picture with the focus flag populated nowhere: the resumed
+    // (active) application must win over a merely topmost one, so mainPackageName agrees with
+    // adb's resumed package and freshness is not retracted against the wrong app.
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 1,
+          hasRoot = true,
+          isActive = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 12,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 3,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 6,
+          hasRoot = true,
+        ),
+      )
+    assertEquals(10, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
   fun `pickPrimaryAppWindowId selects a focused permission dialog over the app beneath it`() {
     // API 34 shape with a runtime permission dialog in front: the permissioncontroller dialog
     // is its own focused TYPE_APPLICATION window layered above the (unfocused) app window.

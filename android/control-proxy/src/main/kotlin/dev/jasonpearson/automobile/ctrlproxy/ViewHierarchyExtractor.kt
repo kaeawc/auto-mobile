@@ -724,6 +724,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           layer = it.layer,
           hasRoot = it.root != null,
           isFocused = it.isFocused,
+          isActive = it.isActive,
         )
       }
     )
@@ -738,6 +739,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val layer: Int,
     val hasRoot: Boolean,
     val isFocused: Boolean = false,
+    val isActive: Boolean = false,
   )
 
   /** Single-pass variant used by tests and by the production overload. */
@@ -746,6 +748,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var anyWindowFocused = false
     var focusedAppId: Int? = null
     var focusedAppLayer = Int.MIN_VALUE
+    var activeAppId: Int? = null
     var topAppId: Int? = null
     var topAppLayer = Int.MIN_VALUE
     for (w in windows) {
@@ -753,6 +756,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       when (w.type) {
         AccessibilityWindowInfo.TYPE_INPUT_METHOD -> if (w.hasRoot) hasIme = true
         AccessibilityWindowInfo.TYPE_APPLICATION -> {
+          if (w.hasRoot && w.isActive) {
+            activeAppId = w.id
+          }
           if (w.hasRoot && w.layer > topAppLayer) {
             topAppLayer = w.layer
             topAppId = w.id
@@ -767,10 +773,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     if (focusedAppId != null) {
       return focusedAppId
     }
-    // The IME owns focus, or the focus flag is populated nowhere: the topmost application window
-    // with readable content is the user-facing window. A focused non-app window (shade, quick
-    // settings, keyguard) keeps the active-window fallback.
-    return if (hasIme || !anyWindowFocused) topAppId else null
+    // The IME owns focus, or the focus flag is populated nowhere: the application window with
+    // readable content is the user-facing window — the active one when several coexist
+    // (split-screen, picture-in-picture), else the topmost. A focused non-app window (shade,
+    // quick settings, keyguard) keeps the active-window fallback.
+    return if (hasIme || !anyWindowFocused) activeAppId ?: topAppId else null
   }
 
   /**

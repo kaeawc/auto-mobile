@@ -146,6 +146,40 @@ describe("daemon startup-option propagation", () => {
     expect(parsed.runnerReadinessTimeoutMs).toBeUndefined();
   });
 
+  // Issue #6136: value-taking options used to advance past the next token even
+  // when the value was rejected as `--`-prefixed, so `--host --debug` silently
+  // started a non-debug daemon. The missing value must be ignored, not the flag
+  // that follows it.
+  test.each<{ flag: string; field: keyof DaemonOptions }>([
+    { flag: "--host", field: "host" },
+    { flag: "--plan-execution-lock-scope", field: "planExecutionLockScope" },
+    { flag: "--tool-outputs-dir", field: "toolOutputsDir" },
+    { flag: "--tool-output-dir", field: "toolOutputsDir" },
+    { flag: "--enable-tool", field: "enabledTools" },
+  ])("a missing $flag value does not consume the following flag", ({ flag, field }) => {
+    const parsed = parseDaemonArgs([flag, "--debug"]);
+    expect(parsed.debug).toBe(true);
+    expect(parsed[field]).toBeUndefined();
+  });
+
+  test.each<{ args: string[]; expected: Partial<DaemonOptions> }>([
+    { args: ["--host", "0.0.0.0"], expected: { host: "0.0.0.0" } },
+    {
+      args: ["--plan-execution-lock-scope", "session"],
+      expected: { planExecutionLockScope: "session" },
+    },
+    {
+      args: ["--tool-outputs-dir", "/tmp/artifacts"],
+      expected: { toolOutputsDir: "/tmp/artifacts" },
+    },
+  ])(
+    "a present value for $args is consumed and the next flag still parses",
+    ({ args, expected }) => {
+      const parsed = parseDaemonArgs([...args, "--debug"]);
+      expect(parsed).toMatchObject({ ...expected, debug: true });
+    },
+  );
+
   test("exact tool defaults round-trip through daemon startup arguments", () => {
     const options: DaemonOptions = {
       enabledTools: ["clipboard", "sqlQuery"],

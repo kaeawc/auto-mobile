@@ -95,6 +95,139 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("2");
   });
 
+  it("accepts a point release under a major-only maxOsVersion bound (#6132)", () => {
+    // AvdConfigReader.versionToApiLevelRange widens a major-only maxOsVersion
+    // like "8" to the whole API-level span for that major (26-27), so
+    // provisioning with only android-27 installed can create an "8.1" AVD.
+    // The matcher must accept that AVD on the identical follow-up
+    // createIfMissing request instead of rejecting it as 8.1 > 8 and
+    // re-provisioning forever.
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "8.1" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "8" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("still rejects a later major under a major-only maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "9" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "8" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("rejects a point release under a dotted maxOsVersion bound (does not widen)", () => {
+    // A dotted bound like "17.2" names an exact inclusive endpoint -- unlike
+    // a major-only bound, it must NOT gain wildcard/prefix semantics. A
+    // device reporting "17.2.1" (e.g. iOS's three-component os_version) is
+    // genuinely newer than "17.2" and must be rejected.
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17.2.1" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17.2" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("accepts an exact match under a dotted maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17.2" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17.2" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("rejects a point release under a major-only iOS maxOsVersion bound (does not widen)", () => {
+    // The major-only widening/truncation exists only to mirror Android's
+    // API-level range expansion (#6132) -- there is no iOS equivalent
+    // table. An iOS maxOsVersion of "17" is an exact inclusive maximum, so
+    // a simulator running 17.6 is genuinely newer and must be rejected, not
+    // treated as "every 17.x" the way Android's "8" spans 8.0-8.1.
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17.6" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("accepts an exact match under a major-only iOS maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "17" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "17" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("accepts a device below a lettered maxOsVersion bound (Android 12L, #6132 follow-up)", () => {
+    // maxOsVersion "12L" resolves to exactly API 32 in AvdConfigReader's
+    // table. If only android-31 is installed, provisioning falls back to
+    // API 31, whose config.ini reports osVersion "12" (apiLevelToVersion(31)).
+    // The matcher must accept that reused AVD ("12" <= "12L") instead of
+    // treating one numeric and one lettered release as incomparable and
+    // re-provisioning on every identical createIfMissing call.
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "12" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12L" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("accepts an exact 12L device under a lettered maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "12L" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12L" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("rejects a device above a lettered maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "13" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12L" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("rejects a lettered device against a plain major maxOsVersion bound", () => {
+    // A plain "12" bound must NOT be widened to swallow "12L" -- 12L is a
+    // distinct, later release than any unlettered Android 12 point release.
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "12L" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
   it("filters by minOsVersion and maxOsVersion together", () => {
     const devices = [
       bootedDevice({ deviceId: "1", osVersion: "13" }),
@@ -289,6 +422,22 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       "LATEST",
     );
     expect(result?.deviceId).toBe("qpr2");
+  });
+
+  it("does not widen a QPR maxOsVersion bound into a false point-release match", () => {
+    // A QPR bound like "14-QPR1" has exactly one numeric component, just
+    // like a major-only bound such as "8" -- but it names an exact QPR
+    // train, not "every point release of major 14". Without the guard,
+    // "14.1" would slice down to "14", compare equal to the bound's "14",
+    // and be falsely accepted as <= "14-QPR1".
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "14.1" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "14-QPR1" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
   });
 
   it("prefers a QPR update over the bare release for LATEST", () => {

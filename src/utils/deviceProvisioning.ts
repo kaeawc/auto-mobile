@@ -15,6 +15,7 @@ import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { AppleDeviceType } from "./ios-cmdline-tools/SimCtlClient";
 import type { CreateAvdParams, SystemImage } from "./android-cmdline-tools/avdmanager";
 import { createAvd, listInstalledSystemImages } from "./android-cmdline-tools/avdmanager";
+import { versionToApiLevelRange } from "./android-cmdline-tools/AvdConfigReader";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
@@ -196,12 +197,84 @@ function abiRank(abi: string, preferences: string[]): number {
   return index === -1 ? preferences.length : index;
 }
 
-function parseApiLevel(version: string | undefined): number | undefined {
-  if (!version) {
+/**
+ * Lowest API level the release table knows. A bare integer at or above it can
+ * only be an API level (no Android release is numbered that high yet), so the
+ * provisioner keeps accepting the `minOsVersion: "34"` form; anything below it,
+ * or dotted / lettered, is a release version.
+ */
+const LOWEST_KNOWN_API_LEVEL = 21;
+
+/**
+ * A bound shaped exactly like a release version `versionToApiLevelRange`
+ * knows how to parse: an integer major, optional dotted point-release
+ * components, and an optional single trailing release letter (`"17"`,
+ * `"4.4"`, `"12L"`). A bound with this shape that still fails to resolve
+ * names a release the table has no entry for and must be rejected outright
+ * -- #6132's "no silent widening" guarantee. A bound that does NOT have this
+ * shape carries some other qualifier syntax the table was never meant to
+ * parse (a QPR suffix, say); see {@link leadingMajorFallback}.
+ */
+const CLEAN_RELEASE_VERSION_SHAPE = /^\d+(?:\.\d+)*[A-Za-z]?$/;
+
+/**
+ * Last-resort fallback for a bound the structured release-version parser
+ * cannot fully recognize (e.g. `"14-QPR2"`): extract its leading integer and
+ * use it directly as an API level, exactly like the `parseInt`-based
+ * resolver this replaced. That old resolver was unconditionally lenient, so
+ * any bound with a leading digit "worked" (if loosely) before this file
+ * started resolving release versions through the table; this fallback keeps
+ * that leniency for inputs the table's grammar doesn't cover, so provisioning
+ * never regresses a bound that used to work (review follow-up on #6132).
+ * Precise ordering of QPR/lettered qualifiers stays out of scope -- #6182.
+ */
+function leadingMajorFallback(trimmed: string): number | undefined {
+  const match = /^(\d+)/.exec(trimmed);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * Resolve one `minOsVersion` / `maxOsVersion` bound to an API level. The
+ * matcher compares these bounds against the AVD's release version and the
+ * provisioner compares them against `SystemImage.apiLevel`, and both receive
+ * the same criteria, so the documented release-version form ("14") must mean
+ * Android 14 (API 34) here too, not API 14 (#6132).
+ */
+function resolveApiLevelBound(bound: string | undefined, edge: "min" | "max"): number | undefined {
+  if (!bound) {
     return undefined;
   }
-  const parsed = Number.parseInt(version.trim().split(".")[0], 10);
-  return Number.isNaN(parsed) ? undefined : parsed;
+  const trimmed = bound.trim();
+  if (/^\d+$/.test(trimmed) && Number(trimmed) >= LOWEST_KNOWN_API_LEVEL) {
+    logger.debug(`[DeviceProvisioner] Treating ${edge}OsVersion '${trimmed}' as an API level`);
+    return Number(trimmed);
+  }
+  const range = versionToApiLevelRange(trimmed);
+  if (range) {
+    return edge === "min" ? range.min : range.max;
+  }
+  if (!CLEAN_RELEASE_VERSION_SHAPE.test(trimmed)) {
+    const fallback = leadingMajorFallback(trimmed);
+    if (fallback !== undefined) {
+      logger.debug(
+        `[DeviceProvisioner] ${edge}OsVersion '${trimmed}' carries a qualifier the release table ` +
+          `doesn't parse; falling back to its leading major ${fallback} as an API level (pre-#6132 ` +
+          "lenient behavior; full qualifier ordering is tracked in #6182).",
+      );
+      return fallback;
+    }
+  }
+  throw new ActionableError(
+    `Unrecognized Android ${edge}OsVersion '${bound}'. ` +
+      "Pass a release version such as '14' (Android 14) or an API level such as 34.",
+  );
+}
+
+function describeBound(bound: string | undefined, apiLevel: number | undefined): string {
+  if (bound === undefined || apiLevel === undefined) {
+    return "any";
+  }
+  return bound.trim() === String(apiLevel) ? bound : `${bound} (API ${apiLevel})`;
 }
 
 /**
@@ -213,8 +286,8 @@ export function pickAndroidSystemImage(
   criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion">,
   architecture: string,
 ): SystemImage {
-  const min = parseApiLevel(criteria.minOsVersion);
-  const max = parseApiLevel(criteria.maxOsVersion);
+  const min = resolveApiLevelBound(criteria.minOsVersion, "min");
+  const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
   const inRange = images.filter((image) => {
     if (min !== undefined && image.apiLevel < min) {
@@ -229,7 +302,7 @@ export function pickAndroidSystemImage(
   if (inRange.length === 0) {
     throw new ActionableError(
       "No installed Android system image matches the requested API range " +
-        `(min=${criteria.minOsVersion ?? "any"}, max=${criteria.maxOsVersion ?? "any"}). ` +
+        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
         `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
         "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
     );

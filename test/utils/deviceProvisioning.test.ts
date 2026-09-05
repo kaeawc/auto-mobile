@@ -130,14 +130,82 @@ describe("pickAndroidSystemImage", () => {
     );
   });
 
-  it("respects the requested API range", () => {
+  it("honours release-version bounds, the form the startDevice schema documents (#6132)", () => {
+    // maxOsVersion "14" is Android 14 (API 34), not API 14: the android-34
+    // image must be selected instead of "nothing installed in range".
+    expect(pickAndroidSystemImage(images, { maxOsVersion: "14" }, "x64").apiLevel).toBe(34);
+    expect(pickAndroidSystemImage(images, { minOsVersion: "15" }, "x64").apiLevel).toBe(35);
+    expect(
+      pickAndroidSystemImage(images, { minOsVersion: "13", maxOsVersion: "14" }, "x64").apiLevel,
+    ).toBe(34);
+    expect(pickAndroidSystemImage(images, { minOsVersion: "14.0" }, "x64").apiLevel).toBe(35);
+  });
+
+  it("resolves a redundant trailing-zero bound identically to its bare major (regression)", () => {
+    // The device matcher's own comparator treats "14", "14.0", and "14.0.0"
+    // as equal (zero-padded comparison), so provisioning must accept the
+    // same forms instead of throwing "Unrecognized ...OsVersion".
+    expect(pickAndroidSystemImage(images, { minOsVersion: "14.0.0" }, "x64").apiLevel).toBe(
+      pickAndroidSystemImage(images, { minOsVersion: "14" }, "x64").apiLevel,
+    );
+  });
+
+  it("spans point releases when a release-version bound names only the major", () => {
+    const legacy = [
+      systemImage(26, "google_apis", "x86_64"),
+      systemImage(27, "google_apis", "x86_64"),
+      systemImage(28, "google_apis", "x86_64"),
+    ];
+    // "8" as a max means "<= 8.x", so API 27 (Android 8.1) is still in range.
+    expect(pickAndroidSystemImage(legacy, { maxOsVersion: "8" }, "x64").apiLevel).toBe(27);
+    // "8" as a min means ">= 8.0", so API 26 stays eligible.
+    expect(
+      pickAndroidSystemImage(legacy, { minOsVersion: "8", maxOsVersion: "8.0" }, "x64").apiLevel,
+    ).toBe(26);
+  });
+
+  it("still accepts raw API levels as bounds", () => {
     expect(pickAndroidSystemImage(images, { maxOsVersion: "34" }, "x64").apiLevel).toBe(34);
     expect(pickAndroidSystemImage(images, { minOsVersion: "35" }, "x64").apiLevel).toBe(35);
+  });
+
+  it("does not throw on a QPR-qualified bound, falling back to its leading major (regression)", () => {
+    // The pre-#6132 resolver used parseInt on the leading digits of any
+    // bound, so minOsVersion:"14-QPR2" always "worked" (loosely) -- an
+    // installed API 35 image safely satisfies a min of 14. The structured
+    // release-version resolver must not be stricter than that: it should
+    // fall back to the leading major instead of throwing "Unrecognized
+    // Android minOsVersion" for a qualifier syntax it doesn't parse.
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "14-QPR2" }, "x64")).not.toThrow();
+    expect(pickAndroidSystemImage(images, { minOsVersion: "14-QPR2" }, "x64").apiLevel).toBe(35);
+  });
+
+  for (const qualifiedBound of ["14-QPR2", "15-QPR1", "13-QPR3", "9-QPR1"]) {
+    it(`does not throw at provisioning for the qualified bound '${qualifiedBound}'`, () => {
+      expect(() =>
+        pickAndroidSystemImage(images, { minOsVersion: qualifiedBound }, "x64"),
+      ).not.toThrow();
+    });
+  }
+
+  it("rejects a release version it cannot map instead of silently widening the range", () => {
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "17" }, "x64")).toThrow(
+      ActionableError,
+    );
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "17" }, "x64")).toThrow(
+      /minOsVersion '17'/,
+    );
+    expect(() => pickAndroidSystemImage(images, { maxOsVersion: "4.4" }, "x64")).toThrow(
+      /maxOsVersion '4.4'/,
+    );
   });
 
   it("throws an actionable error when nothing is installed in range", () => {
     expect(() => pickAndroidSystemImage(images, { minOsVersion: "99" }, "x64")).toThrow(
       /No installed Android system image/,
+    );
+    expect(() => pickAndroidSystemImage(images, { maxOsVersion: "12" }, "x64")).toThrow(
+      /No installed Android system image.*max=12 \(API 31\)/,
     );
   });
 

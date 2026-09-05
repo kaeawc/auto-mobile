@@ -22,17 +22,20 @@ export interface DeviceMatcher {
 
 interface ParsedDeviceVersion {
   components: number[];
+  /** A trailing single-letter release qualifier, e.g. Android 12L's "L" (#6132 follow-up). */
+  letter?: string;
   qpr?: number;
 }
 
 function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
-  const match = /^(\d+(?:\.\d+)*)(?:-QPR(\d+))?$/i.exec(version.trim());
+  const match = /^(\d+(?:\.\d+)*)([A-Za-z])?(?:-QPR(\d+))?$/i.exec(version.trim());
   if (!match) {
     return null;
   }
   return {
     components: match[1].split(".").map(Number),
-    ...(match[2] === undefined ? {} : { qpr: Number(match[2]) }),
+    ...(match[2] === undefined ? {} : { letter: match[2].toUpperCase() }),
+    ...(match[3] === undefined ? {} : { qpr: Number(match[3]) }),
   };
 }
 
@@ -45,6 +48,27 @@ function compareParsedVersions(partsA: number[], partsB: number[]): number {
     }
   }
   return 0;
+}
+
+/**
+ * Orders a trailing release-qualifier letter such as Android 12L's "L": a
+ * release with no letter sorts before one with a letter at the same numeric
+ * components (Android 12 < 12L), and letters otherwise sort alphabetically.
+ * This is a generic string-ordering rule, not an Android-specific codename
+ * table -- it works for any single trailing letter without knowing what it
+ * means.
+ */
+function compareLetterQualifier(letterA: string | undefined, letterB: string | undefined): number {
+  if (letterA === letterB) {
+    return 0;
+  }
+  if (letterA === undefined) {
+    return -1;
+  }
+  if (letterB === undefined) {
+    return 1;
+  }
+  return letterA < letterB ? -1 : 1;
 }
 
 /** Compares strictly numeric dotted version components and returns NaN for other formats. */
@@ -64,6 +88,10 @@ export function compareVersions(a: string, b: string): number {
     const delta = compareParsedVersions(parsedA.components, parsedB.components);
     if (delta !== 0) {
       return delta;
+    }
+    const letterDelta = compareLetterQualifier(parsedA.letter, parsedB.letter);
+    if (letterDelta !== 0) {
+      return letterDelta;
     }
     return (parsedA.qpr ?? 0) - (parsedB.qpr ?? 0);
   }
@@ -100,24 +128,72 @@ function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCrit
   return item.platform === criteria.platform;
 }
 
-function matchesVersionRange(item: { osVersion?: string }, criteria: DeviceMatchCriteria): boolean {
+function matchesVersionRange(
+  item: { platform: Platform; osVersion?: string },
+  criteria: DeviceMatchCriteria,
+): boolean {
   const version = item.osVersion;
   const meetsMinimum =
     !criteria.minOsVersion ||
-    Boolean(version && compareVersionToBound(version, criteria.minOsVersion) >= 0);
+    Boolean(version && compareVersionToBound(version, criteria.minOsVersion, item.platform) >= 0);
   const meetsMaximum =
     !criteria.maxOsVersion ||
-    Boolean(version && compareVersionToBound(version, criteria.maxOsVersion) <= 0);
+    Boolean(version && compareVersionToBound(version, criteria.maxOsVersion, item.platform) <= 0);
   return meetsMinimum && meetsMaximum;
 }
 
-function compareVersionToBound(version: string, bound: string): number {
+function compareVersionToBound(version: string, bound: string, platform: Platform): number {
   const parsedVersion = parseDeviceVersion(version);
   const parsedBound = parseDeviceVersion(bound);
   if (parsedVersion && parsedBound) {
-    const delta = compareParsedVersions(parsedVersion.components, parsedBound.components);
+    // A major-only bound ("8", one component, no dot) spans every point
+    // release of that major (8.0, 8.1, ...), matching
+    // AvdConfigReader.versionToApiLevelRange, which resolves such a bound to
+    // the full API-level span for the major release when provisioning
+    // (#6132). Comparing only the version's leading component against it --
+    // instead of zero-padding the bound out to the version's length --
+    // keeps "8.1" equal to "8", so a matcher against maxOsVersion:"8"
+    // accepts an AVD that provisioning widened to 8.1 instead of rejecting
+    // it and re-provisioning forever. This API-level range expansion is an
+    // Android-only concept (there is no iOS equivalent table), so the
+    // widening is gated to platform === "android" -- an iOS maxOsVersion of
+    // "17" is an exact inclusive maximum and "17.6" is genuinely newer and
+    // must be rejected, not treated as "every 17.x" (regression caught in
+    // review).
+    //
+    // A bound with its own dotted precision (e.g. "17.2") is NOT widened
+    // this way: it names an exact inclusive endpoint, so "17.2.1" must
+    // still compare greater than it and be rejected by a maxOsVersion of
+    // "17.2" (regression caught in review: widening every bound made a
+    // dotted maxOsVersion match any longer version sharing its prefix). A
+    // lettered bound (e.g. "12L") is likewise an exact endpoint, not a
+    // major to widen -- it has its own single component, so slicing is a
+    // no-op for it and the letter tiebreak below does the real work. A QPR
+    // bound (e.g. "14-QPR1") must be excluded from widening too, even though
+    // it also has exactly one numeric component: without this guard "14.1"
+    // would slice down to "14" and false-match a "14-QPR1" bound it has
+    // nothing to do with (review follow-up; full QPR/letter ordering between
+    // arbitrary numeric versions is out of scope here -- see the tracking
+    // issue linked from the PR body).
+    const isMajorOnlyBound =
+      platform === "android" &&
+      parsedBound.components.length === 1 &&
+      parsedBound.letter === undefined &&
+      parsedBound.qpr === undefined;
+    const comparableVersion = isMajorOnlyBound
+      ? parsedVersion.components.slice(0, 1)
+      : parsedVersion.components;
+    const delta = compareParsedVersions(comparableVersion, parsedBound.components);
     if (delta !== 0) {
       return delta;
+    }
+    // Always compare the letter qualifier, even under major-only widening:
+    // Android 12L (letter "L") must still sort above a plain "12" bound and
+    // below "13" (#6132 follow-up) rather than being swallowed as equal to
+    // every unlettered point release of major 12.
+    const letterDelta = compareLetterQualifier(parsedVersion.letter, parsedBound.letter);
+    if (letterDelta !== 0) {
+      return letterDelta;
     }
     if (parsedBound.qpr === undefined) {
       return 0;

@@ -63,6 +63,70 @@ export function apiLevelToVersion(apiLevel: number): string | undefined {
   return API_LEVEL_TO_VERSION[apiLevel];
 }
 
+interface ParsedReleaseVersion {
+  major: number;
+  minor?: number;
+  /** Android 12L is the only lettered release in the table. */
+  lettered: boolean;
+}
+
+function parseReleaseVersion(version: string): ParsedReleaseVersion | undefined {
+  const match = /^(\d+)((?:\.\d+)*)(L)?$/i.exec(version.trim());
+  if (!match) {
+    return undefined;
+  }
+  // The release table only ever needs major.minor, but the device matcher's
+  // own comparator treats any number of trailing ".0" components as
+  // equivalent to the same, shorter version (zero-padded comparison), so
+  // "14.0.0" must resolve exactly like "14" / "14.0" here too -- a caller
+  // passing the matcher's own osVersion string back in as a bound shouldn't
+  // hit "Unrecognized ...OsVersion" (regression caught in review). A
+  // non-zero third-plus component (e.g. "8.1.5") names a point release this
+  // table has no entry for, so it still falls through to undefined.
+  const dotted = match[2].length > 0 ? match[2].slice(1).split(".").map(Number) : [];
+  if (dotted.slice(1).some((component) => component !== 0)) {
+    return undefined;
+  }
+  return {
+    major: Number(match[1]),
+    ...(dotted.length === 0 ? {} : { minor: dotted[0] }),
+    lettered: match[3] !== undefined,
+  };
+}
+
+function releaseMatchesBound(release: ParsedReleaseVersion, bound: ParsedReleaseVersion): boolean {
+  return (
+    release.major === bound.major &&
+    release.lettered === bound.lettered &&
+    (bound.minor === undefined || (release.minor ?? 0) === bound.minor)
+  );
+}
+
+/**
+ * Inverse of {@link apiLevelToVersion} for a release-version bound such as the
+ * `minOsVersion` / `maxOsVersion` that `startDevice` documents ("14", "8.1",
+ * "12L"). A bound naming only the major spans every point release, so "8"
+ * yields `{ min: 26, max: 27 }` (Android 8.0 through 8.1); the caller picks
+ * `min` for a lower bound and `max` for an upper one. Returns `undefined` for
+ * a version the table does not know (#6132).
+ */
+export function versionToApiLevelRange(version: string): { min: number; max: number } | undefined {
+  const bound = parseReleaseVersion(version);
+  if (!bound) {
+    return undefined;
+  }
+  const levels = Object.entries(API_LEVEL_TO_VERSION)
+    .filter(([, release]) => {
+      const parsed = parseReleaseVersion(release);
+      return parsed !== undefined && releaseMatchesBound(parsed, bound);
+    })
+    .map(([apiLevel]) => Number(apiLevel));
+  if (levels.length === 0) {
+    return undefined;
+  }
+  return { min: Math.min(...levels), max: Math.max(...levels) };
+}
+
 function nonEmptyEnvironmentValue(value: string | undefined): string | undefined {
   return value || undefined;
 }

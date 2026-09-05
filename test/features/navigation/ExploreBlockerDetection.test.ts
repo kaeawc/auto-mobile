@@ -108,6 +108,22 @@ describe("ExploreBlockerDetection", () => {
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
     });
+
+    // Issue #6122 follow-up: a multi-word keyword must not be manufactured by
+    // joining `text` and `content-desc` — each field is matched on its own.
+    test("does not match a multiword keyword split across text and content-desc", () => {
+      const elements = [createMockElement({ text: "Only", "content-desc": "this time" })];
+
+      expect(isPermissionDialog(elements)).toBe(false);
+    });
+
+    test("still matches a multiword keyword contained wholly in one field", () => {
+      const textOnly = [createMockElement({ text: "Only this time", "content-desc": "" })];
+      const contentDescOnly = [createMockElement({ text: "", "content-desc": "Only this time" })];
+
+      expect(isPermissionDialog(textOnly)).toBe(true);
+      expect(isPermissionDialog(contentDescOnly)).toBe(true);
+    });
   });
 
   describe("isLoginScreen", () => {
@@ -469,6 +485,70 @@ describe("ExploreBlockerDetection", () => {
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
+    });
+
+    // Discriminating regression test: "Disclosed" contains "close" and
+    // "Skipping" contains "skip" as bare substrings, so under the old
+    // substring matcher these would be (wrongly) tapped as dismiss buttons.
+    // Word-boundary matching must reject both while still accepting a
+    // genuine "Skip" button — reverting to substring matching turns this red.
+    test("dismissDialog does not tap 'close'/'skip' substrings but taps a genuine Skip button", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
+        createMockElement({ text: "Skipping", "resource-id": "com.test:id/skipping" }),
+        createMockElement({ text: "Skip", "resource-id": "com.test:id/skip_button" }),
+      ];
+      const parser = {
+        flattenViewHierarchy: () =>
+          elements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let handled: boolean;
+      try {
+        handled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          parser,
+          async () => {},
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/skip_button", action: "tap" }]);
+    });
+
+    test("dismissDialog does not tap when only 'close'/'skip' substrings are present", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
+        createMockElement({ text: "Skipping", "resource-id": "com.test:id/skipping" }),
+      ];
+      const parser = {
+        flattenViewHierarchy: () =>
+          elements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let handled: boolean;
+      try {
+        handled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          parser,
+          async () => {},
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(false);
+      expect(calls).toEqual([]);
     });
   });
 

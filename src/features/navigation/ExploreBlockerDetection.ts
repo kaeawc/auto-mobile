@@ -52,6 +52,22 @@ function wordBoundaryPattern(keywords: string[]): RegExp {
   return new RegExp(`\\b(?:${keywords.join("|")})\\b`);
 }
 
+/**
+ * Test a keyword pattern against `text` and `content-desc` independently,
+ * never against them joined.
+ *
+ * `elementText`'s space-joined string prevents a *single-token* keyword from
+ * being manufactured across the two fields (e.g. "acc" + "ess" -> "access"),
+ * but a *multi-word* keyword like "only this time" has its own internal
+ * space — text:"Only" + content-desc:"this time" reproduces that exact
+ * phrase via the join separator alone (issue #6122). Matching each field on
+ * its own closes that gap while leaving single-field matches unchanged.
+ */
+function matchesInAnyField(pattern: RegExp, el: Element): boolean {
+  const fields = [el.text, el["content-desc"]];
+  return fields.some((field) => field !== undefined && pattern.test(field.toLowerCase()));
+}
+
 const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
 
 /**
@@ -82,7 +98,7 @@ const PERMISSION_KEYWORD_PATTERN = wordBoundaryPattern(PERMISSION_KEYWORDS);
  * Check if screen is a permission dialog
  */
 export function isPermissionDialog(elements: Element[]): boolean {
-  return elements.some((el) => PERMISSION_KEYWORD_PATTERN.test(elementText(el)));
+  return elements.some((el) => matchesInAnyField(PERMISSION_KEYWORD_PATTERN, el));
 }
 
 /**
@@ -131,7 +147,7 @@ export async function handlePermissionDialog(
       continue;
     }
 
-    if (ALLOW_KEYWORD_PATTERN.test(elementText(element))) {
+    if (matchesInAnyField(ALLOW_KEYWORD_PATTERN, element)) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;
@@ -169,7 +185,7 @@ async function dismissDialog(
       continue;
     }
 
-    if (DISMISS_KEYWORD_PATTERN.test(elementText(element))) {
+    if (matchesInAnyField(DISMISS_KEYWORD_PATTERN, element)) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;

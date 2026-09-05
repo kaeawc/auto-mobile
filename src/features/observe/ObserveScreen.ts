@@ -1001,8 +1001,6 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     signal?: AbortSignal,
   ): Promise<PostCaptureForegroundIdentity> {
-    const activeWindow = result.activeWindow;
-
     // A focused SystemUI surface (notification shade, quick settings, keyguard,
     // status bar owning focus) occludes the app behind it while CtrlProxy's
     // `foregroundActivity` and `adb getForegroundApp` both still name that
@@ -1013,6 +1011,13 @@ export class RealObserveScreen implements ObserveScreen {
     if (await this.applyFocusedSystemUiOverlay(result, signal)) {
       return { sampled: false, identity: undefined, activityAttributionMismatch: false };
     }
+
+    // Read `activeWindow` AFTER the overlay check: its fallback recapture can
+    // replace the tree and re-correlate `result.activeWindow` to it (#6108). A
+    // pre-await capture would be the STALE pre-recapture window, and the
+    // cross-package branch below would then spread it — erasing the re-derived
+    // identity and re-publishing the stale `layoutSeqSum` (#6108, bug 1).
+    const activeWindow = result.activeWindow;
 
     const observed = result.viewHierarchy?.packageName;
     if (
@@ -1198,24 +1203,87 @@ export class RealObserveScreen implements ObserveScreen {
     skipRecapture: boolean,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    if (!skipRecapture && (await this.recaptureHierarchyForSystemUiOverlay(result, signal))) {
-      const freshSignal = classifyFocusedSystemUiWindow(result.viewHierarchy);
-      if (freshSignal === "none") {
-        // The shade closed between the original capture and the recapture; the
-        // fresh tree is the underlying app and `activeWindow` already names it.
-        return false;
-      }
-      if (freshSignal === "focused") {
-        this.mirrorFocusedSystemUiOverlay(result, activeWindow);
-        return true;
-      }
-      // `topmost-suspect` on the fresh tree: confirm focus against it below.
+    if (skipRecapture) {
+      // The back-stack path already recaptured and re-correlated the tree; confirm
+      // focus directly against it rather than recapturing (and re-correlating) twice.
+      return this.confirmFallbackOverlayFocus(result, activeWindow, signal);
     }
+    return this.resolveFallbackOverlayWithRecapture(result, activeWindow, signal);
+  }
+
+  /**
+   * Confirm the adb `mCurrentFocus` overlay against the tree in hand (no
+   * recapture): mirror on confirmation, no-op otherwise (issue #6078).
+   */
+  private async confirmFallbackOverlayFocus(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     if (!(await this.deviceStateCollector.collectFocusedSystemUiSurface(signal))) {
       return false;
     }
     this.mirrorFocusedSystemUiOverlay(result, activeWindow);
     return true;
+  }
+
+  /**
+   * Recapture, re-correlate, then resolve the SystemUI overlay from the fresh
+   * tree (issues #6091, #6108). The recapture replaces the tree AND re-correlates
+   * `activeWindow` to it (#6108), so both branches below draw the published tree
+   * and its attribution from the same post-recapture moment. A `topmost-suspect`
+   * fresh tree still needs the adb `mCurrentFocus` read; when that read disagrees
+   * with the accepted suspect tree — the shade closed while the dumpsys ran
+   * (#6091 gap 2) — one bounded re-capture is taken to converge on a coherent
+   * (tree, attribution) rather than pairing this suspect tree with the app
+   * beneath it. When the re-capture keeps producing a fresh suspect while the
+   * focus read keeps naming an app (a stale window list over a collapsed shade),
+   * the adb ground truth wins and no overlay is mirrored — no over-attribution.
+   */
+  private async resolveFallbackOverlayWithRecapture(
+    result: ObserveResult,
+    activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+    signal?: AbortSignal,
+    retriesLeft: number = 1,
+  ): Promise<boolean> {
+    if (!(await this.recaptureHierarchyForSystemUiOverlay(result, signal))) {
+      // Recapture unavailable: single focus read against the tree in hand — no
+      // worse than pre-#6091.
+      return this.confirmFallbackOverlayFocus(result, activeWindow, signal);
+    }
+    // The recapture re-correlated `result.activeWindow` to the fresh tree (#6108).
+    const recorrelated = result.activeWindow ?? activeWindow;
+    const freshSignal = classifyFocusedSystemUiWindow(result.viewHierarchy);
+    if (freshSignal === "none") {
+      // The shade closed: the fresh tree is the underlying app and
+      // `result.activeWindow` has been re-derived to name it — no overlay.
+      return false;
+    }
+    if (freshSignal === "focused") {
+      this.mirrorFocusedSystemUiOverlay(result, recorrelated);
+      return true;
+    }
+    // `topmost-suspect` on the fresh tree: confirm focus against it.
+    if (await this.deviceStateCollector.collectFocusedSystemUiSurface(signal)) {
+      this.mirrorFocusedSystemUiOverlay(result, recorrelated);
+      return true;
+    }
+    // Disagreement: the accepted tree is a fresh SystemUI suspect but the focus
+    // read names an app — the shade closed during the dumpsys (#6091 gap 2). Take
+    // one bounded re-capture to converge on a coherent (tree, attribution) rather
+    // than publishing this suspect tree stamped with the app beneath it.
+    if (retriesLeft > 0) {
+      return this.resolveFallbackOverlayWithRecapture(
+        result,
+        recorrelated,
+        signal,
+        retriesLeft - 1,
+      );
+    }
+    // Still a fresh suspect while the focus read keeps naming an app: the adb
+    // ground truth is authoritative for focus, so no overlay is mirrored. The
+    // published tree is the re-correlated fresh tree, not the original stale one.
+    return false;
   }
 
   private mirrorFocusedSystemUiOverlay(
@@ -1282,7 +1350,80 @@ export class RealObserveScreen implements ObserveScreen {
     // rather than the stale value, then re-read paired with the replacement tree.
     delete result.deviceLock;
     await this.deviceStateCollector.collectDeviceLock(result, signal);
+    // `backStack` was sampled with the original tree (collectAllData). A recapture
+    // that replaced the tree — including the bounded gap-2 second recapture that
+    // lands on a same-package activity B — leaves `backStack` describing the
+    // pre-recapture screen A. A stale back stack that still agrees with a stale
+    // window would let `reconcileAgainstBackStack` skip confirmation and record
+    // A's depth/task against B's current node (#6108, bug 3). It cannot be
+    // confidently re-correlated to the replacement here (no expected identity to
+    // confirm against, and a fresh read would carry the same post-recapture lag),
+    // so drop it to unknown rather than publish it against the new tree.
+    delete result.backStack;
+    // `activeWindow` (appId/activityName/layoutSeqSum) was likewise sampled with
+    // the original tree. Re-correlate it against the replacement so a stale
+    // non-zero `layoutSeqSum` does not skew the next tap-effect comparison and a
+    // possibly-lagged activity is not stamped onto the fresh tree — the #6108
+    // re-correlation, paired with the tree.
+    this.recorrelateActiveWindowToRecapture(result, hierarchy);
     return true;
+  }
+
+  /**
+   * Re-correlate `activeWindow` after the SystemUI-overlay recapture replaced the
+   * tree (issue #6108). The pre-recapture identity (appId/activityName/
+   * layoutSeqSum) was sampled with the original tree; leaving it in place pairs a
+   * fresh hierarchy with stale attribution — a same-app A->B deep link during the
+   * recapture would publish B's tree with A's activityName (gap 3), and a stale
+   * non-zero `layoutSeqSum` would skew the next tap-effect comparison (gap 1).
+   * Re-derive from the replacement tree — the one source guaranteed to describe
+   * the published hierarchy. When the fresh tree names no owner the earlier
+   * identity is left untouched (there is nothing better to correlate against).
+   */
+  private recorrelateActiveWindowToRecapture(
+    result: ObserveResult,
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  ): void {
+    if (result.activeWindow === undefined) {
+      return;
+    }
+    const rederived = this.deriveActiveWindowFromHierarchy(hierarchy);
+    if (rederived === undefined) {
+      return;
+    }
+    // A notification-permission dialog is a property of the tree, not the prior
+    // window, so re-derive it from the replacement's own detection flag.
+    if (result.notificationPermissionDetected) {
+      rederived.type = "notification_permission_dialog";
+    }
+    result.activeWindow = rederived;
+  }
+
+  /**
+   * Derive an `activeWindow` identity from a recaptured hierarchy (issue #6108).
+   * Only the PACKAGE is trusted: after an overlay recapture a state transition is
+   * known to have occurred, and CtrlProxy's `foregroundActivity` can lag behind
+   * the tree it is attached to (the metadata lag #5972 documents — CtrlProxy can
+   * retain a prior `foregroundActivity` after a window transition), so a same-app
+   * A->B transition can leave `foregroundActivity`
+   * naming A while the fresh tree describes B. Stamping that possibly-lagged
+   * activity onto the replacement tree would publish a confidently-wrong
+   * `activityName` (#6108, bug 2), so the activity is marked UNKNOWN here; when a
+   * back stack is available it is confirmed through the #6088 recapture-and-match
+   * machinery instead. `layoutSeqSum` is the accessibility zero — the correlated
+   * window sequence for the replacement tree is not known here, and zero is the
+   * established "nothing to compare" sentinel (#6070) rather than the stale
+   * pre-recapture value. Prefer the tree package; fall back to the
+   * `foregroundActivity` package; `undefined` when the tree names no owner.
+   */
+  private deriveActiveWindowFromHierarchy(
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  ): NonNullable<ObserveResult["activeWindow"]> | undefined {
+    const appId = hierarchy.packageName ?? hierarchy.foregroundActivity?.split("/")[0];
+    if (!appId) {
+      return undefined;
+    }
+    return { appId, activityName: "", layoutSeqSum: 0 };
   }
 
   private async recaptureHierarchyForBackStackAttribution(

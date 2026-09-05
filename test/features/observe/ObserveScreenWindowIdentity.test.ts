@@ -2016,6 +2016,342 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     expect(fakeAdb.getExecutedCommands().some((c) => c.includes("dumpsys window"))).toBe(false);
   });
 
+  // Issue #6108: after the SystemUI-overlay fallback recapture replaces the tree,
+  // the dependent side samples (`activeWindow.layoutSeqSum`, `activeWindow`
+  // activity) and the focus read must be re-correlated against the fresh tree so
+  // the published observation never pairs a fresh hierarchy with stale
+  // attribution. These drive the fallback (topmost-suspect, no `isFocused`) path.
+
+  const appTreeWithActivity = (now: number, foregroundActivity: string, marker: string): any => ({
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    packageName: OCCLUDED_APP,
+    foregroundActivity,
+    // App window focused: classification is "none" (no overlay), no adb read.
+    windows: [
+      {
+        packageName: OCCLUDED_APP,
+        type: 1,
+        isFocused: true,
+        windowLayer: 200,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      },
+    ],
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [{ text: marker, bounds: { left: 0, top: 300, right: 400, bottom: 360 } }],
+      },
+    },
+  });
+
+  const bootstrapWindow = (activeWindow: {
+    appId: string;
+    activityName: string;
+    layoutSeqSum: number;
+  }) =>
+    ({
+      getActive: async () => activeWindow,
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    }) as any;
+
+  test("gap 1: shade closes to the same app — the stale bootstrap layoutSeqSum is reset against the fresh tree (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    // The captured shade tree names no usable activity (a framework View class),
+    // so the bootstrap Window.getActive() read supplies activeWindow — with a
+    // non-zero layoutSeqSum sampled against the shade-era window read.
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)], {
+        foregroundActivity: `${OCCLUDED_APP}/android.widget.FrameLayout`,
+      }),
+      // Recapture: the shade closed, so the fresh tree is the underlying app.
+      appTreeWithActivity(now + 25, OCCLUDED_ACTIVITY, "App content"),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: bootstrapWindow({
+          appId: OCCLUDED_APP,
+          activityName: OCCLUDED_ACTIVITY,
+          // A stale sequence sampled with the pre-recapture (shade-era) window read.
+          layoutSeqSum: 4096,
+        }),
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    // The recapture ran and the fresh app tree is published, no overlay.
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App content");
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    // The stale 4096 sampled with the shade window read must NOT be published
+    // against the fresh app tree: re-correlated to the accessibility zero.
+    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+  });
+
+  const appTreeForPackage = (
+    now: number,
+    packageName: string,
+    foregroundActivity: string,
+    marker: string,
+  ): any => ({
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    packageName,
+    foregroundActivity,
+    windows: [
+      {
+        packageName,
+        type: 1,
+        isFocused: true,
+        windowLayer: 200,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      },
+    ],
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [{ text: marker, bounds: { left: 0, top: 300, right: 400, bottom: 360 } }],
+      },
+    },
+  });
+
+  // Bug 1 (#6108 review): the caller-local window `reconcileActiveWindowAttribution`
+  // captured BEFORE the overlay recapture must not be reused after it. When a
+  // suspect shade attributed to app A closes onto a DIFFERENT app B during the
+  // recapture, the overlay path re-derives `result.activeWindow` to B, but a
+  // pre-await local (A) drove the cross-package branch — spreading A's stale
+  // window (its non-zero layoutSeqSum) and erasing the re-derivation.
+  test("bug 1: cross-package shade A closes onto app B — the cross-package reconcile does not re-publish A's stale window (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const APP_B = "com.example.appb";
+    // Suspect shade attributed to app A, no usable activity -> bootstrap window
+    // supplies A's identity with a non-zero (shade-era) layoutSeqSum.
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)], {
+        foregroundActivity: `${OCCLUDED_APP}/android.widget.FrameLayout`,
+      }),
+      // Recapture: the shade closed onto a DIFFERENT app B.
+      appTreeForPackage(now + 25, APP_B, `${APP_B}/${APP_B}.MainActivity`, "App B content"),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    // Ground truth agrees with the fresh tree (B): on the buggy path this drives
+    // the cross-package branch that spreads A's stale window.
+    fakeAdb.setForegroundApp({ packageName: APP_B, userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: bootstrapWindow({
+          appId: OCCLUDED_APP,
+          activityName: `${OCCLUDED_APP}.modules.search.SearchActivity`,
+          layoutSeqSum: 7000,
+        }),
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App B content");
+    // Published window is B's re-derived identity, NOT A's stale window with only
+    // the appId swapped: A's 7000 must not survive onto the fresh B tree.
+    expect(result.activeWindow?.appId).toBe(APP_B);
+    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+  });
+
+  // Bug 2 (#6108 review): CtrlProxy's `foregroundActivity` can lag the tree it is
+  // attached to. On a same-app A->B transition the fresh recapture describes B
+  // while `foregroundActivity` still names A, so trusting it stamps a
+  // confidently-wrong activity. After a recapture the activity is UNKNOWN unless
+  // independently confirmed (a back stack, absent here under skipBackStack).
+  test("bug 2: same-app A->B with foregroundActivity lagging to A — the recaptured activity is unknown, not stale A (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const activityA = `${OCCLUDED_APP}.modules.search.SearchActivity`;
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      // Captured shade names activity A (same package).
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+      // Recapture: the tree is B ("Screen B") but foregroundActivity still lags to A.
+      appTreeForPackage(now + 25, OCCLUDED_APP, `${OCCLUDED_APP}/${activityA}`, "Screen B"),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Screen B");
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+    // The lagged foregroundActivity A must NOT be published against the B tree.
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.activityName).not.toBe(activityA);
+  });
+
+  // Bug 3 (#6108 review): a back stack sampled with the pre-recapture screen A
+  // must not be published against a recaptured screen B. The bounded gap-2 second
+  // recapture lands on same-package activity B while `backStack` still describes
+  // A; a stale back stack that still agrees with a stale window would let
+  // reconcileAgainstBackStack skip confirmation and record A's depth/task.
+  test("bug 3: a bounded re-capture lands on same-package B — the stale backStack sampled at A is dropped to unknown (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const activityA = `${OCCLUDED_APP}.modules.search.SearchActivity`;
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    // Capture: suspect shade. Recapture #1: still a suspect shade. The focus read
+    // then names the app (disagreement) -> bounded recapture #2 lands app B.
+    const freshShade = shadeHierarchy(now + 25, [unfocusedShade, occludedAppWindow(false)]);
+    freshShade.hierarchy.node.node = [
+      { text: "Fresh shade", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+    ];
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+      freshShade,
+      appTreeForPackage(
+        now + 50,
+        OCCLUDED_APP,
+        `${OCCLUDED_APP}/${OCCLUDED_APP}.modules.details.DetailsActivity`,
+        "Details B",
+      ),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        // Back stack sampled with the pre-recapture screen A.
+        backStack: {
+          execute: async () => ({
+            depth: 3,
+            activities: [],
+            tasks: [{ id: 14, packageName: OCCLUDED_APP }],
+            currentActivity: { name: activityA, taskId: 14 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    // NOTE: backStack is collected (skipBackStack NOT set) so it can go stale.
+    const result = await screen.execute({ skipScreenshot: true });
+
+    // Initial capture + suspect recapture + the bounded re-capture.
+    expect(viewHierarchy.getCallCount()).toBe(3);
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Details B");
+    // The back stack sampled at A must not be published against B's tree: it is
+    // dropped to unknown rather than recording A's depth/task against B's node.
+    expect(result.backStack).toBeUndefined();
+    // And the activity is not the stale A (it is unknown here).
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.activityName).not.toBe(activityA);
+  });
+
+  test("gap 2: shade closes during the focus dumpsys — a bounded re-capture converges on the app tree, no confidently-wrong overlay (#6108)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const unfocusedShade = { ...focusedShadeWindow(), isFocused: undefined };
+    // Capture: shade suspect. First recapture: shade STILL up (suspect). The adb
+    // focus read then returns an app (the shade closed while dumpsys ran) —
+    // disagreement. The bounded re-capture lands the fresh app tree.
+    const freshShade = shadeHierarchy(now + 25, [unfocusedShade, occludedAppWindow(false)]);
+    freshShade.hierarchy.node.node = [
+      { text: "Fresh shade", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+    ];
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      shadeHierarchy(now, [unfocusedShade, occludedAppWindow(false)]),
+      freshShade,
+      appTreeWithActivity(now + 50, OCCLUDED_ACTIVITY, "App content"),
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
+    // mCurrentFocus names the app: the shade closed during the dumpsys read.
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    // Initial capture + first recapture + the bounded re-capture.
+    expect(viewHierarchy.getCallCount()).toBe(3);
+    // The published tree is the converged app tree, NOT the fresh shade paired
+    // with the app's attribution (the #6091 gap-2 incoherence).
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App content");
+    expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
+    expect(result.activeWindow?.systemOverlay).toBeUndefined();
+  });
+
   test("adb fallback: a package/activity mCurrentFocus (shade collapsed) is NOT an overlay", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

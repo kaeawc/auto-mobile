@@ -157,7 +157,10 @@ describe("daemon startup-option propagation", () => {
     { flag: "--tool-output-dir", field: "toolOutputsDir" },
     { flag: "--enable-tool", field: "enabledTools" },
   ])("a missing $flag value does not consume the following flag", ({ flag, field }) => {
-    const parsed = parseDaemonArgs([flag, "--debug"]);
+    // Isolated env: parseDaemonArgs seeds toolOutputsDir from
+    // AUTOMOBILE_TOOL_OUTPUTS_DIR, which would make the tool-output rows
+    // environment-dependent under process.env.
+    const parsed = parseDaemonArgs([flag, "--debug"], {});
     expect(parsed.debug).toBe(true);
     expect(parsed[field]).toBeUndefined();
   });
@@ -175,7 +178,7 @@ describe("daemon startup-option propagation", () => {
   ])(
     "a present value for $args is consumed and the next flag still parses",
     ({ args, expected }) => {
-      const parsed = parseDaemonArgs([...args, "--debug"]);
+      const parsed = parseDaemonArgs([...args, "--debug"], {});
       expect(parsed).toMatchObject({ ...expected, debug: true });
     },
   );

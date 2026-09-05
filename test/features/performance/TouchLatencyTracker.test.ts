@@ -409,6 +409,94 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.latencyMs).toBeGreaterThan(0);
     });
 
+    test("should detect frame activity via totalFrames increase with flat jank counters (#6124)", async function () {
+      // A smooth app renders frames without tripping any jank counter. The
+      // tracker must treat a growing `Total frames rendered` as a response.
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let callCount = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        callCount++;
+        // Baseline on the first call, then +3 frames per poll, jank flat.
+        const totalFrames = callCount === 1 ? 0 : (callCount - 1) * 3;
+        return {
+          stdout: `
+            Total frames rendered: ${totalFrames}
+            Janky frames: 0 (0.00%)
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.sampleCount).toBe(1);
+      expect(result.latencyMs).toBeGreaterThan(0);
+      // First poll after the touch already shows frames, so latency is one poll.
+      expect(result.latencyMs).toBe(10);
+    });
+
+    test("should report frozen when totalFrames is present but never increases", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        // Frame counter present but flat, jank flat: no frame was rendered.
+        return {
+          stdout: `
+            Total frames rendered: 42
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 50 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.sampleCount).toBe(0);
+      expect(result.error).toContain("No successful measurements");
+    });
+
     test("should handle errors gracefully and return error result", async function () {
       const errorAdb = new FakeAdbExecutor();
       errorAdb.setDefaultError(new Error("ADB connection failed"));

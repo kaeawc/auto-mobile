@@ -404,6 +404,56 @@ describe("Explore", () => {
         { text: "Open settings", action: "tap" },
       ]);
     });
+
+    test("disambiguates a resource-id shared by list rows by unique text, else by hierarchy index", async () => {
+      // tapOn's default picks the first on-screen match, so a shared row id
+      // must not be used alone: unique text wins, and identical rows pin their
+      // 0-based occurrence with `index`.
+      const rowId = "com.test:id/row_title";
+      const row = (text: string, top: number) => ({
+        $: {
+          class: "android.widget.TextView",
+          text,
+          "resource-id": rowId,
+          clickable: "true",
+          enabled: "true",
+        },
+        bounds: { left: 0, top, right: 100, bottom: top + 50 },
+      });
+      const observation = createMockObservation([
+        row("Alpha", 0),
+        row("Beta", 50),
+        row("Beta", 100),
+      ]);
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: "Alpha",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          }),
+          observation,
+        );
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: "Beta",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+          }),
+          observation,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([
+        { text: "Alpha", action: "tap" },
+        { elementId: rowId, index: 2, action: "tap" },
+      ]);
+    });
   });
 
   describe("periodic reset to home", () => {
@@ -456,12 +506,42 @@ describe("Explore", () => {
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
+      const signal = new AbortController().signal;
+      // Capture the launch flags too: clearAppData/coldBoot must stay off, and
+      // the exploration signal must reach the launch so cancellation is honored.
       const launchSpy = spyOn(LaunchApp.prototype, "execute").mockImplementation(
-        async (packageName: string) => {
-          commands.push(`launch ${packageName}`);
-          return { success: true, packageName } as never;
+        async (...args: unknown[]) => {
+          commands.push(`launch ${JSON.stringify(args.slice(0, 3))} signal=${args[6] === signal}`);
+          return { success: true, packageName: args[0] } as never;
         },
       );
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+      (explore as any).targetPackageName = "com.test.app";
+
+      try {
+        await (explore as any).resetToHome(undefined, signal);
+      } finally {
+        launchSpy.mockRestore();
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect(commands).toEqual([
+        "shell input keyevent 3",
+        'launch ["com.test.app",false,false] signal=true',
+      ]);
+      expect((explore as any).stopReason).toBe("");
+    });
+
+    test("records a failed relaunch as a terminal partial-report reason", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
+      } as never);
+      const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
+        success: false,
+        packageName: "com.test.app",
+        error: "App is not installed",
+      } as never);
+      const adb = { execute: async () => "" } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
       (explore as any).targetPackageName = "com.test.app";
 
@@ -472,8 +552,7 @@ describe("Explore", () => {
         ctrlProxySpy.mockRestore();
       }
 
-      expect(commands).toEqual(["shell input keyevent 3", "launch com.test.app"]);
-      expect((explore as any).stopReason).toBe("");
+      expect((explore as any).stopReason).toBe("Home-screen recovery failed: App is not installed");
     });
 
     test("relaunches the target app through the internal launchApp tool on iOS", async () => {
@@ -482,19 +561,21 @@ describe("Explore", () => {
         platform: "ios",
         source: "local",
       } as BootedDevice;
-      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      const calls: Array<{ name: string; args: Record<string, unknown>; signal?: AbortSignal }> =
+        [];
       ToolRegistry.register("homeScreen", "homeScreen", {}, async (args) => {
         calls.push({ name: "homeScreen", args });
         return { success: true };
       });
-      ToolRegistry.register("launchApp", "launchApp", {}, async (args) => {
-        calls.push({ name: "launchApp", args });
+      ToolRegistry.register("launchApp", "launchApp", {}, async (args, _progress, signal) => {
+        calls.push({ name: "launchApp", args, signal });
         return { success: true };
       });
+      const signal = new AbortController().signal;
       explore = new Explore(iOSDevice, null, fakeTimer, fakeGraph, "session-1");
       (explore as any).targetPackageName = "com.test.app";
 
-      await (explore as any).resetToHome();
+      await (explore as any).resetToHome(undefined, signal);
 
       expect(calls.map((call) => call.name)).toEqual(["homeScreen", "launchApp"]);
       expect(calls[1].args).toEqual({
@@ -504,6 +585,7 @@ describe("Explore", () => {
         sessionUuid: "session-1",
         [INTERNAL_NO_DIFF_PARAM]: true,
       });
+      expect(calls[1].signal).toBe(signal);
     });
   });
 

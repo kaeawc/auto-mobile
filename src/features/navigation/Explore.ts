@@ -351,7 +351,7 @@ export class Explore extends BaseVisualChange {
         // Periodic reset if configured
         if (options.resetToHome && this.isResetDue(resetInterval)) {
           this.lastResetAt = this.interactionCount;
-          await this.resetToHome(progress);
+          await this.resetToHome(progress, signal);
         }
       }
 
@@ -749,7 +749,10 @@ export class Explore extends BaseVisualChange {
         return swipeResult.success;
       } else {
         // Perform tap interaction
-        const selector = tapSelectorFor(element);
+        const onScreen = observation.viewHierarchy
+          ? extractAllElements(observation.viewHierarchy, this.elementParser)
+          : [];
+        const selector = tapSelectorFor(element, onScreen);
         if (!selector) {
           logger.warn(`[Explore] Element has no tap selector: ${elementKey}`);
           return false;
@@ -814,7 +817,7 @@ export class Explore extends BaseVisualChange {
   /**
    * Reset to home screen
    */
-  private async resetToHome(progress?: ProgressCallback): Promise<void> {
+  private async resetToHome(progress?: ProgressCallback, signal?: AbortSignal): Promise<void> {
     try {
       if (progress) {
         await progress(
@@ -847,7 +850,7 @@ export class Explore extends BaseVisualChange {
       // Home alone leaves the launcher in the foreground, which the next
       // observation would treat as having left the target app (issue #6126).
       if (this.targetPackageName) {
-        await this.relaunchTargetApp(this.targetPackageName);
+        await this.relaunchTargetApp(this.targetPackageName, signal);
       }
 
       // Reset consecutive back count
@@ -874,26 +877,39 @@ export class Explore extends BaseVisualChange {
 
   /**
    * Bring the target app back to the foreground after a home reset.
+   *
+   * This is a warm launch on purpose: it recovers the foreground (issue #6126)
+   * and resumes the app's existing task rather than clearing state or cold
+   * booting, so the reset never destroys what exploration has reached.
    */
-  private async relaunchTargetApp(packageName: string): Promise<void> {
+  private async relaunchTargetApp(packageName: string, signal?: AbortSignal): Promise<void> {
     if (this.device.platform === "android") {
       // Same injected transport and timer as the home press above.
       const result = await new LaunchApp(this.device, this.adb, null, this.timer).execute(
         packageName,
         false,
         false,
+        undefined,
+        undefined,
+        undefined,
+        signal,
       );
       if (!result.success) {
         throw new Error(result.error ?? `Android relaunch of ${packageName} failed`);
       }
     } else {
       // Keep iOS recovery session/device-aware without nested progress.
-      const response = await ToolRegistry.callInternal("launchApp", {
-        appId: packageName,
-        platform: this.device.platform,
-        deviceId: this.device.deviceId,
-        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-      });
+      const response = await ToolRegistry.callInternal(
+        "launchApp",
+        {
+          appId: packageName,
+          platform: this.device.platform,
+          deviceId: this.device.deviceId,
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+        },
+        undefined,
+        signal,
+      );
       throwIfInternalToolFailed(response, "launchApp", this.device.platform);
     }
   }

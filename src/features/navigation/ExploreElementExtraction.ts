@@ -2,6 +2,7 @@ import type { Element, ViewHierarchyResult } from "../../models";
 import { isTruthy, isFalsy } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
+import { boundsEqual } from "../../utils/bounds";
 
 /**
  * Extract elements likely to be navigation controls
@@ -157,6 +158,54 @@ export function extractAllElements(
   return flatElements.map(({ element }) => element);
 }
 
+/** A single tapOn selector; `index` pins one occurrence when the selector is not unique. */
+export type TapSelector = { elementId: string; index?: number } | { text: string; index?: number };
+
+/**
+ * Single tapOn selector for an element among the elements currently on screen.
+ *
+ * tapOn rejects any call carrying more than one selector (issue #6121), and its
+ * first-match default would collapse repeated controls that share a resource-id
+ * (list rows) onto the first row. So prefer a resource-id that is unique on
+ * screen, then unique text or content-desc (the text selector matches both),
+ * and otherwise pin the occurrence with tapOn's hierarchy-order `index`.
+ * Returns null when the element has no selector at all.
+ */
+export function tapSelectorFor(element: Element, onScreen: Element[]): TapSelector | null {
+  const id = element["resource-id"];
+  const text = textSelectorValue(element);
+  const sharingId = id ? onScreen.filter((other) => other["resource-id"] === id) : [];
+  if (id && sharingId.length <= 1) {
+    return { elementId: id };
+  }
+  const sharingText = text
+    ? onScreen.filter(
+        (other) =>
+          other.text === text ||
+          other["content-desc"] === text ||
+          other["ios-accessibility-label"] === text,
+      )
+    : [];
+  if (text && sharingText.length <= 1) {
+    return { text };
+  }
+  if (id) {
+    return { elementId: id, ...occurrenceIndex(sharingId, element) };
+  }
+  return text ? { text, ...occurrenceIndex(sharingText, element) } : null;
+}
+
+/** The value tapOn's text selector would match for this element, if any. */
+function textSelectorValue(element: Element): string | undefined {
+  return element.text || element["content-desc"] || element["ios-accessibility-label"];
+}
+
+/** Position of `element` among `matches` in hierarchy order, located by bounds. */
+function occurrenceIndex(matches: Element[], element: Element): { index?: number } {
+  const index = matches.findIndex((match) => boundsEqual(match.bounds, element.bounds));
+  return index >= 0 ? { index } : {};
+}
+
 /**
  * Generate unique key for element tracking
  */
@@ -182,21 +231,6 @@ export function getElementKey(element: Element): string {
 /**
  * Filter out elements that have been exhausted
  */
-/**
- * Single tapOn selector for an element.
- *
- * tapOn rejects any call carrying more than one selector (issue #6121), so
- * prefer the stable resource-id, then text, then content-desc (which the text
- * selector also matches). Returns null when the element has none of them.
- */
-export function tapSelectorFor(element: Element): { elementId: string } | { text: string } | null {
-  if (element["resource-id"]) {
-    return { elementId: element["resource-id"] };
-  }
-  const text = element.text || element["content-desc"];
-  return text ? { text } : null;
-}
-
 export function filterUnexhaustedElements(
   elements: Element[],
   exploredElements: Map<string, TrackedElement>,

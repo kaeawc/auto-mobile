@@ -109,7 +109,7 @@ export async function handlePermissionDialog(
       (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
     if (allowKeywords.some((keyword) => text.includes(keyword))) {
-      const selector = tapSelectorFor(element);
+      const selector = tapSelectorFor(element, elements);
       if (!selector) {
         continue;
       }
@@ -147,7 +147,7 @@ async function dismissDialog(
       (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
     if (dismissKeywords.some((keyword) => text.includes(keyword))) {
-      const selector = tapSelectorFor(element);
+      const selector = tapSelectorFor(element, elements);
       if (!selector) {
         continue;
       }

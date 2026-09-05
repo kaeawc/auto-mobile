@@ -47,66 +47,57 @@ tests.
 
 ## Install
 
-<details open markdown>
-<summary>One-line install</summary>
+=== "One-line install"
 
-<div class="install-command" markdown>
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
-~~~
-</div>
+    <div class="install-command" markdown>
+    ~~~bash
+    curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
+    ~~~
+    </div>
 
-Run this in your app repository for project configuration, or elsewhere for
-global configuration. Restart your MCP client when it finishes.
+    Run this in your app repository for project configuration, or elsewhere for
+    global configuration. Restart your MCP client when it finishes.
 
-![Install Demo](img/install.gif)
+    ![Install Demo](img/install.gif)
 
-<div class="desktop-install-options">
-  <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.68/AutoMobile-0.0.68-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
-    <strong>macOS</strong>
-    <span>x86_64 · DMG</span>
-  </a>
-  <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.68/AutoMobile-0.0.68-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
-    <strong>Linux</strong>
-    <span>x86_64 · DEB</span>
-  </a>
-  <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.68/AutoMobile-0.0.68-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
-    <strong>Windows</strong>
-    <span>x86_64 · MSI</span>
-  </a>
-</div>
+    <div class="desktop-install-options">
+      <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.68/AutoMobile-0.0.68-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
+        <strong>macOS</strong>
+        <span>x86_64 · DMG</span>
+      </a>
+      <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.68/AutoMobile-0.0.68-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
+        <strong>Linux</strong>
+        <span>x86_64 · DEB</span>
+      </a>
+      <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.68/AutoMobile-0.0.68-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
+        <strong>Windows</strong>
+        <span>x86_64 · MSI</span>
+      </a>
+    </div>
 
-</details>
+=== "Homebrew (CLI)"
 
-<details markdown>
-<summary>Homebrew (CLI)</summary>
+    ```bash
+    brew tap kaeawc/tap
+    brew install kaeawc/tap/auto-mobile
+    ```
 
-```bash
-brew tap kaeawc/tap
-brew install kaeawc/tap/auto-mobile
-```
+    Installs the `auto-mobile` command-line tool and keeps it current through
+    `brew upgrade`. On recent Homebrew, run `brew trust kaeawc/tap` first if the
+    tap is reported untrusted.
 
-Installs the `auto-mobile` command-line tool and keeps it current through
-`brew upgrade`. On recent Homebrew, run `brew trust kaeawc/tap` first if the
-tap is reported untrusted.
+=== "Manual MCP configuration"
 
-</details>
+    ```json
+    {
+      "command": "bunx",
+      "args": ["@kaeawc/auto-mobile@latest"]
+    }
+    ```
 
-<details markdown>
-<summary>Manual MCP configuration</summary>
-
-```json
-{
-  "command": "bunx",
-  "args": ["@kaeawc/auto-mobile@latest"]
-}
-```
-
-Place this server in the client’s documented MCP configuration, then restart
-the client. Going this route means you're going to handle dependencies like having
-bun and ffmpeg.
-
-</details>
+    Place this server in the client’s documented MCP configuration, then restart
+    the client. Going this route means you're going to handle dependencies like having
+    bun and ffmpeg.
 
 ### First use
 
@@ -114,9 +105,7 @@ Open your configured agent and ask it to explore your mobile app. If you have a 
 
 Some common workflows:
 
-- [Explore an app](using/ux-exploration.md)
-- [Reproduce a bug](using/reproducing-bugs.md)
-- [Measure performance](using/performance.md)
+- [Agent examples](using/agent-examples.md)
 
 ### Uninstall
 

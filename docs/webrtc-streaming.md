@@ -1,4 +1,4 @@
-# CI screen streaming
+# WebRTC Streaming
 
 Stream the Android device or iOS simulator driven by an AutoMobile daemon to a
 WHIP server such as [MediaMTX](https://github.com/bluenviron/mediamtx), then

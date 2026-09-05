@@ -1,6 +1,11 @@
 # Tools
 
-This page reflects the current MCP tool schema. Availability can still vary by
+Every tool below can be driven three ways: from the **CLI**
+(`bunx @kaeawc/auto-mobile --cli <tool>`), over **MCP** from an AI client, or
+directly against the **daemon**'s HTTP endpoint. The tool names and arguments are
+the same across all three.
+
+This page reflects the current tool schema. Availability can still vary by
 platform, runner, and enabled feature gates; inspect the registered schema for
 the exact arguments supported by your connection.
 
@@ -156,7 +161,7 @@ the exact arguments supported by your connection.
 The `deviceId` fields exist so the value that `listDevices` and the
 `automobile:devices/booted/*` resources lead with can be copied straight into
 `getAndroid`/`getApple` — the discovery→acquire path (#5870). See the
-[FAQ](../../faq.md#how-do-i-see-or-start-a-device) for the CLI equivalents.
+[FAQ](faq.md#how-do-i-see-or-start-a-device) for the CLI equivalents.
 
 ## Network, plans & recording
 
@@ -182,5 +187,5 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
 
 For the observe → act → observe behavior behind interaction tools, see the
-[interaction loop](interaction-loop.md). For per-session public tool
-selection, see [Dynamic Tools](../../using/dynamic-tools.md).
+[interaction loop](design-docs/mcp/interaction-loop.md). For per-session public
+tool selection, see [Dynamic Tools](using/dynamic-tools.md).

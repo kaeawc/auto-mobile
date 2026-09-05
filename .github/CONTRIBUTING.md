@@ -19,7 +19,7 @@ If you have a question file an issue or discussion, but small contributions like
 - **Run validation** - `bun run lint` and `bun test` before submitting. If modifying Android or iOS code check for appropriate validation scripts in the `scripts/` directory
 - **Keep PRs focused** - One feature or fix per PR
 - **Add tests** - Cover new functionality with tests
-- **Prefer standard and existing code** - Before adding a dependency or a generic utility, check the JavaScript/Node standard library and `src/utils/`. Keep time, randomness, I/O, concurrency, and process access behind an interface with a fake when tests need control. See [Standard Library First](../docs/contributing/stdlib-first.md).
+- **Prefer standard and existing code** - Before adding a dependency or a generic utility, check the JavaScript/Node standard library and `src/utils/`. Keep time, randomness, I/O, concurrency, and process access behind an interface with a fake when tests need control. Every new dependency needs a short decision record under `docs/decisions/` that `bun run check:stdlib-first` verifies.
 
 ## Pull Request Process
 

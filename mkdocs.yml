@@ -42,9 +42,13 @@ theme:
   features:
     - content.code.copy
     - content.code.select
+    - content.tabs.link
 
 extra_css:
   - assets/stylesheets/automobile-brand.css
+
+extra_javascript:
+  - assets/javascripts/prompt-form.js
 
 markdown_extensions:
   - smarty
@@ -81,32 +85,34 @@ markdown_extensions:
   - attr_list
   - md_in_html
 
+# Author/design docs kept in the repo but intentionally off the site nav. They
+# are still built (so in-repo links resolve) but hidden from navigation.
+not_in_nav: |
+  /design-docs/mcp/daemon/screen-control-mapping.md
+  /design-docs/plat/android/system-tray-lookfor.md
+  /design-docs/plat/android/accessibility-data-sensitive-windows.md
+  /release/ios-simulator-continuity.md
+  /design-docs/plat/ios/xctestrunner/ci-integration.md
+  /decisions/ios-user-files-provider.md
+
 nav:
   - "Overview": index.md
-  - "MCP Tools": design-docs/mcp/tools.md
+  - "Tools": tools.md
   - "Using AutoMobile":
-      - "Explore an app": using/ux-exploration.md
-      - "Reproduce a bug": using/reproducing-bugs.md
+      - "Agent Examples": using/agent-examples.md
       - "UI tests": using/ui-tests.md
       - "Test prep tools": using/test-prep-tools.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
-      - "Performance": using/performance.md
-      - "CI screen streaming": webrtc-streaming-ci-worker.md
+      - "Screen control": using/screen-control.md
+      - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":
       - "System design": design-docs/index.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
-      - "Screen control mapping": design-docs/mcp/daemon/screen-control-mapping.md
-      - "Android JUnit runner": design-docs/plat/android/junit-runner/index.md
-      - "Android system tray": design-docs/plat/android/system-tray-lookfor.md
-      - "Android accessibility-data-sensitive windows": design-docs/plat/android/accessibility-data-sensitive-windows.md
+      - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
-      - "iOS Simulator continuity": release/ios-simulator-continuity.md
-      - "XCTestRunner CI integration": design-docs/plat/ios/xctestrunner/ci-integration.md
-      - "iOS Files picker provider": decisions/ios-user-files-provider.md
-  - "Contributing":
-      - "Standard library first": contributing/stdlib-first.md
+  - "Contributing": contributing.md
   - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md

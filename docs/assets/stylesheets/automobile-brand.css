@@ -84,3 +84,108 @@
   min-width: 12rem;
   white-space: nowrap;
 }
+
+/* Interactive prompt forms (see assets/javascripts/prompt-form.js). */
+.prompt-form {
+  align-items: center;
+  background: var(--md-code-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin: 1.25rem 0 1.75rem;
+  padding: 0.85rem 1rem;
+}
+
+.prompt-form label {
+  font-weight: 600;
+}
+
+.prompt-form input {
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.35rem;
+  color: var(--md-default-fg-color);
+  font-size: 0.9rem;
+  min-width: 14rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.prompt-form input:focus {
+  border-color: var(--md-accent-fg-color);
+  outline: none;
+}
+
+.prompt-form__hint {
+  color: var(--md-default-fg-color--light);
+  flex-basis: 100%;
+  font-size: 0.75rem;
+}
+
+.md-typeset code.prompt-var {
+  color: var(--md-accent-fg-color);
+}
+
+.md-typeset code.prompt-var--edit {
+  border-bottom: 1px dashed var(--md-default-fg-color--lighter);
+  color: inherit;
+  cursor: text;
+}
+
+.md-typeset code.prompt-var--edit:focus {
+  border-bottom-color: var(--md-accent-fg-color);
+  outline: none;
+}
+
+/* One-click copy on example prompts (see assets/javascripts/prompt-form.js). */
+.copyable-prompt {
+  position: relative;
+}
+
+.md-typeset .copyable-prompt > blockquote {
+  padding-right: 3rem;
+}
+
+.copy-prompt {
+  align-items: center;
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.35rem;
+  color: var(--md-default-fg-color--light);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  opacity: 0;
+  padding: 0.25rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 0.5rem;
+  transition: opacity 125ms, color 125ms, border-color 125ms;
+}
+
+.copyable-prompt:hover .copy-prompt,
+.copy-prompt:focus-visible,
+.copy-prompt--done {
+  opacity: 1;
+}
+
+.copy-prompt:hover {
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}
+
+.copy-prompt--done {
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}
+
+/* Demo gifs inside example-prompt tabs. */
+.md-typeset img.example-demo {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  display: block;
+  margin: 1rem auto 0.25rem;
+  max-height: 30rem;
+  width: auto;
+}

@@ -17,6 +17,14 @@ const EXCLUDED_FILES = new Set([
   "design-docs/mcp/vision-fallback.md",
   "design-docs/plat/android/docker.md",
   "using/perf-analysis.md",
+  // Author/design docs kept in the repo but intentionally off the site nav
+  // (mirrors mkdocs.yml `not_in_nav`).
+  "design-docs/mcp/daemon/screen-control-mapping.md",
+  "design-docs/plat/android/system-tray-lookfor.md",
+  "design-docs/plat/android/accessibility-data-sensitive-windows.md",
+  "release/ios-simulator-continuity.md",
+  "design-docs/plat/ios/xctestrunner/ci-integration.md",
+  "decisions/ios-user-files-provider.md",
 ]);
 const TODO_IGNORED_FILES = new Set(["contributing.md"]);
 

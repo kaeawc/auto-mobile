@@ -343,7 +343,7 @@ export class SessionManager {
    */
   private readonly networkConditionExpiryTimers: Map<
     string,
-    { handle: NodeJS.Timeout; session: Session }
+    { handle: NodeJS.Timeout; session: Session; deadlineMs: number; generation: number }
   > = new Map();
   /**
    * Monotonic per-session network-condition generation (issue #6177). Bumped by
@@ -354,6 +354,18 @@ export class SessionManager {
    * on — so it can detect it was superseded and must not clear B's restore slot.
    */
   private readonly networkConditionGeneration: Map<string, number> = new Map();
+  /**
+   * Per-session tail of the promise chain serializing
+   * {@link runNetworkConditionMutationExclusive} critical sections (issue #6178
+   * PR #6183 review, structural fix). The generation guard alone cannot
+   * preserve a displaced expiry: a later generation only proves a mutation was
+   * ATTEMPTED, not that it succeeded, so two overlapping FAILURES (B then C)
+   * could each see nothing to restore while a timed degrade's (A's) original
+   * deadline is lost between them. Serializing the whole apply/reset + TTL
+   * arm/cancel/re-arm sequence per session removes the race family outright —
+   * see {@link runNetworkConditionMutationExclusive}.
+   */
+  private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
   /** Automatic device assignments that have not yet started their creation write. */
@@ -2126,10 +2138,101 @@ export class SessionManager {
     // awaited restore settles, the generation check in restoreNetworkConditionOnExpiry
     // detects the mismatch and skips clearing the newer condition's restore slot.
     const effectiveGeneration = generation ?? this.currentNetworkConditionGeneration(sessionId);
+    this.armNetworkConditionExpiryAt(
+      session,
+      this.timer.now() + effectiveSeconds * 1000,
+      effectiveGeneration,
+    );
+  }
+
+  /**
+   * Arm the timer for an absolute deadline and a fixed generation, shared by
+   * {@link scheduleNetworkConditionExpiry} (a fresh TTL) and
+   * {@link rearmNetworkConditionExpiry} (restoring a snapshot taken by
+   * {@link peekNetworkConditionExpiry}). Identity-guarded like its callers: a
+   * session that was replaced under the same id since the deadline was captured
+   * is not armed against.
+   */
+  private armNetworkConditionExpiryAt(
+    session: Session,
+    deadlineMs: number,
+    generation: number,
+  ): void {
+    const sessionId = session.sessionId;
+    if (this.sessions.get(sessionId) !== session) {
+      return;
+    }
+    const remainingMs = Math.max(0, deadlineMs - this.timer.now());
     const handle = this.timer.setTimeout(() => {
-      this.handleNetworkConditionExpiry(session, effectiveGeneration);
-    }, effectiveSeconds * 1000);
-    this.networkConditionExpiryTimers.set(sessionId, { handle, session });
+      this.handleNetworkConditionExpiry(session, generation);
+    }, remainingMs);
+    this.networkConditionExpiryTimers.set(sessionId, { handle, session, deadlineMs, generation });
+  }
+
+  /**
+   * Snapshot a pending network-condition TTL without disturbing it (issue
+   * #6178 item 1). `runSessionNetworkMutation` calls this before cancelling the
+   * timer to run its own mutation race-free (issue #6085 review), then re-arms
+   * the snapshot via {@link rearmNetworkConditionExpiry} if that mutation does
+   * not confirm success — so a manual reset whose emulator command fails does
+   * not permanently drop the deadline a prior timed degrade promised.
+   */
+  peekNetworkConditionExpiry(
+    sessionId: string,
+  ): { deadlineMs: number; generation: number } | undefined {
+    const entry = this.networkConditionExpiryTimers.get(sessionId);
+    return entry ? { deadlineMs: entry.deadlineMs, generation: entry.generation } : undefined;
+  }
+
+  /**
+   * Re-arm a TTL previously captured via {@link peekNetworkConditionExpiry},
+   * preserving its original deadline and generation exactly (issue #6178 item
+   * 1). A deadline already in the past fires on the next tick rather than
+   * being dropped, matching a TTL that elapsed while the failed mutation ran.
+   *
+   * Generation-guarded (issue #6178 PR #6183 review, P1): the caller's own
+   * mutation attempt already bumped the counter to `snapshot.generation`
+   * before it ran, so an UNCHANGED current generation means nothing else has
+   * mutated since. But three overlapping requests on one session (A's timed
+   * degrade, B's slow failing re-apply, C's later successful re-apply) can
+   * settle out of order — B's failure must not blindly re-arm A's deadline
+   * once C has already bumped the counter again and established its own
+   * state (its own fresh TTL, live in the timer map, or a deliberate "no
+   * TTL"). Skipping whenever the generation has moved on avoids both
+   * resurrecting a deadline C already retired AND clobbering C's live timer
+   * handle without cancelling it.
+   *
+   * Also refuses to re-arm a releasing/released session (issue #6178 PR #6183
+   * review, P2): `releaseSessionInternal` cancels any pending TTL BEFORE
+   * awaiting the tracked mutation that may still be in flight. If that
+   * mutation then throws (or otherwise triggers a re-arm) while release is
+   * still draining, blindly re-arming here would undo release's cancellation
+   * — either running a stale timer concurrently with release's own
+   * restoration, or pinning a released session's timer-map entry for up to
+   * `MAX_NETWORK_CONDITION_TTL_SECONDS` (~24.8 days). Release's cancellation
+   * must be the last word, so a releasing/no-longer-current session is never
+   * re-armed.
+   */
+  rearmNetworkConditionExpiry(
+    session: Session,
+    snapshot: { deadlineMs: number; generation: number },
+  ): void {
+    const sessionId = session.sessionId;
+    if (this.currentNetworkConditionGeneration(sessionId) !== snapshot.generation) {
+      logger.debug(
+        `Skipping network-condition TTL re-arm for session ${sessionId}: generation ` +
+          `${snapshot.generation} has been superseded by a later mutation`,
+      );
+      return;
+    }
+    if (!this.isAdmittedForAutomation(session)) {
+      logger.debug(
+        `Skipping network-condition TTL re-arm for session ${sessionId}: session is releasing ` +
+          `or no longer live`,
+      );
+      return;
+    }
+    this.armNetworkConditionExpiryAt(session, snapshot.deadlineMs, snapshot.generation);
   }
 
   /**
@@ -2408,6 +2511,40 @@ export class SessionManager {
     return next;
   }
 
+  /**
+   * Run `fn` as the next link in a per-session promise-chain mutex, so that
+   * `runSessionNetworkMutation`'s ENTIRE critical section — generation bump,
+   * TTL snapshot/cancel, the mutation itself, and its TTL re-arm/schedule
+   * decision — never overlaps another same-session networkCondition mutation
+   * (issue #6178 PR #6183 review). This is the structural fix for a family of
+   * races the generation guard alone could not close: a later generation only
+   * proves a mutation was ATTEMPTED, not that it succeeded, so two overlapping
+   * FAILURES could each observe nothing to restore while a displaced TTL is
+   * lost between them. With this lock, a later mutation's snapshot always sees
+   * the FULLY SETTLED state (including any prior mutation's own re-arm) of the
+   * one before it — the whole interleaving family becomes impossible, not just
+   * the specific cases already patched.
+   *
+   * Scoped narrowly and reentrancy-safe by construction: keyed per session id
+   * (never blocks a different session's mutations, or unrelated session work
+   * like release/rebind — those act on the timer/session maps directly), and
+   * `fn` is the caller's entire body, so nothing outside this one critical
+   * section is ever held across an await. `.catch(() => undefined)` on the
+   * chain tail ensures one mutation's rejection cannot wedge the queue for the
+   * next; the `finally` drops the map entry once nothing is queued behind it,
+   * so a dead session leaves no residue.
+   */
+  runNetworkConditionMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.networkConditionMutationQueues.get(sessionId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(fn);
+    this.networkConditionMutationQueues.set(sessionId, next);
+    return next.finally(() => {
+      if (this.networkConditionMutationQueues.get(sessionId) === next) {
+        this.networkConditionMutationQueues.delete(sessionId);
+      }
+    });
+  }
+
   private currentNetworkConditionGeneration(sessionId: string): number {
     return this.networkConditionGeneration.get(sessionId) ?? 0;
   }
@@ -2590,6 +2727,7 @@ export class SessionManager {
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);
     this.networkConditionGeneration.delete(sessionId);
+    this.networkConditionMutationQueues.delete(sessionId);
     return true;
   }
 

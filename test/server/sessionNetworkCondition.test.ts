@@ -269,6 +269,454 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("preserves the original TTL deadline when a manual reset fails (#6178 item 1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-reset-fail", "emulator-5554", "android");
+      // Timed degrade arms a 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-reset-fail",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // 10s elapse, then a manual reset (registerRestore=false) whose emulator
+      // command fails — DeviceState resolves this as `success: false`, not a throw.
+      timer.advanceTime(10_000);
+      const resetResult = await runSessionNetworkMutation(
+        manager,
+        "net-reset-fail",
+        "emulator-5554",
+        false,
+        async () => ({ success: false, deviceId: "emulator-5554", platform: "android" }),
+      );
+      expect(resetResult).toEqual({
+        success: false,
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
+
+      // The failed reset must not have cancelled the original degrade's TTL: it
+      // still fires at its ORIGINAL deadline (20s of its 30s remain), not never
+      // and not from a fresh 30s.
+      timer.advanceTime(19_000);
+      expect(restored).toEqual([]);
+      timer.advanceTime(1_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+      expect(manager.getNetworkCondition("net-reset-fail")).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("preserves the original TTL deadline when a manual reset throws (#6178 item 1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-reset-throw", "emulator-5554", "android");
+      await runSessionNetworkMutation(
+        manager,
+        "net-reset-throw",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      timer.advanceTime(10_000);
+      await expect(
+        runSessionNetworkMutation(manager, "net-reset-throw", "emulator-5554", false, async () => {
+          throw new Error("emulator console rejected reset");
+        }),
+      ).rejects.toThrow("emulator console rejected reset");
+
+      timer.advanceTime(20_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("serializes overlapping same-session network mutations so the second observes the first's completed state (#6178 PR #6183 review, structural fix)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedFirst = Promise.withResolvers<void>();
+    const finishFirst = Promise.withResolvers<void>();
+    const order: string[] = [];
+    try {
+      await manager.createSession("net-serialize", "emulator-5554", "android");
+
+      // First mutation starts and blocks mid-flight, HOLDING the per-session lock.
+      const first = runSessionNetworkMutation(
+        manager,
+        "net-serialize",
+        "emulator-5554",
+        true,
+        async () => {
+          order.push("first-start");
+          startedFirst.resolve();
+          await finishFirst.promise;
+          order.push("first-end");
+        },
+        30,
+      );
+      await startedFirst.promise;
+
+      // A second mutation is issued while the first is still in flight. Its
+      // critical section (bump/snapshot/cancel/mutation) must not begin until
+      // the first has fully settled, including its own TTL decision.
+      let secondStarted = false;
+      const second = runSessionNetworkMutation(
+        manager,
+        "net-serialize",
+        "emulator-5554",
+        true,
+        async () => {
+          secondStarted = true;
+          order.push("second-start");
+        },
+        60,
+      );
+
+      // Give the microtask queue every chance to run the second mutation's body
+      // if it were (incorrectly) allowed to start concurrently with the first.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(secondStarted).toBe(false);
+
+      finishFirst.resolve();
+      await first;
+      await second;
+
+      // The second only ran after the first fully completed — no interleaving.
+      expect(order).toEqual(["first-start", "first-end", "second-start"]);
+
+      // The second's own 60s TTL (armed only once both settled) is what fires.
+      timer.advanceTime(60_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("A's original TTL survives two overlapping FAILURES, B then C (#6178 PR #6183 review, structural fix)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedB = Promise.withResolvers<void>();
+    const finishedB = Promise.withResolvers<void>();
+    const startedC = Promise.withResolvers<void>();
+    const finishedC = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-ab-fail", "emulator-5554", "android");
+
+      // A: timed degrade, 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-ab-fail",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+      timer.advanceTime(5_000); // 25s remain on A's deadline.
+
+      // B: a slow re-apply that will fail. Holds the per-session lock while blocked.
+      const mutationB = runSessionNetworkMutation(
+        manager,
+        "net-ab-fail",
+        "emulator-5554",
+        true,
+        async () => {
+          startedB.resolve();
+          await finishedB.promise;
+          return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+        },
+        40,
+      );
+      await startedB.promise;
+
+      // C is issued while B is still in flight. Under serialization it cannot
+      // even begin its critical section (no bump, no snapshot) until B's lock
+      // is released — this call just queues.
+      const mutationC = runSessionNetworkMutation(
+        manager,
+        "net-ab-fail",
+        "emulator-5554",
+        true,
+        async () => {
+          startedC.resolve();
+          await finishedC.promise;
+          return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+        },
+        50,
+      );
+
+      // B fails. With B and C serialized, B's re-arm of A's original deadline
+      // is NOT stale (nothing has bumped the generation past B's yet), so it
+      // succeeds — then B releases the lock and C's critical section begins.
+      finishedB.resolve();
+      await mutationB;
+      await startedC.promise;
+
+      // C fails too, snapshotting the deadline B just restored and re-arming it
+      // again under C's own (now-current) generation.
+      finishedC.resolve();
+      await mutationC;
+
+      // A's ORIGINAL deadline (25s remaining from the 5s mark, i.e. absolute
+      // t=30s) fires and restores — never lost between B's and C's failures.
+      timer.advanceTime(24_000);
+      expect(restored).toEqual([]);
+      timer.advanceTime(1_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a failed re-apply restores the prior deadline and does not arm a fresh TTL of its own (#6178 PR #6183 review, P2)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-reapply-fail", "emulator-5554", "android");
+      // A: 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-reapply-fail",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      timer.advanceTime(10_000);
+
+      // A failing re-apply that ALSO carries its own (very different) TTL. If the
+      // failure path fell through to schedule a fresh TTL for it, the device
+      // would instead be reset ~999s from now rather than at the ORIGINAL
+      // 20s-remaining deadline.
+      const result = await runSessionNetworkMutation(
+        manager,
+        "net-reapply-fail",
+        "emulator-5554",
+        true,
+        async () => ({ success: false, deviceId: "emulator-5554", platform: "android" as const }),
+        999,
+      );
+      expect(result.success).toBe(false);
+
+      // The ORIGINAL deadline (20s remaining) fires — not a fresh 999s TTL from
+      // the failed re-apply, and not never.
+      timer.advanceTime(19_000);
+      expect(restored).toEqual([]);
+      timer.advanceTime(1_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a combined request where DND fails but networkCondition succeeds is not treated as a network failure (#6178 PR #6183 review, P3)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-combined", "emulator-5554", "android");
+      // A: 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-combined",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      timer.advanceTime(10_000);
+
+      // A combined request with NO TTL of its own: the TOP-LEVEL aggregate is
+      // success:false because DND failed, but the networkCondition sub-result
+      // applied cleanly. (No expiresInSeconds is deliberate: it isolates this
+      // case from the #6178 item 2 fix — a wrongly-triggered rearm is the ONLY
+      // thing that could still fire below.)
+      const combined: DeviceStateResult = {
+        success: false,
+        deviceId: "emulator-5554",
+        platform: "android",
+        doNotDisturb: { supported: true, enabled: false, error: "DND toggle rejected" },
+        networkCondition: { supported: true, capability: "partial", appliedProfile: "3g" },
+        error: "DND toggle rejected",
+      };
+      const result = await runSessionNetworkMutation(
+        manager,
+        "net-combined",
+        "emulator-5554",
+        true,
+        async () => combined,
+      );
+      expect(result).toEqual(combined);
+
+      // The network mutation is judged a SUCCESS from its own sub-result, so A's
+      // original TTL is correctly retired (not revived) — and since this request
+      // carried no TTL of its own, nothing is ever scheduled to fire again.
+      timer.advanceTime(1_000_000);
+      expect(restored).toEqual([]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("a mutation queued behind release aborts without touching a same-UUID replacement's generation/timer (#6178 PR #6183 review, P1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedA = Promise.withResolvers<void>();
+    const finishedA = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-release-race", "emulator-5554", "android");
+
+      // A: a mutation that runs long enough to outlast release's ~1s setup
+      // drain. No restore slot (registerRestore=false) so release's OWN
+      // teardown does not also touch the network condition for this device —
+      // this test is about the QUEUE/identity race, not release's restore path.
+      const mutationA = runSessionNetworkMutation(
+        manager,
+        "net-release-race",
+        "emulator-5554",
+        false,
+        async () => {
+          startedA.resolve();
+          await finishedA.promise;
+        },
+      );
+      await startedA.promise;
+
+      // B is issued while A is still in flight — queued behind it on the
+      // per-session mutation lock.
+      let bStarted = false;
+      const mutationB = runSessionNetworkMutation(
+        manager,
+        "net-release-race",
+        "emulator-5554",
+        true,
+        async () => {
+          bStarted = true;
+        },
+        999,
+      );
+
+      // Release begins. It cancels any pending TTL (none right now) and waits
+      // up to 1s for A's tracked setup, which never comes since A is still
+      // blocked — the drain times out and release removes the session anyway.
+      const release = manager.releaseSession("net-release-race");
+      await timer.advanceTimeAsync(1_000);
+      await release;
+
+      // A same-UUID REPLACEMENT session is created and successfully applies
+      // its own condition with its own TTL, all while A (and queued B) are
+      // still unresolved.
+      await manager.createSession("net-release-race", "emulator-5556", "android");
+      await runSessionNetworkMutation(
+        manager,
+        "net-release-race",
+        "emulator-5556",
+        true,
+        async () => {},
+        20,
+      );
+
+      // A finally completes, unblocking B. B must abort — it captured the OLD
+      // (now-dead) session — WITHOUT bumping the replacement's generation or
+      // touching its timer.
+      finishedA.resolve();
+      await mutationA;
+      await expect(mutationB).rejects.toThrow(/no longer the live session/);
+      expect(bStarted).toBe(false);
+
+      // The replacement's own 20s TTL still fires untouched.
+      timer.advanceTime(20_000);
+      await manager.getPendingDeviceCleanup("emulator-5556");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("release rejects a re-arm from a mutation that throws while draining, so no timer is left armed (#6178 PR #6183 review, P2)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const startedB = Promise.withResolvers<void>();
+    const failB = Promise.withResolvers<void>();
+    try {
+      await manager.createSession("net-release-throw", "emulator-5554", "android");
+
+      // A: 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-release-throw",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // B: a re-apply that will THROW. Blocks mid-mutation, having already
+      // snapshotted and cancelled A's TTL.
+      const mutationB = runSessionNetworkMutation(
+        manager,
+        "net-release-throw",
+        "emulator-5554",
+        true,
+        async () => {
+          startedB.resolve();
+          await failB.promise;
+          throw new Error("emulator console rejected re-apply");
+        },
+        40,
+      );
+      await startedB.promise;
+
+      // Release begins WHILE B's mutation is still tracked/in-flight.
+      const release = manager.releaseSession("net-release-throw");
+
+      // B's mutation now throws. Its catch block attempts to re-arm A's
+      // original deadline — but the session is already releasing, so the
+      // re-arm must be skipped.
+      failB.resolve();
+      await expect(mutationB).rejects.toThrow("emulator console rejected re-apply");
+
+      await release;
+
+      // Release's own restoration ran exactly once — no interference from a
+      // resurrected TTL, and no timer was left armed for the (now-released)
+      // session.
+      expect(restored).toEqual(["none"]);
+      expect(manager.peekNetworkConditionExpiry("net-release-throw")).toBeUndefined();
+
+      // Advancing time arbitrarily confirms nothing was pinned/hidden.
+      timer.advanceTime(100_000_000);
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

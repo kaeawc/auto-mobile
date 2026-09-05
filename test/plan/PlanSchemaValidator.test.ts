@@ -129,6 +129,19 @@ steps:
       expect(validator.validateYaml(yaml).valid).toBe(true);
     });
 
+    it("should accept the networkCondition TTL maximum (#6178 item 2)", () => {
+      // Mirrors MAX_NETWORK_CONDITION_TTL_SECONDS (src/features/utility/DeviceState.ts).
+      const yaml = `
+name: net-ttl-max
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: veryBad
+      expiresInSeconds: 2147483
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+    });
+
     it("should accept an inline networkCondition that params.networkCondition overrides (#6090 review)", () => {
       // PlanNormalizer gives params precedence, so at execution this step receives
       // ONLY the valid params reset — the inline `{delayMs:0}` is discarded. Schema
@@ -331,6 +344,22 @@ steps:
       delayMs: 0
 `;
       expect(validator.validateYaml(yaml).valid).toBe(false);
+    });
+
+    it("should reject a networkCondition TTL above the maximum (#6178 item 2)", () => {
+      // Mirrors MAX_NETWORK_CONDITION_TTL_SECONDS (src/features/utility/DeviceState.ts):
+      // out-of-range values must be rejected at plan validation, not only at
+      // execution (issue #6178, from the #6113 review).
+      const yaml = `
+name: net-ttl-above-max
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: veryBad
+      expiresInSeconds: 2147484
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
     });
 
     it("should validate iOS simulator permissions through cross-platform permission tools", () => {

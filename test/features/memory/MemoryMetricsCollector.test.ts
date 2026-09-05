@@ -119,7 +119,8 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       expect(result.length).toBe(1);
       expect(result[0].type).toBe("Background concurrent copying");
       expect(result[0].freedKb).toBe(230);
-      expect(result[0].durationMs).toBeCloseTo(0.213, 5);
+      // Sums both stop-the-world components (213us + 45us), not just the first.
+      expect(result[0].durationMs).toBeCloseTo(0.258, 5);
     });
 
     test("should parse older ART GC lines with a bare KB size and pause in ms", function () {
@@ -132,6 +133,31 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       expect(result[0].type).toBe("Background concurrent mark sweep");
       expect(result[0].freedKb).toBe(1234);
       expect(result[0].durationMs).toBe(123);
+    });
+
+    test("should normalize an adaptively-scaled MB freed size to KB", function () {
+      // ART scales the parenthesized size to whichever unit is most readable
+      // (B/KB/MB/GB) — a large collection freeing tens of MB must not be
+      // mis-parsed as if the number were already in KB.
+      const output =
+        "09-05 12:00:00.000  1234  1234 I com.example.app: Explicit concurrent copying GC freed 716275(24MB) AllocSpace objects, 0(0B) LOS objects, 55% free, 30MB/60MB, paused 1.5ms";
+
+      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+
+      expect(result.length).toBe(1);
+      expect(result[0].freedKb).toBe(24 * 1024);
+      expect(result[0].durationMs).toBe(1.5);
+    });
+
+    test("should sum multiple comma-separated ART pause components", function () {
+      const output =
+        "09-05 12:00:00.000  1234  1234 I com.example.app: Background concurrent copying GC freed 500(50KB) AllocSpace objects, 0(0B) LOS objects, 60% free, 1MB/2MB, paused 213us,45us total 42.3ms";
+
+      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+
+      expect(result.length).toBe(1);
+      // (213 + 45) us = 258us = 0.258ms — not just the first component (0.213ms).
+      expect(result[0].durationMs).toBeCloseTo(0.258, 5);
     });
 
     test("should parse a mix of Dalvik and ART lines in one logcat capture", function () {
@@ -147,6 +173,37 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       expect(result[1].type).toBe("Explicit concurrent copying");
       expect(result[1].freedKb).toBe(50);
       expect(result[1].durationMs).toBeCloseTo(0.5, 5);
+    });
+
+    test("should drop GC lines from a different process when scoped to a pid (device-wide buffer)", function () {
+      // A device-wide logcat capture (e.g. --pid unsupported on this device)
+      // carries GC lines from other processes; only the audited pid's lines
+      // must be attributed to it.
+      const output = [
+        "1725000000.000  1234  1234 I com.example.app: Background concurrent copying GC freed 4180(230KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us",
+        "1725000000.500  9999  9999 I com.other.app: Background concurrent copying GC freed 9000(900KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 999us",
+      ].join("\n");
+
+      const result = (collector as any).parseGCEvents(output, 0, Date.now(), "1234");
+
+      expect(result.length).toBe(1);
+      expect(result[0].freedKb).toBe(230);
+    });
+
+    test("should drop an event whose parsed epoch timestamp falls outside [start, end]", function () {
+      const inWindowMs = 1725000010000; // 1725000010.000s
+      const outOfWindowMs = 1725000090000; // 1725000090.000s — 80s later, outside the window
+      const output = [
+        `1725000010.000  1234  1234 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us`,
+        `1725000090.000  1234  1234 I com.example.app: Background concurrent copying GC freed 200(20KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 200us`,
+      ].join("\n");
+
+      const result = (collector as any).parseGCEvents(output, inWindowMs - 1000, inWindowMs + 1000);
+
+      expect(result.length).toBe(1);
+      expect(result[0].freedKb).toBe(10);
+      expect(result[0].timestamp).toBe(inWindowMs);
+      expect(outOfWindowMs).toBeGreaterThan(inWindowMs + 1000); // sanity: fixture is truly outside
     });
 
     test("should handle empty logcat output", function () {
@@ -170,30 +227,47 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
   });
 
   describe("captureGCEvents", function () {
-    test("should query logcat without the over-narrow dalvikvm/art tag filter", async function () {
-      fakeAdb.setCommandResponse("logcat -d -v time", {
+    test("should query logcat scoped to the audited process's pid, without the over-narrow dalvikvm/art tag filter", async function () {
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1234", stderr: "" } as any);
+      fakeAdb.setCommandResponse("logcat -d -v epoch", {
         stdout:
-          "09-05 12:00:00.123  1234  1234 I com.example.app: Background concurrent copying GC freed 4180(230KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms",
+          "1725000000.000  1234  1234 I com.example.app: Background concurrent copying GC freed 4180(230KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms",
         stderr: "",
       } as any);
 
-      const events = await collector.captureGCEvents(0, Date.now());
+      const events = await collector.captureGCEvents(
+        "com.example.app",
+        1724999999000,
+        1725000001000,
+      );
 
       expect(events.length).toBe(1);
       expect(events[0].freedKb).toBe(230);
-      expect(events[0].durationMs).toBeCloseTo(0.213, 5);
+      expect(events[0].durationMs).toBeCloseTo(0.258, 5);
 
       const executed = fakeAdb.getExecutedCommands();
       const gcCommand = executed.find((cmd) => cmd.includes("logcat"));
       expect(gcCommand).toBeDefined();
       expect(gcCommand).not.toContain("-s dalvikvm:I art:I");
       expect(gcCommand).not.toContain('"GC_"');
+      expect(gcCommand).toContain("--pid=1234");
+    });
+
+    test("should skip capture (not throw) when the audited app has no resolvable pid", async function () {
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "", stderr: "" } as any);
+
+      const events = await collector.captureGCEvents("com.example.app", 0, Date.now());
+
+      expect(events).toEqual([]);
+      const executed = fakeAdb.getExecutedCommands();
+      expect(executed.some((cmd) => cmd.includes("logcat"))).toBe(false);
     });
 
     test("should return zero events (not throw) when logcat has no GC lines", async function () {
-      fakeAdb.setCommandResponse("logcat -d -v time", { stdout: "", stderr: "" } as any);
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1234", stderr: "" } as any);
+      fakeAdb.setCommandResponse("logcat -d -v epoch", { stdout: "", stderr: "" } as any);
 
-      const events = await collector.captureGCEvents(0, Date.now());
+      const events = await collector.captureGCEvents("com.example.app", 0, Date.now());
 
       expect(events).toEqual([]);
     });

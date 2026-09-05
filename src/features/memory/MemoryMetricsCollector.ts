@@ -171,29 +171,51 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   }
 
   /**
-   * Capture GC events from logcat
+   * Capture GC events from logcat, scoped to the audited process
    * Should be called with timestamps around the action being monitored
    */
   async captureGCEvents(
+    packageName: string,
     startTimestamp: number,
     endTimestamp: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<GCEvent[]> {
     try {
-      // Clear logcat buffer before starting if this is the start
-      // For now, we'll just read the recent buffer and filter by timestamp
-      //
+      // Resolve the audited app's PID so GC lines from other processes on the
+      // device are never attributed to it. `pidof` can report multiple pids
+      // for a multi-process app; take the first as the primary process.
+      const { stdout: pidOutput } = await perf.track("adbGetGcPid", () =>
+        this.adb.executeCommand(`shell pidof ${packageName}`),
+      );
+      const pid = pidOutput.trim().split(/\s+/)[0];
+      if (!pid) {
+        logger.warn(
+          `[MemoryMetricsCollector] No PID found for ${packageName}; skipping GC capture ` +
+            `to avoid attributing another process's GC events to it`,
+        );
+        return [];
+      }
+
       // ART (API 21+) logs GC lines under the app's own process tag (not a
       // dedicated "art" tag) and without the legacy "GC_" prefix, e.g.
       // "Background concurrent copying GC freed 4180(230KB) ..., paused 213us".
       // A `-s dalvikvm:I art:I` tag filter plus `grep "GC_"` drops every modern
       // ART line, so scope only on the "freed ... paused" shape both Dalvik and
       // ART share and let parseGCEvents() do the format-specific parsing.
+      //
+      // `--pid` scopes logcat itself to the audited process where the device
+      // supports it; `-v epoch` gives each line a machine-parseable epoch
+      // timestamp so parseGCEvents() can both re-verify the pid column
+      // (defense-in-depth for devices where `--pid` is a no-op) and drop
+      // events outside [startTimestamp, endTimestamp].
       const { stdout } = await perf.track("adbLogcatGC", () =>
-        this.adb.executeCommand(`shell logcat -d -v time | grep -iE "GC[_ ].*freed.*paused"`, 5000),
+        this.adb.executeCommand(
+          `shell logcat -d -v epoch --pid=${pid} | grep -iE "GC[_ ].*freed.*paused"`,
+          5000,
+        ),
       );
 
-      return this.parseGCEvents(stdout, startTimestamp, endTimestamp);
+      return this.parseGCEvents(stdout, startTimestamp, endTimestamp, pid);
     } catch (error) {
       logger.warn(`[MemoryMetricsCollector] Failed to capture GC events: ${error}`);
       return [];
@@ -206,58 +228,152 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    * Two log shapes are supported:
    *  - Dalvik (pre-ART, API < 21): "GC_FOR_ALLOC freed 1234K, 50% free 5678K/11356K, paused 123ms"
    *  - ART (API 21+): "Background concurrent copying GC freed 4180(230KB) AllocSpace objects,
-   *    0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms" — pause may be
-   *    reported in "us" (converted to ms below) or "ms", and the freed size may appear either
-   *    bare ("1234KB") or parenthesized after an object count ("4180(230KB)").
+   *    0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms" — the freed size may
+   *    be bare ("1234KB") or scaled and parenthesized after an object count ("4180(230KB)" /
+   *    "716275(24MB)"), and the pause may list multiple stop-the-world components
+   *    ("213us,45us") in "us" or "ms", all of which are summed and converted to ms.
+   *
+   * `expectedPid`, when supplied, restricts events to lines whose logcat `-v epoch` pid column
+   * matches — a line with no parseable pid column is dropped rather than risk attributing another
+   * process's GC to the audited one. `startTimestamp`/`endTimestamp` are applied the same way:
+   * a line with a parseable epoch timestamp outside the window is dropped; a line with no
+   * timestamp (e.g. a bare fixture without the logcat prefix) is kept for backward compatibility.
    */
-  private parseGCEvents(output: string, startTimestamp: number, endTimestamp: number): GCEvent[] {
+  private parseGCEvents(
+    output: string,
+    startTimestamp: number,
+    endTimestamp: number,
+    expectedPid?: string,
+  ): GCEvent[] {
     const events: GCEvent[] = [];
-    const lines = output.split("\n");
 
-    const dalvikPattern = /^GC_(\w+)\s+freed\s+(\d+)K,?.*?paused\s+(\d+)ms/i;
-    const artPattern =
-      /([A-Za-z][A-Za-z ]*?)\s*GC freed\s+(?:\d+\()?(\d+)\s*KB\)?.*?paused\s+([\d.]+)\s*(us|ms)/i;
-
-    for (const rawLine of lines) {
+    for (const rawLine of output.split("\n")) {
       const line = rawLine.trim();
       if (!line) {
         continue;
       }
 
-      // Strip the logcat prefix (timestamp/pid/tid/level/tag) so pattern
-      // matching only sees the GC message itself. The tag separator is the
-      // rightmost ": " — timestamps use "HH:MM:SS.mmm" (colon with no
-      // trailing space), so this reliably isolates the message.
-      const tagSeparator = line.lastIndexOf(": ");
-      const message = tagSeparator >= 0 ? line.slice(tagSeparator + 2) : line;
+      const prefix = this.parseLogcatLinePrefix(line);
 
-      const dalvikMatch = message.match(dalvikPattern);
-      if (dalvikMatch) {
-        events.push({
-          type: dalvikMatch[1],
-          freedKb: parseInt(dalvikMatch[2], 10),
-          durationMs: parseInt(dalvikMatch[3], 10),
-          timestamp: this.timer.now(), // Approximate - logcat would give us real timestamp with -v time
-        });
+      // Scope to the audited process: drop lines we can't attribute to it.
+      if (expectedPid !== undefined && prefix.pid !== expectedPid) {
         continue;
       }
 
-      const artMatch = message.match(artPattern);
-      if (artMatch) {
-        const pauseValue = parseFloat(artMatch[3]);
-        const pauseUnit = artMatch[4].toLowerCase();
-        const durationMs = pauseUnit === "us" ? pauseValue / 1000 : pauseValue;
+      // Scope to the requested capture window: drop events parsed as outside it.
+      if (
+        prefix.timestampMs !== undefined &&
+        (prefix.timestampMs < startTimestamp || prefix.timestampMs > endTimestamp)
+      ) {
+        continue;
+      }
 
-        events.push({
-          type: artMatch[1].trim(),
-          freedKb: parseInt(artMatch[2], 10),
-          durationMs,
-          timestamp: this.timer.now(), // Approximate - logcat would give us real timestamp with -v time
-        });
+      const eventTimestamp = prefix.timestampMs ?? this.timer.now(); // Approximate when unparsed
+      const event = this.parseGCEventFromMessage(prefix.message, eventTimestamp);
+      if (event) {
+        events.push(event);
       }
     }
 
     return events;
+  }
+
+  /**
+   * Split a raw logcat line into its message body plus, when present, the
+   * "-v epoch" prefix fields: "<epochSeconds> <pid> <tid> <level> <tag>: <message>".
+   * Lines without that prefix (e.g. bare test fixtures) return only `message`.
+   */
+  private parseLogcatLinePrefix(line: string): {
+    message: string;
+    timestampMs?: number;
+    pid?: string;
+  } {
+    const epochLinePattern = /^(\d+(?:\.\d+)?)\s+(\d+)\s+(\d+)\s+[A-Z]\s+(.*)$/;
+    const epochMatch = line.match(epochLinePattern);
+    const rest = epochMatch ? epochMatch[4] : line;
+
+    // Strip the tag separator so pattern matching only sees the GC message
+    // itself. The tag separator is the rightmost ": " — timestamps use
+    // "HH:MM:SS.mmm" (colon with no trailing space), so this reliably
+    // isolates the message even when the epoch prefix wasn't present.
+    const tagSeparator = rest.lastIndexOf(": ");
+    const message = tagSeparator >= 0 ? rest.slice(tagSeparator + 2) : rest;
+
+    if (!epochMatch) {
+      return { message };
+    }
+
+    return {
+      message,
+      timestampMs: parseFloat(epochMatch[1]) * 1000,
+      pid: epochMatch[2],
+    };
+  }
+
+  /**
+   * Match a single GC log message against the Dalvik and ART shapes and
+   * build the corresponding GCEvent, or return null if neither matches.
+   */
+  private parseGCEventFromMessage(message: string, timestamp: number): GCEvent | null {
+    const dalvikPattern = /^GC_(\w+)\s+freed\s+(\d+)K,?.*?paused\s+(\d+)ms/i;
+    const artPattern =
+      /([A-Za-z][A-Za-z ]*?)\s*GC freed\s+(?:\d+\()?([\d.]+)\s*(B|KB|MB|GB)\)?.*?paused\s+([\d.]+(?:us|ms)(?:,\s*[\d.]+(?:us|ms))*)/i;
+
+    const dalvikMatch = message.match(dalvikPattern);
+    if (dalvikMatch) {
+      return {
+        type: dalvikMatch[1],
+        freedKb: parseInt(dalvikMatch[2], 10),
+        durationMs: parseInt(dalvikMatch[3], 10),
+        timestamp,
+      };
+    }
+
+    const artMatch = message.match(artPattern);
+    if (artMatch) {
+      return {
+        type: artMatch[1].trim(),
+        freedKb: this.normalizeFreedToKb(artMatch[2], artMatch[3]),
+        durationMs: this.sumPauseComponentsMs(artMatch[4]),
+        timestamp,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalize an ART freed-size measurement (adaptively scaled B/KB/MB/GB) to KB.
+   */
+  private normalizeFreedToKb(rawValue: string, unit: string): number {
+    const value = parseFloat(rawValue);
+    switch (unit.toUpperCase()) {
+      case "B":
+        return value / 1024;
+      case "MB":
+        return value * 1024;
+      case "GB":
+        return value * 1024 * 1024;
+      case "KB":
+      default:
+        return value;
+    }
+  }
+
+  /**
+   * Sum a comma-separated list of ART stop-the-world pause components
+   * (e.g. "213us,45us"), converting each to ms.
+   */
+  private sumPauseComponentsMs(pauseList: string): number {
+    return pauseList.split(",").reduce((sum, token) => {
+      const match = token.trim().match(/^([\d.]+)(us|ms)$/i);
+      if (!match) {
+        return sum;
+      }
+      const value = parseFloat(match[1]);
+      const unit = match[2].toLowerCase();
+      return sum + (unit === "us" ? value / 1000 : value);
+    }, 0);
   }
 
   /**
@@ -352,7 +468,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     const postSnapshot = await this.takeSnapshot(packageName, perf);
 
     // Capture GC events that occurred during the action
-    const gcEvents = await this.captureGCEvents(startTimestamp, endTimestamp, perf);
+    const gcEvents = await this.captureGCEvents(packageName, startTimestamp, endTimestamp, perf);
 
     // Get unreachable objects
     const unreachableObjects = await this.getUnreachableObjects(packageName, perf);

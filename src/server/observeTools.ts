@@ -517,7 +517,10 @@ export const overrideWaitForJsonSchema: JsonSchemaOverride = (jsonSchema) => {
 const observeBaseSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z.object({
-      platform: platformSchema,
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
       waitFor: waitForSchema
         .optional()
         .describe("Wait for element to appear before returning observation"),
@@ -545,7 +548,10 @@ export const observeSchema = withAppIdAliases(observeBaseSchema);
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(
   z.object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     filter: z
       .object({
         types: z

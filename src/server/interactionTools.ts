@@ -152,7 +152,10 @@ export const shakeSchema = addDeviceTargetingToSchema(
   z.object({
     duration: z.number().optional().describe("Shake duration ms (default 1000)"),
     intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
@@ -160,7 +163,10 @@ export const shakeSchema = addDeviceTargetingToSchema(
 export const keyboardSchema = addDeviceTargetingToSchema(
   z.object({
     action: z.enum(["open", "close", "detect"]).describe("Keyboard action"),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
   }),
 );
 
@@ -385,7 +391,10 @@ export const tapAnySchema = withJsonSchemaOverride(
           })
           .optional()
           .describe("Poll for clickable element before tapping"),
-        platform: platformSchema,
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
         ...responseShapeControlFields,
       })
       .strict(),
@@ -427,7 +436,10 @@ export const dragAndDropSchema = withJsonSchemaOverride(
         .max(3000)
         .optional()
         .describe("Hold duration ms (min: 100, max: 3000, default: 100)"),
-      platform: platformSchema,
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
       ...responseShapeControlFields,
     }),
   ),
@@ -466,7 +478,10 @@ export const swipeOnSchema = withJsonSchemaOverride(
         .optional()
         .describe("Speed multiplier for return swipe (0.1-3.0)"),
       speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
-      platform: platformSchema,
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
       ...responseShapeControlFields,
     }),
   ),
@@ -493,7 +508,10 @@ export const pinchOnSchema = withJsonSchemaOverride(
         .describe("Use full screen including status/nav bars"),
       container: elementContainerSchema.optional().describe("Scope search to a container"),
       autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
-      platform: platformSchema,
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
       ...responseShapeControlFields,
     }),
   ),
@@ -502,14 +520,20 @@ export const pinchOnSchema = withJsonSchemaOverride(
 
 export const clearTextSchema = addDeviceTargetingToSchema(
   z.object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
 
 export const selectAllTextSchema = addDeviceTargetingToSchema(
   z.object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
@@ -517,7 +541,10 @@ export const selectAllTextSchema = addDeviceTargetingToSchema(
 export const pressButtonSchema = addDeviceTargetingToSchema(
   z.object({
     button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
@@ -538,7 +565,10 @@ const systemTraySchemaBase = z.object({
     .number()
     .optional()
     .describe("Timeout in ms to wait for notification (default: 5000)"),
-  platform: platformSchema,
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
   ...responseShapeControlFields,
 });
 
@@ -578,7 +608,10 @@ export const stopAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z.object({
       appId: z.string(),
-      platform: platformSchema,
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
     }),
   ),
 );
@@ -588,7 +621,10 @@ export const clearStateSchema = withAppIdAliases(
     z.object({
       appId: z.string(),
       clearKeychain: z.boolean().optional().describe("Clear iOS keychain"),
-      platform: platformSchema,
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
     }),
   ),
 );
@@ -641,7 +677,10 @@ export const inputTextSchema = addDeviceTargetingToSchema(
       .optional()
       .describe("IME action after input"),
     dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
@@ -654,7 +693,10 @@ export const wakeAndUnlockSchema = addDeviceTargetingToSchema(
       .describe(
         "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
       ),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
   }),
 );
 
@@ -666,7 +708,10 @@ export const openLinkSchema = withAppIdAliases(
     addDeviceTargetingToSchema(
       z.object({
         url: z.string().describe("URL to open"),
-        platform: platformSchema,
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
         waitFor: waitForSchema
           .optional()
           .describe("After opening, wait for this predicate before returning the observation"),
@@ -720,21 +765,30 @@ export const buildOpenLinkPayload = (
 export const imeActionSchema = addDeviceTargetingToSchema(
   z.object({
     action: z.enum(["done", "next", "search", "send", "go", "previous"]).describe("IME action"),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
 
 export const recentAppsSchema = addDeviceTargetingToSchema(
   z.object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
 
 export const homeScreenSchema = addDeviceTargetingToSchema(
   z.object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
@@ -742,7 +796,10 @@ export const homeScreenSchema = addDeviceTargetingToSchema(
 export const rotateSchema = addDeviceTargetingToSchema(
   z.object({
     orientation: z.enum(["portrait", "landscape"]),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );
@@ -754,7 +811,10 @@ const optionalClipboardTextSchema = z
   .optional()
   .describe("Text to copy (required for 'copy' action)");
 const clipboardPlatformSchema = {
-  platform: platformSchema,
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
 };
 
 export const clipboardSchema = z.discriminatedUnion("action", [

@@ -38,7 +38,10 @@ export interface DebugSearchArgs {
 // Schema definitions
 const debugSearchBaseSchema = z
   .object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     text: z.string().optional().describe("Text to search for in elements"),
     elementId: elementIdTextFieldsSchema.shape.elementId.describe(
       "Element resource ID / accessibility identifier to search for",

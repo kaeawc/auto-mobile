@@ -60,7 +60,8 @@ describe("clipboard tool schema", () => {
 
     expect(toolDefinition).toBeDefined();
     const schema = toolDefinition!.inputSchema as any;
-    expect(schema.required).toEqual(["action", "platform"]);
+    // #6154: platform is optional wherever deviceId/session resolves it.
+    expect(schema.required).toEqual(["action"]);
     expect(schema.properties.action.enum).toEqual(["copy", "paste", "clear", "get"]);
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();

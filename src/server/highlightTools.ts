@@ -31,7 +31,10 @@ import { boundsEqual } from "../utils/bounds";
 
 const highlightBaseSchema = z
   .object({
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     deviceId: z.string().optional(),
     timeoutMs: z
       .number()

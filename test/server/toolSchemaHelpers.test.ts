@@ -375,7 +375,9 @@ describe("generated tool definitions", () => {
     expect(changeLocalization?.inputSchema?.then).toEqual({
       required: ["appId"],
     });
-    expect(changeLocalization?.inputSchema?.required).toEqual(["platform"]);
+    // #6154: platform is optional wherever deviceId/session resolves it, so
+    // the top level no longer requires it.
+    expect(changeLocalization?.inputSchema?.required).toBeUndefined();
   });
 });
 

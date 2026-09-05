@@ -42,7 +42,10 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(
 );
 
 const changeLocalizationBaseSchema = z.object({
-  platform: platformSchema,
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
   appId: z.string().min(1).optional().describe("Android app package for locale changes"),
   locale: z.string().min(1).optional().describe("Locale tag (e.g., ar-SA, ja-JP)"),
   timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),

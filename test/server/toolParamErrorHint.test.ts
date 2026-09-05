@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
 import { swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
+import { listDeviceImagesSchema } from "../../src/server/deviceTools";
 import { observeSchema, waitForSchema } from "../../src/server/observeTools";
 import { setPreferenceSchema } from "../../src/server/preferenceTools";
 
@@ -78,12 +79,13 @@ describe("formatToolParamError actionable validation hints", () => {
     );
   });
 
+  // #6154: platform is now optional wherever deviceId/session resolves it, so
+  // this hint is exercised through a schema with no device to resolve it
+  // from — listDeviceImages, where platform genuinely stays required.
   test("calls an omitted required platform required instead of an invalid option", () => {
-    const result = observeSchema.safeParse({ deviceId: "emulator-5554" });
+    const result = listDeviceImagesSchema.safeParse({});
     expect(result.success).toBe(false);
-    const message = formatToolParamError("observe", result.error, {
-      deviceId: "emulator-5554",
-    });
+    const message = formatToolParamError("listDeviceImages", result.error, {});
     expect(message).toContain("platform is required");
     expect(message).not.toContain("Invalid option");
   });

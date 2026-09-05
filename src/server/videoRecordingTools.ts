@@ -234,7 +234,10 @@ const highlightSchema = z.object({
 const videoRecordingSchema = addDeviceTargetingToSchema(
   z.object({
     action: z.enum(["start", "stop"]),
-    platform: platformSchema,
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
     deviceId: z.string().optional(),
     recordingId: z.string().optional().describe("Recording ID"),
     qualityPreset: z.enum(["low", "medium", "high"]).optional(),

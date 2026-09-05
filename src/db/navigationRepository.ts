@@ -502,14 +502,14 @@ export class NavigationRepository {
     // Create new UI element
     const newElement: NewUIElement = {
       app_id: appId,
-      text: element.text || null,
-      resource_id: element.resourceId || null,
-      content_description: element.contentDescription || null,
-      class_name: element.className || null,
-      bounds_left: element.bounds?.left || null,
-      bounds_top: element.bounds?.top || null,
-      bounds_right: element.bounds?.right || null,
-      bounds_bottom: element.bounds?.bottom || null,
+      text: element.text ?? null,
+      resource_id: element.resourceId ?? null,
+      content_description: element.contentDescription ?? null,
+      class_name: element.className ?? null,
+      bounds_left: element.bounds?.left ?? null,
+      bounds_top: element.bounds?.top ?? null,
+      bounds_right: element.bounds?.right ?? null,
+      bounds_bottom: element.bounds?.bottom ?? null,
       clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
       scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
       first_seen_at: timestamp,
@@ -659,10 +659,10 @@ export class NavigationRepository {
     const scrollPos: NewScrollPosition = {
       edge_id: edgeId,
       target_element_id: targetElementId,
-      container_element_id: containerElementId || null,
+      container_element_id: containerElementId ?? null,
       direction,
-      speed: speed || null,
-      swipe_count: swipeCount || null,
+      speed: speed ?? null,
+      swipe_count: swipeCount ?? null,
     };
 
     // Upsert: delete if exists, then insert
@@ -731,8 +731,8 @@ export class NavigationRepository {
         created_at: result.created_at,
       },
       direction: result.direction,
-      speed: result.speed || undefined,
-      swipeCount: result.swipe_count || undefined,
+      speed: result.speed ?? undefined,
+      swipeCount: result.swipe_count ?? undefined,
     };
 
     // Add container element if present

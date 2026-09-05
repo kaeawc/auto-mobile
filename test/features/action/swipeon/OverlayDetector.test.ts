@@ -8,7 +8,84 @@ import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import type { ElementBounds } from "../../../../src/models";
+import type { Element, ElementBounds } from "../../../../src/models";
+import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
+import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
+import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
+
+describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)", () => {
+  const b = (left: number, top: number, right: number, bottom: number): ElementBounds => ({
+    left,
+    top,
+    right,
+    bottom,
+  });
+  const node = (bounds: ElementBounds, attrs: Record<string, string>, children: any[] = []) => ({
+    $: { bounds, ...attrs },
+    node: children,
+  });
+  const LIST_BOUNDS = b(0, 0, 1000, 2000);
+  const listElement: Element = {
+    bounds: LIST_BOUNDS,
+    "resource-id": "list",
+    scrollable: true,
+  } as unknown as Element;
+  const detector = () =>
+    new OverlayDetector(
+      new DefaultElementFinder(),
+      new DefaultElementGeometry(),
+      new DefaultElementParser(),
+    );
+
+  test("a clickable ancestor of the container is not an overlay (issue repro: root(clickable) > list > row(clickable))", () => {
+    const hierarchy = {
+      hierarchy: {
+        node: [
+          node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+            node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }, [
+              node(b(0, 0, 1000, 100), { "resource-id": "row", clickable: "true" }),
+            ]),
+          ]),
+        ],
+      },
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    expect(overlays).toEqual([]);
+  });
+
+  test("a genuine clickable sibling under a clickable root is still an overlay, and only it", () => {
+    const fabBounds = b(800, 1700, 1000, 1900);
+    const hierarchy = {
+      hierarchy: {
+        node: [
+          node(b(0, 0, 1000, 2000), { "resource-id": "root", focusable: "true" }, [
+            node(b(0, 0, 1000, 2000), { "resource-id": "card", clickable: "true" }, [
+              node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
+            ]),
+            node(fabBounds, { "resource-id": "fab", clickable: "true" }),
+          ]),
+        ],
+      },
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0].bounds).toEqual(fabBounds);
+    expect(overlays[0].overlapBounds).toEqual(fabBounds);
+  });
+});
 
 describe("SwipeOn container overlays", () => {
   const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
@@ -143,6 +220,91 @@ describe("SwipeOn container overlays", () => {
     expect(call).toBeDefined();
     expect(call.x1).toBe(500);
     expect(call.y1).toBe(200);
+  });
+
+  test("does not treat the container's clickable ancestor as an overlay (#6128)", async () => {
+    // root(clickable) > list(scrollable) > row(clickable): the root is visited
+    // before the container and fully covers it, so it used to be recorded as
+    // an overlay and force the "No unobstructed swipe area" fallback.
+    const row = createNode(b(0, 0, 1000, 100), { "resource-id": "row", clickable: "true" });
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "list-container", [row]);
+    const clickableRoot = {
+      $: { bounds: b(0, 0, 1000, 2000), "resource-id": "root", clickable: "true" },
+      node: [containerNode],
+    };
+
+    fakeObserveScreen.setObserveResult(createObserveResult(createHierarchy([clickableRoot])));
+
+    const swipeOn = createSwipeOn();
+    const result = await swipeOn.execute({
+      direction: "down",
+      container: { elementId: "list-container" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+    const [call] = fakeGesture.getSwipeCalls();
+    expect(call).toBeDefined();
+    // Same coordinates as an unobstructed container: center x, default start y.
+    expect(call.x1).toBe(500);
+    expect(call.y1).toBe(200);
+  });
+
+  test("still avoids a genuine sibling overlay under a clickable root (#6128)", async () => {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "list-container");
+    const bottomBar = createNode(b(0, 1700, 1000, 2000), {
+      "resource-id": "bottom-bar",
+      clickable: "true",
+    });
+    const clickableRoot = {
+      $: { bounds: b(0, 0, 1000, 2000), "resource-id": "root", clickable: "true" },
+      node: [containerNode, bottomBar],
+    };
+
+    fakeObserveScreen.setObserveResult(createObserveResult(createHierarchy([clickableRoot])));
+
+    const swipeOn = createSwipeOn();
+    const result = await swipeOn.execute({
+      direction: "down",
+      container: { elementId: "list-container" },
+    });
+
+    expect(result.success).toBe(true);
+    // Overlay avoidance must not have been abandoned via the fallback.
+    expect(result.warning).toBeUndefined();
+    const [call] = fakeGesture.getSwipeCalls();
+    expect(call).toBeDefined();
+    expect(call.x1).toBe(call.x2);
+    // Both ends stay above the bottom bar (1700) minus the 8px overlay padding.
+    expect(Math.max(call.y1, call.y2)).toBeLessThanOrEqual(1692);
+  });
+
+  test("handles a nested container inside a clickable card under a focusable root (#6128)", async () => {
+    const containerNode = createContainerNode(b(0, 500, 1000, 1500), "nested-list");
+    const card = {
+      $: { bounds: b(0, 500, 1000, 1500), "resource-id": "card", clickable: "true" },
+      node: [containerNode],
+    };
+    const focusableRoot = {
+      $: { bounds: b(0, 0, 1000, 2000), "resource-id": "root", focusable: "true" },
+      node: [card],
+    };
+
+    fakeObserveScreen.setObserveResult(createObserveResult(createHierarchy([focusableRoot])));
+
+    const swipeOn = createSwipeOn();
+    const result = await swipeOn.execute({
+      direction: "down",
+      container: { elementId: "nested-list" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+    const [call] = fakeGesture.getSwipeCalls();
+    expect(call).toBeDefined();
+    expect(call.x1).toBe(500);
+    expect(call.y1).toBeGreaterThanOrEqual(500);
+    expect(call.y2).toBeLessThanOrEqual(1500);
   });
 
   test("keeps the larger overlay when overlap is partial", async () => {

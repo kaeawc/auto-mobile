@@ -45,6 +45,20 @@ export class OverlayDetector implements OverlayAnalyzer {
     const seenNodes = new Set<ViewHierarchyNode>();
     const containerBounds = containerElement.bounds;
 
+    // The container's own ancestors are visited before the container in the
+    // pre-order walk below and always geometrically contain it, so a
+    // clickable/focusable parent (card, Compose root) used to be recorded as an
+    // overlay covering the whole container, which left no safe swipe area and
+    // forced the "No unobstructed swipe area" fallback (#6128). Ancestors are
+    // never overlays — only siblings and other windows are.
+    const containerAncestors = this.collectContainerAncestors(
+      rootGroups,
+      parser,
+      containerNode,
+      containerElement,
+      containerBounds,
+    );
+
     rootGroups.forEach((rootNodes, windowIndex) => {
       const windowRank = totalWindows - windowIndex;
       let nodeOrder = 0;
@@ -82,7 +96,7 @@ export class OverlayDetector implements OverlayAnalyzer {
             containerDepth = -1;
           }
 
-          if (insideContainer) {
+          if (insideContainer || containerAncestors.has(node)) {
             return;
           }
 
@@ -315,6 +329,58 @@ export class OverlayDetector implements OverlayAnalyzer {
     }
 
     return { left, top, right, bottom };
+  }
+
+  /**
+   * Pre-order walk of the same root groups that records the ancestor chain of
+   * the first node matching the container (same matching as the main walk, so
+   * the resource-id / text / content-desc / bounds fallbacks all apply).
+   * Returns an empty set when the container is not found in the hierarchy.
+   */
+  private collectContainerAncestors(
+    rootGroups: ViewHierarchyNode[][],
+    parser: DefaultElementParser,
+    containerNode: ViewHierarchyNode | null,
+    containerElement: Element,
+    containerBounds: Element["bounds"],
+  ): Set<ViewHierarchyNode> {
+    const ancestors = new Set<ViewHierarchyNode>();
+    // path[depth] is the node currently open at that depth of the pre-order walk.
+    const path: ViewHierarchyNode[] = [];
+    let found = false;
+
+    for (const rootNodes of rootGroups) {
+      for (const rootNode of rootNodes) {
+        parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
+          if (found) {
+            return;
+          }
+          path.length = depth;
+          path[depth] = node;
+
+          const nodeProperties = parser.extractNodeProperties(node);
+          if (
+            this.isContainerNode(
+              node,
+              nodeProperties,
+              containerNode,
+              containerElement,
+              containerBounds,
+            )
+          ) {
+            for (const ancestor of path.slice(0, depth)) {
+              ancestors.add(ancestor);
+            }
+            found = true;
+          }
+        });
+        if (found) {
+          return ancestors;
+        }
+      }
+    }
+
+    return ancestors;
   }
 
   private isClickableNode(nodeProperties: Record<string, unknown>): boolean {

@@ -69,6 +69,10 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
 
     expect(payload.limit).toBe(expectedLimit);
     expect(payload.offset).toBe(expectedOffset);
+    // The returned uri echoes the exact request (issue #6188) rather than a
+    // canonical form without pagination, so two different pages don't come
+    // back labeled with the same URI to a URI-keyed MCP client.
+    expect(content.uri).toBe(uri);
     expect(getTableDataForIos).toHaveBeenCalledWith(
       "com.example.app",
       "/app/Documents/app.db",

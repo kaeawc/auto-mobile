@@ -1,4 +1,4 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   DatabaseInspector,
@@ -320,7 +320,14 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = decodeURIComponent(databasePath);
   const decodedTable = decodeURIComponent(table);
-  const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
+  // Echo back the URI the client actually requested (limit/offset included)
+  // rather than a canonical one without pagination — otherwise two different
+  // pages come back labeled with the same URI, which a URI-keyed MCP client
+  // would conflate (issue #6188). Falls back to the canonical form only if
+  // this handler is ever invoked outside the registry's template-match path.
+  const uri =
+    getRequestedResourceUri(params) ??
+    buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
 
   try {
     // ResourceRegistry forwards any query key that isn't captured as a path

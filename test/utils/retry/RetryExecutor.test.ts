@@ -214,6 +214,42 @@ describe("DefaultRetryExecutor", () => {
       expect(removed).toBe(added);
     });
 
+    it("removes the abort listener when abort wins the race mid-sleep", async () => {
+      // Manual FakeTimer: the sleep never resolves, so the only way execute()
+      // settles is via the abort listener. This pins that `finally` runs after
+      // the race settles (a `return Promise.race` without `await` would remove
+      // the listener before it could fire and hang here).
+      const controller = new AbortController();
+      const signal = controller.signal;
+      let removed = 0;
+      const originalRemove = signal.removeEventListener.bind(signal);
+      signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+        removed++;
+        return originalRemove(...args);
+      }) as AbortSignal["removeEventListener"];
+
+      const resultPromise = executor.execute(
+        async () => {
+          throw new Error("Retry");
+        },
+        { signal, delays: 100, maxAttempts: 3 },
+      );
+
+      await Promise.resolve();
+      expect(timer.getPendingSleepCount()).toBe(1);
+
+      controller.abort();
+      const result = await resultPromise;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe("Operation aborted");
+      expect(result.attempts).toBe(1);
+      expect(removed).toBe(1);
+      // The losing sleep stays registered on the fake timer; it is bounded
+      // (one per abort) and pre-existing behavior.
+      expect(timer.getPendingSleepCount()).toBe(1);
+    });
+
     it("respects shouldRetry predicate", async () => {
       timer.enableAutoAdvance();
 

@@ -183,6 +183,8 @@ export class DefaultRetryExecutor implements RetryExecutor {
     // one listener per retry on a long-lived signal (#6138).
     let onAbort: (() => void) | undefined;
     try {
+      // The `await` is load-bearing: it keeps `finally` from running until the
+      // race settles, so the listener is removed after (not before) it can fire.
       return await Promise.race([
         this.timer.sleep(delay).then(() => false),
         new Promise<boolean>((resolve) => {

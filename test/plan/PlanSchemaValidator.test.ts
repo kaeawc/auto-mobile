@@ -172,6 +172,38 @@ steps:
       expect(validator.validateYaml(offline).valid).toBe(true);
     });
 
+    it("should accept an inline doNotDisturb that params.doNotDisturb overrides (#6112)", () => {
+      // PlanNormalizer gives params precedence, so at execution this step receives
+      // ONLY the valid params form — the malformed inline `{}` (neither `enabled`
+      // nor `mode`) is discarded. Schema validation must not false-reject it.
+      const yaml = `
+name: dnd-inline-overridden
+steps:
+  - tool: setDeviceState
+    doNotDisturb: {}
+    params:
+      doNotDisturb:
+        mode: priority
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+    });
+
+    it("should accept an inline biometrics that params.biometrics overrides (#6112)", () => {
+      // Same duality: params.biometrics discards the malformed inline enrollment
+      // value at normalization, so schema validation must not false-reject it.
+      const yaml = `
+name: biometrics-inline-overridden
+steps:
+  - tool: setDeviceState
+    biometrics:
+      enrollment: sometimes
+    params:
+      biometrics:
+        enrollment: enrolled
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+    });
+
     it("should validate cross-platform permission / appop steps in sequence", () => {
       const yaml = `
 name: grant-explicit
@@ -712,6 +744,51 @@ steps:
   - tool: setDeviceState
     biometrics:
       enrollment: sometimes
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should still reject a standalone inline biometrics with no params override (#6112)", () => {
+      // Guards against weakening the standalone-inline validation: with no
+      // overriding params.biometrics, a malformed inline enrollment value must
+      // still be rejected.
+      const yaml = `
+name: bad-biometric-enrollment-standalone
+steps:
+  - tool: setDeviceState
+    biometrics:
+      enrollment: sometimes
+    params:
+      networkCondition:
+        cancel: true
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a standalone inline doNotDisturb with neither enabled nor mode (#6112)", () => {
+      const yaml = `
+name: bad-dnd-standalone
+steps:
+  - tool: setDeviceState
+    doNotDisturb: {}
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should still reject a standalone inline doNotDisturb when an unrelated params field is set (#6112)", () => {
+      // A present `params` without `params.doNotDisturb` must not gate off the
+      // inline doNotDisturb validation.
+      const yaml = `
+name: bad-dnd-standalone-unrelated-params
+steps:
+  - tool: setDeviceState
+    doNotDisturb: {}
+    params:
+      biometrics:
+        enrollment: enrolled
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);

@@ -683,12 +683,6 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/setDeviceStateParams"
-              },
-              "doNotDisturb": {
-                "$ref": "#/$defs/doNotDisturbStateInput"
-              },
-              "biometrics": {
-                "$ref": "#/$defs/biometricStateInput"
               }
             },
             "anyOf": [
@@ -721,6 +715,44 @@
                   "properties": {
                     "networkCondition": {
                       "$ref": "#/$defs/networkConditionStateInput"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.doNotDisturb (when present) fully overrides an inline doNotDisturb at normalization (PlanNormalizer, params precedence), so the inline value is discarded at execution. Apply the strict doNotDisturbStateInput rules to the inline form ONLY when params.doNotDisturb is absent, otherwise a valid params override would false-reject the discarded inline value (#6112).",
+                "if": {
+                  "required": ["params"],
+                  "properties": {
+                    "params": {
+                      "required": ["doNotDisturb"]
+                    }
+                  }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "doNotDisturb": {
+                      "$ref": "#/$defs/doNotDisturbStateInput"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.biometrics (when present) fully overrides an inline biometrics at normalization (PlanNormalizer, params precedence), so the inline value is discarded at execution. Apply the strict biometricStateInput rules to the inline form ONLY when params.biometrics is absent, otherwise a valid params override would false-reject the discarded inline value (#6112).",
+                "if": {
+                  "required": ["params"],
+                  "properties": {
+                    "params": {
+                      "required": ["biometrics"]
+                    }
+                  }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "biometrics": {
+                      "$ref": "#/$defs/biometricStateInput"
                     }
                   }
                 }

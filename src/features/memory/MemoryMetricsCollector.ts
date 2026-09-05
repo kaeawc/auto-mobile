@@ -182,8 +182,15 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     try {
       // Clear logcat buffer before starting if this is the start
       // For now, we'll just read the recent buffer and filter by timestamp
+      //
+      // ART (API 21+) logs GC lines under the app's own process tag (not a
+      // dedicated "art" tag) and without the legacy "GC_" prefix, e.g.
+      // "Background concurrent copying GC freed 4180(230KB) ..., paused 213us".
+      // A `-s dalvikvm:I art:I` tag filter plus `grep "GC_"` drops every modern
+      // ART line, so scope only on the "freed ... paused" shape both Dalvik and
+      // ART share and let parseGCEvents() do the format-specific parsing.
       const { stdout } = await perf.track("adbLogcatGC", () =>
-        this.adb.executeCommand(`shell logcat -d -s dalvikvm:I art:I | grep "GC_"`, 5000),
+        this.adb.executeCommand(`shell logcat -d -v time | grep -iE "GC[_ ].*freed.*paused"`, 5000),
       );
 
       return this.parseGCEvents(stdout, startTimestamp, endTimestamp);
@@ -195,27 +202,55 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
 
   /**
    * Parse GC events from logcat output
+   *
+   * Two log shapes are supported:
+   *  - Dalvik (pre-ART, API < 21): "GC_FOR_ALLOC freed 1234K, 50% free 5678K/11356K, paused 123ms"
+   *  - ART (API 21+): "Background concurrent copying GC freed 4180(230KB) AllocSpace objects,
+   *    0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms" — pause may be
+   *    reported in "us" (converted to ms below) or "ms", and the freed size may appear either
+   *    bare ("1234KB") or parenthesized after an object count ("4180(230KB)").
    */
   private parseGCEvents(output: string, startTimestamp: number, endTimestamp: number): GCEvent[] {
     const events: GCEvent[] = [];
     const lines = output.split("\n");
 
-    // Pattern: "I/art: Background concurrent mark sweep GC freed 1234KB, 50% free, 5678KB/11356KB, paused 123ms"
-    // Pattern: "I/dalvikvm: GC_FOR_ALLOC freed 1234K, 50% free 5678K/11356K, paused 123ms"
-    const gcPattern = /GC[_\s](\w+).*?freed\s+(\d+)K?B?.*?paused\s+(\d+)ms/i;
+    const dalvikPattern = /^GC_(\w+)\s+freed\s+(\d+)K,?.*?paused\s+(\d+)ms/i;
+    const artPattern =
+      /([A-Za-z][A-Za-z ]*?)\s*GC freed\s+(?:\d+\()?(\d+)\s*KB\)?.*?paused\s+([\d.]+)\s*(us|ms)/i;
 
-    for (const line of lines) {
-      const match = line.match(gcPattern);
-      if (match) {
-        const type = match[1];
-        const freedKb = parseInt(match[2], 10);
-        const durationMs = parseInt(match[3], 10);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
+      }
 
-        // We don't have exact timestamps in logcat without -v time, so we'll accept all recent GC events
-        // In production, we'd parse logcat with timestamp format
+      // Strip the logcat prefix (timestamp/pid/tid/level/tag) so pattern
+      // matching only sees the GC message itself. The tag separator is the
+      // rightmost ": " — timestamps use "HH:MM:SS.mmm" (colon with no
+      // trailing space), so this reliably isolates the message.
+      const tagSeparator = line.lastIndexOf(": ");
+      const message = tagSeparator >= 0 ? line.slice(tagSeparator + 2) : line;
+
+      const dalvikMatch = message.match(dalvikPattern);
+      if (dalvikMatch) {
         events.push({
-          type,
-          freedKb,
+          type: dalvikMatch[1],
+          freedKb: parseInt(dalvikMatch[2], 10),
+          durationMs: parseInt(dalvikMatch[3], 10),
+          timestamp: this.timer.now(), // Approximate - logcat would give us real timestamp with -v time
+        });
+        continue;
+      }
+
+      const artMatch = message.match(artPattern);
+      if (artMatch) {
+        const pauseValue = parseFloat(artMatch[3]);
+        const pauseUnit = artMatch[4].toLowerCase();
+        const durationMs = pauseUnit === "us" ? pauseValue / 1000 : pauseValue;
+
+        events.push({
+          type: artMatch[1].trim(),
+          freedKb: parseInt(artMatch[2], 10),
           durationMs,
           timestamp: this.timer.now(), // Approximate - logcat would give us real timestamp with -v time
         });

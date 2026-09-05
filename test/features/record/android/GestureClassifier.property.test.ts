@@ -90,21 +90,27 @@ describe("GestureClassifier (property-based)", () => {
 
   test("a zero-displacement contact is a tap iff short, a longPress iff long", () => {
     fc.assert(
-      fc.property(density, coord, coord, fc.integer({ min: 0, max: 3000 }), (d, x, y, durationMs) => {
-        // start == end ⇒ displacement 0 < slop for every positive density,
-        // so the swipe branch is never taken and classification hinges only
-        // on duration vs LONG_PRESS_MS.
-        const g = singleFinger(d, { x, y }, { x, y }, durationMs);
-        if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
-          expect(g?.type).toBe("longPress");
-          expect(g?.durationMs).toBe(durationMs);
-        } else {
-          expect(g?.type).toBe("tap");
-        }
-        // Tap-family coordinates round-trip through the identity scaler.
-        expect(g?.screenX).toBe(x);
-        expect(g?.screenY).toBe(y);
-      }),
+      fc.property(
+        density,
+        coord,
+        coord,
+        fc.integer({ min: 0, max: 3000 }),
+        (d, x, y, durationMs) => {
+          // start == end ⇒ displacement 0 < slop for every positive density,
+          // so the swipe branch is never taken and classification hinges only
+          // on duration vs LONG_PRESS_MS.
+          const g = singleFinger(d, { x, y }, { x, y }, durationMs);
+          if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
+            expect(g?.type).toBe("longPress");
+            expect(g?.durationMs).toBe(durationMs);
+          } else {
+            expect(g?.type).toBe("tap");
+          }
+          // Tap-family coordinates round-trip through the identity scaler.
+          expect(g?.screenX).toBe(x);
+          expect(g?.screenY).toBe(y);
+        },
+      ),
       RUN_OPTIONS,
     );
   });
@@ -162,11 +168,19 @@ describe("GestureClassifier (property-based)", () => {
 
   test("a completed single-finger contact is never null and never a two-finger type", () => {
     fc.assert(
-      fc.property(density, coord, coord, coord, coord, fc.integer({ min: 0, max: 3000 }), (d, x0, y0, x1, y1, durationMs) => {
-        const g = singleFinger(d, { x: x0, y: y0 }, { x: x1, y: y1 }, durationMs);
-        expect(g).not.toBeNull();
-        expect(["tap", "longPress", "swipe"]).toContain(g?.type);
-      }),
+      fc.property(
+        density,
+        coord,
+        coord,
+        coord,
+        coord,
+        fc.integer({ min: 0, max: 3000 }),
+        (d, x0, y0, x1, y1, durationMs) => {
+          const g = singleFinger(d, { x: x0, y: y0 }, { x: x1, y: y1 }, durationMs);
+          expect(g).not.toBeNull();
+          expect(["tap", "longPress", "swipe"]).toContain(g?.type);
+        },
+      ),
       RUN_OPTIONS,
     );
   });
@@ -177,63 +191,94 @@ describe("GestureClassifier (property-based)", () => {
 
   test("an emitted pinch reports scale == final/initial and a direction agreeing with it", () => {
     fc.assert(
-      fc.property(density, coord, coord, coord, coord, coord, coord, coord, coord, (d, ax0, ay0, bx0, by0, ax1, ay1, bx1, by1) => {
-        const initialDist = dist(ax0, ay0, bx0, by0);
-        const finalDist = dist(ax1, ay1, bx1, by1);
-        fc.pre(initialDist > 0);
-        const scale = finalDist / initialDist;
-        // Only cases the classifier will actually emit: a meaningful scale change.
-        fc.pre(Math.abs(scale - 1) >= GESTURE_THRESHOLDS.PINCH_MIN_SCALE_DELTA);
+      fc.property(
+        density,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        (d, ax0, ay0, bx0, by0, ax1, ay1, bx1, by1) => {
+          const initialDist = dist(ax0, ay0, bx0, by0);
+          const finalDist = dist(ax1, ay1, bx1, by1);
+          fc.pre(initialDist > 0);
+          const scale = finalDist / initialDist;
+          // Only cases the classifier will actually emit: a meaningful scale change.
+          fc.pre(Math.abs(scale - 1) >= GESTURE_THRESHOLDS.PINCH_MIN_SCALE_DELTA);
 
-        const g = twoFinger(
-          d,
-          { x: ax0, y: ay0 },
-          { x: bx0, y: by0 },
-          { x: ax1, y: ay1 },
-          { x: bx1, y: by1 },
-        );
-        expect(g?.type).toBe("pinch");
-        expect(Number.isFinite(g?.scale)).toBe(true);
-        expect(g!.scale!).toBeGreaterThan(0);
-        expect(g!.scale!).toBeCloseTo(scale, 6);
-        expect(g?.pinchDirection).toBe(scale < 1 ? "in" : "out");
-      }),
+          const g = twoFinger(
+            d,
+            { x: ax0, y: ay0 },
+            { x: bx0, y: by0 },
+            { x: ax1, y: ay1 },
+            { x: bx1, y: by1 },
+          );
+          expect(g?.type).toBe("pinch");
+          expect(Number.isFinite(g?.scale)).toBe(true);
+          expect(g!.scale!).toBeGreaterThan(0);
+          expect(g!.scale!).toBeCloseTo(scale, 6);
+          expect(g?.pinchDirection).toBe(scale < 1 ? "in" : "out");
+        },
+      ),
       RUN_OPTIONS,
     );
   });
 
   test("two fingers starting coincident never emit a non-finite scale (divide-by-zero guard)", () => {
     fc.assert(
-      fc.property(density, coord, coord, coord, coord, coord, coord, (d, px, py, ax1, ay1, bx1, by1) => {
-        // Both fingers begin at the same point ⇒ initialDist === 0. The guard
-        // must suppress the pinch rather than emit scale = n/0 = Infinity.
-        const g = twoFinger(
-          d,
-          { x: px, y: py },
-          { x: px, y: py },
-          { x: ax1, y: ay1 },
-          { x: bx1, y: by1 },
-        );
-        expect(g).toBeNull();
-      }),
+      fc.property(
+        density,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        (d, px, py, ax1, ay1, bx1, by1) => {
+          // Both fingers begin at the same point ⇒ initialDist === 0. The guard
+          // must suppress the pinch rather than emit scale = n/0 = Infinity.
+          const g = twoFinger(
+            d,
+            { x: px, y: py },
+            { x: px, y: py },
+            { x: ax1, y: ay1 },
+            { x: bx1, y: by1 },
+          );
+          expect(g).toBeNull();
+        },
+      ),
       RUN_OPTIONS,
     );
   });
 
   test("a two-finger sequence only ever emits a pinch or nothing — never a single-finger type", () => {
     fc.assert(
-      fc.property(density, coord, coord, coord, coord, coord, coord, coord, coord, (d, ax0, ay0, bx0, by0, ax1, ay1, bx1, by1) => {
-        const g = twoFinger(
-          d,
-          { x: ax0, y: ay0 },
-          { x: bx0, y: by0 },
-          { x: ax1, y: ay1 },
-          { x: bx1, y: by1 },
-        );
-        if (g !== null) {
-          expect(g.type).toBe("pinch");
-        }
-      }),
+      fc.property(
+        density,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        coord,
+        (d, ax0, ay0, bx0, by0, ax1, ay1, bx1, by1) => {
+          const g = twoFinger(
+            d,
+            { x: ax0, y: ay0 },
+            { x: bx0, y: by0 },
+            { x: ax1, y: ay1 },
+            { x: bx1, y: by1 },
+          );
+          if (g !== null) {
+            expect(g.type).toBe("pinch");
+          }
+        },
+      ),
       RUN_OPTIONS,
     );
   });
@@ -243,24 +288,33 @@ describe("GestureClassifier (property-based)", () => {
   // -------------------------------------------------------------------------
 
   test("no emitted gesture's numeric fields are ever non-finite", () => {
-    const finiteOrAbsent = (v: number | undefined): boolean => v === undefined || Number.isFinite(v);
+    const finiteOrAbsent = (v: number | undefined): boolean =>
+      v === undefined || Number.isFinite(v);
     fc.assert(
-      fc.property(density, coord, coord, coord, coord, fc.integer({ min: 0, max: 5000 }), (d, x0, y0, x1, y1, durationMs) => {
-        const g = singleFinger(d, { x: x0, y: y0 }, { x: x1, y: y1 }, durationMs);
-        if (g === null) {
-          return true;
-        }
-        return (
-          finiteOrAbsent(g.screenX) &&
-          finiteOrAbsent(g.screenY) &&
-          finiteOrAbsent(g.startX) &&
-          finiteOrAbsent(g.startY) &&
-          finiteOrAbsent(g.endX) &&
-          finiteOrAbsent(g.endY) &&
-          finiteOrAbsent(g.durationMs) &&
-          finiteOrAbsent(g.scale)
-        );
-      }),
+      fc.property(
+        density,
+        coord,
+        coord,
+        coord,
+        coord,
+        fc.integer({ min: 0, max: 5000 }),
+        (d, x0, y0, x1, y1, durationMs) => {
+          const g = singleFinger(d, { x: x0, y: y0 }, { x: x1, y: y1 }, durationMs);
+          if (g === null) {
+            return true;
+          }
+          return (
+            finiteOrAbsent(g.screenX) &&
+            finiteOrAbsent(g.screenY) &&
+            finiteOrAbsent(g.startX) &&
+            finiteOrAbsent(g.startY) &&
+            finiteOrAbsent(g.endX) &&
+            finiteOrAbsent(g.endY) &&
+            finiteOrAbsent(g.durationMs) &&
+            finiteOrAbsent(g.scale)
+          );
+        },
+      ),
       RUN_OPTIONS,
     );
   });

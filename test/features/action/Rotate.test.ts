@@ -472,9 +472,12 @@ describe("Rotate", () => {
       expect(accelWrites.at(-1)).toContain("accelerometer_rotation 1");
     });
 
-    test("should not restore auto-rotate when accelerometer_rotation is unreadable (#6199)", async () => {
+    test("should not mutate accelerometer_rotation at all when it is unreadable (#6199)", async () => {
       // accelerometer_rotation is malformed/unreadable — this must be treated
-      // as "unknown", never fabricated into a confirmed prior state to restore.
+      // as "unknown". We must not force it off (no confirmed prior value to
+      // restore afterward), so user_rotation is written on its own and
+      // whatever the real device does with it is reported honestly by
+      // waitForRotation rather than covered up with a guessed restore.
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
       fakeAdb.setCommandResponse(
         "shell settings get system accelerometer_rotation",
@@ -486,11 +489,13 @@ describe("Rotate", () => {
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(true);
       expect(result.orientationLockHandled).toBe(false);
-      // The forced-off write still happens (needed to apply user_rotation)...
+      // user_rotation is still written...
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
+      // ...but accelerometer_rotation is never mutated in either direction:
+      // no disable, and (necessarily) no unconfirmed "restore" either.
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(
-        true,
+        false,
       );
-      // ...but there is no unconfirmed "restore" write back to 1.
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
         false,
       );

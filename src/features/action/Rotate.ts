@@ -273,6 +273,12 @@ export class Rotate extends BaseVisualChange {
     // — an unreadable/malformed reading must never be fabricated into a
     // state to restore (#6199 review).
     const wasAutoRotateEnabled = autoRotateState === "enabled";
+    // When the prior state is unconfirmed, do not touch accelerometer_rotation
+    // at all: forcing it to 0 would be a real mutation of device state we
+    // have no confirmed value to restore afterward. Only write user_rotation
+    // in that case and let waitForRotation report honestly whether it took
+    // effect (#6199 review).
+    const canForceAutoRotateOff = autoRotateState !== "unknown";
 
     try {
       if (autoRotateState === "locked") {
@@ -281,16 +287,20 @@ export class Rotate extends BaseVisualChange {
         logger.info("Auto-rotate is on; temporarily disabling it to force rotation");
       } else {
         logger.info(
-          "accelerometer_rotation is unreadable; forcing rotation without restoring it afterward",
+          "accelerometer_rotation is unreadable; setting user_rotation only, without forcing accelerometer_rotation (no confirmed prior state to restore)",
         );
       }
 
-      await perf.track("setRotation", () =>
-        Promise.all([
-          this.writeSystemSetting("accelerometer_rotation", "0"),
-          this.writeSystemSetting("user_rotation", String(value)),
-        ]),
-      );
+      await perf.track("setRotation", async () => {
+        if (canForceAutoRotateOff) {
+          await Promise.all([
+            this.writeSystemSetting("accelerometer_rotation", "0"),
+            this.writeSystemSetting("user_rotation", String(value)),
+          ]);
+        } else {
+          await this.writeSystemSetting("user_rotation", String(value));
+        }
+      });
 
       // Wait for rotation to complete (also serves as verification)
       await perf.track("waitForRotation", () => this.awaitIdle.waitForRotation(value));

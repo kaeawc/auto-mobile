@@ -9,7 +9,7 @@ import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./ele
  *
  * `toSkeleton` collapses the already-computed `ObserveResult.elements`
  * (`{ clickable, scrollable, text, media }`) into a flat, actionable-only list —
- * `{ id, label, bounds, affordances }` — dropping layout scaffolding. Embedded
+ * `{ elementId, label, bounds, affordances }` — dropping layout scaffolding. Embedded
  * semantic links and a Compose test tag are retained only when present, because
  * they make otherwise inaccessible link activation discoverable. It is a
  * pure merge + dedup + compaction of that structure: no device I/O, no tree
@@ -23,9 +23,11 @@ import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./ele
  * already-flattened `text` category's geometry, so those rows are no longer
  * `label: null` and non-clickable state text is not lost.
  *
- * `id` / `label` map directly onto the `tapOn` selector union (`elementId` /
- * `text`), so a skeleton row is issued as `tapOn({ elementId })` with no new
- * selector semantics (issue #4388 acceptance criterion 2).
+ * `elementId` / `label` map directly onto the `tapOn` selector union
+ * (`elementId` / `text`), so a skeleton row is issued as `tapOn({ elementId })`
+ * with no new selector semantics (issue #4388 acceptance criterion 2). The
+ * emitted key is named `elementId` (not `id`) to literally match the selector
+ * field name — see issue #6153.
  */
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
@@ -39,10 +41,10 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /**
- * `id = resource-id ?? view-id`. The `view-id` slot is the stable content-hash
- * id from `assignStableViewIds` (`s-…`, #3228), so a row keeps its id across a
- * scroll. A test tag is carried separately for Compose owners that do not enable
- * `testTagsAsResourceId`.
+ * `elementId = resource-id ?? view-id`. The `view-id` slot is the stable
+ * content-hash id from `assignStableViewIds` (`s-…`, #3228), so a row keeps its
+ * elementId across a scroll. A test tag is carried separately for Compose
+ * owners that do not enable `testTagsAsResourceId`.
  */
 function deriveId(el: Element): string | undefined {
   return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
@@ -113,9 +115,9 @@ function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
   return [left, top, right, bottom];
 }
 
-/** Working accumulator for one merged skeleton row, keyed by `(id, label, bounds)`. */
+/** Working accumulator for one merged skeleton row, keyed by `(elementId, label, bounds)`. */
 interface SkeletonAccumulator {
-  id?: string;
+  elementId?: string;
   label?: string;
   sublabel?: string;
   testTag?: string;
@@ -131,13 +133,13 @@ interface SkeletonAccumulator {
   provenance?: ElementProvenance;
 }
 
-/** NUL-joined identity so `(id, label, bounds)` triples dedup without straddling. */
+/** NUL-joined identity so `(elementId, label, bounds)` triples dedup without straddling. */
 function identityKey(
-  id: string | undefined,
+  elementId: string | undefined,
   label: string | undefined,
   bounds: SkeletonElement["bounds"],
 ): string {
-  return [id ?? "", label ?? "", bounds.join(",")].join("\0");
+  return [elementId ?? "", label ?? "", bounds.join(",")].join("\0");
 }
 
 function area(bounds: SkeletonElement["bounds"]): number {
@@ -159,7 +161,7 @@ function strictlyContains(
 }
 
 /**
- * Merge overlapping element categories into one accumulator per `(id, label,
+ * Merge overlapping element categories into one accumulator per `(elementId, label,
  * bounds)` triple, unioning affordances. `text` overlaps `clickable`/`scrollable`
  * on real captures (a clickable node that carries text is in both), so the
  * identity key dedups them. `media` carries no actionable affordance and is
@@ -172,14 +174,14 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
     if (!bounds) {
       continue;
     }
-    const id = deriveId(el);
+    const elementId = deriveId(el);
     const label = deriveLabel(el);
     const affordances = deriveAffordances(el);
-    const key = identityKey(id, label, bounds);
+    const key = identityKey(elementId, label, bounds);
 
     let acc = byIdentity.get(key);
     if (!acc) {
-      acc = { id, label, bounds, affordances: new Set<Affordance>() };
+      acc = { elementId, label, bounds, affordances: new Set<Affordance>() };
       byIdentity.set(key, acc);
     }
     if (acc.provenance === undefined) {
@@ -384,8 +386,8 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
     bounds: acc.bounds,
     affordances: AFFORDANCE_ORDER.filter((affordance) => acc.affordances.has(affordance)),
   };
-  if (acc.id !== undefined) {
-    entry.id = acc.id;
+  if (acc.elementId !== undefined) {
+    entry.elementId = acc.elementId;
   }
   if (acc.label !== undefined) {
     entry.label = acc.label;
@@ -408,7 +410,7 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
 /**
  * Project the flattened `elements` block into an actionable-only skeleton
  * (issue #4388): merge + dedup the categories, apply the keep rule, and emit
- * `{ id, label, bounds, affordances }` rows with compact tuple bounds.
+ * `{ elementId, label, bounds, affordances }` rows with compact tuple bounds.
  */
 export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
   const accumulators = accumulateByIdentity(elements);

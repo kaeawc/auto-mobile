@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { toSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { tapOnSchema } from "../../../../src/server/interactionTools";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
@@ -29,7 +30,7 @@ function bounds(left: number, top: number, right: number, bottom: number): Eleme
 }
 
 function findById(skeleton: SkeletonElement[], id: string): SkeletonElement | undefined {
-  return skeleton.find((entry) => entry.id === id);
+  return skeleton.find((entry) => entry.elementId === id);
 }
 
 describe("toSkeleton — acceptance criteria", () => {
@@ -55,13 +56,36 @@ describe("toSkeleton — acceptance criteria", () => {
       const submit = findById(skeleton, "com.app:id/submit");
       expect(submit).toBeDefined();
       // resource-id wins over view-id; text wins over content-desc.
-      expect(submit?.id).toBe("com.app:id/submit");
+      expect(submit?.elementId).toBe("com.app:id/submit");
       expect(submit?.label).toBe("Submit");
 
       const row = findById(skeleton, "s-def456");
       expect(row).toBeDefined();
       // No resource-id: falls back to the stable view-id; no text: content-desc.
       expect(row?.label).toBe("Compose row");
+    });
+
+    test("a skeleton entry's elementId round-trips through tapOnSelectorSchema (issue #6153)", () => {
+      const node: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "com.app:id/submit",
+        text: "Submit",
+        clickable: "true",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [node] }));
+      const entry = skeleton[0];
+      expect(entry.elementId).toBe("com.app:id/submit");
+      // No stray `id` key survives the rename.
+      expect((entry as Record<string, unknown>).id).toBeUndefined();
+
+      // The docs promise a skeleton entry's elementId is "directly usable as a
+      // tapOn selector" — verify that promise against the real selector schema.
+      const parsed = tapOnSchema.parse({
+        platform: "android",
+        selector: { elementId: entry.elementId },
+      });
+      expect(parsed.selector).toEqual({ elementId: "com.app:id/submit" });
     });
   });
 
@@ -259,7 +283,7 @@ describe("toSkeleton — acceptance criteria", () => {
 
       // The clickable row survives; the redundant inner label is suppressed.
       expect(skeleton).toHaveLength(1);
-      expect(skeleton[0].id).toBe("row");
+      expect(skeleton[0].elementId).toBe("row");
       expect(skeleton[0].affordances).toEqual(["tap"]);
     });
 
@@ -308,7 +332,7 @@ describe("toSkeleton — acceptance criteria", () => {
       const skeleton = toSkeleton(makeElements({ clickable: [a, b], scrollable: [c] }));
 
       expect(skeleton).toHaveLength(1);
-      expect(skeleton[0].id).toBe("dup");
+      expect(skeleton[0].elementId).toBe("dup");
       expect(skeleton[0].label).toBe("Row");
       expect(skeleton[0].affordances).toEqual(["tap", "scroll"]);
     });
@@ -642,7 +666,7 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(elements).toBeDefined();
 
       const skeleton = toSkeleton(elements!);
-      const card = skeleton.find((entry) => entry.id === "long_press_card");
+      const card = skeleton.find((entry) => entry.elementId === "long_press_card");
       expect(card).toBeDefined();
       // Without ancestry provenance the exact-fill child is dropped and the card
       // stays label:null; with it, the label lands on the tappable row.

@@ -530,8 +530,8 @@ const observeBaseSchema = withJsonSchemaOverride(
         .optional()
         .describe(
           "Output projection. 'skeleton' (default) returns a flat, actionable-only list " +
-            "(id/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton " +
-            "id/label is directly usable " +
+            "(elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton " +
+            "elementId/label is directly usable " +
             "as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
         ),
       skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),

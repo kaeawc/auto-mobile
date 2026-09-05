@@ -990,7 +990,7 @@ describe("sanitizeObserveResult", () => {
 
       const out = sanitizeObserveResult(observe, { dropElements: true, project: "skeleton" });
 
-      const card = out.skeleton?.find((entry) => entry.id === "long_press_card");
+      const card = out.skeleton?.find((entry) => entry.elementId === "long_press_card");
       expect(card).toBeDefined();
       expect(card?.label).toBe("Basic long press card");
       expect(card?.sublabel).toContain("Long press me");

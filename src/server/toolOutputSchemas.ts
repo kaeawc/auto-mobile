@@ -570,7 +570,7 @@ export const deviceLockSchema = z.object({
  */
 export const skeletonElementSchema = z
   .object({
-    id: z.string().optional(),
+    elementId: z.string().optional(),
     label: z.string().optional(),
     sublabel: z.string().optional(),
     testTag: z.string().optional(),

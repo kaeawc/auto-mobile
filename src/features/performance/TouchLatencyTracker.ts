@@ -28,6 +28,15 @@ interface TouchLatencyResult {
 }
 
 /**
+ * True when a gfxinfo counter was parsed on both sides and grew. A `null` on
+ * either side means the line is absent from this gfxinfo variant, which is
+ * never evidence of activity.
+ */
+function counterIncreased(before: number | null, current: number | null): boolean {
+  return before !== null && current !== null && current > before;
+}
+
+/**
  * Measures touch input latency by injecting synthetic touches
  * and measuring the time until UI response is detected via gfxinfo
  */
@@ -86,6 +95,7 @@ export class TouchLatencyTracker {
   private async measureFrameResponse(
     packageName: string,
     beforeStats: {
+      totalFrames: number | null;
       missedVsync: number | null;
       slowUiThread: number | null;
       frameDeadlineMissed: number | null;
@@ -106,17 +116,14 @@ export class TouchLatencyTracker {
 
         const currentStats = this.idle.parseMetrics(stdout);
 
-        // Check if any jank indicator has changed (indicates frame processing)
+        // Any rendered frame is a response (#6124). A smooth app never trips a
+        // jank counter, so `Total frames rendered` is the primary signal; the
+        // jank counters remain as a fallback for gfxinfo variants without it.
         const hasFrameActivity =
-          (beforeStats.missedVsync !== null &&
-            currentStats.missedVsync !== null &&
-            currentStats.missedVsync > beforeStats.missedVsync) ||
-          (beforeStats.slowUiThread !== null &&
-            currentStats.slowUiThread !== null &&
-            currentStats.slowUiThread > beforeStats.slowUiThread) ||
-          (beforeStats.frameDeadlineMissed !== null &&
-            currentStats.frameDeadlineMissed !== null &&
-            currentStats.frameDeadlineMissed > beforeStats.frameDeadlineMissed);
+          counterIncreased(beforeStats.totalFrames, currentStats.totalFrames) ||
+          counterIncreased(beforeStats.missedVsync, currentStats.missedVsync) ||
+          counterIncreased(beforeStats.slowUiThread, currentStats.slowUiThread) ||
+          counterIncreased(beforeStats.frameDeadlineMissed, currentStats.frameDeadlineMissed);
 
         if (hasFrameActivity) {
           const latency = this.timer.now() - startTime;

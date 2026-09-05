@@ -343,7 +343,7 @@ export class SessionManager {
    */
   private readonly networkConditionExpiryTimers: Map<
     string,
-    { handle: NodeJS.Timeout; session: Session }
+    { handle: NodeJS.Timeout; session: Session; deadlineMs: number; generation: number }
   > = new Map();
   /**
    * Monotonic per-session network-condition generation (issue #6177). Bumped by
@@ -2126,10 +2126,63 @@ export class SessionManager {
     // awaited restore settles, the generation check in restoreNetworkConditionOnExpiry
     // detects the mismatch and skips clearing the newer condition's restore slot.
     const effectiveGeneration = generation ?? this.currentNetworkConditionGeneration(sessionId);
+    this.armNetworkConditionExpiryAt(
+      session,
+      this.timer.now() + effectiveSeconds * 1000,
+      effectiveGeneration,
+    );
+  }
+
+  /**
+   * Arm the timer for an absolute deadline and a fixed generation, shared by
+   * {@link scheduleNetworkConditionExpiry} (a fresh TTL) and
+   * {@link rearmNetworkConditionExpiry} (restoring a snapshot taken by
+   * {@link peekNetworkConditionExpiry}). Identity-guarded like its callers: a
+   * session that was replaced under the same id since the deadline was captured
+   * is not armed against.
+   */
+  private armNetworkConditionExpiryAt(
+    session: Session,
+    deadlineMs: number,
+    generation: number,
+  ): void {
+    const sessionId = session.sessionId;
+    if (this.sessions.get(sessionId) !== session) {
+      return;
+    }
+    const remainingMs = Math.max(0, deadlineMs - this.timer.now());
     const handle = this.timer.setTimeout(() => {
-      this.handleNetworkConditionExpiry(session, effectiveGeneration);
-    }, effectiveSeconds * 1000);
-    this.networkConditionExpiryTimers.set(sessionId, { handle, session });
+      this.handleNetworkConditionExpiry(session, generation);
+    }, remainingMs);
+    this.networkConditionExpiryTimers.set(sessionId, { handle, session, deadlineMs, generation });
+  }
+
+  /**
+   * Snapshot a pending network-condition TTL without disturbing it (issue
+   * #6178 item 1). `runSessionNetworkMutation` calls this before cancelling the
+   * timer to run its own mutation race-free (issue #6085 review), then re-arms
+   * the snapshot via {@link rearmNetworkConditionExpiry} if that mutation does
+   * not confirm success — so a manual reset whose emulator command fails does
+   * not permanently drop the deadline a prior timed degrade promised.
+   */
+  peekNetworkConditionExpiry(
+    sessionId: string,
+  ): { deadlineMs: number; generation: number } | undefined {
+    const entry = this.networkConditionExpiryTimers.get(sessionId);
+    return entry ? { deadlineMs: entry.deadlineMs, generation: entry.generation } : undefined;
+  }
+
+  /**
+   * Re-arm a TTL previously captured via {@link peekNetworkConditionExpiry},
+   * preserving its original deadline and generation exactly (issue #6178 item
+   * 1). A deadline already in the past fires on the next tick rather than
+   * being dropped, matching a TTL that elapsed while the failed mutation ran.
+   */
+  rearmNetworkConditionExpiry(
+    session: Session,
+    snapshot: { deadlineMs: number; generation: number },
+  ): void {
+    this.armNetworkConditionExpiryAt(session, snapshot.deadlineMs, snapshot.generation);
   }
 
   /**

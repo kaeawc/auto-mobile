@@ -269,6 +269,82 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("preserves the original TTL deadline when a manual reset fails (#6178 item 1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-reset-fail", "emulator-5554", "android");
+      // Timed degrade arms a 30s TTL.
+      await runSessionNetworkMutation(
+        manager,
+        "net-reset-fail",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      // 10s elapse, then a manual reset (registerRestore=false) whose emulator
+      // command fails — DeviceState resolves this as `success: false`, not a throw.
+      timer.advanceTime(10_000);
+      const resetResult = await runSessionNetworkMutation(
+        manager,
+        "net-reset-fail",
+        "emulator-5554",
+        false,
+        async () => ({ success: false, deviceId: "emulator-5554", platform: "android" }),
+      );
+      expect(resetResult).toEqual({
+        success: false,
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
+
+      // The failed reset must not have cancelled the original degrade's TTL: it
+      // still fires at its ORIGINAL deadline (20s of its 30s remain), not never
+      // and not from a fresh 30s.
+      timer.advanceTime(19_000);
+      expect(restored).toEqual([]);
+      timer.advanceTime(1_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+      expect(manager.getNetworkCondition("net-reset-fail")).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("preserves the original TTL deadline when a manual reset throws (#6178 item 1)", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    try {
+      await manager.createSession("net-reset-throw", "emulator-5554", "android");
+      await runSessionNetworkMutation(
+        manager,
+        "net-reset-throw",
+        "emulator-5554",
+        true,
+        async () => {},
+        30,
+      );
+
+      timer.advanceTime(10_000);
+      await expect(
+        runSessionNetworkMutation(manager, "net-reset-throw", "emulator-5554", false, async () => {
+          throw new Error("emulator console rejected reset");
+        }),
+      ).rejects.toThrow("emulator console rejected reset");
+
+      timer.advanceTime(20_000);
+      await manager.getPendingDeviceCleanup("emulator-5554");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("runs the mutation untracked when there is no session", async () => {
     let ran = false;
     const result = await runSessionNetworkMutation(

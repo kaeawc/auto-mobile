@@ -1,6 +1,22 @@
 import type { SessionManager } from "../daemon/sessionManager";
 
 /**
+ * True when `value` is a typed `{ success: false, ... }` result (e.g.
+ * `DeviceStateResult`) rather than a thrown error or an untyped void return.
+ * `DeviceState` converts a failed emulator command into a resolved
+ * `success: false` rather than throwing (issue #6178 item 1), so a caller
+ * that only watches for a rejection misses it.
+ */
+function isTypedFailureResult(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "success" in value &&
+    (value as Record<string, unknown>).success === false
+  );
+}
+
+/**
  * Bind a device-wide network-condition mutation to the session lifecycle,
  * paralleling {@link runSessionBiometricMutation} (issue #6012 review).
  *
@@ -70,18 +86,47 @@ export async function runSessionNetworkMutation<T>(
   // mid-mutation, reset the just-shaped device, and clear the freshly-published
   // restore slot. Cancelling up front closes that overlap window; the new TTL (if
   // any) is armed only after the mutation settles, below.
+  //
+  // Snapshot the prior TTL's DEADLINE before cancelling it (issue #6178 item 1):
+  // if this mutation is a manual reset (or any mutation) that does not confirm
+  // success — a typed `success: false` result, or a thrown error — the
+  // emulator's shaping never actually changed, so the ORIGINAL deadline must
+  // survive rather than being silently dropped. Re-arming below restores that
+  // deadline, but tagged with THIS call's generation (captured above), not the
+  // snapshot's: the counter was already bumped for this attempt regardless of
+  // its outcome, so the re-armed timer must match what
+  // `currentNetworkConditionGeneration` will return, or its eventual successful
+  // fire would see a generation mismatch and skip clearing the restore slot.
+  const priorExpiry = sessionManager.peekNetworkConditionExpiry(sessionUuid);
   sessionManager.cancelNetworkConditionExpiry(sessionUuid);
+  const rearmPriorExpiry = () => {
+    if (priorExpiry) {
+      sessionManager.rearmNetworkConditionExpiry(session, {
+        deadlineMs: priorExpiry.deadlineMs,
+        generation,
+      });
+    }
+  };
 
   let completed = false;
   let result!: T;
-  await sessionManager.trackSessionSetup(session, async () => {
-    result = await mutation();
-    completed = true;
-  });
+  try {
+    await sessionManager.trackSessionSetup(session, async () => {
+      result = await mutation();
+      completed = true;
+    });
+  } catch (error) {
+    rearmPriorExpiry();
+    throw error;
+  }
   if (!completed) {
+    rearmPriorExpiry();
     throw new Error(
       `Cannot mutate network condition: session ${sessionUuid} began releasing before the mutation started.`,
     );
+  }
+  if (isTypedFailureResult(result)) {
+    rearmPriorExpiry();
   }
   // Arm the standalone per-condition TTL (issue #6085 item 2) for a degrade that
   // registered a restore slot AND carries a positive TTL. Pass the CAPTURED

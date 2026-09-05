@@ -197,7 +197,8 @@ export function setVideoRecordingDeviceDetectorForTesting(
 
 export interface VideoRecordingArgs {
   action: "start" | "stop";
-  platform: "android" | "ios";
+  // #6154: optional — resolved from deviceId/session when omitted.
+  platform?: "android" | "ios";
   deviceId?: string;
   qualityPreset?: VideoQualityPreset;
   targetBitrateKbps?: number;

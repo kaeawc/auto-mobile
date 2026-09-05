@@ -22,7 +22,8 @@ const ensureDebugEnabled = () => {
 
 // Type definitions for tool arguments
 export interface DebugSearchArgs {
-  platform: Platform;
+  // #6154: optional — resolved from deviceId/session when omitted.
+  platform?: Platform;
   text?: string;
   elementId?: string;
   container?: {

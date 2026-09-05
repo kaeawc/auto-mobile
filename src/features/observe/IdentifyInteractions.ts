@@ -9,7 +9,8 @@ import { NavigationEdge } from "../../utils/interfaces/NavigationGraph";
 type InteractionType = "navigation" | "input" | "action" | "scroll" | "toggle";
 
 export interface IdentifyInteractionsOptions {
-  platform: "android" | "ios";
+  // #6154: optional — resolved from deviceId/session when omitted.
+  platform?: "android" | "ios";
   filter?: {
     types?: InteractionType[];
     minConfidence?: number;

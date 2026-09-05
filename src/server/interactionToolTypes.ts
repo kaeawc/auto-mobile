@@ -9,17 +9,23 @@ import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
 // Tool Argument Types
 // ============================================================================
 
+// #6154: `platform` is optional on every one of these tools' wire schemas
+// (resolved from deviceId/session when omitted), so the hand-written arg
+// types below must match it — a typed caller could not otherwise omit it.
+// `TapOnArgs.platform` (below) is left as-is: tapOn's schema has been
+// optional since #5870, predating this pass, and fixing that pre-existing
+// mismatch is out of scope here.
 export interface ClearTextArgs {
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface SelectAllTextArgs {
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface PressButtonArgs {
   button: "home" | "back" | "menu" | "power" | "volume_up" | "volume_down" | "recent";
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface SystemTrayNotificationArgs {
@@ -33,7 +39,7 @@ export interface SystemTrayArgs {
   action: "open" | "close" | "find" | "tap" | "dismiss" | "clearAll";
   notification?: SystemTrayNotificationArgs;
   awaitTimeout?: number;
-  platform: Platform;
+  platform?: Platform;
 }
 
 /** Selector variants that focus an input field before typing (issue #5872). */
@@ -50,19 +56,19 @@ export interface InputTextArgs {
   mode?: "a11y" | "eventLast" | "eventAll" | "eventOnly";
   imeAction?: ImeAction;
   dismissKeyboard?: boolean;
-  platform: Platform;
+  platform?: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";
 }
 
 export interface WakeAndUnlockArgs {
   pin?: string;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface OpenLinkArgs {
   url: string;
-  platform: Platform;
+  platform?: Platform;
   waitFor?: ObserveWaitForOptions;
   settled?: SettledOptions;
 }
@@ -111,7 +117,7 @@ export interface TapAnyArgs {
     duration?: number;
   };
   scrollableContainer?: boolean;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface DragAndDropArgs {
@@ -126,7 +132,7 @@ export interface DragAndDropArgs {
   pressDurationMs?: number;
   dragDurationMs?: number;
   holdDurationMs?: number;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface SwipeOnArgs {
@@ -146,7 +152,7 @@ export interface SwipeOnArgs {
   apexPause?: number;
   returnSpeed?: number;
   speed?: "slow" | "normal" | "fast";
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface PinchOnArgs {
@@ -162,36 +168,36 @@ export interface PinchOnArgs {
     text?: string;
   };
   autoTarget?: boolean;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface ShakeArgs {
   duration?: number;
   intensity?: number;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface ImeActionArgs {
   action: ImeAction;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface KeyboardArgs {
   action: "open" | "close" | "detect";
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface RecentAppsArgs {
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface RotateArgs {
   orientation: "portrait" | "landscape";
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface ClipboardArgs {
   action: "copy" | "paste" | "clear" | "get";
   text?: string;
-  platform: Platform;
+  platform?: Platform;
 }

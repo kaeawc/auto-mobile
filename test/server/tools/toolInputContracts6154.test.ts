@@ -11,7 +11,7 @@ import {
   observeSchema,
 } from "../../../src/server/observeTools";
 import { launchAppSchema } from "../../../src/server/appTools";
-import { resolveHighlightClientOptions } from "../../../src/server/highlightTools";
+import { highlightSchema, resolveHighlightClientOptions } from "../../../src/server/highlightTools";
 import { assertChangeLocalizationPlatformConstraints } from "../../../src/server/utilityTools";
 import type { BootedDevice } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -75,6 +75,32 @@ describe("issue #6154: platform is optional wherever deviceId/session resolves i
       }),
     ).toThrow();
   });
+
+  // CodeRabbit follow-up: the tests above only exercise deviceId-based
+  // resolution — a suite that never sends a bare sessionUuid could pass even
+  // if session-based resolution (no deviceId at all) were broken. Cover that
+  // path explicitly for observe and highlight.
+  test("observe parses with platform omitted, sessionUuid present, and NO deviceId", () => {
+    const result = observeSchema.parse({
+      sessionUuid: "session-123",
+    });
+    expect(result.platform).toBeUndefined();
+    expect(result.deviceId).toBeUndefined();
+    expect(result.sessionUuid).toBe("session-123");
+  });
+
+  test("highlight parses with platform omitted, sessionUuid present, and NO deviceId", () => {
+    const result = highlightSchema.parse({
+      sessionUuid: "session-123",
+      shape: {
+        type: "box",
+        bounds: { x: 0, y: 0, width: 10, height: 10 },
+      },
+    });
+    expect(result.platform).toBeUndefined();
+    expect(result.deviceId).toBeUndefined();
+    expect(result.sessionUuid).toBe("session-123");
+  });
 });
 
 // Issue #6154 half 2: launchApp's advertised `required`/`additionalProperties`
@@ -106,6 +132,16 @@ describe("issue #6154: launchApp schema enforces its declared contract", () => {
         deviceId: "emulator-5554",
         appId: "com.google.android.deskclock",
         bogusKey: 123,
+      }),
+    ).toThrow();
+  });
+
+  // CodeRabbit follow-up: the alias/unknown-property tests above never assert
+  // that appId (or its packageName alias) is actually required — pin that too.
+  test("rejects a missing appId (and missing packageName alias)", () => {
+    expect(() =>
+      launchAppSchema.parse({
+        deviceId: "emulator-5554",
       }),
     ).toThrow();
   });

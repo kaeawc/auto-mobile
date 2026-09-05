@@ -1352,6 +1352,81 @@ final class SecretRedactionTests: XCTestCase {
             XCTAssertTrue(result.contains("token "), "non-secret context is preserved")
         }
     }
+
+    func testShorterSecretReplacementCannotSynthesizeLongerSecretContainingTheMarker() {
+        // Reverse marker collision (#6146): declared `abc` and `X***REDACTED***Y`, text `XabcY`.
+        // Longest-first finds the longer secret nowhere, replaces `abc` with the marker, and the
+        // result IS the longer secret — fully present after its only removal opportunity passed.
+        let longer = "X" + SecretRedaction.placeholder + "Y"
+        let values = SecretRedaction.secretValues(["abc", longer])
+        let result = SecretRedaction.redact("XabcY", secretValues: values)
+        XCTAssertFalse(result.contains(longer), "the marker-containing secret must not be synthesized")
+        XCTAssertFalse(result.contains("abc"), "the shorter secret must be redacted")
+        XCTAssertEqual(result, SecretRedaction.placeholder)
+    }
+
+    func testMarkerSubstringSecretIsNotReintroducedByAnotherSecretsReplacement() {
+        // `REDACTED` is itself a declared secret, so substituting `***REDACTED***` for `abc` would
+        // put that declared value in the output verbatim (#6146).
+        let values = SecretRedaction.secretValues(["REDACTED", "abc"])
+        let result = SecretRedaction.redact("token abc here", secretValues: values)
+        XCTAssertFalse(result.contains("REDACTED"), "the marker-substring secret must not survive")
+        XCTAssertFalse(result.contains("abc"), "the ordinary secret must be redacted")
+        XCTAssertTrue(result.hasPrefix("token ") && result.hasSuffix(" here"), "context is preserved")
+    }
+
+    func testSecretEqualToTheMarkerIsNotReintroducedByAnotherSecretsReplacement() {
+        let values = SecretRedaction.secretValues([SecretRedaction.placeholder, "abc"])
+        let result = SecretRedaction.redact("token abc here", secretValues: values)
+        XCTAssertFalse(result.contains(SecretRedaction.placeholder), "the marker secret must not survive")
+        XCTAssertFalse(result.contains("abc"), "the ordinary secret must be redacted")
+    }
+
+    func testOrdinaryTextIsUnchangedAndAnOrdinarySecretKeepsItsContext() {
+        let values = SecretRedaction.secretValues(["s3cr3t"])
+        XCTAssertEqual(SecretRedaction.redact("nothing to see", secretValues: values), "nothing to see")
+        XCTAssertEqual(
+            SecretRedaction.redact("token s3cr3t here", secretValues: values),
+            "token " + SecretRedaction.placeholder + " here"
+        )
+    }
+
+    func testReplacementChainThatDoesNotConvergeOverRedactsTheWholeText() {
+        // Each pass of `X***REDACTED***` -> marker consumes one leading `X`, so a run of `X`s longer
+        // than the pass budget cannot converge in time. The fail-safe is the marker alone —
+        // over-redact, never leak (#6146).
+        let chained = "X" + SecretRedaction.placeholder
+        let values = SecretRedaction.secretValues(["abc", chained])
+        let result = SecretRedaction.redact("XXXXXXXXabc", secretValues: values)
+        XCTAssertEqual(result, SecretRedaction.placeholder)
+    }
+
+    func testNoDeclaredValueSurvivesRedactionForATableOfAdversarialInputs() {
+        let marker = SecretRedaction.placeholder
+        let cases: [(secrets: [String], text: String)] = [
+            (["abc", "X" + marker + "Y"], "XabcY"),
+            (["REDACTED", "abc"], "abc"),
+            ([marker, "abc"], "token abc"),
+            (["ab", "abcdef"], "x abcdef y"),
+            (["***", "a"], "a*a*a"),
+            (["X" + marker, "abc"], "XXXabc XabcX"),
+            ([marker + marker, "q"], "qq q"),
+            (["*", "R"], "R*R"),
+            (["\u{00E9}", "cafe\u{0301}"], "caf\u{00E9} cafe\u{0301}"),
+            (["pa\"ss", "\\\""], "{\"v\":\"pa\\\"ss\"}"),
+            (["s3cr3t"], "nothing to see"),
+        ]
+        for testCase in cases {
+            let values = SecretRedaction.secretValues(testCase.secrets)
+            let result = SecretRedaction.redact(testCase.text, secretValues: values)
+            for value in values {
+                XCTAssertNil(
+                    result.range(of: value, options: [.literal]),
+                    "declared value \"\(value)\" survived as \"\(result)\" for input \"\(testCase.text)\""
+                )
+            }
+        }
+    }
 }
 
 final class RunBlockingBoundTests: XCTestCase {

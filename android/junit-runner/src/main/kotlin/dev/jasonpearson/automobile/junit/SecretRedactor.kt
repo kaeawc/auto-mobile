@@ -86,23 +86,42 @@ internal object SecretRedactor {
     }
 
   /**
-   * Replace every occurrence of each secret value in [text] with [PLACEHOLDER]. Longer values are
-   * replaced first so a secret that contains a shorter secret as a substring is fully masked.
-   * [String.replace] matches literal code units; [secretValues] already supplies the NFC/NFD
-   * variants.
+   * Replace every occurrence of each secret value in [text] with [PLACEHOLDER], guaranteeing that
+   * NO declared value survives in the result. Longer values are replaced first so a secret that
+   * contains a shorter secret as a substring is fully masked. [String.replace] matches literal code
+   * units; [secretValues] already supplies the NFC/NFD variants.
+   *
+   * A single pass is not enough: substituting the marker can SYNTHESIZE another declared value out
+   * of the marker plus its surrounding context (declared `abc` and `X***REDACTED***Y`, text `XabcY`
+   * — #6146), or reintroduce a declared value that is a substring of the marker (declared
+   * `REDACTED` and `abc`). So the pass repeats until one finds nothing (the proof that no declared
+   * value is present), bounded by the number of values plus one. If the bound is exhausted without
+   * converging, the whole text is over-redacted to the marker alone — or to the empty string when
+   * the marker itself contains a declared value. Over-redact, never leak.
    */
   fun redact(text: String, secretValues: List<String>): String {
-    if (secretValues.isEmpty()) return text
+    val ordered = secretValues.filter { it.isNotEmpty() }.sortedByDescending { it.length }
+    if (ordered.isEmpty()) return text
     var redacted = text
-    for (value in secretValues.sortedByDescending { it.length }) {
-      if (value.isEmpty()) continue
-      // If the secret is itself a substring of the placeholder (e.g. a secret value of "REDACTED"
-      // or "***REDACTED***"), substituting the placeholder would reintroduce the secret — so remove
-      // it instead, guaranteeing it cannot survive in the result (#6094).
-      val replacement = if (PLACEHOLDER.contains(value)) "" else PLACEHOLDER
-      redacted = redacted.replace(value, replacement)
+    repeat(ordered.size + 1) { redacted = replaceEach(redacted, ordered) ?: return redacted }
+    return if (ordered.any { PLACEHOLDER.contains(it) }) "" else PLACEHOLDER
+  }
+
+  /**
+   * One longest-first replacement pass over [text], or `null` when no value of [ordered] occurs in
+   * it (the fixpoint). A value that is itself a substring of the placeholder (e.g. `REDACTED` or
+   * `***REDACTED***`) is removed rather than substituted, since substituting the placeholder would
+   * reintroduce it (#6094).
+   */
+  private fun replaceEach(text: String, ordered: List<String>): String? {
+    var result = text
+    var changed = false
+    for (value in ordered) {
+      if (!result.contains(value)) continue
+      result = result.replace(value, if (PLACEHOLDER.contains(value)) "" else PLACEHOLDER)
+      changed = true
     }
-    return redacted
+    return if (changed) result else null
   }
 
   /**

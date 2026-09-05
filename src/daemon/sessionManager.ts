@@ -345,6 +345,15 @@ export class SessionManager {
     string,
     { handle: NodeJS.Timeout; session: Session }
   > = new Map();
+  /**
+   * Monotonic per-session network-condition generation (issue #6177). Bumped by
+   * {@link bumpNetworkConditionGeneration} on every apply/reset mutation, and
+   * captured into a TTL expiry's closure when it is scheduled. A stale expiry
+   * (condition A) that is still awaiting its restore when a newer condition
+   * (B) is applied sees, on completion, that the session's generation has moved
+   * on — so it can detect it was superseded and must not clear B's restore slot.
+   */
+  private readonly networkConditionGeneration: Map<string, number> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
   /** Automatic device assignments that have not yet started their creation write. */
@@ -2076,8 +2085,24 @@ export class SessionManager {
    * timed-out setup cannot arm or fire a TTL against a same-UUID REPLACEMENT
    * session. The TTL is clamped to `MAX_NETWORK_CONDITION_TTL_SECONDS` so the
    * millisecond product cannot overflow `setTimeout`'s signed 32-bit delay (item 4).
+   *
+   * `generation` MUST be the value the caller's own `bumpNetworkConditionGeneration`
+   * call returned for the mutation this TTL belongs to (issue #6181 review) — NOT
+   * re-read from the session's current generation here. Two mutations (B, C) can
+   * bump the shared counter before either reaches this call (B under `await
+   * trackSessionSetup`, C right behind it), so reading "current" at schedule time
+   * can tag B's timer with C's generation. Comparing against a per-call, per-mutation
+   * value closes that window: a timer only ever matches the generation it actually
+   * belongs to. Callers that don't track their own generation (tests, and any
+   * caller predating this parameter) may omit it, falling back to the session's
+   * current generation at schedule time — safe as long as no concurrent mutation is
+   * in flight for that call.
    */
-  scheduleNetworkConditionExpiry(session: Session, expiresInSeconds: number): void {
+  scheduleNetworkConditionExpiry(
+    session: Session,
+    expiresInSeconds: number,
+    generation?: number,
+  ): void {
     const sessionId = session.sessionId;
     this.cancelNetworkConditionExpiry(sessionId);
     if (!(expiresInSeconds > 0)) {
@@ -2096,8 +2121,13 @@ export class SessionManager {
           `setTimeout limit for session ${sessionId}; clamping to ${effectiveSeconds}s`,
       );
     }
+    // Capture the OWNING mutation's generation into the closure (issue #6177,
+    // hardened #6181): if a newer condition supersedes it before this timer's
+    // awaited restore settles, the generation check in restoreNetworkConditionOnExpiry
+    // detects the mismatch and skips clearing the newer condition's restore slot.
+    const effectiveGeneration = generation ?? this.currentNetworkConditionGeneration(sessionId);
     const handle = this.timer.setTimeout(() => {
-      this.handleNetworkConditionExpiry(session);
+      this.handleNetworkConditionExpiry(session, effectiveGeneration);
     }, effectiveSeconds * 1000);
     this.networkConditionExpiryTimers.set(sessionId, { handle, session });
   }
@@ -2129,7 +2159,7 @@ export class SessionManager {
    * REPLACEMENT session (or an already-released one) is a no-op, so it never acts
    * on a freed or replaced device.
    */
-  private handleNetworkConditionExpiry(session: Session): void {
+  private handleNetworkConditionExpiry(session: Session, expectedGeneration: number): void {
     const sessionId = session.sessionId;
     const entry = this.networkConditionExpiryTimers.get(sessionId);
     if (entry && entry.session === session) {
@@ -2150,7 +2180,7 @@ export class SessionManager {
       `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
     );
     this.trackPendingDeviceCleanup(target.deviceId, [
-      this.restoreNetworkConditionOnExpiry(session, target),
+      this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
     ]);
   }
 
@@ -2163,10 +2193,11 @@ export class SessionManager {
   private async restoreNetworkConditionOnExpiry(
     session: Session,
     target: NetworkConditionRestoreTarget,
+    expectedGeneration: number,
   ): Promise<void> {
     try {
       await this.restoreNetworkCondition(target);
-      this.clearNetworkConditionIfOwned(session);
+      this.clearNetworkConditionIfOwned(session, expectedGeneration);
       return;
     } catch (error) {
       logger.warn(
@@ -2175,7 +2206,7 @@ export class SessionManager {
       );
       const succeeded = await this.retryNetworkConditionRestoreUntilSuccess(target, error);
       if (succeeded) {
-        this.clearNetworkConditionIfOwned(session);
+        this.clearNetworkConditionIfOwned(session, expectedGeneration);
       }
       // On exhaustion the slot is intentionally retained so a later release retries.
     }
@@ -2184,10 +2215,21 @@ export class SessionManager {
   /**
    * Drop the network restore slot once a reset has satisfied it (issue #6085),
    * but ONLY while the captured session is still the live one — a same-UUID
-   * replacement must keep its own freshly-published slot.
+   * replacement must keep its own freshly-published slot — AND only while the
+   * session's network-condition generation still matches the one this expiry was
+   * scheduled against (issue #6177). A stale expiry (condition A) that settles
+   * after a newer condition (B) has been applied must not delete B's restore
+   * slot: the generation mismatch is the signal that A has been superseded.
    */
-  private clearNetworkConditionIfOwned(session: Session): void {
+  private clearNetworkConditionIfOwned(session: Session, expectedGeneration: number): void {
     if (this.sessions.get(session.sessionId) !== session) {
+      return;
+    }
+    if (this.currentNetworkConditionGeneration(session.sessionId) !== expectedGeneration) {
+      logger.debug(
+        `Network condition TTL expiry for session ${session.sessionId} settled after a newer ` +
+          `condition superseded it; leaving that condition's restore slot in place`,
+      );
       return;
     }
     if (session.cacheData.networkCondition) {
@@ -2352,6 +2394,22 @@ export class SessionManager {
       return;
     }
     this.updateSessionCache(sessionId, { networkCondition: state });
+  }
+
+  /**
+   * Bump the per-session network-condition generation (issue #6177). Called on
+   * every apply/reset mutation, BEFORE the mutation runs, so a TTL scheduled for
+   * the condition being replaced can never observe the generation it captures as
+   * still current. Returns the new generation for the caller to arm a TTL with.
+   */
+  bumpNetworkConditionGeneration(sessionId: string): number {
+    const next = (this.networkConditionGeneration.get(sessionId) ?? 0) + 1;
+    this.networkConditionGeneration.set(sessionId, next);
+    return next;
+  }
+
+  private currentNetworkConditionGeneration(sessionId: string): number {
+    return this.networkConditionGeneration.get(sessionId) ?? 0;
   }
 
   /** Read the original network condition without recording session activity. */
@@ -2531,6 +2589,7 @@ export class SessionManager {
     }
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);
+    this.networkConditionGeneration.delete(sessionId);
     return true;
   }
 

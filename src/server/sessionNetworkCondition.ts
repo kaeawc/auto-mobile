@@ -34,6 +34,20 @@ export async function runSessionNetworkMutation<T>(
       `Cannot mutate network condition: session ${sessionUuid} is bound to ${session.assignedDevice}, not ${deviceId}.`,
     );
   }
+  // Bump the network-condition generation BEFORE mutating (issue #6177), and
+  // CAPTURE the value THIS mutation was assigned into a local. This condition
+  // (B) may be applied while an earlier condition's (A's) TTL expiry is still
+  // awaiting its restore — bumping here, and having that expiry re-check the
+  // generation it captured when it fired, lets a stale A detect it has been
+  // superseded and skip clearing B's restore slot.
+  //
+  // The capture matters as much as the bump (issue #6181 review): two mutations
+  // (B, C) can each bump the shared counter before either reaches the `await
+  // trackSessionSetup` below, so `scheduleNetworkConditionExpiry` must be told
+  // THIS call's generation explicitly rather than re-reading "current" once the
+  // mutation settles — by then a third mutation may have bumped it further, and
+  // re-reading would mistag this TTL with a generation it doesn't own.
+  const generation = sessionManager.bumpNetworkConditionGeneration(sessionUuid);
   // Publish the restore slot before mutating, so a release that begins while the
   // emulator command is in flight already knows the device must be restored.
   //
@@ -77,7 +91,7 @@ export async function runSessionNetworkMutation<T>(
   // on it). A reset, or a degrade with no TTL, arms nothing; the pre-mutation
   // cancel above already cleared any prior timer.
   if (registerRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
-    sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds);
+    sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds, generation);
   }
   return result;
 }

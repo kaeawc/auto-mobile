@@ -306,10 +306,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           mainHierarchy = processedElement
           mainPackageName = packageName
         }
-        // A runtime permission dialog is its own permissioncontroller window. Detect it in
-        // whichever window carries it, not only the primary one, so the flag cannot read false
-        // while the dialog is on screen because selection landed on another window (#6151).
-        if (notificationPermissionDetected != true && processedElement != null) {
+        // A runtime permission dialog is its own permissioncontroller window. Detect it in the
+        // primary window or in a focused/active one (a dialog owns focus while it is on screen,
+        // even mid-transition when selection still lands on the app beneath it), so the flag
+        // cannot read false while the dialog is up (#6151). Windows that are neither — e.g.
+        // another app's dialog in split-screen — do not flag the primary app's observation.
+        val canCarryDialog = isPrimaryWindow || window.isFocused || window.isActive
+        if (notificationPermissionDetected != true && processedElement != null && canCarryDialog) {
           notificationPermissionDetected =
             detectNotificationPermissionDialog(processedElement, packageName)
         }

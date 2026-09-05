@@ -89,6 +89,13 @@ export interface FreshnessInputs {
    */
   statusBarOnlyHierarchy?: { foreground: string; ctrlProxyIncomplete?: boolean; sdkInt?: number };
   /**
+   * The accessibility service reported the capture as incomplete (`ctrlProxyIncomplete`): it
+   * could not read the focused application window. Consulted on the `unavailable` path, where a
+   * rootless payload (no hierarchy node at all) never reaches the status-bar geometry gate but
+   * still deserves the same recovery guidance (issue #6151).
+   */
+  incompleteCapture?: { sdkInt?: number };
+  /**
    * ADB and CtrlProxy disagree about the current activity within the same
    * application, and a forced recapture could not safely reconcile them.
    */
@@ -184,7 +191,17 @@ const ACCESSIBILITY_DATA_SENSITIVE_MIN_SDK = 34;
  * which a CtrlProxy update (not home/relaunch) recovers.
  */
 function unreadableFocusedWindowWarning(foreground: string, sdkInt: number | undefined): string {
-  const generic = `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete rather than a stale window: the foreground window's content did not reach the service. Observe again; if it stays unreadable after relaunching the app, the window's content is being withheld from the service.`;
+  return `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete rather than a stale window: the foreground window's content did not reach the service. ${incompleteCaptureGuidance(sdkInt)}`;
+}
+
+/**
+ * Recovery guidance shared by every incomplete-capture verdict: retry first
+ * (the null root can be transient), and on Android 14+ name the data-sensitive
+ * withholding that only a CtrlProxy update recovers.
+ */
+function incompleteCaptureGuidance(sdkInt: number | undefined): string {
+  const generic =
+    "Observe again; if it stays unreadable after relaunching the app, the window's content is being withheld from the service.";
   if (sdkInt === undefined || sdkInt < ACCESSIBILITY_DATA_SENSITIVE_MIN_SDK) {
     return generic;
   }
@@ -235,6 +252,18 @@ function resolveIdentityMismatch(
 }
 
 /**
+ * The `unavailable` warning. A rootless payload that carries the service's own
+ * incomplete flag (issue #6151) names the unreadable focused window and its
+ * recovery instead of a bare "could not be retrieved".
+ */
+function unavailableWarning(incompleteCapture: FreshnessInputs["incompleteCapture"]): string {
+  if (!incompleteCapture) {
+    return "View hierarchy could not be retrieved, so its freshness cannot be established.";
+  }
+  return `View hierarchy could not be retrieved: the accessibility service reported the capture as incomplete because it could not read the focused application window (no root node). ${incompleteCaptureGuidance(incompleteCapture.sdkInt)}`;
+}
+
+/**
  * Compute the freshness verdict.
  *
  * The `requestedAfter` branch is unchanged from the original implementation, so
@@ -254,7 +283,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       ageMs,
       verified,
       isFresh: false,
-      warning: "View hierarchy could not be retrieved, so its freshness cannot be established.",
+      warning: unavailableWarning(inputs.incompleteCapture),
     };
   }
 

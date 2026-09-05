@@ -1158,8 +1158,8 @@ class ViewHierarchyExtractorTest {
       )
     val windows =
       listOf(
-        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true, active = true),
-        fakeWindow(id = 322, layer = 1, root = dialogRoot),
+        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true),
+        fakeWindow(id = 322, layer = 1, root = dialogRoot, active = true),
       )
 
     val result = extractor.extractFromAllWindows(windows, appRoot, occlusionEnabled = false)
@@ -1170,6 +1170,17 @@ class ViewHierarchyExtractorTest {
     val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
     assertTrue(serialized.contains("permission_allow_button"))
     assertTrue(serialized.contains("Allow Contacts to send you notifications?"))
+
+    // An unfocused, inactive permissioncontroller window beside the app (another app's dialog
+    // in split-screen) must not flag this app's observation as a permission dialog.
+    val bystander =
+      listOf(
+        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true, active = true),
+        fakeWindow(id = 322, layer = 1, root = dialogRoot),
+      )
+    val bystanderResult =
+      extractor.extractFromAllWindows(bystander, appRoot, occlusionEnabled = false)
+    assertEquals(false, bystanderResult.notificationPermissionDetected)
   }
 
   @Test

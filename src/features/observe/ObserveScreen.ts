@@ -233,6 +233,17 @@ function describeStatusBarOnlyCapture(
   };
 }
 
+/**
+ * The service's own incomplete-capture signal (issue #6151), for the freshness
+ * `unavailable` path: a rootless payload never reaches the status-bar geometry
+ * gate, so this is what lets the verdict still name the unreadable focused window.
+ */
+function describeIncompleteCapture(
+  hierarchy: ObserveResult["viewHierarchy"],
+): { sdkInt: number | undefined } | undefined {
+  return hierarchy?.ctrlProxyIncomplete === true ? { sdkInt: hierarchy.sdkInt } : undefined;
+}
+
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
   const activityName = foregroundActivity.split("/")[1] ?? "";
   return (
@@ -643,6 +654,7 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
+        incompleteCapture: describeIncompleteCapture(result.viewHierarchy),
       });
 
       // Cache the result for future use

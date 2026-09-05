@@ -737,6 +737,52 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).not.toContain("stale wrong-window");
   });
 
+  test("names the incomplete capture on a rootless payload that never reaches the geometry gate (#6151)", async () => {
+    // The shape the pinned CtrlProxy emits for a runtime permission dialog on API 34: no
+    // window could be extracted at all, so there is no hierarchy node and the status-bar
+    // geometry gate cannot fire. The service's own incomplete flag must still drive the
+    // verdict, and the rootless conversion must keep the API level for the diagnosis.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      ctrlProxyIncomplete: true,
+      sdkInt: 34,
+      hierarchy: { error: "No visible windows available" },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.permissioncontroller", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("incomplete");
+    expect(result.freshness?.warning).toContain("no root node");
+    expect(result.freshness?.warning).toContain("isAccessibilityTool");
+  });
+
   test("keeps the incomplete-capture verdict generic below Android 14 (#6151)", async () => {
     // `ctrlProxyIncomplete` is a generic null-root signal (transient root, an app that
     // restricts accessibility). Only Android 14+ can withhold a data-sensitive window, so on

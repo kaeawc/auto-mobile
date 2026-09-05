@@ -1184,6 +1184,62 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `extractFromAllWindows does not flag an unrelated app's active dialog in a split-screen pane`() {
+    // #6151 follow-up: `canCarryDialog` used to accept ANY focused-or-active permissioncontroller
+    // window, so a foreign app's own active dialog in the other split-screen pane could still set
+    // the primary app's `notificationPermissionDetected`. Here App A (primary, focused) occupies
+    // the top half of the screen; App B's own active permission dialog occupies the bottom half —
+    // a disjoint region, so it does not overlap App A's window and must not be correlated with it.
+    val appARoot =
+      fakeNode(
+        packageName = "com.google.android.contacts",
+        bounds = Rect(0, 0, 1080, 1200),
+        children = listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
+      )
+    val foreignDialogRoot =
+      fakeNode(
+        packageName = "com.google.android.permissioncontroller",
+        bounds = Rect(28, 1300, 1052, 2300),
+        children =
+          listOf(
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Allow Maps to send you notifications?",
+              bounds = Rect(100, 1350, 1000, 1450),
+            ),
+            fakeNode(
+              packageName = "com.google.android.permissioncontroller",
+              text = "Allow",
+              resourceId = "com.android.permissioncontroller:id/permission_allow_button",
+              bounds = Rect(100, 2100, 500, 2200),
+            ),
+          ),
+      )
+    val windows =
+      listOf(
+        fakeWindow(
+          id = 318,
+          layer = 0,
+          root = appARoot,
+          focused = true,
+          bounds = Rect(0, 0, 1080, 1200),
+        ),
+        fakeWindow(
+          id = 322,
+          layer = 0,
+          root = foreignDialogRoot,
+          active = true,
+          bounds = Rect(0, 1200, 1080, 2400),
+        ),
+      )
+
+    val result = extractor.extractFromAllWindows(windows, appARoot, occlusionEnabled = false)
+
+    assertEquals(false, result.notificationPermissionDetected)
+    assertEquals("com.google.android.contacts", result.packageName)
+  }
+
+  @Test
   fun `extractFromAllWindows reports an incomplete capture when the focused app root is withheld`() {
     // The #6151 device shape before the isAccessibilityTool declaration: the status bar has a
     // root, the focused Settings window does not, and rootInActiveWindow is null too. The
@@ -1257,6 +1313,7 @@ class ViewHierarchyExtractorTest {
     type: Int = AccessibilityWindowInfo.TYPE_APPLICATION,
     focused: Boolean = false,
     active: Boolean = false,
+    bounds: Rect? = null,
   ): AccessibilityWindowInfo {
     val window = AccessibilityWindowInfo.obtain()
     val shadow = org.robolectric.Shadows.shadowOf(window)
@@ -1267,7 +1324,7 @@ class ViewHierarchyExtractorTest {
     shadow.setFocused(focused)
     shadow.setActive(active)
     shadow.setBoundsInScreen(
-      Rect(0, 0, 1080, if (type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400)
+      bounds ?: Rect(0, 0, 1080, if (type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400)
     )
     return window
   }

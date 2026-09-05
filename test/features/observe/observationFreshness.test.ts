@@ -249,6 +249,37 @@ describe("computeFreshness", () => {
     });
   });
 
+  describe("incomplete-but-readable capture (issue #6151 follow-up)", () => {
+    test("REGRESSION: a readable capture with a null focused-app root is NOT verified or fresh", () => {
+      // The focused application's root was null (split-screen or a dialog
+      // transition), but CtrlProxy still emitted a non-error, non-status-bar
+      // hierarchy for another window. `unavailable` is false and the
+      // status-bar gate does not match, so without this branch the verdict
+      // fell through to the device-verified/recent case and read fresh.
+      const v = computeFreshness({
+        actualTimestamp: NOW - 50,
+        now: NOW,
+        verified: true,
+        unavailable: false,
+        incompleteCapture: { sdkInt: 34 },
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("could not read the focused application's root window");
+    });
+
+    test("the unavailable path still wins when the capture has no readable content at all", () => {
+      const v = computeFreshness({
+        actualTimestamp: NOW,
+        now: NOW,
+        unavailable: true,
+        incompleteCapture: { sdkInt: 34 },
+      });
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("could not be retrieved");
+    });
+  });
+
   test("every `isFresh: false` names its cause", () => {
     const falseCases = [
       computeFreshness({ actualTimestamp: NOW - 999_999, now: NOW }),

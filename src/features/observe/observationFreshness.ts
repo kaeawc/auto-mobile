@@ -92,7 +92,10 @@ export interface FreshnessInputs {
    * The accessibility service reported the capture as incomplete (`ctrlProxyIncomplete`): it
    * could not read the focused application window. Consulted on the `unavailable` path, where a
    * rootless payload (no hierarchy node at all) never reaches the status-bar geometry gate but
-   * still deserves the same recovery guidance (issue #6151).
+   * still deserves the same recovery guidance, AND on the otherwise-readable path: split-screen
+   * or a dialog transition can leave a non-error hierarchy for another window while the focused
+   * application's root was still null, which trips neither `unavailable` nor
+   * `statusBarOnlyHierarchy`. Either way freshness is retracted (issue #6151).
    */
   incompleteCapture?: { sdkInt?: number };
   /**
@@ -246,6 +249,23 @@ function resolveIdentityMismatch(
       isFresh: false,
       warning:
         "CtrlProxy and adb disagree about the current activity, and a fresh hierarchy could not reconcile them. The observation was not verified against the current activity; call observe again.",
+    };
+  }
+  // The service reported the focused application's root as unreadable even
+  // though the capture is otherwise readable (a status bar or an unrelated
+  // window's content came through) — a split-screen pane or a dialog
+  // transition can leave a non-null, non-error hierarchy that never trips the
+  // `unavailable` or status-bar-only gates above. Retract freshness anyway:
+  // the tree is honest about SOME window, but not about the focused
+  // application (issue #6151).
+  if (inputs.incompleteCapture) {
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning: `The accessibility service reported the capture as incomplete: it could not read the focused application's root window, even though another window's content was readable. ${incompleteCaptureGuidance(inputs.incompleteCapture.sdkInt)}`,
     };
   }
   return undefined;

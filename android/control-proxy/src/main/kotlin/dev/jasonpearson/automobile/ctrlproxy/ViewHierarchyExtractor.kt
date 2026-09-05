@@ -211,6 +211,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // fall back to the topmost application window with a root.
     val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
 
+    // The primary app window's own bounds, used below to correlate a permission-controller
+    // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
+    // primary window was picked, in which case `isPrimaryWindow` already covers the active
+    // window directly and correlation is moot.
+    val primaryAppWindowBounds: Rect? = primaryAppWindowId?.let { id ->
+      windows.firstOrNull { it.id == id }?.let { w -> Rect().also(w::getBoundsInScreen) }
+    }
+
     // Extract from each window
     for (window in windows) {
       try {
@@ -307,11 +315,17 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           mainPackageName = packageName
         }
         // A runtime permission dialog is its own permissioncontroller window. Detect it in the
-        // primary window or in a focused/active one (a dialog owns focus while it is on screen,
-        // even mid-transition when selection still lands on the app beneath it), so the flag
-        // cannot read false while the dialog is up (#6151). Windows that are neither — e.g.
-        // another app's dialog in split-screen — do not flag the primary app's observation.
-        val canCarryDialog = isPrimaryWindow || window.isFocused || window.isActive
+        // primary window or in a focused/active one that also overlaps the primary app window's
+        // bounds (a dialog owns focus while it is on screen, even mid-transition when selection
+        // still lands on the app beneath it), so the flag cannot read false while the dialog is
+        // up (#6151). A focused/active window that does NOT overlap the primary app — e.g.
+        // another app's own dialog in an unrelated split-screen pane — does not flag the primary
+        // app's observation (#6151 follow-up: cross-app false-positive correlation).
+        val canCarryDialog =
+          isPrimaryWindow ||
+            ((window.isFocused || window.isActive) &&
+              (primaryAppWindowBounds == null ||
+                Rect.intersects(primaryAppWindowBounds, windowBounds)))
         if (notificationPermissionDetected != true && processedElement != null && canCarryDialog) {
           notificationPermissionDetected =
             detectNotificationPermissionDialog(processedElement, packageName)

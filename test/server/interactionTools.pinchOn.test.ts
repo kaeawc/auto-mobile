@@ -89,9 +89,15 @@ describe("pinchOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: false, error: "scale must be greater than 0" }),
     }));
 
-    const message = parseMessage(await pinchOnHandler(fakeDevice, args));
+    const response = await pinchOnHandler(fakeDevice, args);
+    const message = parseMessage(response);
     expect(message).toBe("scale must be greater than 0");
     expect(message).not.toBe("Pinched in");
+    // The MCP envelope must agree with the message (#6163): a failed pinch must
+    // not read as an ordinary successful result to a conforming client.
+    expect(response.isError).toBe(true);
+    const payload = JSON.parse(response.content[0].text) as { success: boolean };
+    expect(payload.success).toBe(false);
   });
 
   test("serialized response reports a success message on a successful pinch", async () => {
@@ -99,6 +105,8 @@ describe("pinchOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true }),
     }));
 
-    expect(parseMessage(await pinchOnHandler(fakeDevice, args))).toBe("Pinched in");
+    const response = await pinchOnHandler(fakeDevice, args);
+    expect(parseMessage(response)).toBe("Pinched in");
+    expect(response.isError).toBeUndefined();
   });
 });

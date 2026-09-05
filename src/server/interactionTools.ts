@@ -28,6 +28,11 @@ import {
   PinchOnResult,
   SendTextResult,
   SwipeOnToolPayload,
+  type ClearTextResult,
+  type DragAndDropResult,
+  type ImeActionResult,
+  type PressButtonResult,
+  type SelectAllTextResult,
   type TapOnElementResult,
   type TapOnSelectedElement,
 } from "../models";
@@ -826,6 +831,59 @@ export function formatSwipeOnMessage(
     : `Swiped ${direction}`;
 }
 
+// Injection seam for the swipeOn handler (mirrors the pinchOn/tapOn factory
+// seams). Lets a unit test exercise the registered handler wiring with a fake
+// SwipeOn whose execute() returns a failure, so a revert of the `isError`
+// gating below is caught by a test — not just the formatter (#6163).
+export type SwipeOnLike = Pick<SwipeOn, "execute">;
+
+let swipeOnFactory: (device: BootedDevice) => SwipeOnLike = (device) => new SwipeOn(device);
+
+export function setSwipeOnFactory(factory: (device: BootedDevice) => SwipeOnLike): void {
+  swipeOnFactory = factory;
+}
+
+export function resetSwipeOnFactory(): void {
+  swipeOnFactory = (device) => new SwipeOn(device);
+}
+
+export async function swipeOnHandler(
+  device: BootedDevice,
+  args: SwipeOnArgs,
+  progress?: ProgressCallback,
+): Promise<StructuredToolResponse<SwipeOnToolPayload> & { isError?: true }> {
+  RecompositionTracker.getInstance().recordInteraction();
+  const swipeOn = swipeOnFactory(device);
+  const resolvedDirection = resolveSwipeDirection({
+    direction: args.direction,
+    gestureType: args.gestureType,
+  });
+  const result = await swipeOn.execute(
+    {
+      container: args.container,
+      autoTarget: args.autoTarget ?? true,
+      direction: resolvedDirection.direction,
+      lookFor: args.lookFor,
+      speed: args.speed,
+      includeSystemInsets: args.includeSystemInsets ?? false,
+      boomerang: args.boomerang,
+      apexPause: args.apexPause,
+      returnSpeed: args.returnSpeed,
+    },
+    progress,
+  );
+
+  const response = createStructuredToolResponse({
+    message: formatSwipeOnMessage(result, args.direction),
+    observation: result.observation,
+    ...result,
+  });
+  // formatSwipeOnMessage already gates the message on `result.success`; the MCP
+  // envelope must agree, exactly as tapOn/inputText do (#6152, #5902), so a
+  // conforming client can't mistake a failed swipe for a completed one (#6163).
+  return result.success ? response : { ...response, isError: true };
+}
+
 export function formatPinchOnMessage(
   result: Pick<PinchOnResult, "success" | "error">,
   direction: string,
@@ -877,11 +935,15 @@ export async function pinchOnHandler(
     progress,
   );
 
-  return createJSONToolResponse({
+  const response = createJSONToolResponse({
     message: formatPinchOnMessage(result, args.direction),
     observation: result.observation,
     ...result,
   });
+  // formatPinchOnMessage already gates the message on `result.success`; the MCP
+  // envelope must agree, exactly as tapOn/inputText do (#6152, #5902), so a
+  // conforming client can't mistake a failed pinch for a completed one (#6163).
+  return result.success ? response : { ...response, isError: true };
 }
 
 export function buildInputTextResultMessage(
@@ -1042,137 +1104,281 @@ export async function tapOnHandler(
   return result.success ? response : { ...response, isError: true as const };
 }
 
+// Injection seam for the tapAny handler (mirrors the tapOn factory seam above).
+// Lets a unit test exercise the registered handler wiring with a fake
+// TapAnyElement whose execute() returns a failure (#6163).
+export type TapAnyElementLike = Pick<TapAnyElement, "execute">;
+
+let tapAnyElementFactory: (device: BootedDevice) => TapAnyElementLike = (device) =>
+  new TapAnyElement(device);
+
+export function setTapAnyElementFactory(
+  factory: (device: BootedDevice) => TapAnyElementLike,
+): void {
+  tapAnyElementFactory = factory;
+}
+
+export function resetTapAnyElementFactory(): void {
+  tapAnyElementFactory = (device) => new TapAnyElement(device);
+}
+
+function buildTapAnySearchSummary(
+  result: Pick<TapOnElementResult, "searchUntil">,
+): string | undefined {
+  const searchStats = result.searchUntil;
+  const shouldIncludeSearchSummary =
+    Boolean(searchStats) && (searchStats!.requestCount > 0 || searchStats!.changeCount > 0);
+  return shouldIncludeSearchSummary && searchStats
+    ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
+    : undefined;
+}
+
+export async function tapAnyHandler(
+  device: BootedDevice,
+  args: TapAnyArgs,
+  progress?: ProgressCallback,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const tapAnyCommand = tapAnyElementFactory(device);
+  const result = await tapAnyCommand.execute(
+    {
+      container: args.container,
+      selectionStrategy: args.selectionStrategy,
+      scrollableContainer: args.scrollableContainer,
+      action: args.action,
+      duration: args.duration,
+      searchUntil: args.searchUntil,
+    },
+    progress,
+  );
+
+  const searchSummary = buildTapAnySearchSummary(result);
+  // A miss must not read as a completed tap: gate the message on the outcome
+  // and mark the MCP envelope `isError`, exactly as tapOn does (#6152, #6163).
+  const message = result.success
+    ? searchSummary
+      ? `Tapped clickable element (${searchSummary})`
+      : "Tapped clickable element"
+    : `Failed to tap clickable element: ${result.error || "unknown error"}`;
+  const response = createStructuredToolResponse({
+    message,
+    observation: result.observation,
+    ...result,
+  });
+  return result.success ? response : { ...response, isError: true as const };
+}
+
+// Injection seam for the dragAndDrop handler. Lets a unit test exercise the
+// registered handler wiring with a fake DragAndDrop whose execute() returns a
+// failure (#6163).
+export type DragAndDropLike = Pick<DragAndDrop, "execute">;
+
+let dragAndDropFactory: (device: BootedDevice) => DragAndDropLike = (device) =>
+  new DragAndDrop(device);
+
+export function setDragAndDropFactory(factory: (device: BootedDevice) => DragAndDropLike): void {
+  dragAndDropFactory = factory;
+}
+
+export function resetDragAndDropFactory(): void {
+  dragAndDropFactory = (device) => new DragAndDrop(device);
+}
+
+export async function dragAndDropHandler(
+  device: BootedDevice,
+  args: DragAndDropArgs,
+  progress?: ProgressCallback,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const dragAndDrop = dragAndDropFactory(device);
+  const result: DragAndDropResult = await dragAndDrop.execute(
+    {
+      source: args.source,
+      target: args.target,
+      pressDurationMs: args.pressDurationMs,
+      dragDurationMs: args.dragDurationMs,
+      holdDurationMs: args.holdDurationMs,
+    },
+    progress,
+  );
+
+  const message = result.success
+    ? "Dragged element to target"
+    : `Failed to drag element to target: ${result.error || "unknown error"}`;
+  const response = createJSONToolResponse({
+    message,
+    observation: result.observation,
+    ...result,
+  });
+  return result.success ? response : { ...response, isError: true as const };
+}
+
+// Injection seam for the clearText handler. Lets a unit test exercise the
+// registered handler wiring with a fake ClearText whose execute() returns a
+// failure (#6163).
+export type ClearTextLike = Pick<ClearText, "execute">;
+
+let clearTextFactory: (device: BootedDevice) => ClearTextLike = (device) => new ClearText(device);
+
+export function setClearTextFactory(factory: (device: BootedDevice) => ClearTextLike): void {
+  clearTextFactory = factory;
+}
+
+export function resetClearTextFactory(): void {
+  clearTextFactory = (device) => new ClearText(device);
+}
+
+export async function clearTextHandler(
+  device: BootedDevice,
+  _args: ClearTextArgs,
+  progress?: ProgressCallback,
+) {
+  try {
+    const clearText = clearTextFactory(device);
+    const result: ClearTextResult = await clearText.execute(progress);
+
+    const message = result.success
+      ? "Cleared text from input field"
+      : `Failed to clear text: ${result.error || "unknown error"}`;
+    const response = createJSONToolResponse({
+      message,
+      observation: result.observation,
+      ...result,
+    });
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to clear text: ${error}`);
+  }
+}
+
+// Injection seam for the selectAllText handler. Lets a unit test exercise the
+// registered handler wiring with a fake SelectAllText whose execute() returns
+// a failure (#6163).
+export type SelectAllTextLike = Pick<SelectAllText, "execute">;
+
+let selectAllTextFactory: (device: BootedDevice) => SelectAllTextLike = (device) =>
+  new SelectAllText(device);
+
+export function setSelectAllTextFactory(
+  factory: (device: BootedDevice) => SelectAllTextLike,
+): void {
+  selectAllTextFactory = factory;
+}
+
+export function resetSelectAllTextFactory(): void {
+  selectAllTextFactory = (device) => new SelectAllText(device);
+}
+
+export async function selectAllTextHandler(
+  device: BootedDevice,
+  _args: SelectAllTextArgs,
+  progress?: ProgressCallback,
+) {
+  try {
+    const selectAllText = selectAllTextFactory(device);
+    const result: SelectAllTextResult = await selectAllText.execute(progress);
+
+    const message = result.success
+      ? "Selected all text in focused input field"
+      : `Failed to select all text: ${result.error || "unknown error"}`;
+    const response = createJSONToolResponse({
+      message,
+      observation: result.observation,
+      ...result,
+    });
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to select all text: ${error}`);
+  }
+}
+
+// Injection seam for the pressButton handler. Lets a unit test exercise the
+// registered handler wiring with a fake PressButton whose execute() returns a
+// failure (#6163).
+export type PressButtonLike = Pick<PressButton, "execute">;
+
+let pressButtonFactory: (device: BootedDevice) => PressButtonLike = (device) =>
+  new PressButton(device);
+
+export function setPressButtonFactory(factory: (device: BootedDevice) => PressButtonLike): void {
+  pressButtonFactory = factory;
+}
+
+export function resetPressButtonFactory(): void {
+  pressButtonFactory = (device) => new PressButton(device);
+}
+
+export async function pressButtonHandler(
+  device: BootedDevice,
+  args: PressButtonArgs,
+  progress?: ProgressCallback,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  try {
+    const pressButton = pressButtonFactory(device);
+    const result: PressButtonResult = await pressButton.execute(args.button, progress);
+
+    const message = result.success
+      ? `Pressed button ${args.button}`
+      : `Failed to press button ${args.button}: ${result.error || "unknown error"}`;
+    const response = createJSONToolResponse({
+      message,
+      observation: result.observation,
+      ...result,
+    });
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to press button: ${error}`);
+  }
+}
+
+// Injection seam for the imeAction handler. Lets a unit test exercise the
+// registered handler wiring with a fake ImeAction whose execute() returns a
+// failure (#6163).
+export type ImeActionLike = Pick<ImeAction, "execute">;
+
+let imeActionFactory: (device: BootedDevice) => ImeActionLike = (device) => new ImeAction(device);
+
+export function setImeActionFactory(factory: (device: BootedDevice) => ImeActionLike): void {
+  imeActionFactory = factory;
+}
+
+export function resetImeActionFactory(): void {
+  imeActionFactory = (device) => new ImeAction(device);
+}
+
+export async function imeActionHandler(
+  device: BootedDevice,
+  args: ImeActionArgs,
+  progress?: ProgressCallback,
+) {
+  try {
+    const imeAction = imeActionFactory(device);
+    const result: ImeActionResult = await imeAction.execute(args.action, progress);
+
+    const message = result.success
+      ? `Executed IME action "${args.action}"`
+      : `Failed to execute IME action "${args.action}": ${result.error || "unknown error"}`;
+    const response = createJSONToolResponse({
+      message,
+      observation: result.observation,
+      ...result,
+    });
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to execute IME action: ${error}`);
+  }
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
 
 export function registerInteractionTools() {
-  // tapOn handler is defined at module scope (with an injectable TapOnElement
-  // factory) so a unit test can exercise the registered handler wiring (#6152).
-
-  // TapAny handler
-  const tapAnyHandler = async (
-    device: BootedDevice,
-    args: TapAnyArgs,
-    progress?: ProgressCallback,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const tapAnyCommand = new TapAnyElement(device);
-    const result = await tapAnyCommand.execute(
-      {
-        container: args.container,
-        selectionStrategy: args.selectionStrategy,
-        scrollableContainer: args.scrollableContainer,
-        action: args.action,
-        duration: args.duration,
-        searchUntil: args.searchUntil,
-      },
-      progress,
-    );
-
-    const searchStats = result.searchUntil;
-    const shouldIncludeSearchSummary =
-      Boolean(searchStats) && (searchStats!.requestCount > 0 || searchStats!.changeCount > 0);
-    const searchSummary =
-      shouldIncludeSearchSummary && searchStats
-        ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
-        : undefined;
-
-    return createStructuredToolResponse({
-      message: searchSummary
-        ? `Tapped clickable element (${searchSummary})`
-        : "Tapped clickable element",
-      observation: result.observation,
-      ...result,
-    });
-  };
-
-  // Drag and drop handler
-  const dragAndDropHandler = async (
-    device: BootedDevice,
-    args: DragAndDropArgs,
-    progress?: ProgressCallback,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const dragAndDrop = new DragAndDrop(device);
-    const result = await dragAndDrop.execute(
-      {
-        source: args.source,
-        target: args.target,
-        pressDurationMs: args.pressDurationMs,
-        dragDurationMs: args.dragDurationMs,
-        holdDurationMs: args.holdDurationMs,
-      },
-      progress,
-    );
-
-    return createJSONToolResponse({
-      message: "Dragged element to target",
-      observation: result.observation,
-      ...result,
-    });
-  };
-
-  // Clear text handler
-  const clearTextHandler = async (
-    device: BootedDevice,
-    args: ClearTextArgs,
-    progress?: ProgressCallback,
-  ) => {
-    try {
-      const clearText = new ClearText(device);
-      const result = await clearText.execute(progress);
-
-      return createJSONToolResponse({
-        message: "Cleared text from input field",
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to clear text: ${error}`);
-    }
-  };
-
-  // Select all text handler
-  const selectAllTextHandler = async (
-    device: BootedDevice,
-    args: SelectAllTextArgs,
-    progress?: ProgressCallback,
-  ) => {
-    try {
-      const selectAllText = new SelectAllText(device);
-      const result = await selectAllText.execute(progress);
-
-      return createJSONToolResponse({
-        message: "Selected all text in focused input field",
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to select all text: ${error}`);
-    }
-  };
-
-  // Press button handler
-  const pressButtonHandler = async (
-    device: BootedDevice,
-    args: PressButtonArgs,
-    progress?: ProgressCallback,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    try {
-      const pressButton = new PressButton(device);
-      const result = await pressButton.execute(args.button, progress);
-
-      return createJSONToolResponse({
-        message: `Pressed button ${args.button}`,
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to press button: ${error}`);
-    }
-  };
+  // tapOn, tapAny, dragAndDrop, clearText, selectAllText, pressButton,
+  // imeAction, and swipeOn handlers are defined at module scope (each with an
+  // injectable factory) so a unit test can exercise the registered handler
+  // wiring (#6152, #6163).
 
   // System tray handler
   const systemTrayHandler = async (
@@ -1389,39 +1595,8 @@ export function registerInteractionTools() {
     }
   };
 
-  // Swipe on handler
-  const swipeOnHandler = async (
-    device: BootedDevice,
-    args: SwipeOnArgs,
-    progress?: ProgressCallback,
-  ): Promise<StructuredToolResponse<SwipeOnToolPayload>> => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const swipeOn = new SwipeOn(device);
-    const resolvedDirection = resolveSwipeDirection({
-      direction: args.direction,
-      gestureType: args.gestureType,
-    });
-    const result = await swipeOn.execute(
-      {
-        container: args.container,
-        autoTarget: args.autoTarget ?? true,
-        direction: resolvedDirection.direction,
-        lookFor: args.lookFor,
-        speed: args.speed,
-        includeSystemInsets: args.includeSystemInsets ?? false,
-        boomerang: args.boomerang,
-        apexPause: args.apexPause,
-        returnSpeed: args.returnSpeed,
-      },
-      progress,
-    );
-
-    return createStructuredToolResponse({
-      message: formatSwipeOnMessage(result, args.direction),
-      observation: result.observation,
-      ...result,
-    });
-  };
+  // swipeOn handler is defined at module scope (with an injectable SwipeOn
+  // factory) so a unit test can exercise the registered handler wiring (#6163).
 
   // Pinch on handler
   // pinchOn handler is defined at module scope (with an injectable PinchOn
@@ -1526,25 +1701,8 @@ export function registerInteractionTools() {
     }
   };
 
-  // IME action handler
-  const imeActionHandler = async (
-    device: BootedDevice,
-    args: ImeActionArgs,
-    progress?: ProgressCallback,
-  ) => {
-    try {
-      const imeAction = new ImeAction(device);
-      const result = await imeAction.execute(args.action, progress);
-
-      return createJSONToolResponse({
-        message: `Executed IME action "${args.action}"`,
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to execute IME action: ${error}`);
-    }
-  };
+  // imeAction handler is defined at module scope (with an injectable ImeAction
+  // factory) so a unit test can exercise the registered handler wiring (#6163).
 
   // Keyboard handler
   const keyboardHandler = async (device: BootedDevice, args: KeyboardArgs) => {

@@ -201,6 +201,60 @@ describe("NavigationRepository", () => {
       expect(second.first_seen_at).toBe(1000);
       expect(second.last_seen_at).toBe(2000);
     });
+
+    test("matches an existing row on re-tap of an element with empty-string text (issue #6130)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const first = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "", resourceId: "icon_button" },
+        1000,
+      );
+      const second = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "", resourceId: "icon_button" },
+        2000,
+      );
+
+      expect(second.id).toBe(first.id);
+      expect(first.text).toBe("");
+      expect(second.last_seen_at).toBe(2000);
+    });
+
+    test("matches an existing row on re-tap of an element with a 0 bound (issue #6130)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const bounds = { left: 0, top: 0, right: 100, bottom: 40 };
+      const first = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { resourceId: "top_left_anchor", bounds },
+        1000,
+      );
+      const second = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { resourceId: "top_left_anchor", bounds },
+        2000,
+      );
+
+      expect(second.id).toBe(first.id);
+      expect(first.bounds_left).toBe(0);
+      expect(first.bounds_top).toBe(0);
+      expect(second.last_seen_at).toBe(2000);
+    });
+
+    test("a genuinely different element still creates a distinct row", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const first = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "", resourceId: "icon_button" },
+        1000,
+      );
+      const other = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Other", resourceId: "icon_button" },
+        1000,
+      );
+
+      expect(other.id).not.toBe(first.id);
+    });
   });
 
   describe("setNodeModals / getNodeModals", () => {
@@ -244,6 +298,21 @@ describe("NavigationRepository", () => {
       expect(scroll!.speed).toBe("slow");
       expect(scroll!.swipeCount).toBe(3);
       expect(scroll!.targetElement.id).toBe(target.id);
+    });
+
+    test("preserves a swipeCount of 0 (issue #6130)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "swipeOn", null, 1000);
+      const target = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Target", resourceId: "target_elem" },
+        1000,
+      );
+
+      await repo.setScrollPosition(edge.id, target.id, "down", undefined, "slow", 0);
+
+      const scroll = await repo.getScrollPosition(edge.id);
+      expect(scroll!.swipeCount).toBe(0);
     });
   });
 

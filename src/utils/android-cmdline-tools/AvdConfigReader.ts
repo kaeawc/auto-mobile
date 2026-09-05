@@ -71,13 +71,25 @@ interface ParsedReleaseVersion {
 }
 
 function parseReleaseVersion(version: string): ParsedReleaseVersion | undefined {
-  const match = /^(\d+)(?:\.(\d+))?(L)?$/i.exec(version.trim());
+  const match = /^(\d+)((?:\.\d+)*)(L)?$/i.exec(version.trim());
   if (!match) {
+    return undefined;
+  }
+  // The release table only ever needs major.minor, but the device matcher's
+  // own comparator treats any number of trailing ".0" components as
+  // equivalent to the same, shorter version (zero-padded comparison), so
+  // "14.0.0" must resolve exactly like "14" / "14.0" here too -- a caller
+  // passing the matcher's own osVersion string back in as a bound shouldn't
+  // hit "Unrecognized ...OsVersion" (regression caught in review). A
+  // non-zero third-plus component (e.g. "8.1.5") names a point release this
+  // table has no entry for, so it still falls through to undefined.
+  const dotted = match[2].length > 0 ? match[2].slice(1).split(".").map(Number) : [];
+  if (dotted.slice(1).some((component) => component !== 0)) {
     return undefined;
   }
   return {
     major: Number(match[1]),
-    ...(match[2] === undefined ? {} : { minor: Number(match[2]) }),
+    ...(dotted.length === 0 ? {} : { minor: dotted[0] }),
     lettered: match[3] !== undefined,
   };
 }

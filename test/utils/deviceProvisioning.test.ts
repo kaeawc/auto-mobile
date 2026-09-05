@@ -141,6 +141,15 @@ describe("pickAndroidSystemImage", () => {
     expect(pickAndroidSystemImage(images, { minOsVersion: "14.0" }, "x64").apiLevel).toBe(35);
   });
 
+  it("resolves a redundant trailing-zero bound identically to its bare major (regression)", () => {
+    // The device matcher's own comparator treats "14", "14.0", and "14.0.0"
+    // as equal (zero-padded comparison), so provisioning must accept the
+    // same forms instead of throwing "Unrecognized ...OsVersion".
+    expect(pickAndroidSystemImage(images, { minOsVersion: "14.0.0" }, "x64").apiLevel).toBe(
+      pickAndroidSystemImage(images, { minOsVersion: "14" }, "x64").apiLevel,
+    );
+  });
+
   it("spans point releases when a release-version bound names only the major", () => {
     const legacy = [
       systemImage(26, "google_apis", "x86_64"),

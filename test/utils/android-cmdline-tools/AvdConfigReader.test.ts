@@ -232,6 +232,20 @@ describe("versionToApiLevelRange", () => {
     expect(versionToApiLevelRange("9.0")).toEqual({ min: 28, max: 28 });
   });
 
+  it("accepts redundant trailing-zero components like the matcher does (regression)", () => {
+    // The device matcher's own comparator zero-pads and treats "14",
+    // "14.0", and "14.0.0" as equal, so a minOsVersion/maxOsVersion bound
+    // in any of those forms must resolve identically here too -- a caller
+    // that echoes the matcher's own osVersion string back in as a bound
+    // must not hit "Unrecognized ...OsVersion".
+    expect(versionToApiLevelRange("14.0.0")).toEqual(versionToApiLevelRange("14"));
+    expect(versionToApiLevelRange("8.1.0")).toEqual(versionToApiLevelRange("8.1"));
+  });
+
+  it("still rejects a non-zero third component (no such point release)", () => {
+    expect(versionToApiLevelRange("8.1.5")).toBeUndefined();
+  });
+
   it("does not fold 12L into 12", () => {
     expect(versionToApiLevelRange("12")).toEqual({ min: 31, max: 31 });
     expect(versionToApiLevelRange("12l")).toEqual({ min: 32, max: 32 });

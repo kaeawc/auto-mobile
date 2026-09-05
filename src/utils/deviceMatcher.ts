@@ -160,9 +160,17 @@ function compareVersionToBound(version: string, bound: string): number {
     // dotted maxOsVersion match any longer version sharing its prefix). A
     // lettered bound (e.g. "12L") is likewise an exact endpoint, not a
     // major to widen -- it has its own single component, so slicing is a
-    // no-op for it and the letter tiebreak below does the real work.
+    // no-op for it and the letter tiebreak below does the real work. A QPR
+    // bound (e.g. "14-QPR1") must be excluded from widening too, even though
+    // it also has exactly one numeric component: without this guard "14.1"
+    // would slice down to "14" and false-match a "14-QPR1" bound it has
+    // nothing to do with (review follow-up; full QPR/letter ordering between
+    // arbitrary numeric versions is out of scope here -- see the tracking
+    // issue linked from the PR body).
     const isMajorOnlyBound =
-      parsedBound.components.length === 1 && parsedBound.letter === undefined;
+      parsedBound.components.length === 1 &&
+      parsedBound.letter === undefined &&
+      parsedBound.qpr === undefined;
     const comparableVersion = isMajorOnlyBound
       ? parsedVersion.components.slice(0, 1)
       : parsedVersion.components;

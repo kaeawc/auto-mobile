@@ -397,6 +397,22 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("qpr2");
   });
 
+  it("does not widen a QPR maxOsVersion bound into a false point-release match", () => {
+    // A QPR bound like "14-QPR1" has exactly one numeric component, just
+    // like a major-only bound such as "8" -- but it names an exact QPR
+    // train, not "every point release of major 14". Without the guard,
+    // "14.1" would slice down to "14", compare equal to the bound's "14",
+    // and be falsely accepted as <= "14-QPR1".
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "14.1" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "14-QPR1" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
   it("prefers a QPR update over the bare release for LATEST", () => {
     const devices = [
       bootedDevice({ deviceId: "bare", osVersion: "14" }),

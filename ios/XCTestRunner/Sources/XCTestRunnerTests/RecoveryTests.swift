@@ -1394,11 +1394,22 @@ final class SecretRedactionTests: XCTestCase {
     func testReplacementChainThatDoesNotConvergeOverRedactsTheWholeText() {
         // Each pass of `X***REDACTED***` -> marker consumes one leading `X`, so a run of `X`s longer
         // than the pass budget cannot converge in time. The fail-safe is the marker alone —
-        // over-redact, never leak (#6146).
+        // over-redact, never leak (#6146). The surrounding `pre`/`post` context distinguishes the
+        // fail-safe (whole text -> marker) from a converged result (`pre ***REDACTED*** post`).
         let chained = "X" + SecretRedaction.placeholder
         let values = SecretRedaction.secretValues(["abc", chained])
-        let result = SecretRedaction.redact("XXXXXXXXabc", secretValues: values)
+        let result = SecretRedaction.redact("pre XXXXXXXXabc post", secretValues: values)
         XCTAssertEqual(result, SecretRedaction.placeholder)
+    }
+
+    func testChainThatConvergesOnTheFinalPermittedPassKeepsItsContext() {
+        // Secret `*X` alone allows two passes: `prefix *XX suffix` -> `prefix ***REDACTED***X suffix`
+        // (still contains `*X`) -> `prefix ***REDACTED*****REDACTED*** suffix`, which is clean. That
+        // final result must be kept, not discarded for the whole-text fallback (#6146 Codex review).
+        let values = SecretRedaction.secretValues(["*X"])
+        let result = SecretRedaction.redact("prefix *XX suffix", secretValues: values)
+        XCTAssertNil(result.range(of: "*X", options: [.literal]), "the secret must not survive")
+        XCTAssertTrue(result.hasPrefix("prefix ") && result.hasSuffix(" suffix"), "context is preserved")
     }
 
     func testNoDeclaredValueSurvivesRedactionForATableOfAdversarialInputs() {

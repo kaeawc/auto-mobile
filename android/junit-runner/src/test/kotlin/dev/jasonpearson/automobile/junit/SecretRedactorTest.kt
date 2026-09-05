@@ -424,12 +424,23 @@ class SecretRedactorTest {
   fun `a replacement chain that does not converge over-redacts the whole text`() {
     // Each pass of `X***REDACTED***` -> marker consumes one leading `X`, so a run of `X`s longer
     // than the pass budget cannot converge in time. The fail-safe is the marker alone —
-    // over-redact,
-    // never leak (#6146).
+    // over-redact, never leak (#6146). The surrounding `pre`/`post` context distinguishes the
+    // fail-safe (whole text -> marker) from a converged result (`pre ***REDACTED*** post`).
     val chained = "X${SecretRedactor.PLACEHOLDER}"
     val values = SecretRedactor.secretValues(listOf("abc", chained))
-    val result = SecretRedactor.redact("XXXXXXXXabc", values)
+    val result = SecretRedactor.redact("pre XXXXXXXXabc post", values)
     assertEquals(SecretRedactor.PLACEHOLDER, result)
+  }
+
+  @Test
+  fun `a chain that converges on the final permitted pass keeps its context`() {
+    // Secret `*X` alone allows two passes: `prefix *XX suffix` -> `prefix ***REDACTED***X suffix`
+    // (still contains `*X`) -> `prefix ***REDACTED*****REDACTED*** suffix`, which is clean. That
+    // final result must be kept, not discarded for the whole-text fallback (#6146 Codex review).
+    val values = SecretRedactor.secretValues(listOf("*X"))
+    val result = SecretRedactor.redact("prefix *XX suffix", values)
+    assertFalse(result.contains("*X"), "the secret must not survive")
+    assertTrue(result.startsWith("prefix ") && result.endsWith(" suffix"), "context is preserved")
   }
 
   @Test

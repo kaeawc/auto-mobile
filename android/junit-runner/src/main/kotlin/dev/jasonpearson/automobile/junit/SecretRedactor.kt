@@ -95,15 +95,19 @@ internal object SecretRedactor {
    * of the marker plus its surrounding context (declared `abc` and `X***REDACTED***Y`, text `XabcY`
    * — #6146), or reintroduce a declared value that is a substring of the marker (declared
    * `REDACTED` and `abc`). So the pass repeats until one finds nothing (the proof that no declared
-   * value is present), bounded by the number of values plus one. If the bound is exhausted without
-   * converging, the whole text is over-redacted to the marker alone — or to the empty string when
-   * the marker itself contains a declared value. Over-redact, never leak.
+   * value is present), bounded by the number of values plus one. If the bound is exhausted and the
+   * last pass's output still contains a declared value, the whole text is over-redacted to the
+   * marker alone — or to the empty string when the marker itself contains a declared value.
+   * Over-redact, never leak.
    */
   fun redact(text: String, secretValues: List<String>): String {
     val ordered = secretValues.filter { it.isNotEmpty() }.sortedByDescending { it.length }
     if (ordered.isEmpty()) return text
     var redacted = text
     repeat(ordered.size + 1) { redacted = replaceEach(redacted, ordered) ?: return redacted }
+    // The final permitted pass may itself have produced a secret-free result; keep that rather
+    // than discarding the whole context.
+    if (ordered.none { redacted.contains(it) }) return redacted
     return if (ordered.any { PLACEHOLDER.contains(it) }) "" else PLACEHOLDER
   }
 

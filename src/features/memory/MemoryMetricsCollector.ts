@@ -171,30 +171,67 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   }
 
   /**
-   * Capture GC events from logcat, scoped to the audited process
-   * Should be called with timestamps around the action being monitored
+   * Resolve the audited app's primary PID via `pidof`.
+   * `pidof` can report multiple pids for a multi-process app; the first is
+   * taken as the primary process. Returns undefined when the app isn't running.
+   */
+  private async resolvePid(
+    packageName: string,
+    perf: PerformanceTracker,
+  ): Promise<string | undefined> {
+    const { stdout } = await perf.track("adbGetGcPid", () =>
+      this.adb.executeCommand(`shell pidof ${packageName}`),
+    );
+    return stdout.trim().split(/\s+/)[0] || undefined;
+  }
+
+  /**
+   * Capture GC events from logcat, scoped to the audited process and time window.
+   *
+   * `pid`, when supplied, should be resolved by the caller *before* the audited
+   * action runs (see {@link collectMetrics}) so that an action which kills or
+   * restarts the audited process still attributes its in-flight GC activity to
+   * the process that was actually alive during the action, rather than to
+   * whatever `pidof` reports afterward (which may be a new pid, or none at
+   * all). A caller invoking this standalone may omit it to resolve fresh.
+   *
+   * Known limitation: if the process legitimately restarts mid-audit, GC
+   * events from the *new* process are not captured — only from the pid alive
+   * at audit start. Tracking a restart is left as a follow-up.
    */
   async captureGCEvents(
     packageName: string,
     startTimestamp: number,
     endTimestamp: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    pid?: string,
   ): Promise<GCEvent[]> {
     try {
-      // Resolve the audited app's PID so GC lines from other processes on the
-      // device are never attributed to it. `pidof` can report multiple pids
-      // for a multi-process app; take the first as the primary process.
-      const { stdout: pidOutput } = await perf.track("adbGetGcPid", () =>
-        this.adb.executeCommand(`shell pidof ${packageName}`),
-      );
-      const pid = pidOutput.trim().split(/\s+/)[0];
-      if (!pid) {
+      const resolvedPid = pid ?? (await this.resolvePid(packageName, perf));
+      if (!resolvedPid) {
         logger.warn(
           `[MemoryMetricsCollector] No PID found for ${packageName}; skipping GC capture ` +
             `to avoid attributing another process's GC events to it`,
         );
         return [];
       }
+
+      // Device-vs-host clock skew (#5377): startTimestamp/endTimestamp are
+      // host-clock ms (this.timer.now()), but logcat's "-v epoch" stamps each
+      // line with the DEVICE's own clock. On an emulator/device whose wall
+      // clock differs from the host, comparing them directly rejects
+      // genuinely in-window events (or admits out-of-window ones). Read the
+      // device's current epoch once via the shared getDeviceTimestampMs()
+      // helper (the same device-clock primitive observationFreshness.ts uses
+      // for #5377) and translate the host-domain bounds into the device's
+      // clock domain before comparing against the device-stamped log lines.
+      const hostNowMs = this.timer.now();
+      const deviceNowMs = await perf.track("adbDeviceTimestamp", () =>
+        this.adb.getDeviceTimestampMs(),
+      );
+      const hostToDeviceOffsetMs = deviceNowMs - hostNowMs;
+      const deviceStartTimestamp = startTimestamp + hostToDeviceOffsetMs;
+      const deviceEndTimestamp = endTimestamp + hostToDeviceOffsetMs;
 
       // ART (API 21+) logs GC lines under the app's own process tag (not a
       // dedicated "art" tag) and without the legacy "GC_" prefix, e.g.
@@ -204,18 +241,18 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       // ART share and let parseGCEvents() do the format-specific parsing.
       //
       // `--pid` scopes logcat itself to the audited process where the device
-      // supports it; `-v epoch` gives each line a machine-parseable epoch
-      // timestamp so parseGCEvents() can both re-verify the pid column
-      // (defense-in-depth for devices where `--pid` is a no-op) and drop
-      // events outside [startTimestamp, endTimestamp].
+      // supports it; `-v epoch` gives each line a machine-parseable
+      // device-clock timestamp so parseGCEvents() can both re-verify the pid
+      // column (defense-in-depth for devices where `--pid` is a no-op) and
+      // drop events outside the (device-clock) capture window.
       const { stdout } = await perf.track("adbLogcatGC", () =>
         this.adb.executeCommand(
-          `shell logcat -d -v epoch --pid=${pid} | grep -iE "GC[_ ].*freed.*paused"`,
+          `shell logcat -d -v epoch --pid=${resolvedPid} | grep -iE "GC[_ ].*freed.*paused"`,
           5000,
         ),
       );
 
-      return this.parseGCEvents(stdout, startTimestamp, endTimestamp, pid);
+      return this.parseGCEvents(stdout, deviceStartTimestamp, deviceEndTimestamp, resolvedPid);
     } catch (error) {
       logger.warn(`[MemoryMetricsCollector] Failed to capture GC events: ${error}`);
       return [];
@@ -452,6 +489,14 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     // Clear logcat to prepare for GC event capture
     await this.clearLogcat(perf);
 
+    // Resolve the audited pid BEFORE running the action. If the action kills
+    // or restarts the app, a pidof lookup done afterward would return a new
+    // pid (or none), so GC events from the process actually alive during the
+    // action would be missed or mis-attributed. The common case — the
+    // process staying up through the action — is what this pid scopes
+    // correctly; a legitimate mid-audit restart is a known limitation.
+    const auditedPid = await this.resolvePid(packageName, perf);
+
     // Take pre-action snapshot
     const preSnapshot = await this.takeSnapshot(packageName, perf);
     const startTimestamp = this.timer.now();
@@ -467,8 +512,15 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     // Take post-action snapshot (after GC)
     const postSnapshot = await this.takeSnapshot(packageName, perf);
 
-    // Capture GC events that occurred during the action
-    const gcEvents = await this.captureGCEvents(packageName, startTimestamp, endTimestamp, perf);
+    // Capture GC events that occurred during the action, scoped to the
+    // pre-action pid so a mid-action process restart doesn't swap it out.
+    const gcEvents = await this.captureGCEvents(
+      packageName,
+      startTimestamp,
+      endTimestamp,
+      perf,
+      auditedPid,
+    );
 
     // Get unreachable objects
     const unreachableObjects = await this.getUnreachableObjects(packageName, perf);

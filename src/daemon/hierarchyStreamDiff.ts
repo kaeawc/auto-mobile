@@ -37,6 +37,24 @@ export interface HierarchyDiffResult {
   summary: HierarchyDiffSummary;
 }
 
+/**
+ * Canonical `l,t,r,b` form of a bounds value. Accepts the typed `node.bounds` struct, the iOS
+ * converter's `{left,top,right,bottom}` object under `$.bounds` (it never sets the typed slot), and
+ * Android's `"l,t,r,b"` string attribute — so equal coordinates compare equal across sources.
+ * Stringifying the object form directly gave "[object Object]" for every iOS node, which made a
+ * pure move/resize invisible to the diff (#6134).
+ */
+function boundsSignature(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const bounds = value as Record<string, unknown>;
+    return `${bounds["left"] ?? ""},${bounds["top"] ?? ""},${bounds["right"] ?? ""},${bounds["bottom"] ?? ""}`;
+  }
+  return String(value);
+}
+
 /** Attributes compared to decide whether a node at a stable tree position changed. */
 function nodeSignature(node: ViewHierarchyNode): string {
   const attrs = node.$ ?? {};
@@ -49,10 +67,7 @@ function nodeSignature(node: ViewHierarchyNode): string {
     }
     return "";
   };
-  const bounds = node.bounds;
-  const boundsSig = bounds
-    ? `${bounds.left ?? ""},${bounds.top ?? ""},${bounds.right ?? ""},${bounds.bottom ?? ""}`
-    : get("bounds");
+  const boundsSig = node.bounds ? boundsSignature(node.bounds) : boundsSignature(attrs["bounds"]);
   // Attribute names differ across capture sources (class vs className, etc.), so
   // each field falls back through its known aliases before comparison.
   return [

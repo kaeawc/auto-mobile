@@ -95,6 +95,54 @@ describe("annotateHierarchyDiff", () => {
     expect(summary.changed).toBe(1);
   });
 
+  // The iOS converter (CtrlProxyHierarchy.ts) never sets the typed `node.bounds`; it carries the
+  // bounds ONLY as an object under `$.bounds`. Stringifying that object yields "[object Object]"
+  // for every node, so a pure move/resize used to be invisible to the diff (#6134).
+  test("a bounds-only change on an iOS-shaped node ($.bounds object) marks it changed", () => {
+    const previous = hierarchy(
+      node({ class: "XCUIElementTypeWindow" }, [
+        node({
+          class: "XCUIElementTypeButton",
+          text: "Continue",
+          bounds: { left: 20, top: 100, right: 370, bottom: 144 },
+        }),
+      ]),
+    );
+    const current = hierarchy(
+      node({ class: "XCUIElementTypeWindow" }, [
+        node({
+          class: "XCUIElementTypeButton",
+          text: "Continue",
+          bounds: { left: 20, top: 600, right: 370, bottom: 644 },
+        }),
+      ]),
+    );
+
+    const { hierarchy: out, summary } = annotateHierarchyDiff(previous, current);
+
+    expect(summary).toEqual({ hasBaseline: true, added: 0, changed: 1, removed: 0 });
+    expect(diffState(out.hierarchy.node)).toBeUndefined();
+    expect(diffState(out.hierarchy.node?.node?.[0])).toBe("changed");
+  });
+
+  test("identical $.bounds objects on an iOS-shaped node are a quiet frame", () => {
+    const build = () =>
+      hierarchy(
+        node({ class: "XCUIElementTypeWindow" }, [
+          node({
+            class: "XCUIElementTypeButton",
+            text: "Continue",
+            bounds: { left: 20, top: 100, right: 370, bottom: 144 },
+          }),
+        ]),
+      );
+
+    const { hierarchy: out, summary } = annotateHierarchyDiff(build(), build());
+
+    expect(summary).toEqual({ hasBaseline: true, added: 0, changed: 0, removed: 0 });
+    expect(diffState(out.hierarchy.node?.node?.[0])).toBeUndefined();
+  });
+
   test("an added subtree is fully annotated and counted", () => {
     const previous = hierarchy(node({ class: "Root" }, [node({ class: "A" })]));
     const current = hierarchy(
@@ -182,6 +230,16 @@ describe("nodeSignature alias folding", () => {
     {
       name: "struct bounds and the string bounds fallback with equal coords fold together",
       prev: { $: { class: "X" }, bounds: { left: 0, top: 0, right: 10, bottom: 20 } },
+      cur: node({ class: "X", bounds: "0,0,10,20" }),
+    },
+    {
+      name: "struct bounds and the iOS $.bounds object with equal coords fold together",
+      prev: { $: { class: "X" }, bounds: { left: 0, top: 0, right: 10, bottom: 20 } },
+      cur: node({ class: "X", bounds: { left: 0, top: 0, right: 10, bottom: 20 } }),
+    },
+    {
+      name: "the iOS $.bounds object and the Android string bounds with equal coords fold together",
+      prev: node({ class: "X", bounds: { left: 0, top: 0, right: 10, bottom: 20 } }),
       cur: node({ class: "X", bounds: "0,0,10,20" }),
     },
   ];

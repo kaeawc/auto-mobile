@@ -5,9 +5,13 @@ import * as fs from "fs/promises";
 import http from "http";
 import https from "https";
 import * as path from "path";
+import type { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { promisify } from "util";
 import { logger } from "./logger";
 import { getAbortSignal } from "./AbortContext";
+import { toActionableError } from "../models/ActionableError";
+import { type IdGenerator, defaultIdGenerator } from "./IdGenerator";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +20,8 @@ export interface FileDownloader {
 }
 
 export class DefaultFileDownloader implements FileDownloader {
+  constructor(private readonly idGenerator: IdGenerator = defaultIdGenerator) {}
+
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     signal ??= getAbortSignal();
     if (signal?.aborted) {
@@ -121,13 +127,7 @@ export class DefaultFileDownloader implements FileDownloader {
             return;
           }
 
-          const fileStream = createWriteStream(destination);
-          response.pipe(fileStream);
-          fileStream.on("finish", () => fileStream.close(() => resolve()));
-          fileStream.on("error", (err) => {
-            fileStream.close();
-            reject(err);
-          });
+          void this.pipeResponseToFile(response, destination, url).then(resolve).catch(reject);
         },
       );
 
@@ -141,6 +141,41 @@ export class DefaultFileDownloader implements FileDownloader {
         abort();
       }
     });
+  }
+
+  /**
+   * Streams a response body to `destination`, writing to an attempt-unique
+   * temp path and renaming it onto `destination` only on success. Failure
+   * cleanup only ever removes that temp path, so a slow-to-settle failed
+   * attempt can never delete a concurrent or retried download's completed
+   * file at the same destination (issue #6131).
+   *
+   * Uses `stream.pipeline` (not `response.pipe`) so a mid-body close — the
+   * peer ending the connection before all bytes arrive — surfaces as a
+   * rejection instead of stalling forever: `pipe()` only reacts to
+   * `'end'`/`'error'`, neither of which fires when the source stream is
+   * merely destroyed without ending.
+   */
+  private async pipeResponseToFile(
+    response: Readable,
+    destination: string,
+    url: string,
+  ): Promise<void> {
+    const tempDestination = `${destination}.download-${this.idGenerator.next()}.tmp`;
+    const fileStream = createWriteStream(tempDestination);
+    try {
+      await pipeline(response, fileStream);
+      await fs.rename(tempDestination, destination);
+    } catch (error) {
+      await fs.rm(tempDestination, { force: true }).catch((rmError: unknown) => {
+        // Best-effort cleanup of the partial file; failing to remove it
+        // must not mask the original download error.
+        logger.debug(
+          `[FileDownloader] failed to remove partial download at ${tempDestination}: ${errorMessage(rmError)}`,
+        );
+      });
+      throw toActionableError(error, `Download failed for ${url}`);
+    }
   }
 
   private isCommandUnavailable(error: unknown, command: string): boolean {

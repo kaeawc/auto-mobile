@@ -188,6 +188,12 @@ export class DefaultRetryExecutor implements RetryExecutor {
       return await Promise.race([
         this.timer.sleep(delay).then(() => false),
         new Promise<boolean>((resolve) => {
+          // Recheck: timer.sleep() above runs first and may abort synchronously,
+          // after which the event has already fired and a listener would hang.
+          if (signal.aborted) {
+            resolve(true);
+            return;
+          }
           onAbort = () => resolve(true);
           signal.addEventListener("abort", onAbort, { once: true });
         }),

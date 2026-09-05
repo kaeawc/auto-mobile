@@ -250,6 +250,34 @@ describe("DefaultRetryExecutor", () => {
       expect(timer.getPendingSleepCount()).toBe(1);
     });
 
+    it("settles when the injected sleep aborts the signal synchronously", async () => {
+      // timer.sleep() is evaluated before the abort-promise executor runs, so a
+      // Timer that aborts synchronously must be caught by the recheck inside the
+      // executor; otherwise the listener registers after the event already fired
+      // and execute() never settles.
+      const controller = new AbortController();
+      class SyncAbortingTimer extends FakeTimer {
+        override sleep(ms: number): Promise<void> {
+          controller.abort();
+          return super.sleep(ms);
+        }
+      }
+      const abortingExecutor = new DefaultRetryExecutor(new SyncAbortingTimer());
+      let attempts = 0;
+
+      const result = await abortingExecutor.execute(
+        async () => {
+          attempts++;
+          throw new Error("Retry");
+        },
+        { signal: controller.signal, delays: 100, maxAttempts: 3 },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe("Operation aborted");
+      expect(attempts).toBe(1);
+    });
+
     it("respects shouldRetry predicate", async () => {
       timer.enableAutoAdvance();
 

@@ -160,19 +160,18 @@ The `deviceId` fields exist so the value that `listDevices` and the
 
 ## Network, plans & recording
 
-| Tool                                                           | What it does                                                                              |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 🌐 <code>network</code>                                        | Controls network capture and error simulation.                                            |
-| 🎭 <code>mockNetwork</code> / 🧹 <code>clearMockNetwork</code> | Adds or clears mock network response rules.                                               |
-| 🕸️ <code>getNetworkGraph</code>                                | Returns the aggregate captured network graph.                                             |
-| 🧪 <code>executePlan</code>                                    | Executes YAML plan steps and stops at the first failure.                                  |
-| 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                           |
-| 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                                |
-| 📝 <code>recordSteps</code>                                    | Records MCP calls to YAML; begin and end require <code>--mcp-recording</code>.            |
-| ⏺️ <code>startTestRecording</code>                             | Starts recording user interactions for <code>exportPlan</code>.                           |
-| 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
-| 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
-| 🐛 <code>bugReport</code>                                      | Saves screen state, hierarchy, logs, window info, and a screenshot to a shareable report. |
+| Tool                                                           | What it does                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 🌐 <code>network</code>                                        | Controls network capture and error simulation.                                 |
+| 🎭 <code>mockNetwork</code> / 🧹 <code>clearMockNetwork</code> | Adds or clears mock network response rules.                                    |
+| 🕸️ <code>getNetworkGraph</code>                                | Returns the aggregate captured network graph.                                  |
+| 🧪 <code>executePlan</code>                                    | Executes YAML plan steps and stops at the first failure.                       |
+| 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                |
+| 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                     |
+| 📝 <code>recordSteps</code>                                    | Records MCP calls to YAML; begin and end require <code>--mcp-recording</code>. |
+| ⏺️ <code>startTestRecording</code>                             | Starts recording user interactions for <code>exportPlan</code>.                |
+| 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                            |
+| 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                        |
 
 ## Accessibility & session tools
 

@@ -598,8 +598,6 @@ function artifactNonObservationPayload(
   switch (ctx.name) {
     case "executePlan":
       return artifactExecutePlanPayload(ctx, payload);
-    case "bugReport":
-      return artifactBugReportPayload(ctx, payload);
     case "getNetworkGraph":
       return artifactNetworkGraphPayload(ctx, payload);
     default:
@@ -701,58 +699,6 @@ function artifactPlanObservation(
   return changed ? next : undefined;
 }
 
-function artifactBugReportPayload(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  let changed = false;
-  const next: Record<string, unknown> = { ...payload };
-
-  if (isRecord(payload.viewHierarchy) && payload.viewHierarchy.rawXml !== undefined) {
-    next.viewHierarchy = {
-      ...payload.viewHierarchy,
-      rawXml: writeJsonArtifact(ctx, "BugReportViewHierarchyRawXml", payload.viewHierarchy.rawXml),
-    };
-    changed = true;
-  }
-
-  if (isRecord(payload.logcat)) {
-    next.logcatSummary = {
-      errorCount: arrayLength(payload.logcat.errors),
-      warningCount: arrayLength(payload.logcat.warnings),
-      appLogCount: arrayLength(payload.logcat.appLogs),
-    };
-    next.logcat = writeJsonArtifact(ctx, "BugReportLogcat", payload.logcat);
-    changed = true;
-  }
-
-  if (isRecord(payload.iosDeviceLog)) {
-    const iosDeviceLog = payload.iosDeviceLog;
-    next.iosDeviceLogSummary = {
-      status: iosDeviceLog.status,
-      entryCount: arrayLength(iosDeviceLog.entries),
-      byteSize: iosDeviceLog.byteSize,
-      truncated: iosDeviceLog.truncated,
-      filterStatus: isRecord(iosDeviceLog.appFilter) ? iosDeviceLog.appFilter.status : undefined,
-    };
-    next.iosDeviceLog = {
-      ...iosDeviceLog,
-      entries: writeJsonArtifact(ctx, "BugReportIosDeviceLog", iosDeviceLog.entries),
-    };
-    changed = true;
-  }
-
-  if (isRecord(payload.windowState) && Array.isArray(payload.windowState.windows)) {
-    next.windowState = {
-      ...payload.windowState,
-      windows: writeJsonArtifact(ctx, "BugReportWindowList", payload.windowState.windows),
-    };
-    changed = true;
-  }
-
-  return changed ? next : undefined;
-}
-
 function artifactNetworkGraphPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
@@ -772,10 +718,6 @@ function artifactNetworkGraphPayload(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function arrayLength(value: unknown): number {
-  return Array.isArray(value) ? value.length : 0;
 }
 
 /**

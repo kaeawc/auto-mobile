@@ -448,45 +448,6 @@
     }
   },
   {
-    "name": "bugReport",
-    "description": "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, a bounded device-log tail (Android logcat or iOS device log), window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "appId": {
-          "description": "App identifier to filter device logs for a specific app (Android logcat by PID, or iOS device log when supported)",
-          "type": "string"
-        },
-        "logcatLines": {
-          "description": "Number of recent device-log entries to include (Android logcat lines / iOS log entries, default: 1000)",
-          "type": "number"
-        },
-        "saveDir": {
-          "description": "Directory to save report to",
-          "type": "string"
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["platform"],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "changeLocalization",
     "description": "Change locale, time zone, text direction, time format, and calendar system",
     "inputSchema": {

@@ -17,7 +17,7 @@ import {
   getAppPermissionsSchema,
 } from "../../src/server/appTools";
 import { biometricAuthSchema } from "../../src/server/biometricTools";
-import { bugReportSchema, debugSearchSchema } from "../../src/server/debugTools";
+import { debugSearchSchema } from "../../src/server/debugTools";
 import { getDeepLinksSchema } from "../../src/server/deepLinkTools";
 import { highlightSchema } from "../../src/server/highlightTools";
 import {
@@ -389,7 +389,6 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["uninstallAppSchema", uninstallAppSchema, { appId: "com.example" }],
     ["getAppPermissionsSchema", getAppPermissionsSchema, { appId: "com.example" }],
     ["biometricAuthSchema", biometricAuthSchema, { action: "match" }],
-    ["bugReportSchema", bugReportSchema, { platform: "ios" }],
     ["debugSearchSchema", debugSearchSchema, { platform: "ios", text: "hello" }],
     ["getDeepLinksSchema", getDeepLinksSchema, { appId: "com.example" }],
     ["highlightSchema", highlightSchema, { platform: "ios", elementId: "btn1" }],

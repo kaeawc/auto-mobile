@@ -149,6 +149,58 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("1");
   });
 
+  it("accepts a device below a lettered maxOsVersion bound (Android 12L, #6132 follow-up)", () => {
+    // maxOsVersion "12L" resolves to exactly API 32 in AvdConfigReader's
+    // table. If only android-31 is installed, provisioning falls back to
+    // API 31, whose config.ini reports osVersion "12" (apiLevelToVersion(31)).
+    // The matcher must accept that reused AVD ("12" <= "12L") instead of
+    // treating one numeric and one lettered release as incomparable and
+    // re-provisioning on every identical createIfMissing call.
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "12" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12L" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("accepts an exact 12L device under a lettered maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "12L" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12L" },
+      devices,
+      "LATEST",
+    );
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("rejects a device above a lettered maxOsVersion bound", () => {
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "13" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12L" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("rejects a lettered device against a plain major maxOsVersion bound", () => {
+    // A plain "12" bound must NOT be widened to swallow "12L" -- 12L is a
+    // distinct, later release than any unlettered Android 12 point release.
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "12L" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", maxOsVersion: "12" },
+      devices,
+      "LATEST",
+    );
+    expect(result).toBeNull();
+  });
+
   it("filters by minOsVersion and maxOsVersion together", () => {
     const devices = [
       bootedDevice({ deviceId: "1", osVersion: "13" }),

@@ -68,7 +68,7 @@ export class WcagAudit {
     }
 
     // Check for touch target size violations
-    violations.push(...this.checkTouchTargetSizes(elements, config.level));
+    violations.push(...this.checkTouchTargetSizes(elements, config.level, density));
 
     // Check for unlabeled form inputs
     violations.push(...this.checkFormInputLabels(elements, viewHierarchy, density));
@@ -206,12 +206,23 @@ export class WcagAudit {
   /**
    * Check for touch targets that are too small
    */
-  private checkTouchTargetSizes(elements: Element[], wcagLevel: string): WcagViolation[] {
+  private checkTouchTargetSizes(
+    elements: Element[],
+    wcagLevel: string,
+    density?: number,
+  ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
-    // WCAG 2.1 Level AA: minimum 44x44 CSS pixels (approx 44 dp on Android)
-    // WCAG 2.1 Level AAA: no additional requirement beyond AA
-    const minSize = 44;
+    // WCAG 2.1 Level AA: minimum 44x44 dp on Android.
+    // WCAG 2.1 Level AAA: no additional requirement beyond AA.
+    const minSizeDp = 44;
+
+    // `bounds` are physical pixels (see Element.ts / ViewHierarchyNode), so the
+    // dp gate must be scaled by density the same way checkFormInputLabels
+    // scales its gap gate (labelGapThresholdPx) — otherwise a 33dp target on an
+    // xxhdpi device (~100px) is compared against a raw 44px and wrongly passes.
+    const dpi = density && density > 0 ? density : WcagAudit.FALLBACK_DENSITY_DPI;
+    const minSizePx = minSizeDp * (dpi / WcagAudit.BASELINE_DENSITY_DPI);
 
     for (const element of elements) {
       // Only check clickable elements
@@ -219,19 +230,28 @@ export class WcagAudit {
         continue;
       }
 
-      const width = element.bounds.right - element.bounds.left;
-      const height = element.bounds.bottom - element.bounds.top;
+      const widthPx = element.bounds.right - element.bounds.left;
+      const heightPx = element.bounds.bottom - element.bounds.top;
 
-      if (width < minSize || height < minSize) {
+      if (widthPx < minSizePx || heightPx < minSizePx) {
+        // Report the measured size in dp, not raw px, so the message is
+        // labeled correctly regardless of device density. Round DOWN rather
+        // than to nearest: a violation's exact dp size is always < minSizeDp
+        // (that's why it violated), and rounding to nearest can carry a
+        // fractional dp (e.g. 43.81dp) up to display as the minimum itself
+        // (44dp), which reads as passing next to "minimum: 44x44dp".
+        const widthDp = Math.floor((widthPx * WcagAudit.BASELINE_DENSITY_DPI) / dpi);
+        const heightDp = Math.floor((heightPx * WcagAudit.BASELINE_DENSITY_DPI) / dpi);
+
         violations.push({
           type: "touch-target-too-small",
           severity: wcagLevel === "AAA" ? "error" : "warning",
           criterion: "2.5.5", // Target Size (Level AAA in WCAG 2.1, AA in WCAG 2.2)
-          message: `Touch target is too small: ${width}x${height}dp (minimum: ${minSize}x${minSize}dp)`,
+          message: `Touch target is too small: ${widthDp}x${heightDp}dp (minimum: ${minSizeDp}x${minSizeDp}dp)`,
           element,
           details: {
-            actualSize: { width, height },
-            requiredSize: { width: minSize, height: minSize },
+            actualSize: { width: widthDp, height: heightDp },
+            requiredSize: { width: minSizeDp, height: minSizeDp },
             explanation: "Touch targets should be at least 44x44 dp to be easily tappable",
           },
           fingerprint: this.generateFingerprint(element, "touch-target-too-small"),

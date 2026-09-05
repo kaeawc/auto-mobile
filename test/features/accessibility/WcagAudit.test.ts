@@ -177,7 +177,8 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      // mdpi (160 DPI): 1dp == 1px, so bounds-as-dp assumptions below hold exactly.
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(1);
@@ -199,7 +200,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
@@ -221,7 +222,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
@@ -507,7 +508,8 @@ describe("WcagAudit", function () {
           useBaseline: false,
         };
 
-        const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+        // mdpi (160 DPI): 1dp == 1px, so bounds-as-dp labels above hold exactly.
+        const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
         const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
         if (expectViolation) {
@@ -519,6 +521,105 @@ describe("WcagAudit", function () {
         }
       },
     );
+  });
+
+  describe("Touch Target Size (density scaling)", function () {
+    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const config: AccessibilityAuditConfig = {
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    };
+
+    // 44dp minimum, scaled by density/160. At xxhdpi (480 DPI) that is 132px.
+    it("flags a 100x100px target on an xxhdpi (480 DPI) device (33dp, below the 44dp gate)", async function () {
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          clickable: true,
+          text: "Small",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 480);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(1);
+      // 100px at 480 DPI is 33dp (100 * 160 / 480), not 100dp.
+      expect(sizeViolations[0].message).toContain("33x33dp");
+      expect(sizeViolations[0].message).not.toContain("100x100dp");
+    });
+
+    it("passes a 140x140px target on an xxhdpi (480 DPI) device (>= the 132px/44dp gate)", async function () {
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 140, bottom: 140 },
+          clickable: true,
+          text: "Big enough",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 480);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(0);
+    });
+
+    it("treats mdpi (160 DPI) as 1dp == 1px", async function () {
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+          clickable: true,
+          text: "Small",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(1);
+      expect(sizeViolations[0].message).toContain("40x40dp");
+    });
+
+    it("falls back to a sensible default density when none is reported, consistent with checkFormInputLabels", async function () {
+      // No density passed at all — exercises the same fallback path as
+      // labelGapThresholdPx's FALLBACK_DENSITY_DPI (320 == xhdpi/2x), so a
+      // 44dp target on that assumed density is ~88px.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 88, bottom: 88 }, // exactly 44dp at 320 DPI
+          clickable: true,
+          text: "Perfect",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(0);
+    });
+
+    it("never rounds a failing dimension's reported dp up to the minimum", async function () {
+      // 115px at 420 DPI is 43.81dp — under the 44dp gate (115.5px), so this
+      // must violate. Rounding to nearest would display "44x44dp", which
+      // reads as meeting "minimum: 44x44dp" right next to it.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 115, bottom: 115 },
+          clickable: true,
+          text: "Borderline",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 420);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(1);
+      expect(sizeViolations[0].message).toBe(
+        "Touch target is too small: 43x43dp (minimum: 44x44dp)",
+      );
+      expect(sizeViolations[0].details.actualSize).toEqual({ width: 43, height: 43 });
+    });
   });
 
   describe("Heading Hierarchy", function () {

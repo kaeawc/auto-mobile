@@ -75,4 +75,57 @@ describe("parseArgs (#4277)", () => {
     expect(parsed.enabledTools).toEqual(["observe"]);
     expect(parsed.disabledTools).toEqual(["clipboard"]);
   });
+
+  // #6168: --port / --host / --initial-session-uuid must not swallow the
+  // following flag when given no value (proxy-mode sibling of #6136).
+  describe("value-taking options do not consume a following flag when given no value", () => {
+    test.each([
+      {
+        name: "--host with no value preserves the following --port",
+        args: ["--host", "--port", "9999"],
+        expected: { daemonHost: undefined, daemonPort: 9999 },
+      },
+      {
+        name: "--port with no value preserves the following --host",
+        args: ["--port", "--host", "0.0.0.0"],
+        expected: { daemonPort: undefined, daemonHost: "0.0.0.0" },
+      },
+      {
+        name: "--initial-session-uuid with no value preserves the following --debug",
+        args: ["--initial-session-uuid", "--debug"],
+        expected: { initialSessionUuid: undefined, debug: true },
+      },
+    ])("$name", ({ args, expected }) => {
+      const parsed = parseArgs(args, logger);
+
+      for (const [key, value] of Object.entries(expected)) {
+        expect(parsed[key as keyof typeof parsed]).toBe(value);
+      }
+    });
+
+    test.each([
+      {
+        name: "--host with a valid value",
+        args: ["--host", "0.0.0.0"],
+        key: "daemonHost",
+        value: "0.0.0.0",
+      },
+      {
+        name: "--port with a valid value",
+        args: ["--port", "9999"],
+        key: "daemonPort",
+        value: 9999,
+      },
+      {
+        name: "--initial-session-uuid with a valid value",
+        args: ["--initial-session-uuid", "device-session-a"],
+        key: "initialSessionUuid",
+        value: "device-session-a",
+      },
+    ])("$name still parses correctly", ({ args, key, value }) => {
+      const parsed = parseArgs(args, logger);
+
+      expect(parsed[key as keyof typeof parsed]).toBe(value);
+    });
+  });
 });

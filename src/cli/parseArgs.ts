@@ -268,29 +268,30 @@ export function parseArgs(
       break;
     }
     if (arg === "--port") {
-      const port = parseInt(args[i + 1], 10);
+      const nextArg = args[i + 1];
+      const port = parseInt(nextArg, 10);
       if (!isNaN(port) && port > 0 && port < 65536) {
         daemonPort = port;
+        i++;
       } else {
-        log.warn(`Invalid port: ${args[i + 1]}`);
+        log.warn(`Invalid port: ${nextArg}`);
       }
-      i++;
     } else if (arg === "--host") {
       const host = args[i + 1];
       if (host && !host.startsWith("--")) {
         daemonHost = host;
+        i++;
       } else {
         log.warn(`Invalid host: ${host}`);
       }
-      i++;
     } else if (arg === "--initial-session-uuid") {
       const sessionUuid = args[i + 1];
       if (sessionUuid && !sessionUuid.startsWith("--")) {
         initialSessionUuid = sessionUuid;
+        i++;
       } else {
         log.warn(`Invalid initial session UUID: ${sessionUuid}`);
       }
-      i++;
     } else if (arg === "--a11y-level") {
       a11yLevel = args[++i];
     } else if (arg === "--a11y-failure-mode") {

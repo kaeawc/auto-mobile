@@ -2,6 +2,10 @@ import type { Element, ViewHierarchyResult } from "../../models";
 import { isTruthy, isFalsy } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
+import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
+import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import { boundsEqual } from "../../utils/bounds";
 
 /**
  * Extract elements likely to be navigation controls
@@ -155,6 +159,75 @@ export function extractAllElements(
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);
   return flatElements.map(({ element }) => element);
+}
+
+/** A single tapOn selector; `index` pins one occurrence when the selector is not unique. */
+export type TapSelector = { elementId: string; index?: number } | { text: string; index?: number };
+
+type SelectOccurrence = (index?: number) => ElementSelectionResult;
+
+/**
+ * Single tapOn selector for an element on the given screen.
+ *
+ * tapOn rejects any call carrying more than one selector (issue #6121), and its
+ * first-match default would collapse repeated controls that share a resource-id
+ * (list rows) onto the first row. Uniqueness and occurrence are measured through
+ * the same {@link ElementSelector} tapOn uses, with tapOn's own options, so they
+ * see exactly its matches: a bare Compose id matching a qualified one, and
+ * off-screen matches dropped before `index` applies. Prefer a unique resource-id,
+ * then unique text / content-desc / iOS label (all matched by the text selector),
+ * and otherwise pin the occurrence with tapOn's on-screen `index`.
+ * Returns null when the element has no selector at all.
+ */
+export function tapSelectorFor(
+  element: Element,
+  viewHierarchy: ViewHierarchyResult,
+  selector: ElementSelector = new DefaultElementSelector(),
+): TapSelector | null {
+  const id = element["resource-id"];
+  const text = element.text || element["content-desc"] || element["ios-accessibility-label"];
+  const candidates: Array<{ selector: TapSelector; select: SelectOccurrence }> = [];
+  if (id) {
+    candidates.push({
+      selector: { elementId: id },
+      select: (index) =>
+        selector.selectByResourceId(viewHierarchy, id, { partialMatch: false, index }),
+    });
+  }
+  if (text) {
+    candidates.push({
+      selector: { text },
+      select: (index) =>
+        selector.selectByText(viewHierarchy, text, {
+          partialMatch: true,
+          caseSensitive: false,
+          index,
+        }),
+    });
+  }
+  const unique = candidates.find((candidate) => candidate.select().totalMatches <= 1);
+  if (unique) {
+    return unique.selector;
+  }
+  const [preferred] = candidates;
+  return preferred
+    ? { ...preferred.selector, ...occurrenceIndex(preferred.select, element) }
+    : null;
+}
+
+/** Position of `element` among the selector's on-screen matches, located by bounds. */
+function occurrenceIndex(select: SelectOccurrence, element: Element): { index?: number } {
+  const total = select().totalMatches;
+  for (let index = 0; index < total; index++) {
+    const match = select(index).element;
+    if (!match) {
+      break;
+    }
+    if (boundsEqual(match.bounds, element.bounds)) {
+      return { index };
+    }
+  }
+  return {};
 }
 
 /**

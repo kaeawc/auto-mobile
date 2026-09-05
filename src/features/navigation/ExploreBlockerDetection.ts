@@ -1,10 +1,10 @@
-import type { BootedDevice, Element, ObserveResult } from "../../models";
+import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ProgressCallback } from "../action/BaseVisualChange";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { TapOnElement } from "../action/TapOnElement";
 import { logger } from "../../utils/logger";
-import { extractAllElements } from "./ExploreElementExtraction";
+import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
 import { defaultTimer } from "../../utils/SystemTimer";
 
 /**
@@ -93,6 +93,7 @@ export function isRatingDialog(elements: Element[]): boolean {
  */
 export async function handlePermissionDialog(
   elements: Element[],
+  viewHierarchy: ViewHierarchyResult,
   device: BootedDevice,
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
@@ -109,16 +110,13 @@ export async function handlePermissionDialog(
       (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
     if (allowKeywords.some((keyword) => text.includes(keyword))) {
+      const selector = tapSelectorFor(element, viewHierarchy);
+      if (!selector) {
+        continue;
+      }
       try {
         const tapOn = new TapOnElement(device, adb);
-        await tapOn.execute(
-          {
-            text: element.text,
-            elementId: element["resource-id"],
-            action: "tap",
-          },
-          progress,
-        );
+        await tapOn.execute({ ...selector, action: "tap" }, progress);
         await defaultTimer.sleep(1000);
         return true;
       } catch (error) {
@@ -135,6 +133,7 @@ export async function handlePermissionDialog(
  */
 async function dismissDialog(
   elements: Element[],
+  viewHierarchy: ViewHierarchyResult,
   device: BootedDevice,
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
@@ -150,16 +149,13 @@ async function dismissDialog(
       (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
     if (dismissKeywords.some((keyword) => text.includes(keyword))) {
+      const selector = tapSelectorFor(element, viewHierarchy);
+      if (!selector) {
+        continue;
+      }
       try {
         const tapOn = new TapOnElement(device, adb);
-        await tapOn.execute(
-          {
-            text: element.text,
-            elementId: element["resource-id"],
-            action: "tap",
-          },
-          progress,
-        );
+        await tapOn.execute({ ...selector, action: "tap" }, progress);
         await defaultTimer.sleep(1000);
         return true;
       } catch (error) {
@@ -198,7 +194,7 @@ export async function detectAndHandleBlockers(
   // Check for permission dialogs
   if (isPermissionDialog(elements)) {
     logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    return await handlePermissionDialog(elements, device, adb, progress);
+    return await handlePermissionDialog(elements, viewHierarchy, device, adb, progress);
   }
 
   // Check for login/signup screens
@@ -211,7 +207,7 @@ export async function detectAndHandleBlockers(
   // Check for app rating/review dialogs
   if (isRatingDialog(elements)) {
     logger.info("[Explore] Detected rating dialog, attempting to dismiss");
-    return await dismissDialog(elements, device, adb, progress);
+    return await dismissDialog(elements, viewHierarchy, device, adb, progress);
   }
 
   return false;

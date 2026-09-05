@@ -29,6 +29,8 @@ import {
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { LaunchApp } from "../../../src/features/action/LaunchApp";
 
 describe("Explore", () => {
   let explore: Explore;
@@ -344,6 +346,310 @@ describe("Explore", () => {
     });
   });
 
+  describe("performInteraction tap selector", () => {
+    // TapOnElement.validateOptions rejects any call carrying more than one
+    // selector, so an element with both text and resource-id must reach tapOn
+    // with exactly one of them (issue #6121).
+    function captureTapOptions(): { calls: unknown[]; restore: () => void } {
+      const calls: unknown[] = [];
+      const spy = spyOn(TapOnElement.prototype, "execute").mockImplementation(
+        async (options: unknown) => {
+          calls.push(options);
+          return { success: true, action: "tap" } as never;
+        },
+      );
+      return { calls, restore: () => spy.mockRestore() };
+    }
+
+    test("taps an element with both text and resource-id once, by id only", async () => {
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        const success = await (explore as any).performInteraction(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+        expect(success).toBe(true);
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([{ elementId: "com.test:id/settings_btn", action: "tap" }]);
+    });
+
+    test("falls back to text, then content-desc, when no resource-id is present", async () => {
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({ text: "Settings", "resource-id": undefined }),
+          createMockObservation(),
+        );
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: undefined,
+            "resource-id": undefined,
+            "content-desc": "Open settings",
+          }),
+          createMockObservation(),
+        );
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([
+        { text: "Settings", action: "tap" },
+        { text: "Open settings", action: "tap" },
+      ]);
+    });
+
+    test("disambiguates a resource-id shared by list rows by unique text, else by hierarchy index", async () => {
+      // tapOn's default picks the first on-screen match, so a shared row id
+      // must not be used alone: unique text wins, and identical rows pin their
+      // 0-based occurrence with `index`.
+      const rowId = "com.test:id/row_title";
+      const row = (text: string, top: number) => ({
+        $: {
+          class: "android.widget.TextView",
+          text,
+          "resource-id": rowId,
+          clickable: "true",
+          enabled: "true",
+        },
+        bounds: { left: 0, top, right: 100, bottom: top + 50 },
+      });
+      const observation = createMockObservation([
+        row("Alpha", 0),
+        row("Beta", 50),
+        row("Beta", 100),
+      ]);
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: "Alpha",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          }),
+          observation,
+        );
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: "Beta",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+          }),
+          observation,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([
+        { text: "Alpha", action: "tap" },
+        { elementId: rowId, index: 2, action: "tap" },
+      ]);
+    });
+
+    test("counts the occurrence index over tapOn's on-screen matches, skipping off-screen rows", async () => {
+      // tapOn drops matches whose center is off screen before applying `index`,
+      // so a scrolled-away duplicate row above the target must not shift it.
+      const rowId = "com.test:id/row_title";
+      const row = (text: string, top: number) => ({
+        $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
+        bounds: { left: 0, top, right: 100, bottom: top + 50 },
+      });
+      const observation = {
+        viewHierarchy: {
+          hierarchy: {
+            node: [row("Beta", -100), row("Alpha", 0), row("Beta", 50), row("Beta", 100)],
+          },
+          packageName: "com.test.app",
+          screenWidth: 100,
+          screenHeight: 200,
+        },
+      } as unknown as ObserveResult;
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({
+            text: "Beta",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+          }),
+          observation,
+        );
+      } finally {
+        restore();
+      }
+
+      // Visible matches in hierarchy order: Alpha, Beta@50, Beta@100 -> index 2
+      // (a raw count over the hierarchy would say 3 and miss the row).
+      expect(calls).toEqual([{ elementId: rowId, index: 2, action: "tap" }]);
+    });
+
+    test("treats a qualified id as shared with a bare Compose id, as tapOn's finder does", async () => {
+      // The finder matches "pkg:id/row" against a bare "row" node, so the
+      // qualified id is not unique on this screen and unique text must win.
+      const observation = createMockObservation([
+        createMockViewHierarchyNode({ text: "Alpha", "resource-id": "com.test:id/row" }),
+        createMockViewHierarchyNode({ text: "Beta", "resource-id": "row" }),
+      ]);
+      const { calls, restore } = captureTapOptions();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).performInteraction(
+          createMockElement({ text: "Alpha", "resource-id": "com.test:id/row" }),
+          observation,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(calls).toEqual([{ text: "Alpha", action: "tap" }]);
+    });
+  });
+
+  describe("periodic reset to home", () => {
+    // resetToHome is gated on interactionCount, which only advances on a
+    // successful interaction, so the gate must not re-fire while the count sits
+    // on a multiple of resetInterval — including 0 (issue #6126).
+    test("resets once per resetInterval successful interactions and never at count 0", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = {
+        execute: async () => createMockObservation(),
+      };
+      const outcomes = [false, true, true, false, true];
+      const log: string[] = [];
+      (explore as any).performInteraction = async () => {
+        const success = outcomes.shift() ?? true;
+        log.push(success ? "interaction:ok" : "interaction:fail");
+        return success;
+      };
+      (explore as any).resetToHome = async () => {
+        log.push("reset");
+      };
+
+      const result = await explore.execute({
+        maxInteractions: 3,
+        timeoutMs: 5000,
+        packageName: "com.test.app",
+        resetToHome: true,
+        resetInterval: 2,
+      });
+
+      expect(result.interactionsPerformed).toBe(3);
+      expect(log).toEqual([
+        "interaction:fail",
+        "interaction:ok",
+        "interaction:ok",
+        "reset",
+        "interaction:fail",
+        "interaction:ok",
+      ]);
+    });
+
+    test("relaunches the target app after pressing home on Android", async () => {
+      const commands: string[] = [];
+      const adb = {
+        execute: async (args: string[]) => {
+          commands.push(args.join(" "));
+          return "";
+        },
+      } as AdbClient;
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
+      } as never);
+      const signal = new AbortController().signal;
+      // Capture the launch flags too: clearAppData/coldBoot must stay off, and
+      // the exploration signal must reach the launch so cancellation is honored.
+      const launchSpy = spyOn(LaunchApp.prototype, "execute").mockImplementation(
+        async (...args: unknown[]) => {
+          commands.push(`launch ${JSON.stringify(args.slice(0, 3))} signal=${args[6] === signal}`);
+          return { success: true, packageName: args[0] } as never;
+        },
+      );
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+      (explore as any).targetPackageName = "com.test.app";
+
+      try {
+        await (explore as any).resetToHome(undefined, signal);
+      } finally {
+        launchSpy.mockRestore();
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect(commands).toEqual([
+        "shell input keyevent 3",
+        'launch ["com.test.app",false,false] signal=true',
+      ]);
+      expect((explore as any).stopReason).toBe("");
+    });
+
+    test("records a failed relaunch as a terminal partial-report reason", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
+      } as never);
+      const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
+        success: false,
+        packageName: "com.test.app",
+        error: "App is not installed",
+      } as never);
+      const adb = { execute: async () => "" } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+      (explore as any).targetPackageName = "com.test.app";
+
+      try {
+        await (explore as any).resetToHome();
+      } finally {
+        launchSpy.mockRestore();
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect((explore as any).stopReason).toBe("Home-screen recovery failed: App is not installed");
+    });
+
+    test("relaunches the target app through the internal launchApp tool on iOS", async () => {
+      const iOSDevice = {
+        deviceId: "ios-simulator-123",
+        platform: "ios",
+        source: "local",
+      } as BootedDevice;
+      const calls: Array<{ name: string; args: Record<string, unknown>; signal?: AbortSignal }> =
+        [];
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async (args) => {
+        calls.push({ name: "homeScreen", args });
+        return { success: true };
+      });
+      ToolRegistry.register("launchApp", "launchApp", {}, async (args, _progress, signal) => {
+        calls.push({ name: "launchApp", args, signal });
+        return { success: true };
+      });
+      const signal = new AbortController().signal;
+      explore = new Explore(iOSDevice, null, fakeTimer, fakeGraph, "session-1");
+      (explore as any).targetPackageName = "com.test.app";
+
+      await (explore as any).resetToHome(undefined, signal);
+
+      expect(calls.map((call) => call.name)).toEqual(["homeScreen", "launchApp"]);
+      expect(calls[1].args).toEqual({
+        appId: "com.test.app",
+        platform: "ios",
+        deviceId: "ios-simulator-123",
+        sessionUuid: "session-1",
+        [INTERNAL_NO_DIFF_PARAM]: true,
+      });
+      expect(calls[1].signal).toBe(signal);
+    });
+  });
+
   // Exploration strategies and modes are tested through unit tests
   // Full device integration tests are in JUnitRunner and XCTestRunner
 
@@ -367,6 +673,9 @@ describe("Explore", () => {
       (explore as any).handleDeadEnd = async () => {
         backPresses.push("back");
       };
+      // The first observation is in-app, so the loop reaches performInteraction;
+      // stub it so the test stays on the enforcement path and off the tap pipeline.
+      (explore as any).performInteraction = async () => true;
 
       let observeCount = 0;
       (explore as any).observeScreen = {

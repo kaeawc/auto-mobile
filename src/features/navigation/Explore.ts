@@ -877,9 +877,11 @@ export class Explore extends BaseVisualChange {
   /**
    * Bring the target app back to the foreground after a home reset.
    *
-   * This is a warm launch on purpose: it recovers the foreground (issue #6126)
-   * and resumes the app's existing task rather than clearing state or cold
-   * booting, so the reset never destroys what exploration has reached.
+   * This is a plain warm launchApp on purpose (no clearAppData, no coldBoot):
+   * it recovers the foreground (issue #6126) with the platform's cheapest
+   * launch. What "warm" means is launchApp's contract per platform — Android
+   * and the iOS simulator foreground the existing process, while a physical
+   * iOS device relaunches it because devicectl has no foreground verb.
    */
   private async relaunchTargetApp(packageName: string, signal?: AbortSignal): Promise<void> {
     if (this.device.platform === "android") {

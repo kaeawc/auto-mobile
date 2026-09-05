@@ -377,4 +377,98 @@ class SecretRedactorTest {
       assertTrue(result.contains("token "), "non-secret context is preserved")
     }
   }
+
+  @Test
+  fun `a shorter secret's replacement cannot synthesize a longer secret containing the marker`() {
+    // Reverse marker collision (#6146): declared `abc` and `X***REDACTED***Y`, text `XabcY`.
+    // Longest-first finds the longer secret nowhere, replaces `abc` with the marker, and the result
+    // IS the longer secret — fully present after its only removal opportunity passed.
+    val longer = "X${SecretRedactor.PLACEHOLDER}Y"
+    val values = SecretRedactor.secretValues(listOf("abc", longer))
+    val result = SecretRedactor.redact("XabcY", values)
+    assertFalse(result.contains(longer), "the marker-containing secret must not be synthesized")
+    assertFalse(result.contains("abc"), "the shorter secret must be redacted")
+    assertEquals(SecretRedactor.PLACEHOLDER, result)
+  }
+
+  @Test
+  fun `a marker-substring secret is not reintroduced by another secret's replacement`() {
+    // `REDACTED` is itself a declared secret, so substituting `***REDACTED***` for `abc` would put
+    // that declared value in the output verbatim (#6146).
+    val values = SecretRedactor.secretValues(listOf("REDACTED", "abc"))
+    val result = SecretRedactor.redact("token abc here", values)
+    assertFalse(result.contains("REDACTED"), "the marker-substring secret must not survive")
+    assertFalse(result.contains("abc"), "the ordinary secret must be redacted")
+    assertTrue(result.startsWith("token ") && result.endsWith(" here"), "context is preserved")
+  }
+
+  @Test
+  fun `a secret equal to the marker is not reintroduced by another secret's replacement`() {
+    val values = SecretRedactor.secretValues(listOf(SecretRedactor.PLACEHOLDER, "abc"))
+    val result = SecretRedactor.redact("token abc here", values)
+    assertFalse(result.contains(SecretRedactor.PLACEHOLDER), "the marker secret must not survive")
+    assertFalse(result.contains("abc"), "the ordinary secret must be redacted")
+  }
+
+  @Test
+  fun `ordinary text is unchanged and an ordinary secret keeps its context`() {
+    val values = SecretRedactor.secretValues(listOf("s3cr3t"))
+    assertEquals("nothing to see", SecretRedactor.redact("nothing to see", values))
+    assertEquals(
+      "token ${SecretRedactor.PLACEHOLDER} here",
+      SecretRedactor.redact("token s3cr3t here", values),
+    )
+  }
+
+  @Test
+  fun `a replacement chain that does not converge over-redacts the whole text`() {
+    // Each pass of `X***REDACTED***` -> marker consumes one leading `X`, so a run of `X`s longer
+    // than the pass budget cannot converge in time. The fail-safe is the marker alone —
+    // over-redact, never leak (#6146). The surrounding `pre`/`post` context distinguishes the
+    // fail-safe (whole text -> marker) from a converged result (`pre ***REDACTED*** post`).
+    val chained = "X${SecretRedactor.PLACEHOLDER}"
+    val values = SecretRedactor.secretValues(listOf("abc", chained))
+    val result = SecretRedactor.redact("pre XXXXXXXXabc post", values)
+    assertEquals(SecretRedactor.PLACEHOLDER, result)
+  }
+
+  @Test
+  fun `a chain that converges on the final permitted pass keeps its context`() {
+    // Secret `*X` alone allows two passes: `prefix *XX suffix` -> `prefix ***REDACTED***X suffix`
+    // (still contains `*X`) -> `prefix ***REDACTED*****REDACTED*** suffix`, which is clean. That
+    // final result must be kept, not discarded for the whole-text fallback (#6146 Codex review).
+    val values = SecretRedactor.secretValues(listOf("*X"))
+    val result = SecretRedactor.redact("prefix *XX suffix", values)
+    assertFalse(result.contains("*X"), "the secret must not survive")
+    assertTrue(result.startsWith("prefix ") && result.endsWith(" suffix"), "context is preserved")
+  }
+
+  @Test
+  fun `no declared value survives redaction for a table of adversarial inputs`() {
+    val marker = SecretRedactor.PLACEHOLDER
+    val cases =
+      listOf(
+        listOf("abc", "X${marker}Y") to "XabcY",
+        listOf("REDACTED", "abc") to "abc",
+        listOf(marker, "abc") to "token abc",
+        listOf("ab", "abcdef") to "x abcdef y",
+        listOf("***", "a") to "a*a*a",
+        listOf("X$marker", "abc") to "XXXabc XabcX",
+        listOf("$marker$marker", "q") to "qq q",
+        listOf("*", "R") to "R*R",
+        listOf("é", "café") to "café café",
+        listOf("pa\"ss", "\\\"") to "{\"v\":\"pa\\\"ss\"}",
+        listOf("s3cr3t") to "nothing to see",
+      )
+    for ((secrets, text) in cases) {
+      val values = SecretRedactor.secretValues(secrets)
+      val result = SecretRedactor.redact(text, values)
+      for (value in values) {
+        assertFalse(
+          result.contains(value),
+          "declared value \"$value\" survived as \"$result\" for input \"$text\"",
+        )
+      }
+    }
+  }
 }

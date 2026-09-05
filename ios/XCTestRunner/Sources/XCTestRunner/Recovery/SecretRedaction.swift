@@ -72,25 +72,55 @@ enum SecretRedaction {
         return result
     }
 
-    /// Replace every occurrence of each secret value in `text` with the redaction placeholder. Values
-    /// are replaced longest-first — by UTF-16 code-unit length, so a decomposed form (more code units
-    /// than its composed twin) and any shorter secret that is a substring of a longer one are masked
-    /// whole, with no combining-mark or substring residue. Matching is `.literal` (exact code units)
-    /// because `secretValues` already supplies the NFC/NFD variants. Matches Android's `length`-desc
-    /// ordering (Kotlin `String.length` is a UTF-16 count).
+    /// Replace every occurrence of each secret value in `text` with the redaction placeholder,
+    /// guaranteeing that NO declared value survives in the result. Values are replaced longest-first
+    /// — by UTF-16 code-unit length, so a decomposed form (more code units than its composed twin)
+    /// and any shorter secret that is a substring of a longer one are masked whole, with no
+    /// combining-mark or substring residue. Matching is `.literal` (exact code units) because
+    /// `secretValues` already supplies the NFC/NFD variants. Matches Android's `length`-desc ordering
+    /// (Kotlin `String.length` is a UTF-16 count).
+    ///
+    /// A single pass is not enough: substituting the marker can SYNTHESIZE another declared value
+    /// out of the marker plus its surrounding context (declared `abc` and `X***REDACTED***Y`, text
+    /// `XabcY` — #6146), or reintroduce a declared value that is a substring of the marker (declared
+    /// `REDACTED` and `abc`). So the pass repeats until one finds nothing (the proof that no declared
+    /// value is present), bounded by the number of values plus one. If the bound is exhausted and the
+    /// last pass's output still contains a declared value, the whole text is over-redacted to the
+    /// marker alone — or to the empty string when the marker itself contains a declared value.
+    /// Over-redact, never leak.
     static func redact(_ text: String, secretValues: [String]) -> String {
-        guard !secretValues.isEmpty else {
+        let ordered = secretValues.filter { !$0.isEmpty }.sorted(by: { $0.utf16.count > $1.utf16.count })
+        guard !ordered.isEmpty else {
             return text
         }
         var redacted = text
-        for value in secretValues.sorted(by: { $0.utf16.count > $1.utf16.count }) where !value.isEmpty {
-            // If the secret is itself a substring of the placeholder (e.g. a secret value of
-            // "REDACTED" or "***REDACTED***"), substituting the placeholder would reintroduce the
-            // secret — so remove it instead, guaranteeing it cannot survive in the result (#6094).
-            let replacement = placeholder.contains(value) ? "" : placeholder
-            redacted = redacted.replacingOccurrences(of: value, with: replacement, options: [.literal])
+        for _ in 0 ... ordered.count {
+            guard let next = replaceEach(redacted, ordered: ordered) else {
+                return redacted
+            }
+            redacted = next
         }
-        return redacted
+        // The final permitted pass may itself have produced a secret-free result; keep that rather
+        // than discarding the whole context.
+        if !ordered.contains(where: { redacted.range(of: $0, options: [.literal]) != nil }) {
+            return redacted
+        }
+        return ordered.contains(where: { placeholder.contains($0) }) ? "" : placeholder
+    }
+
+    /// One longest-first replacement pass over `text`, or `nil` when no value of `ordered` occurs in
+    /// it (the fixpoint). A value that is itself a substring of the placeholder (e.g. `REDACTED` or
+    /// `***REDACTED***`) is removed rather than substituted, since substituting the placeholder would
+    /// reintroduce it (#6094).
+    private static func replaceEach(_ text: String, ordered: [String]) -> String? {
+        var result = text
+        var changed = false
+        for value in ordered where result.range(of: value, options: [.literal]) != nil {
+            let replacement = placeholder.contains(value) ? "" : placeholder
+            result = result.replacingOccurrences(of: value, with: replacement, options: [.literal])
+            changed = true
+        }
+        return changed ? result : nil
     }
 
     /// Redact the sampled UI strings and observe-error that feed the recovery prompt. A secret can

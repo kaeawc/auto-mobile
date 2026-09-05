@@ -2,6 +2,8 @@ import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
+import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
 
 const makeDevice = (deviceId: string): BootedDevice => ({
@@ -119,5 +121,95 @@ describe("barrier tool", () => {
 
     expect(await aTimedOut).toBe("timed-out");
     expect(await bTimedOut).toBe("timed-out");
+  });
+
+  test("schema preserves the device label and sessionUuid (not stripped by parse)", () => {
+    // Issue #6117: PlanExecutor requires every multi-device step to carry
+    // `params.device`, then runs `tool.schema.parse` before dispatch. A schema
+    // without the device-targeting fields strips the label, so every track's
+    // barrier routes to the base session's device.
+    const tool = ToolRegistry.getToolForPlan("barrier");
+    const parsed = tool!.schema.parse({
+      device: "B",
+      lock: "sync",
+      deviceCount: 2,
+      sessionUuid: "base-uuid",
+      platform: "android",
+      __lockNamespace: "base-uuid",
+    });
+    expect(parsed).toMatchObject({
+      device: "B",
+      lock: "sync",
+      deviceCount: 2,
+      sessionUuid: "base-uuid",
+      platform: "android",
+      __lockNamespace: "base-uuid",
+    });
+  });
+
+  test("two-track plan with one barrier per track passes (each track routes to its own device)", async () => {
+    // Issue #6117 end-to-end: push the barrier through the real executeStep
+    // (buildEnhancedStepParams -> schema.parse -> callInternal -> handler
+    // routing). The fake resolver maps the surviving `device` label to a
+    // distinct device; if the label were stripped, both tracks would resolve
+    // to the base device and `awaitBarrier` would reject the duplicate arrival.
+    const devicesByLabel: Record<string, BootedDevice> = {
+      A: makeDevice("device-a"),
+      B: makeDevice("device-b"),
+    };
+    const resolvedDeviceIds: string[] = [];
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async (input) => {
+          const label = typeof input.args.device === "string" ? input.args.device : "A";
+          const device = devicesByLabel[label];
+          resolvedDeviceIds.push(device.deviceId);
+          return {
+            args: input.args,
+            baseSessionUuid: "base-uuid",
+            device,
+            internalCall: true,
+            sessionUuid: label === "A" ? "base-uuid" : `base-uuid:${label}`,
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      auditRunner: {
+        run: async (input) => input.handler(input.device, input.args, input.progress, input.signal),
+      },
+      afterToolCall: {
+        handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
+      },
+      planLifecycleManager: {
+        afterExecution: async () => {},
+      },
+    });
+
+    try {
+      const plan: Plan = {
+        name: "two-track barrier",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync", deviceCount: 2, timeout: 200 } },
+          { tool: "barrier", params: { device: "B", lock: "sync", deviceCount: 2, timeout: 200 } },
+        ],
+      };
+
+      const result = await new DefaultPlanExecutor().executePlan(
+        plan,
+        0,
+        "android",
+        "device-a",
+        "base-uuid",
+      );
+
+      expect(result.failedStep?.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.perDeviceResults?.get("A")?.success).toBe(true);
+      expect(result.perDeviceResults?.get("B")?.success).toBe(true);
+      expect(new Set(resolvedDeviceIds)).toEqual(new Set(["device-a", "device-b"]));
+    } finally {
+      restore();
+    }
   });
 });

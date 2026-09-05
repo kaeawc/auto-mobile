@@ -5,28 +5,39 @@ import { ActionableError, BootedDevice } from "../models/index";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
+import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 
 // Barrier tool schema. A barrier is a pure synchronization point: every
 // participating device arrives, and once all `deviceCount` devices have
 // arrived they all proceed concurrently. Unlike criticalSection there is no
 // serialized section and no steps — each device's own track continues in
 // parallel after the barrier lifts.
-const barrierSchema = z.object({
-  lock: z
-    .string()
-    .describe("Shared barrier name; all devices using the same name synchronize together"),
-  deviceCount: z
-    .number()
-    .int()
-    .positive()
-    .describe("Number of devices that must arrive before the barrier lifts"),
-  timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
-  // Internal: the plan's base session UUID, injected by PlanExecutor
-  // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-  // plans that reuse the same lock name get isolated barriers instead of
-  // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-  __lockNamespace: z.string().optional().describe("Internal plan-scoped lock namespace (injected)"),
-});
+//
+// Wrapped in addDeviceTargetingToSchema (like criticalSectionSchema) so the
+// `device` label / `sessionUuid` / `platform` PlanExecutor injects survive
+// `schema.parse`. Without them every track's barrier would route to the base
+// session's device and fail as a duplicate arrival (#6117).
+const barrierSchema = addDeviceTargetingToSchema(
+  z.object({
+    lock: z
+      .string()
+      .describe("Shared barrier name; all devices using the same name synchronize together"),
+    deviceCount: z
+      .number()
+      .int()
+      .positive()
+      .describe("Number of devices that must arrive before the barrier lifts"),
+    timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
+    // Internal: the plan's base session UUID, injected by PlanExecutor
+    // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
+    // plans that reuse the same lock name get isolated barriers instead of
+    // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
+    __lockNamespace: z
+      .string()
+      .optional()
+      .describe("Internal plan-scoped lock namespace (injected)"),
+  }),
+);
 
 type BarrierParams = z.infer<typeof barrierSchema>;
 

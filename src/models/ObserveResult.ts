@@ -69,14 +69,15 @@ export type Affordance = "tap" | "long-press" | "input" | "scroll" | "toggle";
 
 /**
  * One row of the Interactable Skeleton Projection (issue #4388): a flat,
- * actionable-only summary of a screen. `id` / `label` map directly onto the
- * `tapOn` selector union (`elementId` / `text`), so an agent reads the skeleton
- * and issues `tapOn({ elementId })` with no new selector semantics. Bounds are
- * always the compact `[left, top, right, bottom]` tuple.
+ * actionable-only summary of a screen. `elementId` / `label` map directly onto
+ * the `tapOn` selector union (`elementId` / `text`), so an agent reads the
+ * skeleton and issues `tapOn({ elementId })` with no new selector semantics
+ * and no key rename (issue #6153). Bounds are always the compact
+ * `[left, top, right, bottom]` tuple.
  */
 export interface SkeletonElement {
   /** `resource-id ?? view-id` (the stable content-hash id from #3228). */
-  id?: string;
+  elementId?: string;
   /**
    * `text ?? content-desc`, else the hoisted primary text of descendants (issue
    * #5869). A clickable container whose own node carries no text/content-desc

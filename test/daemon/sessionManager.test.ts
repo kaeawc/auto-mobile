@@ -2295,6 +2295,67 @@ describe("SessionManager", () => {
         manager.stopCleanupTimer();
       }
     });
+
+    test("a stale TTL (A) whose restore is still pending must not clobber a newer condition's (B's) restore slot (#6177)", async () => {
+      const timer = new FakeTimer();
+      const restoreCalls: string[] = [];
+      let releaseFirstRestore: (() => void) | undefined;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        noopBiometric,
+        (): NetworkConditionRestorer => ({
+          restore: async (profile) => {
+            restoreCalls.push(profile);
+            if (restoreCalls.length === 1) {
+              // Condition A's TTL-expiry restore: deferred so the test can apply
+              // condition B while it is still in flight.
+              await new Promise<void>((resolve) => {
+                releaseFirstRestore = resolve;
+              });
+            }
+          },
+        }),
+      );
+      try {
+        const sessionId = "net-ttl-generation";
+        const session = await manager.createSession(sessionId, "emulator-5554", "android");
+
+        // Apply condition A with a 60s TTL.
+        manager.bumpNetworkConditionGeneration(sessionId);
+        manager.setNetworkCondition(sessionId, { initialProfile: "none" });
+        manager.scheduleNetworkConditionExpiry(session, 60);
+
+        // A's TTL fires: its restore starts but hangs (deferred above).
+        timer.advanceTime(60_000);
+        const aCleanup = manager.getPendingDeviceCleanup("emulator-5554");
+        expect(aCleanup).not.toBeNull();
+        expect(restoreCalls).toEqual(["none"]);
+
+        // While A's restore is still pending, condition B is applied on the same
+        // session — bumping the generation and arming its own TTL, exactly as
+        // runSessionNetworkMutation does for a real setDeviceState call.
+        manager.bumpNetworkConditionGeneration(sessionId);
+        manager.cancelNetworkConditionExpiry(sessionId);
+        manager.scheduleNetworkConditionExpiry(session, 60);
+
+        // A's deferred restore now settles. Its completion must detect it was
+        // superseded and must NOT clear B's restore slot.
+        releaseFirstRestore?.();
+        await aCleanup;
+        expect(manager.getNetworkCondition(sessionId)).toEqual({ initialProfile: "none" });
+
+        // A later release must still restore the device — B's slot survived, so
+        // the device is not handed back to the pool still shaped.
+        await manager.releaseSession(sessionId);
+        expect(restoreCalls).toEqual(["none", "none"]);
+        expect(manager.getNetworkCondition(sessionId)).toBeUndefined();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
   });
 
   describe("statistics", () => {

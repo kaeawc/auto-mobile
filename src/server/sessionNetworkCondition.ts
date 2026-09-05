@@ -34,6 +34,12 @@ export async function runSessionNetworkMutation<T>(
       `Cannot mutate network condition: session ${sessionUuid} is bound to ${session.assignedDevice}, not ${deviceId}.`,
     );
   }
+  // Bump the network-condition generation BEFORE mutating (issue #6177): this
+  // condition (B) may be applied while an earlier condition's (A's) TTL expiry is
+  // still awaiting its restore. Bumping here — and having that expiry re-check the
+  // generation it captured when it fired, after its own restore settles — lets a
+  // stale A detect it has been superseded and skip clearing B's restore slot.
+  sessionManager.bumpNetworkConditionGeneration(sessionUuid);
   // Publish the restore slot before mutating, so a release that begins while the
   // emulator command is in flight already knows the device must be restored.
   //

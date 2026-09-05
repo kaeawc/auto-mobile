@@ -112,6 +112,12 @@ describe("ExploreBlockerDetection", () => {
       // them.
       ["allow_button", true],
       ["permission_denied", true],
+      // camelCase accessibility ids (issue #6122 follow-up round 3): a
+      // lookaround excluding only [a-z0-9] treats an adjacent capital as
+      // alphanumeric, so "allowButton" needs tokenizing at the camelCase
+      // boundary, not just a boundary regex.
+      ["allowButton", true],
+      ["denyButton", true],
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
     });
@@ -498,6 +504,33 @@ describe("ExploreBlockerDetection", () => {
       }
     });
 
+    // Issue #6122 follow-up round 3: a lookaround boundary treats an
+    // adjacent uppercase letter as alphanumeric, so "okButton"/"allowButton"
+    // regressed under the separator-boundary fix even though the old
+    // substring check accepted them. "Okay" is also added as its own
+    // affirmative keyword (tokenizes to ["okay"], distinct from "ok").
+    test("handlePermissionDialog taps camelCase 'okButton'/'allowButton' content-desc ids and a genuine 'Okay' button", async () => {
+      for (const text of ["okButton", "allowButton", "Okay"]) {
+        const { calls, restore } = captureTapOptions();
+        const elements = [createMockElement({ text, "resource-id": "com.test:id/ok_button" })];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+      }
+    });
+
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
       const { calls, restore } = captureTapOptions();
       const elements = [
@@ -563,8 +596,8 @@ describe("ExploreBlockerDetection", () => {
 
     // Issue #6122 follow-up: machine-style content-desc ids using "_"/"-"/"."
     // separators must still be tapped as dismiss buttons.
-    test("dismissDialog taps machine-style 'not_now'/'skip-action'/'skip.action' content-desc ids", async () => {
-      for (const machineId of ["not_now", "skip-action", "skip.action"]) {
+    test("dismissDialog taps machine-style 'not_now'/'skip-action'/'skip.action'/'notNow'/'skipAction' content-desc ids", async () => {
+      for (const machineId of ["not_now", "skip-action", "skip.action", "notNow", "skipAction"]) {
         const { calls, restore } = captureTapOptions();
         const elements = [
           createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),

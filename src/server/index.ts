@@ -665,7 +665,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !tool.requiresDevice &&
         !isDeviceSessionAcquisitionTool(name) &&
         name !== "setActiveDevice" &&
-        name !== SET_TOOL_ENABLED_TOOL_NAME
+        // #6148 (#6069 residual): setToolEnabled is exempt ONLY when the caller
+        // echoed back this connection's own already-issued tool-selection
+        // profile uuid (the internal resume path uses a distinct
+        // DAEMON_TOOL_SELECTION_PROFILE_PARAM, never this branch). Any other
+        // explicit sessionUuid — including a never-issued/fabricated one — must
+        // clear the same admission check every other plain session tool
+        // (listDevices, etc.) already enforces here, instead of silently
+        // succeeding and writing state for a session that was never issued.
+        (name !== SET_TOOL_ENABLED_TOOL_NAME || providedSessionUuid !== connectionProfileUuid)
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware
         // tools carry their admitted identity into execution in ToolRegistry.

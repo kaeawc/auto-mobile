@@ -195,6 +195,20 @@ describe("ResourceRegistry URI-template matching", () => {
     });
   });
 
+  test("ignores an undeclared query key instead of overwriting a path-captured param (issue #6188)", () => {
+    ResourceRegistry.registerTemplate(
+      "automobile:test/{id}/data{?first}",
+      "Test",
+      "Test path/query collision",
+      "application/json",
+      async () => ({ uri: "automobile:test", text: "{}" }),
+    );
+
+    const match = ResourceRegistry.matchTemplate("automobile:test/one/data?first=a&id=two");
+
+    expect(match).toMatchObject({ params: { id: "one", first: "a" } });
+  });
+
   test("retains the requested URI for an RFC 6570 template handler", async () => {
     const server = new FakeMcpServer();
     let handlerUri = "";

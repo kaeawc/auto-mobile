@@ -109,4 +109,71 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     expect(payload.error).toContain("Invalid offset");
     expect(getTableDataForIos).not.toHaveBeenCalled();
   });
+
+  test("rejects a limit outside the safe integer range instead of overflowing", async () => {
+    const getTableDataForIos = mock(async () => ({ columns: [], rows: [], total: 0 }));
+    setupDevice(getTableDataForIos);
+    registerDatabaseResources();
+
+    const uri = `${base}?appId=com.example.app&limit=99999999999999999999999`;
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+
+    const content = await match!.template.handler(match!.params);
+    const payload = JSON.parse(content.text!);
+
+    expect(payload.error).toContain("Invalid limit");
+    expect(getTableDataForIos).not.toHaveBeenCalled();
+  });
+
+  // Issue #6188: `{?appId,limit,offset}` makes every query variable optional
+  // at the template-match level, including appId — which must stay a
+  // required app identity. The handler rejects a missing/empty appId itself.
+  test.each([
+    ["appId omitted entirely", `${base}?limit=10&offset=5`],
+    ["appId present but empty", `${base}?appId=&limit=10&offset=5`],
+  ])("rejects table data request when %s", async (_label, uri) => {
+    const getTableDataForIos = mock(async () => ({ columns: [], rows: [], total: 0 }));
+    setupDevice(getTableDataForIos);
+    registerDatabaseResources();
+
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+
+    const content = await match!.template.handler(match!.params);
+    const payload = JSON.parse(content.text!);
+
+    expect(payload.error).toContain("Missing required appId");
+    expect(getTableDataForIos).not.toHaveBeenCalled();
+  });
+
+  // Issue #6188: extractTemplateParams previously copied every query pair,
+  // so a query key colliding with a path-captured param name (deviceId,
+  // databasePath, table) silently overrode the path-selected value.
+  test("ignores an undeclared query key that collides with a path parameter", async () => {
+    const getTableDataForIos = mock(async () => ({
+      columns: ["id"],
+      rows: [["1"]],
+      total: 1,
+    }));
+    setupDevice(getTableDataForIos);
+    registerDatabaseResources();
+
+    const uri = `${base}?appId=com.example.app&deviceId=ios-2`;
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    expect(match!.params.deviceId).toBe("ios-1");
+
+    const content = await match!.template.handler(match!.params);
+    const payload = JSON.parse(content.text!);
+
+    expect(payload.deviceId).toBe("ios-1");
+    expect(getTableDataForIos).toHaveBeenCalledWith(
+      "com.example.app",
+      "/app/Documents/app.db",
+      "notes",
+      50,
+      0,
+    );
+  });
 });

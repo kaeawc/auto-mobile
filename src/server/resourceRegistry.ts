@@ -128,6 +128,7 @@ function extractTemplateParams(
     params[name] = match[index + 1];
   });
   if (template.queryParamNames.length > 0) {
+    const declaredQueryParams = new Set(template.queryParamNames);
     const queryStart = uri.indexOf("?");
     const query = queryStart >= 0 ? uri.slice(queryStart + 1) : "";
     const seen = new Set<string>();
@@ -136,6 +137,13 @@ function extractTemplateParams(
         return null;
       }
       seen.add(name);
+      // Only declared `{?a,b}` query variables are captured. An undeclared
+      // query key (issue #6188) — including one that collides with a
+      // path-captured param name like `deviceId` — is ignored rather than
+      // silently overwriting the path capture.
+      if (!declaredQueryParams.has(name)) {
+        continue;
+      }
       params[name] = value;
     }
   }

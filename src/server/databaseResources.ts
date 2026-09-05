@@ -21,6 +21,11 @@ const DATABASE_RESOURCE_TEMPLATES = {
   // "?appId={appId}&limit={limit}&offset={offset}" query string compiles to
   // fixed-order, all-required captures instead and only matches when every
   // param appears, in that exact order.
+  //
+  // ResourceRegistry has no way to mark one of the template's query variables
+  // required and the others optional, so `appId` matches the template even
+  // when absent/empty (issue #6188) — getTableDataResource rejects a missing
+  // or empty `appId` itself instead of forwarding it to the platform client.
   TABLE_DATA:
     "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data{?appId,limit,offset}",
   TABLE_STRUCTURE:
@@ -295,9 +300,11 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
 
 /**
  * Parse an optional pagination query param (limit/offset) as a non-negative
- * integer. Returns `defaultValue` when the param is absent or empty; throws
- * a descriptive error for anything else that isn't a non-negative integer
- * (issue #6133 — previously `parseInt` silently produced `NaN`).
+ * safe integer. Returns `defaultValue` when the param is absent or empty;
+ * throws a descriptive error for anything else that isn't a non-negative
+ * safe integer (issue #6133 — previously `parseInt` silently produced `NaN`;
+ * an all-digit string outside Number.MAX_SAFE_INTEGER would otherwise round
+ * or overflow to `Infinity`).
  */
 function parsePaginationParam(
   raw: string | undefined,
@@ -310,7 +317,11 @@ function parsePaginationParam(
   if (!/^\d+$/.test(raw)) {
     throw new Error(`Invalid ${paramName} "${raw}": must be a non-negative integer`);
   }
-  return Number.parseInt(raw, 10);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`Invalid ${paramName} "${raw}": must be a safe integer`);
+  }
+  return value;
 }
 
 /**
@@ -320,9 +331,17 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = decodeURIComponent(databasePath);
   const decodedTable = decodeURIComponent(table);
-  const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId);
+  const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
 
   try {
+    // appId is a required identity for the target app/database, unlike
+    // limit/offset — the `{?appId,limit,offset}` query-expansion form makes
+    // every one of its variables optional at the template level, so the
+    // handler must reject a missing or empty appId itself rather than
+    // forwarding `undefined`/"" to the platform inspector (issue #6188).
+    if (!appId) {
+      throw new Error("Missing required appId query parameter for table data");
+    }
     // Parse optional limit and offset from query params. Each is validated as
     // a non-negative integer when present; absent falls back to the
     // documented default (issue #6133).

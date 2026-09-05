@@ -1,9 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   buildInputTextResultMessage,
   buildTapOnResultMessage,
+  registerInteractionTools,
+  resetTapOnElementFactory,
+  setTapOnElementFactory,
+  tapOnHandler,
 } from "../../src/server/interactionTools";
-import type { TapOnSelectedElement } from "../../src/models";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { TapOnArgs } from "../../src/server/interactionToolTypes";
+import { getStructuredField } from "../../src/utils/toolUtils";
+import type { BootedDevice, TapOnElementResult, TapOnSelectedElement } from "../../src/models";
 
 const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElement => ({
   text: "",
@@ -158,6 +165,106 @@ describe("buildTapOnResultMessage", () => {
   test("uses only the search summary when there is no selected element", () => {
     const summary = "2 view hierarchy changes over 5 requests within 300ms";
     expect(buildTapOnResultMessage(undefined, summary)).toBe(`Tapped on element (${summary})`);
+  });
+});
+
+// Handler-level coverage: exercise the REGISTERED tapOn handler path with an
+// injected fake TapOnElement and assert the serialized envelope. Before #6152 a
+// selector that matched nothing still produced "Tapped on element (...)" and no
+// `isError` on the envelope — the exact shape #5902 fixed for inputText only.
+describe("tapOnHandler (registered handler wiring)", () => {
+  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const args: TapOnArgs = { selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" }, platform: "android" };
+
+  afterEach(() => {
+    resetTapOnElementFactory();
+    ToolRegistry.clearTools();
+  });
+
+  // The direct-call tests below only pin the wiring if the handler they call is
+  // the one registered for "tapOn" — pin that identity so the two cannot drift.
+  test("the module-scope handler is the one registered for tapOn", () => {
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    expect(ToolRegistry.getTool("tapOn")?.deviceAwareHandler).toBe(tapOnHandler);
+  });
+
+  const fakeResult = (overrides: Partial<TapOnElementResult>): TapOnElementResult =>
+    ({
+      success: false,
+      action: "tap",
+      element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+      ...overrides,
+    }) as TapOnElementResult;
+
+  const parseMessage = (response: { content: Array<{ type: string; text: string }> }): string =>
+    (JSON.parse(response.content[0].text) as { message: string }).message;
+
+  test("a selector miss sets isError and reports the failure, not a tap", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        fakeResult({
+          error:
+            "Failed to perform tap on element: Element not found with provided text 'ZZZ_NO_SUCH_TEXT_ZZZ'",
+          searchUntil: { durationMs: 1521, requestCount: 29, changeCount: 0 },
+        }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, args);
+    expect(response.isError).toBe(true);
+    const message = parseMessage(response);
+    // The failure keeps the search summary: the user sees both that nothing
+    // matched and how long the selector was looked for.
+    expect(message).toBe(
+      "Failed to tap: Failed to perform tap on element: Element not found with provided text 'ZZZ_NO_SUCH_TEXT_ZZZ' (0 view hierarchy changes over 29 requests within 1521ms)",
+    );
+    expect(message).not.toContain("Tapped on element");
+    // The failure message must also be the one on the wire (structuredContent).
+    expect(getStructuredField(response, "message")).toBe(message);
+    expect(getStructuredField(response, "success")).toBe(false);
+  });
+
+  test("a failure without search stats carries no empty summary parenthetical", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () => fakeResult({ error: "Element not found with provided text 'Missing'" }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, args);
+    expect(response.isError).toBe(true);
+    expect(parseMessage(response)).toBe(
+      "Failed to tap: Element not found with provided text 'Missing'",
+    );
+  });
+
+  // `||` not `??`: an empty-string error must still yield a non-empty failure
+  // message (#4183 P4), never a blank or success-shaped one.
+  test.each([
+    [undefined, "Failed to tap: unknown error"],
+    ["", "Failed to tap: unknown error"],
+  ])("a failure with error %p yields %p", async (error, expected) => {
+    setTapOnElementFactory(() => ({ execute: async () => fakeResult({ error }) }));
+
+    const response = await tapOnHandler(fakeDevice, args);
+    expect(response.isError).toBe(true);
+    expect(parseMessage(response)).toBe(expected);
+  });
+
+  test("a successful tap keeps the success message and no isError", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        fakeResult({
+          success: true,
+          selectedElement: selected({ text: "Internet" }),
+          searchUntil: { durationMs: 300, requestCount: 5, changeCount: 2 },
+        }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, args);
+    expect(response.isError).toBeUndefined();
+    expect(parseMessage(response)).toBe(
+      'Tapped on element (matched text="Internet"; 1 match; 2 view hierarchy changes over 5 requests within 300ms)',
+    );
+    expect(getStructuredField(response, "success")).toBe(true);
   });
 });
 

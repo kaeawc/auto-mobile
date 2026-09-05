@@ -28,6 +28,7 @@ import {
   PinchOnResult,
   SendTextResult,
   SwipeOnToolPayload,
+  type TapOnElementResult,
   type TapOnSelectedElement,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
@@ -952,68 +953,102 @@ export function buildTapOnResultMessage(
   return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
 }
 
+// Injection seam for the tapOn handler (mirrors the pinchOn factory seam above).
+// Lets a unit test exercise the registered handler wiring with a fake
+// TapOnElement whose execute() returns a selector miss, so a revert of the
+// failure gating below is caught by a test — not just the formatter (#6152).
+export type TapOnElementLike = Pick<TapOnElement, "execute">;
+
+let tapOnElementFactory: (device: BootedDevice) => TapOnElementLike = (device) =>
+  new TapOnElement(device);
+
+export function setTapOnElementFactory(factory: (device: BootedDevice) => TapOnElementLike): void {
+  tapOnElementFactory = factory;
+}
+
+export function resetTapOnElementFactory(): void {
+  tapOnElementFactory = (device) => new TapOnElement(device);
+}
+
+/**
+ * The hierarchy-changed search summary appended to the tapOn message. Emitted
+ * when the search polled or observed changes, or when `searchUntil` was
+ * requested and the observation is confirmed fresh.
+ */
+function buildTapOnSearchSummary(
+  result: Pick<TapOnElementResult, "searchUntil" | "observation">,
+  searchUntilRequested: boolean,
+): string | undefined {
+  const searchStats = result.searchUntil;
+  if (!searchStats) {
+    return undefined;
+  }
+  const freshness = result.observation?.freshness;
+  const hasFreshnessTimestamp =
+    typeof freshness?.requestedAfter === "number" && typeof freshness?.actualTimestamp === "number";
+  const hasConfirmedFreshObservation =
+    hasFreshnessTimestamp && freshness.actualTimestamp >= freshness.requestedAfter;
+  const shouldIncludeSearchSummary =
+    searchStats.requestCount > 0 ||
+    searchStats.changeCount > 0 ||
+    (searchUntilRequested && hasConfirmedFreshObservation);
+  return shouldIncludeSearchSummary
+    ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
+    : undefined;
+}
+
+export async function tapOnHandler(
+  device: BootedDevice,
+  args: TapOnArgs,
+  progress?: ProgressCallback,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const tapOnTextCommand = tapOnElementFactory(device);
+  const result = await tapOnTextCommand.execute(
+    {
+      container: args.container,
+      text: args.selector.text,
+      textAny: args.selector.textAny,
+      elementId: args.selector.elementId,
+      testTag: args.selector.testTag,
+      accessibilityLink: args.selector.accessibilityLink,
+      sibling: args.sibling,
+      selectionStrategy: args.selectionStrategy,
+      index: args.index,
+      action: args.action,
+      duration: args.duration,
+      searchUntil: args.searchUntil,
+      preTapStability: args.preTapStability,
+      retryIfNoChange: args.retryIfNoChange,
+      ensureTap: args.ensureTap,
+      subtext: args.subtext,
+    },
+    progress,
+  );
+
+  const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
+
+  // A selector miss must not read as a completed tap: gate the message on the
+  // outcome and mark the MCP envelope `isError`, exactly as inputText does since
+  // #5902 (#6152). `||` not `??`: an empty-string error must still yield the
+  // non-empty fallback (#4183 P4). The failure keeps the search summary so the
+  // user still sees how long the selector was looked for before it missed.
+  const message = result.success
+    ? buildTapOnResultMessage(result.selectedElement, searchSummary, result.activatedSubtext)
+    : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
+  const payload = { message, observation: result.observation, ...result };
+  const response: StructuredToolResponse<typeof payload> & { isError?: true } =
+    createStructuredToolResponse(payload);
+  return result.success ? response : { ...response, isError: true as const };
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
 
 export function registerInteractionTools() {
-  // Tap on handler
-  const tapOnHandler = async (
-    device: BootedDevice,
-    args: TapOnArgs,
-    progress?: ProgressCallback,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const tapOnTextCommand = new TapOnElement(device);
-    const result = await tapOnTextCommand.execute(
-      {
-        container: args.container,
-        text: args.selector.text,
-        textAny: args.selector.textAny,
-        elementId: args.selector.elementId,
-        testTag: args.selector.testTag,
-        accessibilityLink: args.selector.accessibilityLink,
-        sibling: args.sibling,
-        selectionStrategy: args.selectionStrategy,
-        index: args.index,
-        action: args.action,
-        duration: args.duration,
-        searchUntil: args.searchUntil,
-        preTapStability: args.preTapStability,
-        retryIfNoChange: args.retryIfNoChange,
-        ensureTap: args.ensureTap,
-        subtext: args.subtext,
-      },
-      progress,
-    );
-
-    const searchStats = result.searchUntil;
-    const freshness = result.observation?.freshness;
-    const hasFreshnessTimestamp =
-      typeof freshness?.requestedAfter === "number" &&
-      typeof freshness?.actualTimestamp === "number";
-    const hasConfirmedFreshObservation =
-      hasFreshnessTimestamp && freshness.actualTimestamp >= freshness.requestedAfter;
-    const shouldIncludeSearchSummary =
-      Boolean(searchStats) &&
-      (searchStats.requestCount > 0 ||
-        searchStats.changeCount > 0 ||
-        (Boolean(args.searchUntil) && hasConfirmedFreshObservation));
-    const searchSummary =
-      shouldIncludeSearchSummary && searchStats
-        ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
-        : undefined;
-
-    return createStructuredToolResponse({
-      message: buildTapOnResultMessage(
-        result.selectedElement,
-        searchSummary,
-        result.activatedSubtext,
-      ),
-      observation: result.observation,
-      ...result,
-    });
-  };
+  // tapOn handler is defined at module scope (with an injectable TapOnElement
+  // factory) so a unit test can exercise the registered handler wiring (#6152).
 
   // TapAny handler
   const tapAnyHandler = async (

@@ -92,17 +92,23 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     // 'finish'/'error') never observes this and hangs forever; verified
     // directly against the pre-fix code, which timed out well past this
     // test's bound.
+    //
+    // The destroy is scheduled AFTER `pipeResponseToFile` is called (not
+    // before) so the source is destroyed while `stream.pipeline` is
+    // actively consuming it, not before piping even starts — otherwise an
+    // implementation that merely checks `response.destroyed` at entry
+    // (and still hangs on a genuine mid-stream close) would also pass.
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
-    queueMicrotask(() => response.destroy());
 
     tempDir = await makeScratchTempDir("pipe-response-mid-close-");
     const destination = path.join(tempDir, "file.bin");
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
-    await expect(
-      downloader.pipeResponseToFile(response, destination, "https://example.com/file"),
-    ).rejects.toThrow(/premature close/i);
+    const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
+    queueMicrotask(() => response.destroy());
+
+    await expect(result).rejects.toThrow(/premature close/i);
 
     expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
     // No attempt-unique temp file is left behind either.
@@ -114,10 +120,10 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     // attempt's own temp file, never the shared `destination` — otherwise a
     // slow-to-settle failed attempt can delete a concurrent/retried
     // download's completed file out from under it (issue #6131 review).
-    // Same close-only shape as above: no error emitted, only 'close'.
+    // Same close-only, destroy-after-start shape as above: no error
+    // emitted, only 'close', and destroyed while piping is in progress.
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
-    queueMicrotask(() => response.destroy());
 
     tempDir = await makeScratchTempDir("pipe-response-mid-close-race-");
     const destination = path.join(tempDir, "file.bin");
@@ -125,9 +131,10 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     await fs.writeFile(destination, existingPayload);
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
-    await expect(
-      downloader.pipeResponseToFile(response, destination, "https://example.com/file"),
-    ).rejects.toThrow(/premature close/i);
+    const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
+    queueMicrotask(() => response.destroy());
+
+    await expect(result).rejects.toThrow(/premature close/i);
 
     expect(await fs.readFile(destination)).toEqual(existingPayload);
   }, 500);

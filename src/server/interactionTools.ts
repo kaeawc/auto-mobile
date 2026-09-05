@@ -39,6 +39,7 @@ import {
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import {
+  assertActiveWindowWaitForSupportedOnPlatform,
   overrideWaitForJsonSchema,
   refineWaitForArgs,
   settledSchema,
@@ -1713,6 +1714,12 @@ export function registerInteractionTools() {
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    // #6154 follow-up: `platform` is optional on the wire, so the schema's
+    // iOS-rejects-activityName check (raw request platform) can be skipped
+    // entirely when the caller omitted it. Re-validate against the resolved
+    // `device.platform` before opening the URL.
+    assertActiveWindowWaitForSupportedOnPlatform(device.platform, args.waitFor);
+
     const openUrl = new OpenURL(device);
     const result = await openUrl.execute(args.url);
 

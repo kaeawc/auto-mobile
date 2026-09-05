@@ -6,8 +6,15 @@ import {
   selectAllTextSchema,
   wakeAndUnlockSchema,
 } from "../../../src/server/interactionTools";
-import { observeSchema } from "../../../src/server/observeTools";
+import {
+  assertActiveWindowWaitForSupportedOnPlatform,
+  observeSchema,
+} from "../../../src/server/observeTools";
 import { launchAppSchema } from "../../../src/server/appTools";
+import { resolveHighlightClientOptions } from "../../../src/server/highlightTools";
+import { assertChangeLocalizationPlatformConstraints } from "../../../src/server/utilityTools";
+import type { BootedDevice } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 // Issue #6154 half 1: `platform` was required on pressButton/inputText/observe
 // (and siblings) but optional on tapOn/launchApp, even though a `deviceId`
@@ -101,5 +108,95 @@ describe("issue #6154: launchApp schema enforces its declared contract", () => {
         bogusKey: 123,
       }),
     ).toThrow();
+  });
+});
+
+// Coordinator follow-up on #6154 (three Codex review threads): making
+// `platform` optional exposed handlers that still branched on the raw,
+// possibly-undefined request field instead of the platform ToolRegistry had
+// already resolved from deviceId/session onto `device`. These tests exercise
+// the extracted resolution/validation helpers directly against a resolved
+// `BootedDevice`, independent of the raw (now-optional) `platform` param.
+describe("issue #6154 follow-up: handlers use the resolved platform, not the raw param", () => {
+  const iosDevice: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "sim-1" };
+  const androidDevice: BootedDevice = {
+    name: "Pixel",
+    platform: "android",
+    deviceId: "emulator-5554",
+  };
+
+  describe("highlight (P1)", () => {
+    test("resolves platform from the device when the request omitted it", () => {
+      const options = resolveHighlightClientOptions(iosDevice, { deviceId: iosDevice.deviceId });
+      expect(options.platform).toBe("ios");
+      expect(options.device).toBe(iosDevice);
+    });
+
+    test("resolves the Android platform the same way", () => {
+      const options = resolveHighlightClientOptions(androidDevice, {
+        deviceId: androidDevice.deviceId,
+      });
+      expect(options.platform).toBe("android");
+    });
+  });
+
+  describe("changeLocalization (P2)", () => {
+    test("Android device via deviceId with locale + appId (no platform param) is valid", () => {
+      expect(() =>
+        assertChangeLocalizationPlatformConstraints(androidDevice.platform, {
+          locale: "fr-FR",
+          appId: "com.example.app",
+        }),
+      ).not.toThrow();
+    });
+
+    test("Android device via deviceId with locale but no appId is rejected post-resolution", () => {
+      expect(() =>
+        assertChangeLocalizationPlatformConstraints(androidDevice.platform, {
+          locale: "fr-FR",
+        }),
+      ).toThrow(ActionableError);
+    });
+
+    test("iOS device via deviceId with appId is rejected post-resolution", () => {
+      expect(() =>
+        assertChangeLocalizationPlatformConstraints(iosDevice.platform, {
+          locale: "fr-FR",
+          appId: "com.example.app",
+        }),
+      ).toThrow(ActionableError);
+    });
+  });
+
+  describe("observe / openLink activeWindow.activityName (P2)", () => {
+    test("iOS device via deviceId with activityName (no platform param) is rejected post-resolution", () => {
+      expect(() =>
+        assertActiveWindowWaitForSupportedOnPlatform(iosDevice.platform, {
+          activeWindow: { activityName: "com.example.MainActivity" },
+        }),
+      ).toThrow(ActionableError);
+    });
+
+    test("iOS device via deviceId with appId (not activityName) is accepted", () => {
+      expect(() =>
+        assertActiveWindowWaitForSupportedOnPlatform(iosDevice.platform, {
+          activeWindow: { appId: "com.example.app" },
+        }),
+      ).not.toThrow();
+    });
+
+    test("Android device with activityName is accepted", () => {
+      expect(() =>
+        assertActiveWindowWaitForSupportedOnPlatform(androidDevice.platform, {
+          activeWindow: { activityName: "com.example.MainActivity" },
+        }),
+      ).not.toThrow();
+    });
+
+    test("no waitFor at all is a no-op", () => {
+      expect(() =>
+        assertActiveWindowWaitForSupportedOnPlatform(iosDevice.platform, undefined),
+      ).not.toThrow();
+    });
   });
 });

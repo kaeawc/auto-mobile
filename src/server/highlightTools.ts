@@ -355,18 +355,40 @@ const createDefaultViewHierarchyClient = (device: BootedDevice): HighlightViewHi
   throw new ActionableError(`Visual highlights are not supported on ${device.platform} devices.`);
 };
 
+/**
+ * #6154 follow-up: `platform` is optional on the wire (resolved from
+ * deviceId/session), so `args.platform` can be `undefined` here even though
+ * ToolRegistry has already resolved `device`. Build the `VisualHighlightClient`
+ * options from the resolved `device.platform` — never the raw request field —
+ * or its device/platform mismatch check spuriously rejects every call that
+ * omitted `platform`. Exported standalone so the resolution itself (not just
+ * the end-to-end handler) is directly testable.
+ */
+export function resolveHighlightClientOptions(
+  device: BootedDevice,
+  args: Pick<HighlightArgs, "deviceId" | "sessionUuid" | "timeoutMs">,
+): {
+  device: BootedDevice;
+  deviceId: string;
+  platform: Platform;
+  sessionUuid?: string;
+  timeoutMs?: number;
+} {
+  return {
+    device,
+    deviceId: args.deviceId ?? device.deviceId,
+    platform: device.platform,
+    sessionUuid: args.sessionUuid,
+    timeoutMs: args.timeoutMs,
+  };
+}
+
 export function registerHighlightTools(dependencies: HighlightToolDependencies = {}) {
   const highlightHandler = async (device: BootedDevice, args: HighlightArgs) => {
     const highlightClient = dependencies.highlightClientFactory
       ? dependencies.highlightClientFactory()
       : new VisualHighlightClient();
-    const options = {
-      device,
-      deviceId: args.deviceId ?? device.deviceId,
-      platform: args.platform as Platform,
-      sessionUuid: args.sessionUuid,
-      timeoutMs: args.timeoutMs,
-    };
+    const options = resolveHighlightClientOptions(device, args);
 
     try {
       const highlightId = dependencies.generateHighlightId

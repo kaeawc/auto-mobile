@@ -301,21 +301,20 @@ describe("appId aliases on tool schemas", () => {
     }
   });
 
-  test("changeLocalizationSchema rejects appId for iOS locale changes", () => {
+  // #6154 follow-up: `platform` is optional (resolved from deviceId/session),
+  // so the appId<->platform cross-checks can no longer live in the schema
+  // (parse time may not know the effective platform yet) — they run in
+  // `changeLocalizationHandler` against the resolved `device.platform`
+  // instead (see test/server/utilityTools.changeLocalizationPlatform.test.ts).
+  // The schema itself now accepts this combination at parse time.
+  test("changeLocalizationSchema accepts appId regardless of the declared platform (enforced post-resolution)", () => {
     const result = changeLocalizationSchema.safeParse({
       platform: "ios",
       bundleId: "com.example.app",
       locale: "fr-FR",
     });
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(
-        result.error.issues.some((issue) =>
-          issue.message.includes("appId is only supported for Android"),
-        ),
-      ).toBe(true);
-    }
+    expect(result.success).toBe(true);
   });
 
   test("changeLocalizationSchema rejects appId when locale is omitted", () => {
@@ -335,20 +334,16 @@ describe("appId aliases on tool schemas", () => {
     }
   });
 
-  test("changeLocalizationSchema requires appId for Android locale changes", () => {
+  // #6154 follow-up: the "appId required for Android" cross-check moved to
+  // the handler (see note above), so this now parses successfully at the
+  // schema level; the handler test covers the actual enforcement.
+  test("changeLocalizationSchema accepts a missing appId at parse time (enforced post-resolution)", () => {
     const result = changeLocalizationSchema.safeParse({
       platform: "android",
       locale: "fr-FR",
     });
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(
-        result.error.issues.some((issue) =>
-          issue.message.includes("appId is required for Android locale changes"),
-        ),
-      ).toBe(true);
-    }
+    expect(result.success).toBe(true);
   });
 });
 

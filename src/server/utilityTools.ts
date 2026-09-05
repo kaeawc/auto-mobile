@@ -79,13 +79,6 @@ export const changeLocalizationSchema = withJsonSchemaOverride(
             "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
         });
       }
-      if (values.appId && values.platform !== "android") {
-        ctx.addIssue({
-          code: "custom",
-          path: ["appId"],
-          message: "appId is only supported for Android locale changes.",
-        });
-      }
       if (values.appId && !values.locale) {
         ctx.addIssue({
           code: "custom",
@@ -93,13 +86,12 @@ export const changeLocalizationSchema = withJsonSchemaOverride(
           message: "appId only applies when locale is provided.",
         });
       }
-      if (values.platform === "android" && values.locale && !values.appId) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["appId"],
-          message: "appId is required for Android locale changes.",
-        });
-      }
+      // #6154 follow-up: `platform` is optional here (resolved from
+      // deviceId/session), so a platform-dependent check at parse time would
+      // run before that resolution and could miss real violations, or reject
+      // valid requests, when the caller omitted platform. Those checks
+      // (`appId` requires/implies Android) run in `changeLocalizationHandler`
+      // instead, against the resolved `device.platform`.
     },
   ),
   (jsonSchema) => {
@@ -325,7 +317,8 @@ export interface SetActiveDeviceArgs {
 }
 
 export interface ChangeLocalizationArgs {
-  platform: Platform;
+  // #6154: optional — resolved from deviceId/session when omitted.
+  platform?: Platform;
   appId?: string;
   locale?: string;
   timeZone?: string;
@@ -333,6 +326,27 @@ export interface ChangeLocalizationArgs {
   timeFormat?: "12" | "24";
   calendarSystem?: string;
   restartApp?: string;
+}
+
+/**
+ * #6154 follow-up: `platform` is optional on the wire (resolved from
+ * deviceId/session), so the appId<->platform cross-checks that used to live in
+ * `changeLocalizationSchema`'s `superRefine` cannot run there anymore — at
+ * parse time the effective platform may not be known yet (the caller may have
+ * omitted it entirely). Run them here instead, against the resolved
+ * `device.platform`, exported standalone so the constraint itself is directly
+ * testable without a real `SystemConfigurationManager`.
+ */
+export function assertChangeLocalizationPlatformConstraints(
+  platform: Platform,
+  args: Pick<ChangeLocalizationArgs, "appId" | "locale">,
+): void {
+  if (args.appId && platform !== "android") {
+    throw new ActionableError("appId is only supported for Android locale changes.");
+  }
+  if (platform === "android" && args.locale && !args.appId) {
+    throw new ActionableError("appId is required for Android locale changes.");
+  }
 }
 
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
@@ -458,6 +472,8 @@ export function registerUtilityTools() {
   };
 
   const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocalizationArgs) => {
+    assertChangeLocalizationPlatformConstraints(device.platform, args);
+
     const manager = new SystemConfigurationManager(device);
     const changes: {
       locale?: string;

@@ -470,6 +470,28 @@ export const refineWaitForArgs = (
   }
 };
 
+/**
+ * #6154 follow-up: `refineWaitForArgs`'s iOS-rejects-activityName check runs
+ * at schema-parse time against the raw request `platform`, which is now
+ * optional (resolved from deviceId/session). A caller that omits `platform`
+ * on an iOS device would skip that check entirely at parse time, so both
+ * `observe` and `openLink` re-run it here against the resolved
+ * `device.platform` once ToolRegistry has determined it.
+ */
+export function assertActiveWindowWaitForSupportedOnPlatform(
+  platform: "android" | "ios",
+  waitFor: ObserveWaitForOptions | undefined,
+): void {
+  const activeWindow = waitFor?.activeWindow;
+  if (
+    platform === "ios" &&
+    activeWindow?.activityName !== undefined &&
+    activeWindow.appId === undefined
+  ) {
+    throw new ActionableError("activityName is Android-only; use appId/bundleId on iOS");
+  }
+}
+
 // Shared advertised-JSON-schema override for `observe` and `openLink`: enforce
 // the iOS activityName rule, require waitFor whenever settled is present, and
 // swap the verbose generated `waitFor` schema for the compact advertised form.
@@ -1162,9 +1184,15 @@ export function registerObserveTools() {
     _progress?: unknown,
     signal?: AbortSignal,
   ): Promise<StructuredToolResponse<ObserveToolPayload>> => {
+    const waitFor = args.waitFor;
+    // #6154 follow-up: `platform` is optional on the wire, so the schema's
+    // iOS-rejects-activityName check (which runs against the raw request
+    // platform) can be skipped entirely when the caller omitted it. Re-validate
+    // against the resolved `device.platform`, before the try/catch below so the
+    // actionable message isn't re-wrapped as a generic execution failure.
+    assertActiveWindowWaitForSupportedOnPlatform(device.platform, waitFor);
     try {
       const observeScreen = new RealObserveScreen(device);
-      const waitFor = args.waitFor;
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).

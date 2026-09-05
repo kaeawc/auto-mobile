@@ -43,26 +43,134 @@ const RATING_KEYWORDS = [
   "stars",
 ];
 
-const RATING_KEYWORD_PATTERN = new RegExp(`\\b(?:${RATING_KEYWORDS.join("|")})\\b`);
+/**
+ * Build a case-sensitive word-boundary pattern from already-lowercased
+ * keywords. Callers must lowercase input text before testing (see
+ * `elementText`) since the pattern itself carries no `i` flag.
+ */
+function wordBoundaryPattern(keywords: string[]): RegExp {
+  return new RegExp(`\\b(?:${keywords.join("|")})\\b`);
+}
+
+/**
+ * Tokenize accessibility field text into lowercase word tokens.
+ *
+ * Splits on every non-alphanumeric character (whitespace, underscore,
+ * hyphen, dot, slash, apostrophe, punctuation) AND at camelCase boundaries —
+ * both a lowercase/digit-to-uppercase transition ("okButton" -> "ok
+ * Button") and an acronym-to-titlecase transition ("OKButton" ->
+ * "OK Button", "HTTPServer" -> "HTTP Server") — so "ok_button", "okButton",
+ * "OKButton", and "OK Button" all tokenize to the same `["ok", "button"]`.
+ *
+ * This replaces regex-boundary keyword matching (`\b`, then a
+ * non-alphanumeric lookaround), which needed a new boundary rule for every
+ * separator style real apps use — underscore ids in one #6122 follow-up,
+ * plain camelCase ids in the next, acronym-prefixed camelCase in this one.
+ * Tokenizing once and comparing whole tokens ends that per-case patching: a
+ * keyword matches iff it equals a token (or, for a multi-word keyword, a
+ * contiguous run of tokens), so "ok" never matches inside "token" or
+ * "bookmark", and "allow" never matches inside "disallowance", regardless of
+ * how the surrounding text is punctuated or cased.
+ */
+function tokenize(field: string): string[] {
+  return field
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((token) => token.length > 0)
+    .map((token) => token.toLowerCase());
+}
+
+/**
+ * True if `keywordTokens` (itself tokenized, so "don't allow" -> ["don", "t",
+ * "allow"]) appears, by exact token equality, as a contiguous run inside
+ * `fieldTokens`.
+ *
+ * An earlier revision stripped a trailing "s"/"es"/"ing"/"ed" from a field
+ * token before comparing, to accept plurals like "permissions" without
+ * listing them explicitly. That algorithmic stemming traded one false
+ * negative for a false positive: "notes" strips to "not", so "Notes now"
+ * satisfied the dismiss phrase "not now" (issue #6122 follow-up). Matching
+ * stays exact-token-only; any inflected form a real dialog uses (e.g.
+ * "permissions", "allows") is listed explicitly in the keyword set instead
+ * (see `PERMISSION_KEYWORDS`), so the match surface is exactly what was
+ * asked for, never a guess.
+ */
+function containsTokenSequence(fieldTokens: string[], keywordTokens: string[]): boolean {
+  if (keywordTokens.length === 0) {
+    return false;
+  }
+  for (let start = 0; start + keywordTokens.length <= fieldTokens.length; start++) {
+    if (keywordTokens.every((token, offset) => fieldTokens[start + offset] === token)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function toKeywordTokenLists(keywords: string[]): string[][] {
+  return keywords.map(tokenize);
+}
+
+/**
+ * Test a set of already-tokenized keywords against an element's `text` and
+ * `content-desc` independently — never joined.
+ *
+ * A joined string would let a multi-word keyword be manufactured across the
+ * two independent fields (text:"Only" + content-desc:"this time" -> "only
+ * this time"), so each field is tokenized and searched on its own (issue
+ * #6122 follow-up).
+ */
+function matchesAnyKeywordInAnyField(keywordTokenLists: string[][], el: Element): boolean {
+  const fields = [el.text, el["content-desc"]];
+  return fields.some((field) => {
+    if (field === undefined) {
+      return false;
+    }
+    const fieldTokens = tokenize(field);
+    return keywordTokenLists.some((keywordTokens) =>
+      containsTokenSequence(fieldTokens, keywordTokens),
+    );
+  });
+}
+
+const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
+
+/**
+ * Permission-dialog keywords, matched by whole tokens (see `tokenize`).
+ *
+ * Substring matching misclassified ordinary UI text — "access" matched
+ * "Accessibility", and (in `handlePermissionDialog`) "ok" matched
+ * "Bookmarks"/"Cookies"/"Tokens" (issue #6122, same defect class as #4190).
+ * "access" is included as its own exact token: tokenizing "Accessibility"
+ * yields the single token `["accessibility"]`, distinct from `["access"]`,
+ * so it no longer collides the way the old substring check did — an earlier
+ * revision dropped "access" from this list defensively, before the
+ * tokenizer existed to make that distinction safely, which regressed
+ * "Camera access required" to a miss. Plurals actually seen on real dialogs
+ * ("permissions", "allows") are listed explicitly rather than derived by
+ * stemming — stemming previously turned "Notes now" into a false dismiss
+ * match ("notes" -> "not").
+ */
+const PERMISSION_KEYWORDS = [
+  "allow",
+  "allows",
+  "permission",
+  "permissions",
+  "access",
+  "deny",
+  "don't allow",
+  "while using",
+  "only this time",
+];
+
+const PERMISSION_KEYWORD_TOKENS = toKeywordTokenLists(PERMISSION_KEYWORDS);
 
 /**
  * Check if screen is a permission dialog
  */
 export function isPermissionDialog(elements: Element[]): boolean {
-  const permissionKeywords = [
-    "allow",
-    "permission",
-    "access",
-    "deny",
-    "don't allow",
-    "while using",
-    "only this time",
-  ];
-
-  return elements.some((el) => {
-    const text = (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
-    return permissionKeywords.some((keyword) => text.includes(keyword));
-  });
+  return elements.some((el) => matchesAnyKeywordInAnyField(PERMISSION_KEYWORD_TOKENS, el));
 }
 
 /**
@@ -89,6 +197,17 @@ export function isRatingDialog(elements: Element[]): boolean {
 }
 
 /**
+ * "Allow"-button keywords, matched by whole tokens (issue #6122): bare "ok"
+ * as a substring matched "Bookmarks"/"Look up"/"Cookies"/"Tokens", while
+ * token matching still accepts machine ids like "ok_button"/"okButton" and
+ * "okay" as its own affirmative. "ok"/"okay" are never inflected — "notes"
+ * must never satisfy "not", so no keyword here is derived by stemming.
+ */
+const ALLOW_KEYWORDS = ["allow", "allows", "while using", "only this time", "ok", "okay"];
+
+const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
+
+/**
  * Handle permission dialog by clicking "Allow" or similar
  */
 export async function handlePermissionDialog(
@@ -98,18 +217,12 @@ export async function handlePermissionDialog(
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
 ): Promise<boolean> {
-  // Look for "Allow" or "While using" buttons
-  const allowKeywords = ["allow", "while using", "only this time", "ok"];
-
   for (const element of elements) {
     if (!element.clickable) {
       continue;
     }
 
-    const text =
-      (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
-
-    if (allowKeywords.some((keyword) => text.includes(keyword))) {
+    if (matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element)) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;
@@ -128,6 +241,10 @@ export async function handlePermissionDialog(
   return false;
 }
 
+const DISMISS_KEYWORDS = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
+
+const DISMISS_KEYWORD_TOKENS = toKeywordTokenLists(DISMISS_KEYWORDS);
+
 /**
  * Dismiss dialog by clicking dismiss/close/later buttons
  */
@@ -138,17 +255,12 @@ async function dismissDialog(
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
 ): Promise<boolean> {
-  const dismissKeywords = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
-
   for (const element of elements) {
     if (!element.clickable) {
       continue;
     }
 
-    const text =
-      (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
-
-    if (dismissKeywords.some((keyword) => text.includes(keyword))) {
+    if (matchesAnyKeywordInAnyField(DISMISS_KEYWORD_TOKENS, element)) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;

@@ -75,6 +75,82 @@ describe("ExploreBlockerDetection", () => {
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
+
+    // Issue #6122: keywords were matched as bare substrings, so ordinary UI
+    // text containing "access" ("Accessibility") was misclassified as a
+    // permission dialog — same defect class as #4190. Tokenizing splits
+    // "Accessibility" into the single token ["accessibility"], distinct from
+    // ["access"], so "access" is safely kept as its own exact keyword (an
+    // earlier revision dropped it defensively before the tokenizer existed
+    // to make that distinction — see PERMISSION_KEYWORDS).
+    test.each([
+      // [text, expected]
+      ["Accessibility", false],
+      ["ACCESSIBILITY", false],
+      ["Accessibility settings", false],
+      ["Accessible", false],
+      ["Disallow", false],
+      ["Allowance", false],
+      ["disallowance", false],
+      ["Bookmarks", false],
+      ["Home", false],
+      ["Settings", false],
+      // positive controls: real permission dialogs must still match
+      ["Allow", true],
+      ["allow", true],
+      ["ALLOW", true],
+      ["Allow access to your location?", true], // matches via "allow" and "access"
+      ["Deny", true],
+      ["This app needs permission to access your camera", true], // matches via "permission"
+      ["While using the app", true],
+      ["Only this time", true],
+      ["Don't allow", true],
+      // "access" is a real exact-token keyword again (issue #6122 follow-up
+      // round 6): tokenizing keeps it distinct from "accessibility", so
+      // "Camera access required" is correctly detected, and "Quick
+      // access"/"Access your library" — real ambient UI, but genuinely
+      // containing the standalone word "access" — now match too, which is
+      // the accepted tradeoff of restoring this keyword.
+      ["Camera access required", true],
+      ["Quick access", true],
+      ["Access your library", true],
+      // machine-style accessibility ids (issue #6122 follow-up): "_"/"-"/"."
+      // are separators, not word characters, so a plain `\b` boundary would
+      // wrongly reject these even though the old substring check accepted
+      // them.
+      ["allow_button", true],
+      ["permission_denied", true],
+      // camelCase accessibility ids (issue #6122 follow-up round 3): a
+      // lookaround excluding only [a-z0-9] treats an adjacent capital as
+      // alphanumeric, so "allowButton" needs tokenizing at the camelCase
+      // boundary, not just a boundary regex.
+      ["allowButton", true],
+      ["denyButton", true],
+      // Explicit inflected forms (issue #6122 follow-up round 6): matching
+      // is exact-token-only (no stemming — see `containsTokenSequence`), so
+      // "permissions"/"allows" match only because they're listed explicitly
+      // in PERMISSION_KEYWORDS, not derived from "permission"/"allow".
+      ["Permissions required", true],
+      ["Allows access", true],
+    ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
+      expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
+    });
+
+    // Issue #6122 follow-up: a multi-word keyword must not be manufactured by
+    // joining `text` and `content-desc` — each field is matched on its own.
+    test("does not match a multiword keyword split across text and content-desc", () => {
+      const elements = [createMockElement({ text: "Only", "content-desc": "this time" })];
+
+      expect(isPermissionDialog(elements)).toBe(false);
+    });
+
+    test("still matches a multiword keyword contained wholly in one field", () => {
+      const textOnly = [createMockElement({ text: "Only this time", "content-desc": "" })];
+      const contentDescOnly = [createMockElement({ text: "", "content-desc": "Only this time" })];
+
+      expect(isPermissionDialog(textOnly)).toBe(true);
+      expect(isPermissionDialog(contentDescOnly)).toBe(true);
+    });
   });
 
   describe("isLoginScreen", () => {
@@ -358,6 +434,144 @@ describe("ExploreBlockerDetection", () => {
       ]);
     });
 
+    // Issue #6122: the allow-button keyword "ok" was matched as a bare
+    // substring, so "Bookmarks"/"Look up"/"Cookies"/"Tokens" were tapped as
+    // if they were the dialog's Allow button, before a genuine "OK" was ever
+    // reached.
+    test("handlePermissionDialog skips 'ok'-substring buttons and taps the real OK button", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Bookmarks", "resource-id": "com.test:id/bookmarks" }),
+        createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
+        createMockElement({ text: "Tokens", "resource-id": "com.test:id/tokens" }),
+        createMockElement({ text: "OK", "resource-id": "com.test:id/ok_button" }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+    });
+
+    test("handlePermissionDialog does not tap when only 'ok'-substring buttons are present", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Bookmarks", "resource-id": "com.test:id/bookmarks" }),
+        createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    // Issue #6122 follow-up: JS `\b` treats "_"/"-"/"." as word characters,
+    // so a plain word-boundary pattern would wrongly reject machine-style
+    // accessibility descriptions like "ok_button" even though the old
+    // substring check accepted them.
+    test("handlePermissionDialog taps machine-style 'ok_button'/'allow_button'/'ok.button' content-desc ids", async () => {
+      for (const machineId of ["ok_button", "allow_button", "ok.button"]) {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({
+            text: "",
+            "content-desc": machineId,
+            "resource-id": "com.test:id/ok_button",
+          }),
+        ];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+      }
+    });
+
+    // Issue #6122 follow-up round 3: a lookaround boundary treats an
+    // adjacent uppercase letter as alphanumeric, so "okButton"/"allowButton"
+    // regressed under the separator-boundary fix even though the old
+    // substring check accepted them. "Okay" is also added as its own
+    // affirmative keyword (tokenizes to ["okay"], distinct from "ok").
+    test("handlePermissionDialog taps camelCase 'okButton'/'allowButton' content-desc ids and a genuine 'Okay' button", async () => {
+      for (const text of ["okButton", "allowButton", "Okay"]) {
+        const { calls, restore } = captureTapOptions();
+        const elements = [createMockElement({ text, "resource-id": "com.test:id/ok_button" })];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+      }
+    });
+
+    // Issue #6122 follow-up round 4: an acronym-prefixed camelCase id like
+    // "OKButton" has no lowercase-to-uppercase transition (the whole prefix
+    // "OKB" is capitals), so it needs the acronym-to-titlecase split too —
+    // otherwise it tokenizes as a single "okbutton" token that matches
+    // nothing.
+    test("handlePermissionDialog taps acronym-prefixed camelCase 'OKButton' content-desc", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "OKButton", "resource-id": "com.test:id/ok_button" }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+    });
+
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
       const { calls, restore } = captureTapOptions();
       const elements = [
@@ -384,6 +598,166 @@ describe("ExploreBlockerDetection", () => {
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
+    });
+
+    // Discriminating regression test: "Disclosed" contains "close" and
+    // "Skipping" contains "skip" as bare substrings, so under the old
+    // substring matcher these would be (wrongly) tapped as dismiss buttons.
+    // Word-boundary matching must reject both while still accepting a
+    // genuine "Skip" button — reverting to substring matching turns this red.
+    test("dismissDialog does not tap 'close'/'skip' substrings but taps a genuine Skip button", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
+        createMockElement({ text: "Skipping", "resource-id": "com.test:id/skipping" }),
+        createMockElement({ text: "Skip", "resource-id": "com.test:id/skip_button" }),
+      ];
+      const parser = {
+        flattenViewHierarchy: () =>
+          elements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let handled: boolean;
+      try {
+        handled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          parser,
+          async () => {},
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([{ elementId: "com.test:id/skip_button", action: "tap" }]);
+    });
+
+    // Issue #6122 follow-up: machine-style content-desc ids using "_"/"-"/"."
+    // separators must still be tapped as dismiss buttons.
+    test("dismissDialog taps machine-style 'not_now'/'skip-action'/'skip.action'/'notNow'/'skipAction' content-desc ids", async () => {
+      for (const machineId of ["not_now", "skip-action", "skip.action", "notNow", "skipAction"]) {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+          createMockElement({
+            text: "",
+            "content-desc": machineId,
+            "resource-id": "com.test:id/dismiss_button",
+          }),
+        ];
+        const parser = {
+          flattenViewHierarchy: () =>
+            elements.map((element, index) => ({ element, index, depth: 0 })),
+        } as unknown as ElementParser;
+
+        let handled: boolean;
+        try {
+          handled = await detectAndHandleBlockers(
+            { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+            androidDevice,
+            null,
+            parser,
+            async () => {},
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
+      }
+    });
+
+    test("dismissDialog does not tap when only 'close'/'skip' substrings are present", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
+        createMockElement({ text: "Skipping", "resource-id": "com.test:id/skipping" }),
+      ];
+      const parser = {
+        flattenViewHierarchy: () =>
+          elements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let handled: boolean;
+      try {
+        handled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          parser,
+          async () => {},
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    // Issue #6122 follow-up round 6: an earlier inflection-tolerant matcher
+    // stripped a trailing "s" before comparing tokens, so "notes" stripped
+    // to "not" and falsely satisfied the dismiss phrase "not now" — a live
+    // regression on any screen with a "Notes" button next to a "Now"/similar
+    // label. Exact-token matching must reject this while still accepting a
+    // genuine "Not now".
+    test("dismissDialog does not tap a 'Notes now' false positive but taps a genuine 'Not now'", async () => {
+      const { calls: notesCalls, restore: restoreNotes } = captureTapOptions();
+      const notesElements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Notes now", "resource-id": "com.test:id/notes_now" }),
+      ];
+      const notesParser = {
+        flattenViewHierarchy: () =>
+          notesElements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let notesHandled: boolean;
+      try {
+        notesHandled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(notesElements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          notesParser,
+          async () => {},
+        );
+      } finally {
+        restoreNotes();
+      }
+
+      expect(notesHandled).toBe(false);
+      expect(notesCalls).toEqual([]);
+
+      const { calls: genuineCalls, restore: restoreGenuine } = captureTapOptions();
+      const genuineElements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
+      ];
+      const genuineParser = {
+        flattenViewHierarchy: () =>
+          genuineElements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      let genuineHandled: boolean;
+      try {
+        genuineHandled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(genuineElements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          genuineParser,
+          async () => {},
+        );
+      } finally {
+        restoreGenuine();
+      }
+
+      expect(genuineHandled).toBe(true);
+      expect(genuineCalls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
     });
   });
 

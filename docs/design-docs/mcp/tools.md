@@ -172,7 +172,6 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | ⏺️ <code>startTestRecording</code>                             | Starts recording user interactions for <code>exportPlan</code>.                           |
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
-| 🐛 <code>bugReport</code>                                      | Saves screen state, hierarchy, logs, window info, and a screenshot to a shareable report. |
 
 ## Accessibility & session tools
 

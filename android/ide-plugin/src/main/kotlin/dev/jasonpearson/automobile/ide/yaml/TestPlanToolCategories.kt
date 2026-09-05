@@ -46,7 +46,7 @@ object TestPlanToolCategories {
             "deleteSnapshot",
           ),
         "Video recording" to setOf("videoRecording"),
-        "Debugging" to setOf("debugSearch", "bugReport"),
+        "Debugging" to setOf("debugSearch"),
         "Doctor" to setOf("doctor"),
         "Biometrics" to setOf("biometricAuth"),
       )

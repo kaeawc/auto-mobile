@@ -10,7 +10,6 @@ object ValidTools {
       "accessibility",
       "accessibilityFocus",
       "biometricAuth",
-      "bugReport",
       "captureDeviceSnapshot",
       "changeLocalization",
       "clearKeyValueFile",

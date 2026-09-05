@@ -2,10 +2,9 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { DebugSearch } from "../features/debug/DebugSearch";
-import { BugReport } from "../features/debug/BugReport";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { BootedDevice, Platform } from "../models";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   elementContainerSchema,
@@ -34,13 +33,6 @@ export interface DebugSearchArgs {
   caseSensitive?: boolean;
   includeNearMisses?: boolean;
   maxNearMisses?: number;
-}
-
-export interface BugReportArgs {
-  platform: Platform;
-  appId?: string;
-  logcatLines?: number;
-  saveDir?: string;
 }
 
 // Schema definitions
@@ -79,27 +71,6 @@ export const debugSearchSchema = addDeviceTargetingToSchema(debugSearchBaseSchem
   },
 );
 
-export const bugReportSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z.object({
-      platform: platformSchema,
-      appId: z
-        .string()
-        .optional()
-        .describe(
-          "App identifier to filter device logs for a specific app (Android logcat by PID, or iOS device log when supported)",
-        ),
-      logcatLines: z
-        .number()
-        .optional()
-        .describe(
-          "Number of recent device-log entries to include (Android logcat lines / iOS log entries, default: 1000)",
-        ),
-      saveDir: z.string().optional().describe("Directory to save report to"),
-    }),
-  ),
-);
-
 // Register debug tools
 export function registerDebugTools() {
   // Debug Search handler
@@ -129,36 +100,12 @@ export function registerDebugTools() {
     }
   };
 
-  // Bug Report handler
-  const bugReportHandler = async (device: BootedDevice, args: BugReportArgs) => {
-    try {
-      ensureDebugEnabled();
-      const bugReport = new BugReport(device);
-      const result = await bugReport.execute({
-        appId: args.appId,
-        logcatLines: args.logcatLines,
-        saveDir: args.saveDir,
-      });
-      return createJSONToolResponse(result);
-    } catch (error) {
-      throw new ActionableError(`Failed to generate bug report: ${error}`);
-    }
-  };
-
   // Register tools with the tool registry
   ToolRegistry.registerDeviceAware(
     "debugSearch",
     "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.",
     debugSearchSchema,
     debugSearchHandler,
-    { defaultEnabled: true, debugOnly: true },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "bugReport",
-    "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, a bounded device-log tail (Android logcat or iOS device log), window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
-    bugReportSchema,
-    bugReportHandler,
     { defaultEnabled: true, debugOnly: true },
   );
 }

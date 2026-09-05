@@ -104,8 +104,6 @@ export * from "./ExecutePlanResult";
 export * from "./FailureObservation";
 export * from "./RawViewHierarchyResult";
 export * from "./DebugSearchResult";
-export * from "./BugReportResult";
-export * from "./IosDeviceLog";
 export * from "./VisualHighlight";
 export * from "./VideoRecording";
 export * from "./DeviceSnapshot";

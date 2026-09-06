@@ -32,11 +32,14 @@ import {
 } from "./daemonSocketReachability";
 
 /**
- * Bound on the observation-only reachability probe consulted before a
+ * Upper bound on the observation-only reachability probe consulted before a
  * stale-socket recovery unlink in {@link DaemonClient.connect} (issue #6140).
  * Short by design: it only needs to distinguish "something is already bound to
  * this path" from "nothing is listening" before falling back to the existing
- * dead-PID cleanup, not to wait out a slow daemon.
+ * dead-PID cleanup, not to wait out a slow daemon. `connect()` additionally
+ * caps this against whatever remains of the caller's own deadline, so the
+ * probe can never itself make `connect(timeoutMs)` overrun its advertised
+ * timeout.
  */
 const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
 
@@ -284,7 +287,13 @@ export class DaemonClient {
       await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       return;
     } catch (error) {
-      if (!signal?.aborted) {
+      // Bound the recovery probe by whatever remains of the caller's own
+      // deadline instead of always spending the full fixed cap — otherwise a
+      // stalled probe could make connect(timeoutMs) overrun its advertised
+      // timeout. Skip recovery entirely once nothing remains: there is no
+      // budget left for a retried connectOnce anyway.
+      const remainingForProbe = deadline - this.timer.now();
+      if (!signal?.aborted && remainingForProbe > 0) {
         // Never fall through to the dead-PID unlink while something is still
         // actually bound to this socket path (issue #6140): a startup race can
         // leave the PID file naming the just-exited losing child while a live
@@ -293,7 +302,7 @@ export class DaemonClient {
         // only decides whether the existing dead-PID cleanup below is safe to run.
         const reachable = await this.staleSocketRecoveryReachability().isReachable(
           this.socketPath,
-          STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS,
+          Math.min(STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS, remainingForProbe),
         );
         // Recheck after the await: the caller can abort WHILE this probe is
         // in flight, and the pre-await check above cannot see that. Proceeding

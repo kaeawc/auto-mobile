@@ -28,7 +28,9 @@
         "oneOf": [
           {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Device label; must contain at least one non-whitespace character (a whitespace-only label like \" \" satisfies minLength but is rejected by the daemon's validateDevicesField, which trims labels before checking emptiness -- #6215 review)."
           },
           {
             "$ref": "#/$defs/planDevice"
@@ -141,8 +143,9 @@
       "properties": {
         "label": {
           "type": "string",
-          "description": "Device label for multi-device routing",
-          "minLength": 1
+          "description": "Device label for multi-device routing; must contain at least one non-whitespace character.",
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "platform": {
           "type": "string",
@@ -173,9 +176,7 @@
           "description": "Tool-specific parameters (can also be specified as top-level properties)"
         },
         "device": {
-          "type": "string",
-          "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
-          "minLength": 1
+          "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools). Type-constrained in allOf below, gated on whether params.device overrides it (params-wins precedence)."
         },
         "label": {
           "type": "string",
@@ -199,6 +200,37 @@
       },
       "description": "A step can have tool-specific parameters either in a 'params' object or as top-level properties (e.g., 'id', 'text', 'appId', 'direction', etc.)",
       "allOf": [
+        {
+          "$comment": "Generic (all tools): params.device (when present) overrides inline device at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, params precedence), so the inline sibling is discarded and must NOT be type-checked in that case -- e.g. a nested criticalSection/barrier sub-step with an invalid inline device but a valid params.device must not be false-rejected. Conversely, when params DOES declare device, its own value must still be validated (non-blank string) -- most tools have no tool-specific params schema to catch an invalid params.device otherwise, so a plan with e.g. params.device: 456 would normalize to an invalid device and only fail at the daemon (#6215 review).",
+          "if": {
+            "required": ["params"],
+            "properties": { "params": { "type": "object", "required": ["device"] } }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "properties": {
+                  "device": {
+                    "type": "string",
+                    "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "device": {
+                "type": "string",
+                "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -753,6 +785,393 @@
                   "properties": {
                     "biometrics": {
                       "$ref": "#/$defs/biometricStateInput"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "$comment": "criticalSection accepts lock/deviceCount/steps/timeout either inline on the step (like dragAndDrop's source/target), nested under params, or SPLIT across both (e.g. lock inline, deviceCount in params) -- PlanNormalizer merges inline fields and params together before execution, so a field counts as present wherever it appears. Each required field is validated against that merged union independently, not as an all-inline-or-all-params choice. Additionally, when params declares a field, params WINS at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, same precedence #6090/#6107 established for networkCondition/doNotDisturb) -- so the inline sibling is discarded and must NOT be type-checked in that case, or a plan with an invalid-but-overridden inline value would be false-rejected (#6215 review).",
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "criticalSection"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "allOf": [
+              {
+                "$comment": "Apply criticalSectionParams' shape ONLY when params is actually an object. PlanNormalizer.isRecord treats a non-object params (e.g. null) as absent ({}), so an inline-form step with params: null must still validate via its inline fields below, not fail the unconditional object-shaped $ref (#6215 review).",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object" } }
+                },
+                "then": {
+                  "properties": {
+                    "params": {
+                      "$ref": "#/$defs/criticalSectionParams"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "__lockNamespace is a reserved internal field injected by PlanExecutor at runtime to scope a plan's lock state -- an authored plan must never set it, inline or under params. Rejected explicitly here because criticalSectionParams' additionalProperties stays true, so simply omitting it from the declared properties would not block it. The params branch requires params to be an object before trusting its 'required' check -- required vacuously passes against a non-object value like params: null, which would otherwise misfire this rejection on every step with params: null (#6215 review).",
+                "not": {
+                  "anyOf": [
+                    { "required": ["__lockNamespace"] },
+                    {
+                      "required": ["params"],
+                      "properties": {
+                        "params": { "type": "object", "required": ["__lockNamespace"] }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "anyOf": [
+                  { "required": ["lock"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["lock"] } }
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  { "required": ["deviceCount"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  { "required": ["steps"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["steps"] } }
+                  }
+                ]
+              },
+              {
+                "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["lock"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "lock": {
+                      "type": "string",
+                      "description": "Global lock identifier for synchronization across devices",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceCount override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceCount": {
+                      "type": "integer",
+                      "description": "Expected number of devices that must reach the barrier before execution proceeds",
+                      "minimum": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.steps override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["steps"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "steps": {
+                      "type": "array",
+                      "description": "Steps to execute serially within the critical section",
+                      "minItems": 1,
+                      "items": {
+                        "$ref": "#/$defs/planStep"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.timeout override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["timeout"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "timeout": {
+                      "type": "integer",
+                      "description": "Barrier timeout in milliseconds (default: 30000ms)",
+                      "exclusiveMinimum": 0,
+                      "maximum": 2147483647,
+                      "default": 30000
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["platform"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": ["android", "ios"],
+                      "description": "Platform"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.sessionUuid override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["sessionUuid"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "sessionUuid": {
+                      "type": "string",
+                      "description": "Session UUID for device targeting"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.keepScreenAwake override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["keepScreenAwake"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "keepScreenAwake": {
+                      "type": "boolean",
+                      "description": "Keep physical Android devices awake during the session (default: true)"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceId override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["deviceId"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceId": {
+                      "type": "string",
+                      "description": "Device ID override"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "$comment": "barrier accepts lock/deviceCount/timeout either inline on the step, nested under params, or split across both, same union-of-locations and params-wins-override rules as criticalSection (#6215 review).",
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "barrier"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "allOf": [
+              {
+                "$comment": "Apply barrierParams' shape ONLY when params is actually an object. PlanNormalizer.isRecord treats a non-object params (e.g. null) as absent ({}), so an inline-form step with params: null must still validate via its inline fields below, not fail the unconditional object-shaped $ref (#6215 review).",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object" } }
+                },
+                "then": {
+                  "properties": {
+                    "params": {
+                      "$ref": "#/$defs/barrierParams"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "__lockNamespace is a reserved internal field injected by PlanExecutor at runtime to scope a plan's lock state -- an authored plan must never set it, inline or under params. Rejected explicitly here because barrierParams' additionalProperties stays true, so simply omitting it from the declared properties would not block it. The params branch requires params to be an object before trusting its 'required' check -- required vacuously passes against a non-object value like params: null, which would otherwise misfire this rejection on every step with params: null (#6215 review).",
+                "not": {
+                  "anyOf": [
+                    { "required": ["__lockNamespace"] },
+                    {
+                      "required": ["params"],
+                      "properties": {
+                        "params": { "type": "object", "required": ["__lockNamespace"] }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "anyOf": [
+                  { "required": ["lock"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["lock"] } }
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  { "required": ["deviceCount"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                  }
+                ]
+              },
+              {
+                "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["lock"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "lock": {
+                      "type": "string",
+                      "description": "Shared barrier name; all devices using the same name synchronize together",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceCount override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceCount": {
+                      "type": "integer",
+                      "description": "Number of devices that must arrive before the barrier lifts",
+                      "minimum": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.timeout override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["timeout"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "timeout": {
+                      "type": "integer",
+                      "description": "Barrier timeout in milliseconds (default: 30000ms)",
+                      "exclusiveMinimum": 0,
+                      "maximum": 2147483647,
+                      "default": 30000
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["platform"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": ["android", "ios"],
+                      "description": "Platform"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.sessionUuid override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["sessionUuid"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "sessionUuid": {
+                      "type": "string",
+                      "description": "Session UUID for device targeting"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.keepScreenAwake override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["keepScreenAwake"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "keepScreenAwake": {
+                      "type": "boolean",
+                      "description": "Keep physical Android devices awake during the session (default: true)"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceId override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object", "required": ["deviceId"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceId": {
+                      "type": "string",
+                      "description": "Device ID override"
                     }
                   }
                 }
@@ -1444,8 +1863,7 @@
     },
     "criticalSectionParams": {
       "type": "object",
-      "required": ["lock", "steps", "deviceCount"],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "lock": {
           "type": "string",
@@ -1468,11 +1886,78 @@
         "timeout": {
           "type": "integer",
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647,
           "default": 30000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
         }
       },
-      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices"
+      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/steps/deviceCount are intentionally NOT required here: a plan may declare any of them inline on the step instead of nested here, and PlanNormalizer merges the two -- the planStep if/then block enforces required-ness against that merged union, not against this def in isolation."
+    },
+    "barrierParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "lock": {
+          "type": "string",
+          "description": "Shared barrier name; all devices using the same name synchronize together",
+          "minLength": 1
+        },
+        "deviceCount": {
+          "type": "integer",
+          "description": "Number of devices that must arrive before the barrier lifts",
+          "minimum": 1
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Barrier timeout in milliseconds (default: 30000ms)",
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647,
+          "default": 30000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block. __lockNamespace is deliberately NOT declared here (and is explicitly rejected in the criticalSection/barrier if/then blocks below): it is injected internally by PlanExecutor at runtime to scope a plan's lock state, and an authored plan must never set it -- two participants authoring different truthy __lockNamespace values for the same lock would pass every per-lock feasibility check yet wait in separate namespaced barriers at runtime until timeout."
     }
   }
 }

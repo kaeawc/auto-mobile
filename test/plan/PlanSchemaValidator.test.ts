@@ -605,6 +605,290 @@ steps:
       expect(result.errors!.some((e) => e.field.includes("devices"))).toBe(true);
     });
 
+    it("should reject a whitespace-only device label", () => {
+      // A whitespace-only label like " " satisfies minLength:1 but is not a
+      // real device label -- the pattern requiring a non-whitespace
+      // character catches it at the schema level too (#6215 review).
+      const yaml = `
+name: test-plan
+devices:
+  - " "
+steps:
+  - tool: observe
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a non-coordination step's params.device when it is not a string", () => {
+      // For a tool with no tool-specific params schema (e.g. tapOn), an
+      // invalid inline device is skipped once params declares device (params
+      // wins at normalization), but nothing previously validated params.device
+      // itself -- a plan with params.device: 456 would normalize to an
+      // invalid device and only fail at the daemon (#6215 review).
+      const yaml = `
+name: tapon-invalid-params-device-number
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: 123
+    params:
+      device: 456
+      text: hi
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a non-coordination step's params.device when it is whitespace-only", () => {
+      const yaml = `
+name: tapon-blank-params-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    params:
+      device: " "
+      text: hi
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a valid params.device overriding an invalid inline device", () => {
+      const yaml = `
+name: tapon-valid-params-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: 123
+    params:
+      device: A
+      text: hi
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step's params.device when it is whitespace-only", () => {
+      // Dovetails with fp0eM: params.device: " " passed the
+      // criticalSectionParams/barrierParams schema (just type: string)
+      // before the generic non-blank constraint was added; it becomes
+      // step.device = " " after normalization, which validateDeviceLabelsPresent
+      // rejects at runtime (#6215 review).
+      const yaml = `
+name: barrier-blank-params-device
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: " "
+      lock: sync1
+      deviceCount: 2
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an authored '__lockNamespace' on a barrier step's params", () => {
+      // __lockNamespace is a reserved field injected internally by
+      // PlanExecutor at runtime to scope a plan's lock state. If two
+      // participants authored different truthy values for the same lock,
+      // every per-lock feasibility check would pass yet they'd wait in
+      // separate namespaced barriers at runtime until timeout (#6215
+      // review).
+      const yaml = `
+name: barrier-authored-lock-namespace
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+      __lockNamespace: one
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+      __lockNamespace: two
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an authored inline '__lockNamespace' on a barrier step", () => {
+      const yaml = `
+name: barrier-authored-lock-namespace-inline
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: 2
+    __lockNamespace: one
+  - tool: barrier
+    device: B
+    lock: sync1
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an authored '__lockNamespace' on a criticalSection step's params", () => {
+      const yaml = `
+name: critical-section-authored-lock-namespace
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 1
+      __lockNamespace: one
+      steps:
+        - tool: observe
+          params:
+            device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a normal barrier plan that does not author '__lockNamespace'", () => {
+      const yaml = `
+name: barrier-normal-no-lock-namespace
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier timeout exceeding setTimeout's usable range", () => {
+      // barrierTools.ts declares timeout as z.number().int().positive(), and
+      // CriticalSectionCoordinator.waitAtBarrier passes it straight to
+      // production setTimeout -- Node/Bun clamp any delay >= 2^31
+      // (2147483648) to 1ms instead of honoring it, so a value at or beyond
+      // that range passes this schema's simple exclusiveMinimum check yet
+      // times out almost instantly at runtime (#6215 review).
+      const yaml = `
+name: barrier-timeout-over-cap
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+      timeout: 2147483648
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier timeout at exactly setTimeout's usable range", () => {
+      const yaml = `
+name: barrier-timeout-at-cap
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+      timeout: 2147483647
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection timeout exceeding setTimeout's usable range", () => {
+      // criticalSectionTools.ts has the identical z.number().int().positive()
+      // contract as barrier, so the same cap applies.
+      const yaml = `
+name: critical-section-timeout-over-cap
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 1
+      timeout: 2147483648
+      steps:
+        - tool: observe
+          params:
+            device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a criticalSection timeout at exactly setTimeout's usable range", () => {
+      const yaml = `
+name: critical-section-timeout-at-cap
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 1
+      timeout: 2147483647
+      steps:
+        - tool: observe
+          params:
+            device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should provide line numbers for field errors when possible", () => {
       const yaml = `
 name: test-plan
@@ -840,8 +1124,26 @@ steps:
     });
 
     it("should accept steps with tool-specific parameters", () => {
-      // Note: Tool-specific parameter validation happens at runtime by the tool handler,
-      // not by the JSON Schema. The schema only validates the basic step structure.
+      // Note: most tool-specific parameter validation happens at runtime by the
+      // tool handler, not by the JSON Schema. The schema only validates the
+      // basic step structure for the general case.
+      const yaml = `
+name: generic-tool-test
+steps:
+  - tool: tapOn
+    params:
+      text: Login
+      customField: anything
+`;
+      const result = validator.validateYaml(yaml);
+      // This is valid from a schema perspective - tapOn params are validated at runtime
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection step missing required params (schema-level parity with barrier)", () => {
+      // Unlike most tools, criticalSection/barrier ARE validated at the schema
+      // level (parity fix #6175): missing 'deviceCount'/'steps' surfaces here
+      // instead of only at a runtime coordination timeout.
       const yaml = `
 name: critical-section-test
 steps:
@@ -850,8 +1152,479 @@ steps:
       lock: sync-point
 `;
       const result = validator.validateYaml(yaml);
-      // This is valid from a schema perspective - tool params are validated at runtime
+      expect(result.valid).toBe(false);
+    });
+
+    it("should validate barrier parameters", () => {
+      const yaml = `
+name: barrier-test
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+  - tool: barrier
+    params:
+      device: B
+      lock: sync-point
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step missing required params", () => {
+      const yaml = `
+name: barrier-missing-devicecount
+steps:
+  - tool: barrier
+    params:
+      lock: sync-point
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier step with INLINE coordination params (no nested params object)", () => {
+      // Plans may place lock/deviceCount/device directly on the step, the
+      // same inline-vs-params shape criticalSection (and most other tools)
+      // accept -- PlanNormalizer merges inline fields into params before
+      // execution (#6215 review).
+      const yaml = `
+name: barrier-inline-test
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept a barrier step with coordination fields SPLIT across inline and params", () => {
+      // PlanNormalizer merges inline fields and params together before
+      // execution, so a field counts as present wherever it appears -- lock
+      // inline + deviceCount in params must validate (#6215 review).
+      const yaml = `
+name: barrier-split-fields-test
+devices:
+  - A
+steps:
+  - tool: barrier
+    lock: sync-point
+    params:
+      device: A
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step missing deviceCount from BOTH inline and params", () => {
+      const yaml = `
+name: barrier-split-fields-missing-devicecount
+devices:
+  - A
+steps:
+  - tool: barrier
+    lock: sync-point
+    params:
+      device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a criticalSection step with INLINE coordination params", () => {
+      const yaml = `
+name: critical-section-inline-test
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    lock: sync-point
+    deviceCount: 1
+    steps:
+      - tool: tapOn
+        params:
+          device: A
+          text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step with a zero timeout", () => {
+      const yaml = `
+name: barrier-zero-timeout
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      timeout: 0
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a barrier step with a malformed platform value", () => {
+      // addDeviceTargetingToSchema restricts platform to android/ios at
+      // execution; the authoring schema must reject an invalid value too,
+      // instead of only failing at execution (#6215 review).
+      const yaml = `
+name: barrier-malformed-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      platform: windows
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier step with a valid platform value", () => {
+      const yaml = `
+name: barrier-valid-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      platform: android
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection step with a malformed platform value", () => {
+      const yaml = `
+name: critical-section-malformed-platform
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 1
+      platform: windows
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a criticalSection sub-step with a discarded invalid inline device overridden by a valid params.device", () => {
+      // PlanNormalizer.normalizeSteps merges params over inline fields for
+      // EVERY step, not just the outer criticalSection/barrier step -- a
+      // nested sub-step is itself validated as a planStep (via the
+      // criticalSectionParams.steps $ref), so this precedence must be
+      // honored there too, or a discarded, invalid inline device would
+      // false-reject an otherwise-valid plan (#6215 review).
+      const yaml = `
+name: critical-section-substep-device-override
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 1
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            device: A
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection sub-step with an invalid inline device when params does not override it", () => {
+      const yaml = `
+name: critical-section-substep-invalid-device
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 1
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an invalid inline device when params is null (not an object)", () => {
+      // JSON Schema's "required" keyword vacuously passes against a
+      // non-object value, so a naive "params has device" guard would treat
+      // params: null as if it declared 'device', wrongly skipping the
+      // inline check. The guard must require params to be an object before
+      // trusting its presence (#6215 review).
+      const yaml = `
+name: tapon-null-params-invalid-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: 123
+    params: null
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a valid inline device when params is null (not an object)", () => {
+      const yaml = `
+name: tapon-null-params-valid-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: A
+    params: null
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept an inline barrier with params: null and valid inline lock/deviceCount/device", () => {
+      // PlanNormalizer.isRecord treats a non-object params (e.g. null) as
+      // absent ({}), so an inline-form barrier step with params: null is a
+      // previously-supported normalized form -- the unconditional
+      // barrierParams $ref (which requires an object) must not reject it;
+      // only the inline fields should be validated (#6215 review).
+      const yaml = `
+name: barrier-inline-null-params
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: 2
+    params: null
+  - tool: barrier
+    device: B
+    lock: sync1
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject an inline barrier with params: null and an invalid inline field", () => {
+      const yaml = `
+name: barrier-inline-null-params-invalid
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: not-a-number
+    params: null
+  - tool: barrier
+    device: B
+    lock: sync1
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a barrier step with an inline malformed platform value", () => {
+      // The inline form must be constrained the same as the nested-params
+      // form, or PlanNormalizer moving it into params later would make the
+      // runtime addDeviceTargetingToSchema reject a plan this authoring
+      // schema accepted (#6215 review).
+      const yaml = `
+name: barrier-inline-malformed-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    platform: windows
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier step with an inline valid platform value", () => {
+      const yaml = `
+name: barrier-inline-valid-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    platform: android
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept a barrier step with an inline malformed platform overridden by a valid params.platform", () => {
+      const yaml = `
+name: barrier-inline-platform-override
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    platform: windows
+    params:
+      platform: android
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept a barrier step with a positive timeout", () => {
+      const yaml = `
+name: barrier-positive-timeout
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      timeout: 5000
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection step with a zero timeout", () => {
+      const yaml = `
+name: critical-section-zero-timeout
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      lock: sync-point
+      deviceCount: 1
+      timeout: 0
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier whose inline deviceCount is invalid but params.deviceCount (the effective, params-wins value) is valid", () => {
+      // PlanNormalizer's { ...inlineParams, ...paramsFromStep } merge means
+      // params.deviceCount overrides the inline sibling at normalization, so
+      // the discarded inline value must NOT be schema-validated (#6215
+      // review, mirroring the #6090/#6107 networkCondition/doNotDisturb
+      // override precedence).
+      const yaml = `
+name: barrier-inline-invalid-params-valid
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: not-a-number
+    params:
+      deviceCount: 2
+  - tool: barrier
+    device: B
+    lock: sync-point
+    params:
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier whose inline deviceCount is valid but params.deviceCount (the effective, params-wins value) is invalid", () => {
+      const yaml = `
+name: barrier-inline-valid-params-invalid
+devices:
+  - A
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    params:
+      deviceCount: 0
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
     });
 
     it("should validate expectations array", () => {

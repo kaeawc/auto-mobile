@@ -35,7 +35,7 @@ object TestPlanToolCategories {
             "deleteDevice",
           ),
         "Device configuration" to setOf("rotate", "shake", "systemTray", "changeLocalization"),
-        "Plan execution" to setOf("executePlan", "criticalSection"),
+        "Plan execution" to setOf("executePlan", "criticalSection", "barrier"),
         "Deep links" to setOf("getDeepLinks"),
         "Navigation graph" to setOf("getNavigationGraph", "explore", "identifyInteractions"),
         "Snapshots" to

@@ -113,6 +113,7 @@ class TestPlanValidatorTest {
       steps:
         - tool: criticalSection
           params:
+            device: A
             lock: sync-point
             deviceCount: 2
             steps:
@@ -125,6 +126,1675 @@ class TestPlanValidatorTest {
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue(result.valid, "Critical section plan should be valid")
+  }
+
+  @Test
+  fun `validates barrier parameters`() {
+    val yaml =
+      """
+      name: barrier-test
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Barrier plan should be valid")
+  }
+
+  @Test
+  fun `rejects a plan with valid barriers plus a device-less non-coordination step`() {
+    // devices=[A,B] and both barrier steps are individually valid, but the
+    // trailing tapOn step declares no device at all. The daemon's
+    // PlanValidator.validateDeviceLabelsPresent checks every step
+    // generically, not just barrier/criticalSection -- this must be
+    // rejected here too (#6215 review).
+    val yaml =
+      """
+      name: barrier-plan-with-device-less-tapon
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: tapOn
+          params:
+            text: Continue
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A device-less tapOn step under a plan that declares devices should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects a plan with valid barriers plus a non-coordination step targeting an undeclared device`() {
+    val yaml =
+      """
+      name: barrier-plan-with-undeclared-device-tapon
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: tapOn
+          params:
+            device: C
+            text: Continue
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A tapOn step targeting an undeclared device should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects barrier missing lock`() {
+    val yaml =
+      """
+      name: barrier-missing-lock
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier missing 'lock' should be invalid")
+  }
+
+  @Test
+  fun `rejects barrier missing deviceCount`() {
+    val yaml =
+      """
+      name: barrier-missing-devicecount
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier missing 'deviceCount' should be invalid")
+  }
+
+  @Test
+  fun `rejects barrier with wrong-typed deviceCount`() {
+    val yaml =
+      """
+      name: barrier-bad-devicecount-type
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: "two"
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier with a non-numeric deviceCount should be invalid")
+  }
+
+  @Test
+  fun `rejects criticalSection missing lock`() {
+    val yaml =
+      """
+      name: critical-section-missing-lock
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            deviceCount: 2
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "criticalSection missing 'lock' should be invalid")
+  }
+
+  @Test
+  fun `rejects criticalSection missing deviceCount`() {
+    val yaml =
+      """
+      name: critical-section-missing-devicecount
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            lock: sync-point
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "criticalSection missing 'deviceCount' should be invalid")
+  }
+
+  @Test
+  fun `accepts barrier with inline coordination params (no nested params object)`() {
+    // Plans may place lock/deviceCount/device directly on the step, the same
+    // inline-vs-params shape criticalSection (and most other tools) accept.
+    val yaml =
+      """
+      name: barrier-inline-test
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+        - tool: barrier
+          device: B
+          lock: sync-point
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Inline-form barrier plan should be valid")
+  }
+
+  @Test
+  fun `accepts barrier with coordination fields split across inline and params`() {
+    // PlanNormalizer merges inline fields and params together before
+    // execution, so a field counts as present wherever it appears -- lock
+    // inline + deviceCount in params must validate. A second device's
+    // arrival is included so the lock's declared deviceCount=2 is
+    // satisfiable by 2 distinct devices.
+    val yaml =
+      """
+      name: barrier-split-fields-test
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          lock: sync-point
+          params:
+            device: A
+            deviceCount: 2
+        - tool: barrier
+          lock: sync-point
+          params:
+            device: B
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Split-field barrier plan should be valid")
+  }
+
+  @Test
+  fun `rejects barrier missing deviceCount from both inline and params`() {
+    val yaml =
+      """
+      name: barrier-split-fields-missing-devicecount
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          lock: sync-point
+          params:
+            device: A
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier missing deviceCount from both locations should be invalid")
+  }
+
+  @Test
+  fun `accepts criticalSection with inline coordination params`() {
+    val yaml =
+      """
+      name: critical-section-inline-test
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          device: A
+          lock: sync-point
+          deviceCount: 1
+          steps:
+            - tool: tapOn
+              params:
+                device: A
+                text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Inline-form criticalSection plan should be valid")
+  }
+
+  @Test
+  fun `rejects barrier with a zero timeout`() {
+    val yaml =
+      """
+      name: barrier-zero-timeout
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            timeout: 0
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "barrier with timeout=0 should be invalid")
+  }
+
+  @Test
+  fun `rejects barrier with a malformed platform value`() {
+    // addDeviceTargetingToSchema restricts platform to android/ios at
+    // execution; the authoring schema must reject an invalid value too,
+    // instead of only failing at execution (#6215 review).
+    val yaml =
+      """
+      name: barrier-malformed-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            platform: windows
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "barrier with platform=windows should be invalid")
+  }
+
+  @Test
+  fun `accepts barrier with a valid platform value`() {
+    val yaml =
+      """
+      name: barrier-valid-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            platform: android
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+            platform: android
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "barrier with platform=android should be valid")
+  }
+
+  @Test
+  fun `accepts a criticalSection sub-step with a discarded invalid inline device overridden by a valid params device`() {
+    // PlanNormalizer.normalizeSteps merges params over inline fields for
+    // EVERY step, not just the outer criticalSection/barrier step -- a
+    // nested sub-step is itself validated as a planStep (via the
+    // criticalSectionParams.steps $ref), so this precedence must be
+    // honored there too (#6215 review).
+    val yaml =
+      """
+      name: critical-section-substep-device-override
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 1
+            steps:
+              - tool: tapOn
+                device: 123
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A discarded invalid inline device overridden by a valid params.device should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects a criticalSection sub-step with an invalid inline device when params does not override it`() {
+    val yaml =
+      """
+      name: critical-section-substep-invalid-device
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 1
+            steps:
+              - tool: tapOn
+                device: 123
+                params:
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An un-overridden invalid inline device should be invalid")
+  }
+
+  @Test
+  fun `rejects an invalid inline device when params is null`() {
+    // JSON Schema's "required" keyword vacuously passes against a
+    // non-object value, so a naive "params has device" guard would treat
+    // params: null as if it declared 'device', wrongly skipping the inline
+    // check. The guard must require params to be an object before
+    // trusting its presence (#6215 review).
+    val yaml =
+      """
+      name: tapon-null-params-invalid-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: 123
+          params: null
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An invalid inline device with params: null should be invalid")
+  }
+
+  @Test
+  fun `accepts a valid inline device when params is null`() {
+    val yaml =
+      """
+      name: tapon-null-params-valid-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: A
+          params: null
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A valid inline device with params: null should be valid")
+  }
+
+  @Test
+  fun `rejects a whitespace-only declared device label`() {
+    // A whitespace-only label like " " satisfies the schema's minLength:1
+    // (and now the non-whitespace pattern too), but the daemon trims
+    // labels before checking emptiness -- mirrors
+    // PlanValidator.validateDevicesField (#6215 review).
+    val yaml =
+      """
+      name: whitespace-only-device-label
+      devices:
+        - " "
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A whitespace-only device label should be invalid")
+  }
+
+  @Test
+  fun `accepts an inline barrier with params null and valid inline lock deviceCount device`() {
+    // PlanNormalizer.isRecord treats a non-object params (e.g. null) as
+    // absent ({}), so an inline-form barrier step with params: null is a
+    // previously-supported normalized form -- the unconditional
+    // barrierParams $ref (which requires an object) must not reject it;
+    // only the inline fields should be validated (#6215 review).
+    val yaml =
+      """
+      name: barrier-inline-null-params
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync1
+          deviceCount: 2
+          params: null
+        - tool: barrier
+          device: B
+          lock: sync1
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "An inline barrier with params: null and valid inline fields should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects an inline barrier with params null and an invalid inline field`() {
+    val yaml =
+      """
+      name: barrier-inline-null-params-invalid
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync1
+          deviceCount: not-a-number
+          params: null
+        - tool: barrier
+          device: B
+          lock: sync1
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An invalid inline deviceCount with params: null should be invalid")
+  }
+
+  @Test
+  fun `rejects the same lock name used by both a criticalSection and a barrier step`() {
+    // Both tools share the runtime coordinator's lock namespace and
+    // expected-count state, so a criticalSection A/B pair and a barrier
+    // C/D pair both using lock "shared" with deviceCount=2 can pair
+    // mismatched participants and overwrite each other's expected count.
+    val yaml =
+      """
+      name: lock-shared-across-tool-types
+      devices:
+        - A
+        - B
+        - C
+        - D
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: shared
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: A
+        - tool: criticalSection
+          params:
+            device: B
+            lock: shared
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: B
+        - tool: barrier
+          params:
+            device: C
+            lock: shared
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: D
+            lock: shared
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A lock shared between criticalSection and barrier should be invalid")
+  }
+
+  @Test
+  fun `accepts criticalSection and barrier using distinct lock names`() {
+    val yaml =
+      """
+      name: distinct-locks-per-tool-type
+      devices:
+        - A
+        - B
+        - C
+        - D
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: cs-lock
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: A
+        - tool: criticalSection
+          params:
+            device: B
+            lock: cs-lock
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: B
+        - tool: barrier
+          params:
+            device: C
+            lock: barrier-lock
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: D
+            lock: barrier-lock
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Distinct lock names per tool type should be valid")
+  }
+
+  @Test
+  fun `rejects an authored __lockNamespace on a barrier step's params`() {
+    // __lockNamespace is a reserved field injected internally by
+    // PlanExecutor at runtime to scope a plan's lock state. If two
+    // participants authored different truthy values for the same lock,
+    // every per-lock feasibility check would pass yet they'd wait in
+    // separate namespaced barriers at runtime until timeout (#6215 review).
+    val yaml =
+      """
+      name: barrier-authored-lock-namespace
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+            __lockNamespace: one
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+            __lockNamespace: two
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An authored __lockNamespace on a barrier step should be invalid")
+  }
+
+  @Test
+  fun `rejects an authored inline __lockNamespace on a barrier step`() {
+    val yaml =
+      """
+      name: barrier-authored-lock-namespace-inline
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync1
+          deviceCount: 2
+          __lockNamespace: one
+        - tool: barrier
+          device: B
+          lock: sync1
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "An authored inline __lockNamespace on a barrier step should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects an authored __lockNamespace on a criticalSection step's params`() {
+    val yaml =
+      """
+      name: critical-section-authored-lock-namespace
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 1
+            __lockNamespace: one
+            steps:
+              - tool: observe
+                params:
+                  device: A
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "An authored __lockNamespace on a criticalSection step should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a normal barrier plan that does not author __lockNamespace`() {
+    val yaml =
+      """
+      name: barrier-normal-no-lock-namespace
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A normal barrier plan without __lockNamespace should be valid")
+  }
+
+  @Test
+  fun `rejects a barrier timeout exceeding setTimeout's usable range`() {
+    val yaml =
+      """
+      name: barrier-timeout-over-cap
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+            timeout: 2147483648
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A barrier timeout exceeding setTimeout's usable range should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a barrier timeout at exactly setTimeout's usable range`() {
+    val yaml =
+      """
+      name: barrier-timeout-at-cap
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+            timeout: 2147483647
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A barrier timeout at exactly setTimeout's usable range should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects a criticalSection timeout exceeding setTimeout's usable range`() {
+    val yaml =
+      """
+      name: critical-section-timeout-over-cap
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 1
+            timeout: 2147483648
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: OK
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A criticalSection timeout exceeding setTimeout's usable range should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a criticalSection timeout at exactly setTimeout's usable range`() {
+    val yaml =
+      """
+      name: critical-section-timeout-at-cap
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 1
+            timeout: 2147483647
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: OK
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A criticalSection timeout at exactly setTimeout's usable range should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects devices mixing a plain-string label with a label platform definition`() {
+    val yaml =
+      """
+      name: mixed-device-formats
+      devices:
+        - A
+        - label: B
+          platform: android
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Mixed device declaration formats should be invalid")
+  }
+
+  @Test
+  fun `accepts devices that are all plain-string labels`() {
+    val yaml =
+      """
+      name: all-label-devices
+      devices:
+        - A
+        - B
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "All plain-string device labels should be valid")
+  }
+
+  @Test
+  fun `accepts devices that are all label platform definitions`() {
+    val yaml =
+      """
+      name: all-definition-devices
+      devices:
+        - label: A
+          platform: android
+        - label: B
+          platform: ios
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "All label/platform device definitions should be valid")
+  }
+
+  @Test
+  fun `rejects two structurally-different device definitions sharing a label`() {
+    // JSON Schema's uniqueItems only compares whole entries, so an Android
+    // "A" and an iOS "A" definition pass it -- but they collapse to the
+    // same label, and the daemon's validateDevicesField rejects the
+    // duplicate regardless of the definitions' other fields (#6215 review).
+    val yaml =
+      """
+      name: duplicate-label-across-definitions
+      devices:
+        - label: A
+          platform: android
+        - label: A
+          platform: ios
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Two structurally-different device definitions sharing a label should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects a non-coordination step's params device when it is not a string`() {
+    // For a tool with no tool-specific params schema (e.g. tapOn), an
+    // invalid inline device is skipped once params declares device (params
+    // wins at normalization), but nothing previously validated params.device
+    // itself -- a plan with params.device: 456 would normalize to an
+    // invalid device and only fail at the daemon (#6215 review).
+    val yaml =
+      """
+      name: tapon-invalid-params-device-number
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            device: 456
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A non-string params.device should be invalid")
+  }
+
+  @Test
+  fun `rejects a non-coordination step's params device when it is whitespace-only`() {
+    val yaml =
+      """
+      name: tapon-blank-params-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          params:
+            device: " "
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A whitespace-only params.device should be invalid")
+  }
+
+  @Test
+  fun `accepts a valid params device overriding an invalid inline device`() {
+    val yaml =
+      """
+      name: tapon-valid-params-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A valid params.device overriding an invalid inline device should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects a barrier step's params device when it is whitespace-only`() {
+    val yaml =
+      """
+      name: barrier-blank-params-device
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: " "
+            lock: sync1
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A whitespace-only barrier params.device should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier with an inline malformed platform value`() {
+    // The inline form must be constrained the same as the nested-params
+    // form, or PlanNormalizer moving it into params later would make the
+    // runtime addDeviceTargetingToSchema reject a plan this authoring
+    // schema accepted (#6215 review).
+    val yaml =
+      """
+      name: barrier-inline-malformed-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+          platform: windows
+        - tool: barrier
+          device: B
+          lock: sync-point
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An inline platform=windows should be invalid")
+  }
+
+  @Test
+  fun `accepts a barrier with an inline valid platform value`() {
+    val yaml =
+      """
+      name: barrier-inline-valid-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+          platform: android
+        - tool: barrier
+          device: B
+          lock: sync-point
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "An inline platform=android should be valid")
+  }
+
+  @Test
+  fun `accepts barrier with a positive timeout`() {
+    // Both A and B arrive so the declared deviceCount=2 is satisfiable by 2
+    // distinct devices.
+    val yaml =
+      """
+      name: barrier-positive-timeout
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            timeout: 5000
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+            timeout: 5000
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "barrier with a positive timeout should be valid")
+  }
+
+  @Test
+  fun `rejects criticalSection with a zero timeout`() {
+    val yaml =
+      """
+      name: critical-section-zero-timeout
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            lock: sync-point
+            deviceCount: 1
+            timeout: 0
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "criticalSection with timeout=0 should be invalid")
+  }
+
+  @Test
+  fun `accepts barrier with invalid inline deviceCount overridden by a valid params deviceCount`() {
+    // PlanNormalizer's params-wins merge discards the inline sibling, so the
+    // effective (params) value is what must be validated.
+    val yaml =
+      """
+      name: barrier-inline-invalid-params-valid
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: not-a-number
+          params:
+            deviceCount: 2
+        - tool: barrier
+          device: B
+          lock: sync-point
+          params:
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "Effective (params) deviceCount should be validated, not the discarded inline value",
+    )
+  }
+
+  @Test
+  fun `rejects barrier with a valid inline deviceCount overridden by an invalid params deviceCount`() {
+    val yaml =
+      """
+      name: barrier-inline-valid-params-invalid
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+          params:
+            deviceCount: 0
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Effective (params) deviceCount=0 should be rejected even though inline is valid",
+    )
+  }
+
+  @Test
+  fun `rejects a barrier plan with no top-level devices declaration`() {
+    // Mirrors the daemon's PlanValidator.validateMultiDeviceRequirements: a
+    // barrier step is a multi-device coordination primitive, so a plan using
+    // it must declare 'devices'. Without this check, IDE/JUnit validation
+    // would bless a plan the daemon rejects at load time (#6215 review).
+    val yaml =
+      """
+      name: barrier-no-devices-declared
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier plan without a 'devices' declaration should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier lock reachable by fewer distinct devices than its declared deviceCount`() {
+    // Only device A ever arrives at this lock, so the declared
+    // deviceCount=2 can never be satisfied -- mirrors the daemon's
+    // PlanValidator.validateBarrierDistinctDeviceCounts.
+    val yaml =
+      """
+      name: barrier-underpopulated-lock
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Barrier lock reachable by only 1 distinct device but declaring deviceCount=2 should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects a barrier plan targeting device labels outside the declared devices set`() {
+    // devices=[A,B] but the barrier steps target C/D: the distinct-device
+    // count (2) would otherwise satisfy deviceCount=2, but C/D are not
+    // declared devices at all, so this must be rejected regardless --
+    // mirrors the daemon's PlanValidator.validateDeviceLabelsPresent.
+    val yaml =
+      """
+      name: barrier-targets-undeclared-devices
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: D
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier targeting undeclared device labels should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier deviceCount that overflows Int instead of silently truncating it`() {
+    // 4294967298 = 2^32 + 2, which truncates to 2 via a naive Int narrowing
+    // -- that would make this A/B plan pass. The declared count must be
+    // honored at its real magnitude (held as Long) and rejected as
+    // underpopulated, not silently truncated to something satisfiable.
+    val yaml =
+      """
+      name: barrier-devicecount-overflows-int
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 4294967298
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 4294967298
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A deviceCount exceeding Int range must not be silently truncated into a satisfiable value",
+    )
+  }
+
+  @Test
+  fun `rejects a reused barrier lock whose total arrivals are not a multiple of deviceCount`() {
+    // A, B, A with deviceCount=2: 2 distinct devices satisfies the
+    // distinct-device check, but 3 total arrivals is not a multiple of 2 --
+    // generation 1 {A,B} completes and clears, then the trailing A waits
+    // alone forever. Mirrors the daemon's
+    // PlanValidator.validateBarrierGenerationCompleteness.
+    val yaml =
+      """
+      name: barrier-incomplete-trailing-generation
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "3 total arrivals is not a multiple of deviceCount=2, so this should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a reused barrier lock whose total arrivals form complete generations`() {
+    // A, B, A, B with deviceCount=2: 4 total arrivals is a multiple of 2,
+    // so both generations complete cleanly.
+    val yaml =
+      """
+      name: barrier-complete-generations
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "4 total arrivals is a multiple of deviceCount=2, so this is valid")
+  }
+
+  @Test
+  fun `rejects a single device arriving more times than there are generations`() {
+    // A, B, A, A with deviceCount=2: 4 arrivals is divisible by 2 (G=2), but
+    // device A appears 3 times (greater than G=2) -- after generation 1
+    // {A,B} releases, A's second arrival starts generation 2, but its third
+    // arrival has no generation left to join.
+    val yaml =
+      """
+      name: barrier-excess-single-device-arrivals
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Device A arriving 3 times with only 2 generations available should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a barrier lock where every device arrives at most once per available generation`() {
+    // A, A, B, B with deviceCount=2: G=2, and each device appears exactly 2
+    // times (<= G) -- feasible, since generation 1 can be {A,B} and
+    // generation 2 can be {A,B} using the second arrival of each.
+    val yaml =
+      """
+      name: barrier-feasible-repeated-arrivals
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "Each device arriving exactly as many times as there are generations should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects a reused barrier lock declared with more than one distinct deviceCount`() {
+    // A/B at deviceCount=2, then A/B/C at deviceCount=3 for the SAME lock
+    // name: the runtime coordinator keeps one shared expected count per
+    // lock, so mixed-count reuse is racy and must be rejected regardless of
+    // whether the distinct-device/divisibility checks would otherwise pass
+    // it.
+    val yaml =
+      """
+      name: barrier-mixed-devicecount-reuse
+      devices:
+        - A
+        - B
+        - C
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 3
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A lock reused with two different deviceCount values should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a reused barrier lock whose deviceCount stays consistent across every use`() {
+    val yaml =
+      """
+      name: barrier-consistent-devicecount-reuse
+      devices:
+        - A
+        - B
+        - C
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 3
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A lock reused with a consistent deviceCount should be valid")
+  }
+
+  @Test
+  fun `rejects a barrier step that omits device entirely under a declared devices set`() {
+    // devices=[A]: one deviceCount=1 barrier step for this lock omits
+    // 'device' altogether while another targets A. The device-less step
+    // must be rejected, not silently ignored -- mirrors the daemon's
+    // PlanValidator.validateDeviceLabelsPresent.
+    val yaml =
+      """
+      name: barrier-missing-device
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            lock: sync-point
+            deviceCount: 1
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 1
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A barrier step with no device label should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier deviceCount that overflows Long instead of wrapping it`() {
+    // 18446744073709551618 = 2^64 + 2, a SnakeYAML BigInteger. A naive
+    // Long.toLong() (or BigInteger.toLong()) narrowing wraps this to 2,
+    // which would make this A/B plan pass. The value must be rejected at
+    // its real magnitude, not silently wrapped into something satisfiable.
+    val yaml =
+      """
+      name: barrier-devicecount-overflows-long
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 18446744073709551618
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 18446744073709551618
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A deviceCount exceeding Long range must not be silently wrapped into a satisfiable value",
+    )
   }
 
   @Test

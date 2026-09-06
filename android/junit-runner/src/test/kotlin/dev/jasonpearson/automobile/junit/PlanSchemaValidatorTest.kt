@@ -299,6 +299,7 @@ class PlanSchemaValidatorTest {
       steps:
         - tool: criticalSection
           params:
+            device: A
             lock: sync-point
             deviceCount: 2
             steps:

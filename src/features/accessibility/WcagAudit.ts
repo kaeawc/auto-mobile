@@ -407,9 +407,14 @@ export class WcagAudit {
   private generateScreenId(packageName: string, hierarchy: ViewHierarchyNode): string {
     // Use package name + root activity/fragment identifier
     // This is a simplified approach - could be enhanced with more specific identifiers
+    //
+    // Node attributes (class, resource-id) live under `$`, not directly on the
+    // node (issue #6252) -- `rootNode.class`/`rootNode["resource-id"]` were
+    // always undefined, so every screen collapsed to the same "unknown:" id,
+    // defeating per-screen baseline tracking.
     const rootNode = this.resolveRootNode(hierarchy);
-    const rootClass = rootNode.class || "unknown";
-    const rootId = rootNode["resource-id"] || "";
+    const rootClass = (rootNode.$?.class as string | undefined) || "unknown";
+    const rootId = (rootNode.$?.["resource-id"] as string | undefined) || "";
 
     return `${packageName}:${rootClass}:${rootId}`;
   }

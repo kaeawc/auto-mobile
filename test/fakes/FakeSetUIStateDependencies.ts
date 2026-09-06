@@ -78,10 +78,16 @@ export class FakeTapOnElement implements TapOnElementLike {
 
   async execute(
     options: { text?: string; elementId?: string; action: string },
-    _progress?: any,
+    progress?: (progress: number, total?: number, message?: string) => Promise<void>,
     _signal?: AbortSignal,
   ): Promise<TapOnElementResult> {
     this.calls.push({ options });
+    // Mirror BaseVisualChange.observedInteraction's own local 0..100 progress
+    // range, resetting to 0 on every call -- this is the real shape that
+    // SetUIState's own progress reporting must project into a single
+    // monotonic range rather than forwarding verbatim (#6222 review).
+    await progress?.(0, 100, "Preparing to execute action...");
+    await progress?.(10, 100, "Getting previous view hierarchy...");
     const key = options.text ?? options.elementId ?? "";
     return this.results.get(key) ?? this.defaultResult;
   }
@@ -144,8 +150,13 @@ export class FakeClearText implements ClearTextLike {
   private callCount: number = 0;
   private result: ClearTextResult = { success: true };
 
-  async execute(_progress?: any): Promise<ClearTextResult> {
+  async execute(
+    progress?: (progress: number, total?: number, message?: string) => Promise<void>,
+  ): Promise<ClearTextResult> {
     this.callCount++;
+    // Same local 0..100 reset as FakeTapOnElement above (#6222 review).
+    await progress?.(0, 100, "Preparing to execute action...");
+    await progress?.(10, 100, "Getting previous view hierarchy...");
     return this.result;
   }
 

@@ -149,6 +149,36 @@ export class SetUIState extends BaseVisualChange {
     const processed = new Set<number>();
     let totalAttempts = 0;
 
+    // Progress reported to the client MUST stay on one consistent scale and
+    // never regress. Sub-steps a field's work delegates to (TapOnElement,
+    // ClearText, ...) each independently report their own local 0..100
+    // range via the SAME callback, and would otherwise reset to 0 mid-field
+    // or between fields. Give every field a fixed 100-wide slice of one
+    // overall range and clamp every emission to the high-water mark so nested
+    // resets can never read as a regression (#6222 review).
+    const overallProgressTotal = options.fields.length * 100;
+    let maxProgressReported = 0;
+    const emitProgress = async (raw: number, message?: string): Promise<void> => {
+      if (!progress) {
+        return;
+      }
+      maxProgressReported = Math.max(raw, maxProgressReported);
+      await progress(maxProgressReported, overallProgressTotal, message);
+    };
+    // Projects a child step's own 0..N progress into the 100-wide slice for
+    // the field currently being worked on (identified by how many fields are
+    // already fully processed, i.e. its position in processing order).
+    const fieldProgress = (fieldSequence: number): ProgressCallback | undefined => {
+      if (!progress) {
+        return undefined;
+      }
+      return async (childProgress, childTotal, message) => {
+        const pct =
+          childTotal && childTotal > 0 ? (childProgress / childTotal) * 100 : childProgress;
+        await emitProgress(fieldSequence * 100 + pct, message);
+      };
+    };
+
     // Get initial observation
     let lastObservation = await this.getObserveScreen().execute(
       undefined,
@@ -182,23 +212,35 @@ export class SetUIState extends BaseVisualChange {
         // Each edit may change layout (keyboard, reflow, dynamic fields),
         // so we re-find visible fields from a fresh observation each iteration.
         const { fieldSpec, fieldIndex, element } = visibleFields[0];
-        const result = await this.processField(fieldSpec, element, progress, signal);
+        // This field's slice starts at processed.size * 100, before it is
+        // added to `processed` below.
+        const result = await this.processField(
+          fieldSpec,
+          element,
+          fieldProgress(processed.size),
+          signal,
+        );
 
-        fieldResults[fieldIndex] = result;
         processed.add(fieldIndex);
+        // Retain only the small, public FieldResult fields across the loop --
+        // `freshObservation` (a full view hierarchy) is used immediately below
+        // for reuse and then must NOT be kept alive in `fieldResults` for the
+        // rest of the call, or peak memory grows to fieldCount x one full
+        // hierarchy instead of staying ~one hierarchy (#6222 review).
+        fieldResults[fieldIndex] = this.toPublicFieldResult(result);
         totalAttempts += result.attempts;
         // Progress clears the budget: it bounds futile searching, not successful
         // work. The next search re-arms it from scratch (#4252 review).
         searchDeadline = null;
 
-        // Report per-field advancement. This keeps the request alive on
-        // progress-aware clients (a live request timeout is commonly reset by
-        // progress notifications) and, independent of transport behavior,
-        // gives the client a durable trace of what has already been applied
-        // before a bare timeout could otherwise leave it blind (#6222).
-        await progress?.(
-          processed.size,
-          options.fields.length,
+        // Report per-field advancement at the top of the field's own slice.
+        // This keeps the request alive on progress-aware clients (a live
+        // request timeout is commonly reset by progress notifications) and,
+        // independent of transport behavior, gives the client a durable
+        // trace of what has already been applied before a bare timeout could
+        // otherwise leave it blind (#6222).
+        await emitProgress(
+          processed.size * 100,
           result.success
             ? `Set field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
             : `Failed field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
@@ -253,8 +295,13 @@ export class SetUIState extends BaseVisualChange {
 
         // Scroll one step without lookFor to avoid jumping past intermediate fields.
         // Using lookFor would enable scroll-until-visible mode which can skip over
-        // fields that need to be processed first in screen order.
-        await this.getSwipeOn().execute({ direction: currentDirection }, progress);
+        // fields that need to be processed first in screen order. The scroll is in
+        // service of the next not-yet-processed field, so it reports into that
+        // field's own progress slice (#6222 review).
+        await this.getSwipeOn().execute(
+          { direction: currentDirection },
+          fieldProgress(processed.size),
+        );
 
         // Re-observe after scroll
         const freshObs = await this.getObserveScreen().execute(
@@ -292,6 +339,26 @@ export class SetUIState extends BaseVisualChange {
       fields: fieldResults,
       totalAttempts,
       observation: lastObservation,
+    };
+  }
+
+  /**
+   * Strip the internal `freshObservation` (a full view hierarchy) from a
+   * field outcome before it is retained in `fieldResults` for the rest of the
+   * call. The observation is only needed transiently, to let the caller reuse
+   * it in place of an extra observe -- keeping it in the retained array would
+   * hold one full hierarchy per verified field alive for the whole call
+   * instead of ~one at a time (#6222 review).
+   */
+  private toPublicFieldResult(result: InternalFieldResult): FieldResult {
+    return {
+      selector: result.selector,
+      success: result.success,
+      attempts: result.attempts,
+      verified: result.verified,
+      error: result.error,
+      fieldType: result.fieldType,
+      skipped: result.skipped,
     };
   }
 

@@ -1134,12 +1134,25 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     );
 
     expect(result.success).toBe(true);
-    // One progress notification per field, reporting cumulative advancement.
+    // One progress notification per field-completed boundary at minimum, plus
+    // whatever each field's own tap/clear child steps contributed.
     expect(progressCalls.length).toBeGreaterThanOrEqual(3);
+    // Every notification shares ONE consistent total across the whole call
+    // (fieldCount * 100) -- not the per-field child steps' own local total,
+    // and not a bare field-count total that would collide with those.
+    expect(progressCalls.every((c) => c.total === 300)).toBe(true);
+    // Every field's own child steps (TapOnElement/ClearText, each reporting
+    // their own local 0..100 via the SAME callback) are projected into that
+    // field's 100-wide slice of the overall range, so the sequence across
+    // the whole call -- child ticks AND per-field boundary ticks together --
+    // never regresses.
+    for (let i = 1; i < progressCalls.length; i++) {
+      expect(progressCalls[i].progress).toBeGreaterThanOrEqual(progressCalls[i - 1].progress);
+    }
+    // The three field-boundary ticks land at the top of each field's slice.
     expect(progressCalls.map((c) => c.progress)).toEqual(
-      expect.arrayContaining([1, 2, 3]) as unknown as number[],
+      expect.arrayContaining([100, 200, 300]) as unknown as number[],
     );
-    expect(progressCalls.every((c) => c.total === 3)).toBe(true);
     expect(progressCalls[progressCalls.length - 1].message).toContain("3/3");
   });
 
@@ -1174,25 +1187,51 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
 
     expect(result.success).toBe(false);
     // A client watching progress must see field 1 succeed before field 2 fails
-    // -- it must not look like nothing happened.
-    expect(progressCalls.length).toBe(2);
-    expect(progressCalls[0].message).toContain("Set field");
-    expect(progressCalls[1].message).toContain("Failed field");
+    // -- it must not look like nothing happened. Field 1's tap/clear child
+    // steps and field 2's three failed-tap retries all report their own
+    // progress too, so isolate the two per-field boundary ticks by message.
+    const boundaryTicks = progressCalls.filter(
+      (c) => c.message?.includes("Set field") || c.message?.includes("Failed field"),
+    );
+    expect(boundaryTicks.length).toBe(2);
+    expect(boundaryTicks[0].message).toContain("Set field");
+    expect(boundaryTicks[1].message).toContain("Failed field");
+    // The whole trace -- child ticks from both fields' retries included --
+    // must never regress, even though field 2's tap fails and retries three
+    // times inside the same 100-wide slice.
+    for (let i = 1; i < progressCalls.length; i++) {
+      expect(progressCalls[i].progress).toBeGreaterThanOrEqual(progressCalls[i - 1].progress);
+    }
   });
 
   test("does not re-observe after a verified success -- reuses verification's own observation", async () => {
-    // Single field, verification enabled (no text-only-selector skip, since
-    // elementId selector is used). Only two observes should occur total: the
-    // initial observe, and the one verifyFieldValue performs. No third,
-    // separate "refresh" observe should follow it.
-    fakeObserve.setResultFactory(() => createObserveResultFor(threeFieldHierarchy(["a", "", ""])));
+    // Single field, starting value differs from the target so the apply+verify
+    // path actually runs (isFieldAlreadyCorrect must be false, or verification
+    // -- and this whole test -- never happens). No textValue override is set:
+    // the real FieldTypeDetector.getTextValue reads the element's own `text`
+    // straight off whichever hierarchy findElement resolved against, so the
+    // pre-edit observe genuinely reports "" and the post-edit one genuinely
+    // reports "a".
+    //
+    // Only two observes should occur total: the initial observe, and the one
+    // verifyFieldValue performs. Without the fix, a third, separate "refresh"
+    // observe follows verification's -- this test fails against that
+    // (pre-fix) behavior with callCount === 3 and passes at 2.
+    let observeCallCount = 0;
+    fakeObserve.setResultFactory(() => {
+      observeCallCount++;
+      const value = observeCallCount === 1 ? "" : "a";
+      return createObserveResultFor(threeFieldHierarchy([value, "", ""]));
+    });
     fakeFieldTypeDetector.setFieldType("first", "text");
-    fakeFieldTypeDetector.setTextValue("first", "a");
 
-    await build().execute({
+    const result = await build().execute({
       fields: [{ selector: { elementId: "first" }, value: "a" }],
     });
 
+    expect(result.success).toBe(true);
+    expect(result.fields[0].verified).toBe(true);
+    expect(result.fields[0].skipped).toBeUndefined();
     expect(fakeObserve.getCallCount()).toBe(2);
   });
 

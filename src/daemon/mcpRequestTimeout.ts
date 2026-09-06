@@ -244,3 +244,68 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
   return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0);
 }
+
+/**
+ * Hard ceiling on how far a progress-emitting request's deadline can be
+ * pushed out by its own progress notifications (issue #6222 review, P1). A
+ * multi-field `setUIState` (or any other progress-emitting tool) that applies
+ * work successfully but keeps progressing past the tool's normal deadline
+ * must not time out mid-flight and strand the client unable to tell success
+ * from failure -- but a genuinely hung tool that STOPS progressing must still
+ * be killed, not run forever. Chosen to comfortably cover a large multi-field
+ * form (each field costs at most a handful of seconds of real device work)
+ * while staying well short of "effectively unbounded".
+ */
+export const MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS = 300_000;
+
+/**
+ * A per-request deadline that a progress notification can push forward, up to
+ * a fixed ceiling measured from when the request was first received. Nothing
+ * in this class evaluates progress itself -- callers extend the deadline only
+ * when they actually observe a progress notification for this request, so a
+ * tool that emits none never has its deadline touched and keeps its exact
+ * original timeout (issue #6222 review, P1: `resetTimeoutOnProgress` for the
+ * daemon's own request-deadline bookkeeping, mirroring the MCP SDK option of
+ * the same name used for the inner MCP client call).
+ *
+ * Deliberately timer-agnostic: every method takes the caller's own `nowMs`
+ * (from whatever `Timer` it holds) rather than reading a clock itself, so
+ * this composes with the existing `FakeTimer` seams used throughout the
+ * daemon and its tests.
+ */
+export class ProgressExtendableDeadline {
+  private currentMs: number;
+  private readonly ceilingMs: number;
+
+  constructor(
+    receivedAtMs: number,
+    initialTimeoutMs: number,
+    maxTotalTimeoutMs: number = MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
+  ) {
+    this.currentMs = receivedAtMs + initialTimeoutMs;
+    // A tool floor already larger than the default progress ceiling (e.g.
+    // executePlan's 10-minute floor) keeps its own, larger ceiling -- the
+    // progress ceiling only ever extends a request, never shortens one.
+    this.ceilingMs = receivedAtMs + Math.max(initialTimeoutMs, maxTotalTimeoutMs);
+  }
+
+  /** Current absolute deadline, in the same clock the constructor's `receivedAtMs` came from. */
+  get value(): number {
+    return this.currentMs;
+  }
+
+  /** Absolute hard ceiling this deadline can never be pushed past. */
+  get ceiling(): number {
+    return this.ceilingMs;
+  }
+
+  /**
+   * Push the deadline forward to `nowMs + extensionMs`, capped at the hard
+   * ceiling. A proposal at or behind the current deadline is a no-op --
+   * progress only ever extends a deadline, never shortens it.
+   */
+  extendOnProgress(nowMs: number, extensionMs: number): void {
+    const proposed = Math.min(nowMs + extensionMs, this.ceilingMs);
+    this.currentMs = Math.max(this.currentMs, proposed);
+  }
+}

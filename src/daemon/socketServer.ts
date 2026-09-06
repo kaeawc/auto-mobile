@@ -9,7 +9,7 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
-import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -213,7 +213,14 @@ interface McpForwardRecoveryContext {
   route: McpForwardRoute;
   socketSessionId: string;
   totalTimeoutMs: number;
-  requestDeadlineMs: number;
+  /**
+   * Mutable: a progress notification for THIS request extends `.value`, up to
+   * its own bounded ceiling (issue #6222 review, P1). Every consumer must
+   * read `.value` live rather than caching it, so a pre-flight budget check
+   * made after progress has already extended the deadline sees the extended
+   * value, not the original one.
+   */
+  deadline: ProgressExtendableDeadline;
   remainingTimeoutMs: number;
   forwardStartMs: number;
 }
@@ -720,7 +727,10 @@ export class UnixSocketServer {
     }
 
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
-    const requestDeadlineMs = receivedAtMs + totalTimeoutMs;
+    // Mutable: extended by progress notifications for this specific request
+    // (see ProgressExtendableDeadline) -- untouched for a request that never
+    // emits progress, which keeps its exact original deadline.
+    const deadline = new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs);
 
     // Enqueue request to maintain order
     return this.enqueueRequest(session, async () => {
@@ -752,7 +762,7 @@ export class UnixSocketServer {
           request,
           sessionId,
           async (route) => {
-            const remainingTimeoutMs = requestDeadlineMs - this.timer.now();
+            const remainingTimeoutMs = deadline.value - this.timer.now();
             const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
             const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
             logger.debug(
@@ -780,7 +790,7 @@ export class UnixSocketServer {
                 route,
                 socketSessionId: sessionId,
                 totalTimeoutMs,
-                requestDeadlineMs,
+                deadline,
                 remainingTimeoutMs,
                 forwardStartMs,
               });
@@ -832,10 +842,13 @@ export class UnixSocketServer {
   private requireRemainingMcpForwardBudget(
     request: DaemonRequest,
     totalTimeoutMs: number,
-    requestDeadlineMs: number,
+    deadline: ProgressExtendableDeadline,
     phase: string,
   ): number {
-    const remainingTimeoutMs = requestDeadlineMs - this.timer.now();
+    // Read live: a progress notification received since this request first
+    // started may already have pushed `deadline.value` out (issue #6222
+    // review, P1) -- caching it earlier would silently ignore that extension.
+    const remainingTimeoutMs = deadline.value - this.timer.now();
     if (remainingTimeoutMs > 0) {
       return remainingTimeoutMs;
     }
@@ -1402,7 +1415,7 @@ export class UnixSocketServer {
     const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
       context.request,
       context.totalTimeoutMs,
-      context.requestDeadlineMs,
+      context.deadline,
       "waiting in queues and preparing the MCP client",
     );
     return this.forwardConnectedMcpRequest(context, identity, mcpClient, forwardRemainingMs);
@@ -1420,6 +1433,7 @@ export class UnixSocketServer {
         context.request,
         remainingTimeoutMs,
         context.socketSessionId,
+        context.deadline,
       );
     } catch (error) {
       const message = errorMessage(error);
@@ -1470,7 +1484,7 @@ export class UnixSocketServer {
     const retryRemainingMs = this.requireRemainingMcpForwardBudget(
       context.request,
       context.totalTimeoutMs,
-      context.requestDeadlineMs,
+      context.deadline,
       "waiting in queues and reconnecting the MCP client",
     );
     try {
@@ -1479,6 +1493,7 @@ export class UnixSocketServer {
         context.request,
         retryRemainingMs,
         context.socketSessionId,
+        context.deadline,
       );
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
@@ -2120,6 +2135,7 @@ export class UnixSocketServer {
         recoveryRequest,
         retryRemainingMs,
         input.socketSessionId,
+        input.deadline,
       );
       if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
         await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
@@ -3943,6 +3959,7 @@ export class UnixSocketServer {
     request: DaemonRequest,
     timeoutMs: number,
     socketSessionId: string,
+    deadline: ProgressExtendableDeadline,
   ): Promise<any> {
     const requestOptions = { timeout: timeoutMs };
 
@@ -3964,23 +3981,49 @@ export class UnixSocketServer {
           undefined,
           {
             ...requestOptions,
+            // A progress-emitting tool (e.g. a multi-field setUIState) can
+            // legitimately take longer than its normal deadline once it has
+            // already started applying work; leaving that work stranded by a
+            // fixed timeout is exactly the unsafe-to-retry shape issue #6222
+            // exists to close. `resetTimeoutOnProgress` makes the SDK's OWN
+            // internal timeout for this call reset on each progress tick
+            // instead of firing at the original `timeout`, and
+            // `maxTotalTimeout` still caps it at this request's own bounded
+            // ceiling -- a tool that stops progressing is still killed there.
+            // Only set for a request that actually asked for progress
+            // (`progressToken !== undefined`, same gate as `onprogress`
+            // below): a tool with no progress relay keeps its exact original,
+            // non-extendable `timeout` (#6222 review, P1).
+            ...(progressToken !== undefined
+              ? {
+                  resetTimeoutOnProgress: true,
+                  maxTotalTimeout: Math.max(deadline.ceiling - this.timer.now(), timeoutMs),
+                }
+              : {}),
             // Relay progress ticks back to the ORIGINATING socket session,
             // tagged with the client's own token — never a daemon-fabricated
             // one, and never sent when the client asked for none (#6205).
+            // Also extends the DAEMON's OWN request deadline (the one
+            // `requireRemainingMcpForwardBudget` checks before a retry), so a
+            // budget check made after this tick sees the extended value
+            // rather than the original one (#6222 review, P1) -- bounded by
+            // the same ceiling as the SDK-side `maxTotalTimeout` above.
             ...(progressToken !== undefined
               ? {
                   onprogress: (notification: {
                     progress: number;
                     total?: number;
                     message?: string;
-                  }) =>
+                  }) => {
+                    deadline.extendOnProgress(this.timer.now(), timeoutMs);
                     this.pushProgressNotification(
                       socketSessionId,
                       progressToken,
                       notification.progress,
                       notification.total,
                       notification.message,
-                    ),
+                    );
+                  },
                 }
               : {}),
           },

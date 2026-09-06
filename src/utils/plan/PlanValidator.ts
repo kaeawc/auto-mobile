@@ -226,6 +226,7 @@ export class PlanValidator {
   private static validateCoordinationLocks(plan: Plan): void {
     this.validateCriticalSectionLocks(plan);
     this.validateBarrierParams(plan);
+    this.validateBarrierDistinctDeviceCounts(plan);
   }
 
   /**
@@ -369,6 +370,81 @@ export class PlanValidator {
     if (errors.length > 0) {
       throw new ActionableError(errors.join("\n"));
     }
+  }
+
+  /**
+   * Validates that every barrier lock is populated by enough distinct devices
+   * to ever satisfy its declared `deviceCount`.
+   *
+   * This is sound WITHOUT reconstructing rounds: a single round needs
+   * `deviceCount` distinct device arrivals, so if fewer distinct devices ever
+   * target a given lock across the whole plan, no round can ever complete —
+   * regardless of how many times those devices arrive (reused across
+   * rounds). This mirrors the intent of criticalSection's cross-step lock
+   * check without inferring round boundaries.
+   */
+  private static validateBarrierDistinctDeviceCounts(plan: Plan): void {
+    const usageByLock = this.collectBarrierLockUsage(plan);
+    const errors: string[] = [];
+
+    for (const [lock, usage] of usageByLock.entries()) {
+      for (const deviceCount of usage.deviceCounts) {
+        if (usage.devices.size < deviceCount) {
+          const devices = Array.from(usage.devices).join(", ") || "none";
+          errors.push(
+            `barrier lock "${lock}" declares deviceCount=${deviceCount} but only ${usage.devices.size} distinct device${usage.devices.size === 1 ? "" : "s"} (${devices}) ever target it in this plan. No round can ever complete.`,
+          );
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
+  }
+
+  private static collectBarrierLockUsage(
+    plan: Plan,
+  ): Map<string, { devices: Set<string>; deviceCounts: Set<number> }> {
+    const usageByLock = new Map<string, { devices: Set<string>; deviceCounts: Set<number> }>();
+
+    for (const step of plan.steps) {
+      if (step.tool === "barrier") {
+        this.recordBarrierLockUsage(usageByLock, step.params);
+      }
+    }
+
+    return usageByLock;
+  }
+
+  private static recordBarrierLockUsage(
+    usageByLock: Map<string, { devices: Set<string>; deviceCounts: Set<number> }>,
+    params: Record<string, unknown> | undefined,
+  ): void {
+    if (!params || typeof params !== "object") {
+      return;
+    }
+    const lock = (params as { lock?: unknown }).lock;
+    if (typeof lock !== "string" || lock.length === 0) {
+      return;
+    }
+
+    const usage = usageByLock.get(lock) ?? {
+      devices: new Set<string>(),
+      deviceCounts: new Set<number>(),
+    };
+
+    const device = (params as { device?: unknown }).device;
+    if (typeof device === "string" && device.length > 0) {
+      usage.devices.add(device);
+    }
+
+    const deviceCount = (params as { deviceCount?: unknown }).deviceCount;
+    if (typeof deviceCount === "number" && Number.isInteger(deviceCount) && deviceCount >= 1) {
+      usage.deviceCounts.add(deviceCount);
+    }
+
+    usageByLock.set(lock, usage);
   }
 
   /**

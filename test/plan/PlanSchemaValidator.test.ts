@@ -929,6 +929,40 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should accept a barrier step with coordination fields SPLIT across inline and params", () => {
+      // PlanNormalizer merges inline fields and params together before
+      // execution, so a field counts as present wherever it appears -- lock
+      // inline + deviceCount in params must validate (#6215 review).
+      const yaml = `
+name: barrier-split-fields-test
+devices:
+  - A
+steps:
+  - tool: barrier
+    lock: sync-point
+    params:
+      device: A
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step missing deviceCount from BOTH inline and params", () => {
+      const yaml = `
+name: barrier-split-fields-missing-devicecount
+devices:
+  - A
+steps:
+  - tool: barrier
+    lock: sync-point
+    params:
+      device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should accept a criticalSection step with INLINE coordination params", () => {
       const yaml = `
 name: critical-section-inline-test

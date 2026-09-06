@@ -429,6 +429,42 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("validateBarrierDistinctDeviceCounts", () => {
+    test("throws when fewer distinct devices target a lock than its declared deviceCount", () => {
+      // Two distinct devices (A, B) can never produce the 3 arrivals
+      // deviceCount=3 demands -- no round can ever complete.
+      const plan: Plan = {
+        name: "Underpopulated barrier lock",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        'barrier lock "sync1" declares deviceCount=3 but only 2 distinct devices',
+      );
+    });
+
+    test("accepts a lock with exactly deviceCount distinct devices, even when reused across rounds", () => {
+      const plan: Plan = {
+        name: "Fully-populated barrier lock reused across rounds",
+        devices: ["A", "B", "C"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "C", lock: "sync1", deviceCount: 3 } },
+          // Round 2 reuse of the same lock by the same 3 devices.
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "C", lock: "sync1", deviceCount: 3 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+  });
+
   describe("hasMultiDeviceFeatures", () => {
     test("returns false for a simple single-device plan", () => {
       const plan: Plan = {

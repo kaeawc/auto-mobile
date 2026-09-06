@@ -761,7 +761,7 @@
           }
         },
         {
-          "$comment": "criticalSection accepts lock/deviceCount/steps/timeout either inline on the step (like dragAndDrop's source/target) or nested under params -- PlanNormalizer merges both into params before execution, so either authoring style must validate (#6215 review).",
+          "$comment": "criticalSection accepts lock/deviceCount/steps/timeout either inline on the step (like dragAndDrop's source/target), nested under params, or SPLIT across both (e.g. lock inline, deviceCount in params) -- PlanNormalizer merges inline fields and params together before execution, so a field counts as present wherever it appears. Each required field is validated against that merged union independently, not as an all-inline-or-all-params choice (#6215 review).",
           "if": {
             "properties": {
               "tool": {
@@ -800,18 +800,33 @@
                 "default": 30000
               }
             },
-            "anyOf": [
+            "allOf": [
               {
-                "required": ["lock", "deviceCount", "steps"]
+                "anyOf": [
+                  { "required": ["lock"] },
+                  { "required": ["params"], "properties": { "params": { "required": ["lock"] } } }
+                ]
               },
               {
-                "required": ["params"]
+                "anyOf": [
+                  { "required": ["deviceCount"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "required": ["deviceCount"] } }
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  { "required": ["steps"] },
+                  { "required": ["params"], "properties": { "params": { "required": ["steps"] } } }
+                ]
               }
             ]
           }
         },
         {
-          "$comment": "barrier accepts lock/deviceCount/timeout either inline on the step or nested under params, same as criticalSection (#6215 review).",
+          "$comment": "barrier accepts lock/deviceCount/timeout either inline on the step, nested under params, or split across both, same union-of-locations rule as criticalSection (#6215 review).",
           "if": {
             "properties": {
               "tool": {
@@ -842,12 +857,21 @@
                 "default": 30000
               }
             },
-            "anyOf": [
+            "allOf": [
               {
-                "required": ["lock", "deviceCount"]
+                "anyOf": [
+                  { "required": ["lock"] },
+                  { "required": ["params"], "properties": { "params": { "required": ["lock"] } } }
+                ]
               },
               {
-                "required": ["params"]
+                "anyOf": [
+                  { "required": ["deviceCount"] },
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "required": ["deviceCount"] } }
+                  }
+                ]
               }
             ]
           }
@@ -1536,7 +1560,6 @@
     },
     "criticalSectionParams": {
       "type": "object",
-      "required": ["lock", "steps", "deviceCount"],
       "additionalProperties": true,
       "properties": {
         "lock": {
@@ -1564,11 +1587,10 @@
           "default": 30000
         }
       },
-      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are not rejected."
+      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are not rejected. lock/steps/deviceCount are intentionally NOT required here: a plan may declare any of them inline on the step instead of nested here, and PlanNormalizer merges the two -- the planStep if/then block enforces required-ness against that merged union, not against this def in isolation (#6215 review)."
     },
     "barrierParams": {
       "type": "object",
-      "required": ["lock", "deviceCount"],
       "additionalProperties": true,
       "properties": {
         "lock": {
@@ -1588,7 +1610,7 @@
           "default": 30000
         }
       },
-      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) and the internally-injected __lockNamespace are not rejected."
+      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) and the internally-injected __lockNamespace are not rejected. lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block (#6215 review)."
     }
   }
 }

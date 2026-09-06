@@ -284,6 +284,48 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `accepts barrier with coordination fields split across inline and params`() {
+    // PlanNormalizer merges inline fields and params together before
+    // execution, so a field counts as present wherever it appears -- lock
+    // inline + deviceCount in params must validate.
+    val yaml =
+      """
+      name: barrier-split-fields-test
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          lock: sync-point
+          params:
+            device: A
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Split-field barrier plan should be valid")
+  }
+
+  @Test
+  fun `rejects barrier missing deviceCount from both inline and params`() {
+    val yaml =
+      """
+      name: barrier-split-fields-missing-devicecount
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          lock: sync-point
+          params:
+            device: A
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier missing deviceCount from both locations should be invalid")
+  }
+
+  @Test
   fun `accepts criticalSection with inline coordination params`() {
     val yaml =
       """

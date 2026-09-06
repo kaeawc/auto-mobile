@@ -257,4 +257,42 @@ describe("findAppWindowBounds (#6167)", () => {
 
     expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
   });
+
+  test("excludes the focused IME (soft keyboard, type=2) window and returns the app window instead", () => {
+    // AccessibilityWindowInfo.TYPE_INPUT_METHOD = 2. The keyboard can hold
+    // input focus while open, but its bounds are the keyboard's, not the
+    // audited app's.
+    const appBounds = { left: 0, top: 0, right: 1080, bottom: 1200 };
+    const imeBounds = { left: 0, top: 1200, right: 1080, bottom: 2400 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        windows: [
+          { id: 1, type: 1, isActive: true, isFocused: false, bounds: appBounds },
+          { id: 2, type: 2, isActive: true, isFocused: true, bounds: imeBounds },
+        ] as ViewHierarchyWindowInfo[],
+      } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toEqual(appBounds);
+  });
+
+  test("returns undefined when the only window is a focused IME (no app window to fall back to)", () => {
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        windows: [
+          {
+            id: 1,
+            type: 2,
+            isActive: true,
+            isFocused: true,
+            bounds: { left: 0, top: 1200, right: 1080, bottom: 2400 },
+          },
+        ] as ViewHierarchyWindowInfo[],
+      } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
+  });
 });

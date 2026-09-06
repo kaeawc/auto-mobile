@@ -16,20 +16,27 @@ import {
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
 /**
- * Android's `AccessibilityWindowInfo.TYPE_SYSTEM` constant (status bar,
- * navigation bar, and other SystemUI chrome). The wire `WindowInfo` CtrlProxy
- * actually emits (`android/control-proxy/.../models/WindowInfo.kt`) carries
- * only `id`/`type`/`isActive`/`isFocused`/`bounds` - critically, no
+ * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1): the
+ * only window type that represents genuine app content. The wire `WindowInfo`
+ * CtrlProxy actually emits (`android/control-proxy/.../models/WindowInfo.kt`,
+ * mapped from `AccessibilityWindowInfo.type` in `ViewHierarchyExtractor.kt`)
+ * carries only `id`/`type`/`isActive`/`isFocused`/`bounds` - critically, no
  * per-window `packageName` (see the real fixture,
  * `test/fixtures/observe/android-home.json`, whose `viewHierarchy.windows`
- * has this exact shape). A `type === 3` window is the SystemUI surface;
- * anything else (application, IME, overlay, ...) is a candidate for "the
- * audited app's own window".
+ * has this exact shape).
+ *
+ * Every other type is chrome, not app content, and must be excluded even
+ * when it is the focused window - most importantly `TYPE_INPUT_METHOD` (2):
+ * the soft keyboard can hold focus while it's open, and its bounds are not
+ * inside the audited app's window. Also excluded by not being
+ * TYPE_APPLICATION: `TYPE_SYSTEM` (3, status/nav bar and other SystemUI),
+ * `TYPE_ACCESSIBILITY_OVERLAY` (4), `TYPE_SPLIT_SCREEN_DIVIDER` (5), and
+ * `TYPE_MAGNIFICATION_OVERLAY` (6).
  */
-const ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
+const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
 
 function isCandidateAppWindow(window: ViewHierarchyWindowInfo, appId: string): boolean {
-  if (!window.bounds || window.type === ACCESSIBILITY_WINDOW_TYPE_SYSTEM) {
+  if (!window.bounds || window.type !== ACCESSIBILITY_WINDOW_TYPE_APPLICATION) {
     return false;
   }
   // packageName is never populated by the real Android accessibility window
@@ -43,9 +50,11 @@ function isCandidateAppWindow(window: ViewHierarchyWindowInfo, appId: string): b
  * window list, so the touch-latency synthetic tap can be placed inside the
  * app's actual window rather than a fixed screen fraction - correct under
  * split-screen/freeform where the app doesn't occupy the full screen
- * (issue #6167). Prefers the window marked focused; falls back to any
- * non-SystemUI window if none is marked focused. Returns undefined when no
- * matching window bounds are available.
+ * (issue #6167). Prefers the focused APPLICATION-type window; if no
+ * APPLICATION window is focused (e.g. the soft keyboard holds focus instead)
+ * falls back to any other APPLICATION window. Returns undefined when no
+ * APPLICATION window bounds are available at all - the caller then falls
+ * back to a fixed-fraction default point.
  */
 export function findAppWindowBounds(
   result: ObserveResult,

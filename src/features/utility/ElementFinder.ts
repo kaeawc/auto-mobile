@@ -7,6 +7,111 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
 import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
+import {
+  STABLE_VIEW_ID_HASH_LENGTH,
+  STABLE_VIEW_ID_PREFIX,
+} from "../observe/android/StableNodeIdentity";
+import { ActionableError } from "../../models/ActionableError";
+
+/**
+ * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
+ * ordinal `-<k>` suffix (`s-<hash>-2`, `s-<hash>-3`, ...) assigned by document
+ * order AT CAPTURE TIME (`StableNodeIdentity.ts`) - the FIRST occurrence gets
+ * the bare, un-suffixed `s-<hash>` (implicitly ordinal 1). Both forms are
+ * therefore capture-local whenever a duplicate exists: an insert or reorder
+ * between the capture an id was observed from and the fresh capture a later
+ * `tapOn`/`inputText` resolves it against can hand the bare id to a DIFFERENT
+ * node (the new first occurrence) and push the original to `-2`, or shift
+ * which node an existing `-<k>` lands on - silently resolving to the WRONG
+ * node rather than the one the caller meant (issue #6218 review thread
+ * PRRT_kwDOP-GF5M6foer0, follow-up PRRT_kwDOP-GF5M6fomf-).
+ *
+ * This pattern requires the producer's EXACT shape - the `s-` prefix plus
+ * exactly `STABLE_VIEW_ID_HASH_LENGTH` hex characters, with an optional
+ * `-<k>` ordinal - so a real, resource-id-backed `view-id` that merely starts
+ * with `s-` (e.g. a bare Compose testTag like `s-a` / `s-a-2`) is never
+ * misclassified as synthetic (review thread PRRT_kwDOP-GF5M6fomgA).
+ */
+const SYNTHETIC_STABLE_VIEW_ID_PATTERN = new RegExp(
+  `^(${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}})(?:-\\d+)?$`,
+);
+
+/**
+ * The base id (`s-<hash>`, un-suffixed) for a synthetic stable id, whether
+ * `id` itself is the bare first-occurrence form or an ordinal-suffixed
+ * duplicate. Returns null when `id` does not match the producer's exact
+ * shape - including a real `view-id` that only superficially resembles one.
+ */
+function syntheticStableViewIdBase(id: string): string | null {
+  const match = SYNTHETIC_STABLE_VIEW_ID_PATTERN.exec(id);
+  return match ? match[1] : null;
+}
+
+/** True when `viewId` is a synthetic id (bare or ordinal-suffixed) sharing `base`. */
+function sharesStableViewIdBase(viewId: string, base: string): boolean {
+  return syntheticStableViewIdBase(viewId) === base;
+}
+
+/**
+ * Match a selector against a node's REAL `resource-id` field only - never
+ * `view-id`. Callers use this alone (instead of
+ * `matchesResourceIdOrStableViewId`) once they have established that a real
+ * resource-id match exists somewhere in the active search scope, so the
+ * synthetic view-id fallback can be disabled entirely for that selector
+ * rather than unioned with it (review threads PRRT_kwDOP-GF5M6fo13g,
+ * PRRT_kwDOP-GF5M6fo2Iq).
+ */
+function matchesResourceIdFieldOnly(
+  nodeProperties: Record<string, unknown>,
+  resourceId: string,
+  bareResourceId: string | null,
+  partialMatch: boolean,
+): boolean {
+  const nodeResourceId = nodeProperties["resource-id"];
+  if (typeof nodeResourceId !== "string") {
+    return false;
+  }
+  return (
+    nodeResourceId === resourceId ||
+    (bareResourceId !== null && nodeResourceId === bareResourceId) ||
+    (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
+  );
+}
+
+/**
+ * `resourceId`/`elementId` selectors carry an `s-<hash>` content-derived
+ * stable id (`assignStableViewIds`, issue #3228) for nodes with no real
+ * `resource-id` — the skeleton projection emits exactly that value as
+ * `elementId` (`SkeletonProjection.deriveId`). Resolve it against the node's
+ * `view-id` field, not `resource-id`, so a skeleton id round-trips back to
+ * its element (issue #6218). Exact match only: the hash carries no partial-
+ * or bare-suffix semantics the way a `pkg:id/name` resource-id does. The
+ * view-id fallback is gated on the selector matching the producer's strict
+ * synthetic shape (`syntheticStableViewIdBase`), not merely the `s-` prefix,
+ * so a real id like `view-id: "s-a"` is treated as a plain resource-id, never
+ * as a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip). Callers that
+ * have already established a real resource-id match exists in scope should
+ * use `matchesResourceIdFieldOnly` instead of this function, which unions
+ * both kinds of match and is therefore only safe to use when no such
+ * precedence question is in play.
+ */
+function matchesResourceIdOrStableViewId(
+  nodeProperties: Record<string, unknown>,
+  resourceId: string,
+  bareResourceId: string | null,
+  partialMatch: boolean,
+): boolean {
+  if (matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)) {
+    return true;
+  }
+  if (syntheticStableViewIdBase(resourceId) !== null) {
+    const nodeViewId = nodeProperties["view-id"];
+    if (typeof nodeViewId === "string" && nodeViewId === resourceId) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Handles searching and selection of elements in view hierarchy
@@ -38,6 +143,7 @@ export class DefaultElementFinder implements ElementFinder {
     rootNodes: ViewHierarchyNode[],
     container: { elementId?: string; text?: string },
     matchesContainerText: ((input?: string) => boolean) | null,
+    preferResourceIdOnly: boolean = false,
   ): ViewHierarchyNode | null {
     for (const rootNode of rootNodes) {
       let containerNode: ViewHierarchyNode | null = null;
@@ -47,12 +153,17 @@ export class DefaultElementFinder implements ElementFinder {
         }
 
         const nodeProperties = this.parser.extractNodeProperties(node);
-        const nodeResourceId = nodeProperties["resource-id"];
         const nodeText = nodeProperties.text;
         const nodeContentDesc = nodeProperties["content-desc"];
         const nodeIosLabel = nodeProperties["ios-accessibility-label"];
 
-        if (container.elementId && nodeResourceId === container.elementId) {
+        const elementIdMatches =
+          container.elementId &&
+          (preferResourceIdOnly
+            ? matchesResourceIdFieldOnly(nodeProperties, container.elementId, null, false)
+            : matchesResourceIdOrStableViewId(nodeProperties, container.elementId, null, false));
+
+        if (elementIdMatches) {
           containerNode = node;
           return;
         }
@@ -83,6 +194,22 @@ export class DefaultElementFinder implements ElementFinder {
       return null;
     }
 
+    let preferResourceIdOnly = false;
+    if (container.elementId) {
+      // A container selector has no enclosing scope of its own to resolve
+      // first, so it is always checked against the whole capture.
+      const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
+      this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, container.elementId);
+      // A real resource-id match anywhere in the capture always wins over a
+      // synthetic view-id match - never unioned with one, and never shadowed
+      // by a stable-id match found in an earlier-priority scope (review
+      // threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq).
+      preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
+        fullCaptureRoots,
+        container.elementId,
+      );
+    }
+
     const matchesContainerText = container.text
       ? this.textMatcher.createTextMatcher(container.text, true, false)
       : null;
@@ -91,6 +218,7 @@ export class DefaultElementFinder implements ElementFinder {
       rootNodes,
       container,
       matchesContainerText,
+      preferResourceIdOnly,
     );
     if (containerInMain) {
       return containerInMain;
@@ -102,6 +230,7 @@ export class DefaultElementFinder implements ElementFinder {
         windowRoots,
         container,
         matchesContainerText,
+        preferResourceIdOnly,
       );
       if (containerInWindow) {
         return containerInWindow;
@@ -212,6 +341,7 @@ export class DefaultElementFinder implements ElementFinder {
     resourceId: string,
     partialMatch: boolean,
     sortByArea: boolean = true,
+    resourceIdFieldOnly: boolean = false,
   ): Element[] {
     const matches: Element[] = [];
     // Compose semantics (Modifier.testTag) surface via AccessibilityNodeInfo.viewIdResourceName
@@ -226,17 +356,23 @@ export class DefaultElementFinder implements ElementFinder {
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties["resource-id"] && typeof nodeProperties["resource-id"] === "string") {
-          const nodeResourceId = nodeProperties["resource-id"];
-          if (
-            nodeResourceId === resourceId ||
-            (bareResourceId !== null && nodeResourceId === bareResourceId) ||
-            (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
-          ) {
-            const parsedNode = this.parser.parseNodeBounds(node);
-            if (parsedNode) {
-              matches.push(parsedNode);
-            }
+        // `resourceIdFieldOnly` disables the synthetic view-id fallback
+        // entirely once a real resource-id match has been established
+        // elsewhere in the active scope (review threads
+        // PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq) - a real match must
+        // never be unioned with, or out-competed by, a synthetic one.
+        const isMatch = resourceIdFieldOnly
+          ? matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)
+          : matchesResourceIdOrStableViewId(
+              nodeProperties,
+              resourceId,
+              bareResourceId,
+              partialMatch,
+            );
+        if (isMatch) {
+          const parsedNode = this.parser.parseNodeBounds(node);
+          if (parsedNode) {
+            matches.push(parsedNode);
           }
         }
       });
@@ -334,6 +470,145 @@ export class DefaultElementFinder implements ElementFinder {
 
   private isClickableNode(props: Record<string, unknown>): boolean {
     return isClickableElementProperties(props);
+  }
+
+  /**
+   * The full set of search roots for a capture — main hierarchy roots plus
+   * every window's roots — for callers that scope an ambiguity check to the
+   * WHOLE capture rather than one already-resolved container (see
+   * `assertStableViewIdSelectorNotAmbiguous`).
+   */
+  private collectFullCaptureSearchRoots(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[] {
+    const roots = [...this.parser.extractRootNodes(viewHierarchy)];
+    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    for (const windowRoots of windowRootGroups) {
+      roots.push(...windowRoots);
+    }
+    return roots;
+  }
+
+  /**
+   * Count nodes within `searchRoots` whose `view-id` is `base` or an
+   * ordinal-suffixed duplicate of it. Used to decide whether a synthetic
+   * `s-<hash>(-<k>)?` selector is safe to trust WITHIN THE GIVEN SCOPE (see
+   * `assertStableViewIdSelectorNotAmbiguous`) — the scope is the whole
+   * capture when there is no container, or just the resolved container's
+   * subtree when there is one, so a duplicate OUTSIDE a selected container
+   * never blocks resolution inside it.
+   */
+  private countNodesSharingStableViewIdBase(
+    searchRoots: ViewHierarchyNode[],
+    base: string,
+  ): number {
+    let count = 0;
+    for (const root of searchRoots) {
+      this.parser.traverseNode(root, (node: any) => {
+        const nodeProperties = this.parser.extractNodeProperties(node);
+        const viewId = nodeProperties["view-id"];
+        if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
+          count++;
+        }
+      });
+    }
+    return count;
+  }
+
+  /**
+   * True when some node within `searchRoots` carries `id` as its REAL
+   * `resource-id` field (not merely a `view-id` that happens to look
+   * synthetic-shaped). A real resource-id is never subject to
+   * `assignStableViewIds`' ordinal semantics, so it must win over a
+   * synthetic-ordinal interpretation of the same string (review thread
+   * PRRT_kwDOP-GF5M6fomgA) even in the astronomically unlikely case a real id
+   * collides with the producer's exact `s-<16 hex>(-<k>)?` shape.
+   */
+  private hasExactResourceIdFieldMatch(searchRoots: ViewHierarchyNode[], id: string): boolean {
+    let found = false;
+    for (const root of searchRoots) {
+      if (found) {
+        break;
+      }
+      this.parser.traverseNode(root, (node: any) => {
+        if (found) {
+          return;
+        }
+        const resourceId = this.parser.extractNodeProperties(node)["resource-id"];
+        if (typeof resourceId === "string" && resourceId === id) {
+          found = true;
+        }
+      });
+    }
+    return found;
+  }
+
+  /**
+   * Reject a synthetic stable-view-id selector (`s-<hash>` bare OR
+   * `s-<hash>-<k>` ordinal-suffixed) when MORE THAN ONE node within
+   * `searchRoots` shares its base content hash — i.e. it has
+   * content-identical peers IN THIS SCOPE, so which node holds the bare id
+   * vs. which ordinal is load-bearing / capture-local rather than moot. A
+   * selector whose base hash is unique within `searchRoots` is left alone,
+   * and so is a real `resource-id`-backed id that merely resembles the
+   * synthetic shape (issue #6218 review threads PRRT_kwDOP-GF5M6foer0,
+   * PRRT_kwDOP-GF5M6fomf-, PRRT_kwDOP-GF5M6fomgA, PRRT_kwDOP-GF5M6fouI_).
+   * Rejecting is correct here: a wrong tap is worse than a clear failure
+   * telling the caller to use a more specific selector.
+   *
+   * `searchRoots` MUST already reflect any container scoping — callers with a
+   * `container` selector resolve the container FIRST and pass only its
+   * subtree, so a content-identical duplicate OUTSIDE the named container
+   * cannot block (or wrongly influence) resolution inside it. A duplicate
+   * that exists only outside the container leaves the id's exact `view-id`
+   * string matching at most one node inside the container, which the normal
+   * exact-match lookup resolves safely (or returns no-match) on its own.
+   *
+   * KNOWN LIMITATION (issue #6229, review thread PRRT_kwDOP-GF5M6fouI8): this
+   * guard is only as good as what a single, fresh capture can reveal. If node
+   * `A` (bare `s-H`) is REMOVED before the next capture and content-identical
+   * `B` (previously `s-H-2`) is now the sole survivor, `B` is reassigned the
+   * bare `s-H` id and `duplicateCount` here is 1 — the guard cannot tell that
+   * apart from an id that was always unique, so it passes and a selector
+   * meant for `A` silently resolves to `B` instead. A correct fix needs the
+   * id to carry capture-origin provenance (which generation/session it was
+   * observed in), a design change spanning the observe layer and this finder
+   * - out of scope for the current-capture-only check implemented here.
+   *
+   * KNOWN LIMITATION (issue #6230, review thread PRRT_kwDOP-GF5M6fo-Pb): a
+   * synthetic id is a Merkle hash over a node's OWN content fields plus every
+   * DESCENDANT's content hash (`StableNodeIdentity.ts`), so a still-present,
+   * otherwise-unchanged ancestor's id changes whenever any descendant's
+   * `text`/`content-desc` changes between captures - e.g. a live timer child
+   * ticking "1 second" → "2 seconds" changes its row's id from one capture to
+   * the next. The exact-match lookup below then finds nothing for the id a
+   * caller observed a moment earlier, even though the intended control is
+   * still on screen (a miss, not a mis-tap). This is the counterpart of the
+   * #6229 removal case - both are inherent to a pure content hash, which is
+   * stable only while content is stable - and needs the same class of fix:
+   * structural/positional identity or capture-origin provenance, not a
+   * change to the current-capture-only matching done here.
+   */
+  private assertStableViewIdSelectorNotAmbiguous(
+    searchRoots: ViewHierarchyNode[],
+    id: string,
+  ): void {
+    const base = syntheticStableViewIdBase(id);
+    if (!base) {
+      return;
+    }
+    if (this.hasExactResourceIdFieldMatch(searchRoots, id)) {
+      return;
+    }
+    const duplicateCount = this.countNodesSharingStableViewIdBase(searchRoots, base);
+    if (duplicateCount > 1) {
+      throw new ActionableError(
+        `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
+          `content-identical elements share stable id "${base}", and which of them holds the ` +
+          'bare id vs. an "-N" ordinal suffix is assigned by document order at capture time. An ' +
+          "element insert or reorder since this id was observed can shift which element it now " +
+          "points to, so resolving it here could silently act on the wrong element. Use a more " +
+          "specific selector (text, content-desc, or bounds) instead.",
+      );
+    }
   }
 
   private rankTextMatches(matches: Element[]): Element[] {
@@ -494,6 +769,11 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
+    // Resolve the container FIRST when one is given, so the ambiguity check
+    // below can be scoped to just its subtree - a content-identical duplicate
+    // OUTSIDE the named container must not block (or misdirect) resolution
+    // of a uniquely-identified control inside it (review thread
+    // PRRT_kwDOP-GF5M6fouI_).
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
       : null;
@@ -503,13 +783,27 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (containerNode) {
+      this.assertStableViewIdSelectorNotAmbiguous([containerNode], resourceId);
+      // A real resource-id match anywhere in the container's subtree always
+      // wins over a synthetic view-id match, never unioned with one (review
+      // thread PRRT_kwDOP-GF5M6fo13g).
+      const preferResourceIdOnly = this.hasExactResourceIdFieldMatch([containerNode], resourceId);
       return this.collectResourceIdMatchesInRoots(
         [containerNode],
         resourceId,
         partialMatch,
         !preserveTraversalOrder,
+        preferResourceIdOnly,
       );
     }
+
+    const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
+    this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, resourceId);
+    // Computed against the WHOLE capture (main + every window) so a real
+    // resource-id match in one root is never shadowed by a stable-id match
+    // encountered earlier in search order (review thread
+    // PRRT_kwDOP-GF5M6fo2Iq).
+    const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(fullCaptureRoots, resourceId);
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectResourceIdMatchesInRoots(
@@ -517,6 +811,7 @@ export class DefaultElementFinder implements ElementFinder {
       resourceId,
       partialMatch,
       !preserveTraversalOrder,
+      preferResourceIdOnly,
     );
     if (mainMatches.length > 0) {
       return mainMatches;
@@ -529,6 +824,7 @@ export class DefaultElementFinder implements ElementFinder {
         resourceId,
         partialMatch,
         !preserveTraversalOrder,
+        preferResourceIdOnly,
       );
       if (windowMatches.length > 0) {
         return windowMatches;
@@ -1148,16 +1444,8 @@ export class DefaultElementFinder implements ElementFinder {
     const idSeparatorIndex = resourceId.lastIndexOf("/");
     const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
 
-    const matchesId = (input?: string): boolean => {
-      if (!input) {
-        return false;
-      }
-      if (partialMatch) {
-        return input.toLowerCase().includes(resourceId.toLowerCase());
-      }
-      return input === resourceId || (bareResourceId !== null && input === bareResourceId);
-    };
-
+    // Resolve the container FIRST (same ordering fix as findElementsByResourceId)
+    // so the ambiguity check can be scoped to just its subtree.
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
       : null;
@@ -1169,6 +1457,21 @@ export class DefaultElementFinder implements ElementFinder {
     const searchRoots = containerNode
       ? [containerNode]
       : this.parser.extractRootNodes(viewHierarchy);
+
+    // Computed against the container's subtree, or the WHOLE capture when
+    // there is no container, so a real resource-id match is never unioned
+    // with, or shadowed in window-search order by, a synthetic view-id match
+    // (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq).
+    const ambiguityScopeRoots = containerNode
+      ? searchRoots
+      : this.collectFullCaptureSearchRoots(viewHierarchy);
+    this.assertStableViewIdSelectorNotAmbiguous(ambiguityScopeRoots, resourceId);
+    const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(ambiguityScopeRoots, resourceId);
+
+    const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
+      preferResourceIdOnly
+        ? matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)
+        : matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch);
 
     const siblings = this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId);
 
@@ -1194,7 +1497,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private collectClickableSiblingsWithResourceIdInRoots(
     rootNodes: ViewHierarchyNode[],
-    matchesId: (input?: string) => boolean,
+    matchesId: (nodeProperties: Record<string, unknown>) => boolean,
   ): Element[] {
     const results: Element[] = [];
     for (const rootNode of rootNodes) {
@@ -1205,7 +1508,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private findClickableSiblingsOfResourceIdInNode(
     node: ViewHierarchyNode,
-    matchesId: (input?: string) => boolean,
+    matchesId: (nodeProperties: Record<string, unknown>) => boolean,
     results: Element[],
   ): void {
     const children = node.node;
@@ -1217,16 +1520,14 @@ export class DefaultElementFinder implements ElementFinder {
 
     const hasIdMatch = childArray.some((child) => {
       const props = this.parser.extractNodeProperties(child);
-      const rid = props["resource-id"];
-      return typeof rid === "string" && matchesId(rid);
+      return matchesId(props);
     });
 
     if (hasIdMatch) {
       for (const child of childArray) {
         const childProps = this.parser.extractNodeProperties(child);
         const isClickable = this.isClickableNode(childProps);
-        const childRid = childProps["resource-id"];
-        const isIdMatch = typeof childRid === "string" && matchesId(childRid);
+        const isIdMatch = matchesId(childProps);
 
         if (isClickable && !isIdMatch) {
           const parsedNode = this.parser.parseNodeBounds(child);

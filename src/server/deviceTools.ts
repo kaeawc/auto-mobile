@@ -2150,9 +2150,17 @@ function matchesTeardownStableId(
   stableId: string,
   devicePool: DevicePool | undefined,
 ): boolean {
-  return device.platform === "android" && isVirtualAndroidDevice(device)
+  // The name-or-UDID fallback is an iOS-only concern (#6250 delete-by-name).
+  // Branching explicitly on platform keeps a physical Android device whose
+  // `name` happens to collide with an unrelated target's stableId from being
+  // captured by that fallback; Android keeps matching by stable AVD name /
+  // deviceId only.
+  if (device.platform === "ios") {
+    return matchesIosTeardownIdentity(device, stableId);
+  }
+  return isVirtualAndroidDevice(device)
     ? getBootedAndroidStableName(device, devicePool) === stableId
-    : matchesIosTeardownIdentity(device, stableId);
+    : device.deviceId === stableId;
 }
 
 function teardownDeadlineDevice(args: TeardownDeviceArgs): BootedDevice {
@@ -2490,7 +2498,86 @@ async function resolveInventoryTeardownTarget(
       ),
     };
   }
+  // findInventoryTeardownTarget already deduped this match against the
+  // complete iOS inventory, so only the UDID rebind remains here.
+  await rebindIosTeardownLease(context, target);
   return { target };
+}
+
+/**
+ * A booted-device match found via the iOS name fallback only checked the
+ * *booted* device list, so a name that also matches a distinct *stopped*
+ * simulator was never detected as ambiguous (#6250 review). Re-check the
+ * requested name against the complete iOS inventory (booted + stopped)
+ * before committing to it, and rebind the teardown lifecycle lease to the
+ * resolved UDID so it shares the same keyspace as start/provision leases.
+ */
+async function finalizeIosNameResolvedTeardownTarget(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<TeardownResolution> {
+  if (target.device.platform !== "ios" || context.args.target.stableId === target.device.deviceId) {
+    return { target };
+  }
+  const inventory = await readTeardownInventory(
+    context,
+    "ios",
+    "platform inventory precondition did not complete",
+  );
+  if (!completedInventoryFor(inventory, "ios")) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "inventory_incomplete",
+        "Cannot resolve the requested iOS device name against the complete inventory because platform discovery did not complete.",
+        target.device,
+      ),
+    };
+  }
+  const matches = inventory.devices.filter(
+    (device) =>
+      device.platform === "ios" && matchesIosTeardownIdentity(device, context.args.target.stableId),
+  );
+  if (matches.length > 1) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_identity_conflict",
+        "Multiple iOS devices matched the requested stable name; refusing to guess which one to delete.",
+        target.device,
+      ),
+    };
+  }
+  await rebindIosTeardownLease(context, target);
+  return { target };
+}
+
+/**
+ * Delete-by-name reserves the teardown lease under the supplied display
+ * name, but iOS start/provision paths reserve the same simulator by UDID
+ * (#6250 review). Rebind to the resolved UDID once the name has resolved to
+ * a real device so the lease actually shares a keyspace with — and mutually
+ * excludes — a concurrent start/provision of that simulator.
+ */
+async function rebindIosTeardownLease(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<void> {
+  const resolvedUdid = target.device.deviceId;
+  if (
+    target.device.platform !== "ios" ||
+    !resolvedUdid ||
+    context.args.target.stableId === resolvedUdid ||
+    !context.lifecycleLease
+  ) {
+    return;
+  }
+  await context.lifecycleLease.bindCanonicalIdentity({
+    platform: "ios",
+    stableId: resolvedUdid,
+  });
 }
 
 async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
@@ -2526,7 +2613,7 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
     };
   }
   if (bootedTarget.target) {
-    return { target: bootedTarget.target };
+    return await finalizeIosNameResolvedTeardownTarget(context, bootedTarget.target);
   }
   const unresolvedAndroidRuntime = booted.devices.find(
     (device) =>

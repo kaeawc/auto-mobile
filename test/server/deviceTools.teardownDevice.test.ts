@@ -332,6 +332,119 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
+  // #6250 review: the iOS name-or-UDID fallback must be scoped to iOS only.
+  // A physical Android device whose `name` happens to collide with the
+  // requested AVD stableId must not be captured by it — the AVD inventory
+  // lookup must still get a chance to resolve the real target.
+  test("does not let a physical Android device's colliding name capture the iOS name fallback", async () => {
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      {
+        platform: "android",
+        name: avdName,
+        deviceId: "R58N123ABCD", // physical serial, not "emulator-*"
+      },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: false }]);
+
+    const response = await teardownTool().handler(request("android", avdName));
+    const body = responseBody(response);
+
+    expect(body.state).toBe("destroyed");
+    expect(body.command).toEqual({ stop: "not_required", destroy: "accepted" });
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({ platform: "android", name: avdName }),
+      }),
+    ]);
+  });
+
+  // #6250 review: a name that resolves against ONLY the booted device list
+  // can miss a distinct stopped simulator sharing that same name. Ambiguity
+  // must be detected against the complete inventory, not just the booted
+  // snapshot, and must never silently pick the booted device.
+  test("returns target_identity_conflict when an iOS name matches both a booted and a stopped simulator", async () => {
+    const booted: BootedDevice = {
+      platform: "ios",
+      name: "am-sweep-sim",
+      deviceId: "BOOTED-UDID",
+    };
+    const stopped: DeviceInfo = {
+      platform: "ios",
+      name: "am-sweep-sim",
+      deviceId: "STOPPED-UDID",
+      isRunning: false,
+    };
+    manager.setBootedDevices("ios", [booted]);
+    manager.setDeviceImages("ios", [{ ...booted, isRunning: true }, stopped]);
+
+    const response = await teardownTool().handler(request("ios", booted.name));
+    const body = responseBody(response);
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "target_identity_conflict",
+        phase: "precondition",
+      }),
+    );
+    expect(manager.destroyRequests).toEqual([]);
+    expect(manager.wasMethodCalled("killDevice")).toBe(false);
+  });
+
+  // #6250 review: delete-by-name reserves the teardown lease under the
+  // supplied display NAME, but iOS start/provision reserve the same
+  // simulator by UDID. Once the name resolves to a real device, the lease
+  // must be rebound to that UDID so it actually shares start/provision's
+  // keyspace and blocks a concurrent UDID-keyed acquire.
+  test("rebinds an iOS delete-by-name teardown lease to the resolved UDID", async () => {
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "am-sweep-sim",
+      deviceId: "466A9467-CD90-41F3-902B-DC1625471C77",
+      isRunning: false,
+    };
+    let releaseDestroy!: () => void;
+    const destroyStarted = new Promise<void>((resolve) => {
+      manager.destroyStarted = resolve;
+    });
+    manager.destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    manager.setDeviceImages("ios", [device]);
+
+    // stableId is the device NAME (delete-by-name), not the UDID.
+    const teardown = teardownTool().handler(request("ios", device.name));
+    await destroyStarted;
+    manager.clearHistory();
+
+    // A concurrent UDID-keyed acquire must be blocked by the rebound lease —
+    // proof the teardown lease now shares the UDID keyspace with start.
+    const start = getAppleTool().handler({
+      udid: device.deviceId,
+      bootTimeoutMs: 30_000,
+      automationReadyTimeoutMs: 30_000,
+    });
+    let startSettled = false;
+    void start.then(
+      () => {
+        startSettled = true;
+      },
+      () => {
+        startSettled = true;
+      },
+    );
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(startSettled).toBe(false);
+    expect(manager.getExecutedOperations()).toEqual([]);
+
+    releaseDestroy();
+    await teardown;
+    await expect(start).rejects.toThrow(/not found/);
+  });
+
   test("finalizes a segmented recording before deleting its booted Android AVD", async () => {
     const device: BootedDevice = {
       platform: "android",

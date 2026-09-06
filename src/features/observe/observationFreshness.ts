@@ -103,6 +103,19 @@ export interface FreshnessInputs {
    * application, and a forced recapture could not safely reconcile them.
    */
   activityAttributionMismatch?: boolean;
+  /**
+   * The observation carries no foreground application window at all:
+   * `activeWindow.appId` is empty even after every fallback (viewHierarchy
+   * packageName, etc.) has run, so nothing identifies which app — if any —
+   * the captured hierarchy belongs to (issue #6220). This is the synchronous
+   * counterpart to {@link statusBarOnlyHierarchy}: that gate needs an
+   * independent, device-confirmed read of the foreground app to name the
+   * mismatch, so when that confirming read itself comes back empty (or
+   * races), a hierarchy that is honest about carrying no window identity must
+   * still not be stamped `verified/isFresh: true`. Needs no device
+   * round-trip — derived entirely from the observation already in hand.
+   */
+  missingForegroundWindow?: { reason: "status_bar_only" | "empty_active_window" };
   /** Age budget; defaults to {@link maxObservationAgeMs}. */
   maxAgeMs?: number;
 }
@@ -266,6 +279,26 @@ function resolveIdentityMismatch(
       verified: false,
       isFresh: false,
       warning: `The accessibility service reported the capture as incomplete: it could not read the focused application's root window, even though another window's content was readable. ${incompleteCaptureGuidance(inputs.incompleteCapture.sdkInt)}`,
+    };
+  }
+  // Lowest-priority fallback (issue #6220): none of the device-confirmed gates
+  // above fired — most commonly because there was no ground-truth foreground
+  // read to confirm against — yet the observation itself names no foreground
+  // window at all. Every other branch above names the actual foreground app or
+  // a more specific cause; this one only fires when nothing more specific could
+  // be established.
+  if (inputs.missingForegroundWindow) {
+    const { reason } = inputs.missingForegroundWindow;
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning:
+        reason === "status_bar_only"
+          ? "Observed hierarchy contains only Android status-bar content — every extracted node lies within the status-bar strip, not a full foreground application window. Any package/activity attribution on this capture may be stale from a previous app; this capture cannot be trusted to reflect any app's screen. Call observe again."
+          : "Observed hierarchy reports no foreground application window (activeWindow.appId is empty), so this capture cannot be trusted to reflect the current screen; call observe again.",
     };
   }
   return undefined;

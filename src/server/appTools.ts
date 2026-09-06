@@ -15,6 +15,7 @@ import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
+import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
 import {
   createJSONToolResponse,
   createStructuredToolResponse,
@@ -138,6 +139,26 @@ export function resetCrashAppToolDependencies(): void {
   crashAppToolDependencies = null;
 }
 
+/**
+ * Extract the package name from `viewHierarchy.foregroundActivity` (issue
+ * #6220 follow-up): the raw accessibility signal, in the standard
+ * `package/activity` (or `package/.RelativeActivity`) wire format. Mirrors
+ * `LaunchApp.packageFromForegroundActivity` — kept as a matching one-liner
+ * here (not a shared import) the same way `ObserveScreen.ts` already inlines
+ * this exact parse at each of its own call sites — so the attribution driving
+ * `observedAppId` here and the match/mismatch decision in `LaunchApp.execute`
+ * can never disagree about which app a `foregroundActivity` names.
+ */
+function packageFromForegroundActivity(
+  observation: LaunchAppResult["observation"],
+): string | undefined {
+  const foregroundActivity = observation?.viewHierarchy?.foregroundActivity;
+  if (!foregroundActivity) {
+    return undefined;
+  }
+  return foregroundActivity.split("/")[0] || undefined;
+}
+
 function isVerifiedLaunchObservation(
   appId: string,
   observedAppId: string | undefined,
@@ -148,6 +169,54 @@ function isVerifiedLaunchObservation(
     observation?.freshness?.isFresh !== false &&
     observation?.freshness?.verified !== false
   );
+}
+
+/**
+ * Reason a launch could not be verified (issue #6220), for the case where no
+ * foreground application window was observed at all — as opposed to an
+ * observed-but-different foreground (an accepted surface, e.g. a permission
+ * dialog, which `LaunchApp.execute` already treats as success and this
+ * response layer must not second-guess with a misleading `verified: false`).
+ */
+type LaunchVerificationFailureReason = "no_observation" | "no_foreground_window";
+
+function launchVerificationFailureReason(
+  observedAppId: string | undefined,
+  observation: LaunchAppResult["observation"],
+): LaunchVerificationFailureReason | undefined {
+  if (observation === undefined) {
+    return "no_observation";
+  }
+  // `resolveMissingForegroundWindow` (the SAME machine-readable verdict the
+  // observe freshness gate uses) is consulted here too, not just an empty
+  // `observedAppId` (issue #6239 review follow-up): a status-bar-only capture
+  // can still carry STALE `activeWindow.appId`/`packageName` metadata from a
+  // previously-resumed app, which would otherwise make `observedAppId` look
+  // like a real (if wrong) observed app and suppress this structured failure.
+  if (!observedAppId || resolveMissingForegroundWindow(observation) !== undefined) {
+    return "no_foreground_window";
+  }
+  return undefined;
+}
+
+function launchVerificationFailureMessage(reason: LaunchVerificationFailureReason): string {
+  return reason === "no_observation"
+    ? "no observation was captured after launch"
+    : "no foreground application window could be observed after launch";
+}
+
+function buildLaunchMessage(
+  appId: string,
+  verified: boolean | undefined,
+  verifyFailureReason: LaunchVerificationFailureReason | undefined,
+): string {
+  if (verified === true) {
+    return `Launched app ${appId} (foreground verified)`;
+  }
+  if (verifyFailureReason) {
+    return `Launched app ${appId} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
+  }
+  return `Launched app ${appId}`;
 }
 
 /**
@@ -163,7 +232,36 @@ function isVerifiedLaunchObservation(
  * them behind a success message. On success it additionally reports the observed
  * foreground appId and whether it matched, so a client can skip a confirming
  * `observe` round-trip.
+ *
+ * `verified` is a three-way signal, never a silent `undefined` when the launch
+ * genuinely could not be confirmed (issue #6220): `true` on an exact foreground
+ * match against a fresh, verified observation; `false` (with `verifyFailureReason`
+ * naming why) when no foreground window could be observed for the launched app at
+ * all; and `undefined` only for the deliberately-ambiguous case of an observed,
+ * DIFFERENT real foreground (an accepted surface such as a permission dialog,
+ * which `LaunchApp.execute` already accepted as success) or a matching-but-stale
+ * observation, where asserting `false` would contradict the tool's own success.
  */
+/**
+ * Mirror `LaunchApp`'s own reconciliation, which accepts the active window's
+ * appId, the view hierarchy's packageName, OR the package parsed out of
+ * `viewHierarchy.foregroundActivity` — the one remaining app-identity signal
+ * on a hierarchy with no screen dimensions (so `ObserveScreen` never derives
+ * `activeWindow`) and no `packageName` (issue #6220 follow-up). `||` (not
+ * `??`) throughout so an empty-string appId (no foreground window
+ * identified, issue #6220) falls through each fallback rather than being
+ * treated as a real observed app.
+ */
+function resolveLaunchObservedAppId(
+  observation: LaunchAppResult["observation"],
+): string | undefined {
+  return (
+    observation?.activeWindow?.appId ||
+    observation?.viewHierarchy?.packageName ||
+    packageFromForegroundActivity(observation)
+  );
+}
+
 export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   if (!result.success) {
     // `||` not `??`: an empty-string error must still yield the non-empty
@@ -171,22 +269,21 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
     throw new ActionableError(result.error || `Failed to launch app ${appId}`);
   }
 
-  // Mirror `LaunchApp`'s own reconciliation, which accepts either the active
-  // window's appId or the view hierarchy's packageName — so a launch verified via
-  // the hierarchy (active window absent) still reports the observed app.
-  const observedAppId =
-    result.observation?.activeWindow?.appId ?? result.observation?.viewHierarchy?.packageName;
+  const observedAppId = resolveLaunchObservedAppId(result.observation);
   // Only assert verification on an exact foreground match with a fresh, verified
   // observation. `LaunchApp.execute` retries an unverified observation, but this
   // response-level guard preserves the true-or-undefined contract for any direct
   // caller that supplies one.
-  const verified = isVerifiedLaunchObservation(appId, observedAppId, result.observation)
-    ? true
-    : undefined;
+  const isVerified = isVerifiedLaunchObservation(appId, observedAppId, result.observation);
+  const verifyFailureReason = isVerified
+    ? undefined
+    : launchVerificationFailureReason(observedAppId, result.observation);
+  const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {
-    message: verified ? `Launched app ${appId} (foreground verified)` : `Launched app ${appId}`,
+    message: buildLaunchMessage(appId, verified, verifyFailureReason),
     verified,
+    ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
     observation: result.observation,
     ...result,

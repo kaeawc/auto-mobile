@@ -218,6 +218,81 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
 }
 
 /**
+ * Synchronous counterpart to the async, device-confirmed status-bar-only gate
+ * below (issue #6220): `activeWindow.appId` is empty even after every
+ * fallback (viewHierarchy packageName, bootstrap attribution, etc.) has
+ * already run against this result, so nothing identifies which app — if any —
+ * the captured hierarchy belongs to. The async gate needs an independent
+ * dumpsys read of the foreground app to name the mismatch; when that
+ * confirming read itself comes back empty (or races), this still catches the
+ * case without a device round-trip. A missing `viewHierarchy` is left to the
+ * `unavailable` freshness path instead — this is only about a hierarchy that
+ * WAS captured but carries no window identity.
+ */
+/**
+ * Whether the observation carries ANY signal identifying a real foreground
+ * application: a usable `activeWindow.appId`, `viewHierarchy.packageName`, or
+ * a valid `foregroundActivity` (the raw accessibility signal, checked
+ * directly rather than only through `activeWindow`). The third signal matters
+ * on its own: deriving `activeWindow` from `foregroundActivity` in
+ * `collectAllData` is gated on screen dimensions being present, so a
+ * hierarchy that lacks `packageName`/dimensions but DOES carry a valid
+ * `foregroundActivity` never gets an `activeWindow` at all — it must still
+ * not be treated as identity-less (issue #6220 follow-up false-positive).
+ * Single source of truth for "does this capture name an app", so a future
+ * signal is added once here rather than risking one call site missing it.
+ */
+function hasForegroundAppIdentity(result: ObserveResult): boolean {
+  return Boolean(
+    result.activeWindow?.appId ||
+    result.viewHierarchy?.packageName ||
+    hierarchyCarriesActivitySignal(result.viewHierarchy),
+  );
+}
+
+/**
+ * Exported so other consumers can reuse the SAME machine-readable verdict
+ * this freshness gate uses, instead of re-deriving "does this capture have a
+ * foreground window" from a weaker proxy (e.g. package-name presence, which a
+ * status-bar-only capture can still carry as stale metadata). `LaunchApp`
+ * uses this to distinguish a status-bar-only/no-window post-launch capture
+ * from a genuine wrong-app landing (issue #6239 review follow-up).
+ */
+export function resolveMissingForegroundWindow(
+  result: ObserveResult,
+): { reason: "status_bar_only" | "empty_active_window" } | undefined {
+  if (!result.viewHierarchy?.hierarchy?.node) {
+    return undefined;
+  }
+  // Status-bar-ONLY geometry is checked FIRST and dominates any lingering
+  // identity metadata. `packageName`/`foregroundActivity` can survive on the
+  // wire from a PRIOR resumed app even once the tree itself has collapsed to
+  // chrome-only content (both ADB foreground reads coming back empty means
+  // there is no ground truth to confirm or refute that staleness against) —
+  // the geometry is the one signal that cannot lie about what actually came
+  // back. `isStatusBarOnlyHierarchy` already distinguishes this incomplete,
+  // chrome-only strip from a legitimate FULL-height SystemUI shade capture
+  // (it returns `false` the moment any node extends below the status-bar
+  // height), so a genuine expanded shade is never caught here — only the
+  // provably-incomplete case is (issue #6239 review follow-up).
+  if (isStatusBarOnlyHierarchy(result)) {
+    return { reason: "status_bar_only" };
+  }
+  // `hasForegroundAppIdentity` is checked directly (not only via
+  // `activeWindow.appId`, which the package-attribution fallback above should
+  // already have backfilled from `viewHierarchy.packageName`): later stages
+  // (e.g. `reconcileActiveWindowAttribution`, the SystemUI-overlay mirroring)
+  // can still re-derive `activeWindow` after this point, and a
+  // package/activity-attributed capture must never be reported as having no
+  // foreground window regardless of what runs afterward (issue #6220
+  // false-positive) — UNLESS the geometry above already proved it incomplete.
+  if (hasForegroundAppIdentity(result)) {
+    return undefined;
+  }
+  return { reason: "empty_active_window" };
+}
+
+/**
  * The status-bar-only verdict inputs (issue #6151): whether the service itself
  * reported the focused window as unreadable, and the device API level that
  * decides whether that can be Android 14+ data-sensitive withholding.
@@ -677,6 +752,7 @@ export class RealObserveScreen implements ObserveScreen {
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined,
+        missingForegroundWindow: resolveMissingForegroundWindow(result),
         statusBarOnlyHierarchy: await this.resolveStatusBarOnlyHierarchy(
           result,
           foregroundIdentity,
@@ -971,7 +1047,12 @@ export class RealObserveScreen implements ObserveScreen {
 
         // Preserve package attribution when the accessibility service did not
         // provide a usable activity and the legacy window query also failed.
-        if (result.viewHierarchy?.packageName && !result.activeWindow) {
+        // `!result.activeWindow?.appId` (not `!result.activeWindow`): the legacy
+        // query's own failure sentinel is a TRUTHY object with an empty appId
+        // (`Window.getActive`'s catch branch), which would otherwise short-circuit
+        // this fallback and leave a readable, package-attributed capture wrongly
+        // reporting no foreground window (issue #6220 false-positive).
+        if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
           result.activeWindow = {
             appId: result.viewHierarchy.packageName,
             activityName: "",

@@ -123,7 +123,10 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
   });
 
-  test("omits verification when no observation is available", () => {
+  // #6220: no observation at all is squarely "could not observe the launched
+  // app's window" — the response must say so explicitly (verified:false with a
+  // reason) instead of a silent, success-shaped `verified: undefined`.
+  test("reports an explicit verification failure when no observation is available", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
@@ -131,8 +134,105 @@ describe("buildLaunchAppResponse", () => {
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
 
-    expect(payload.verified).toBeUndefined();
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_observation");
     expect(payload.observedAppId).toBeUndefined();
+    expect(payload.message).toBe(
+      "Launched app com.android.settings (verification failed: no observation was captured after launch)",
+    );
+  });
+
+  // #6220 repro: the observation is present but reports no foreground window at
+  // all (activeWindow.appId is empty, e.g. a status-bar-only hierarchy) — the
+  // launch must not silently drop `verified`.
+  test("reports an explicit verification failure when the observation shows no foreground window", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        activeWindow: { appId: "", activityName: "", layoutSeqSum: 0 },
+        freshness: { isFresh: false, verified: false, warning: "no foreground window" },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_foreground_window");
+    expect(payload.observedAppId).toBeUndefined();
+    expect(payload.message).toBe(
+      "Launched app com.android.settings (verification failed: no foreground application window could be observed after launch)",
+    );
+  });
+
+  // P2 review finding on #6239: when neither `activeWindow.appId` nor
+  // `viewHierarchy.packageName` name an app, `viewHierarchy.foregroundActivity`
+  // is the one remaining identity signal — it must drive `observedAppId` (and
+  // `verified`) the same way it drives `LaunchApp`'s own match decision.
+  test("reports the foregroundActivity-derived package as observedAppId when nothing else names an app", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        viewHierarchy: {
+          node: {},
+          foregroundActivity: "com.android.settings/.SubSettings",
+        },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.android.settings");
+    expect(payload.verified).toBe(true);
+    expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
+  });
+
+  test("reports the foregroundActivity-derived package even when it names a different app", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        viewHierarchy: {
+          node: {},
+          foregroundActivity: "com.google.android.permissioncontroller/.GrantPermissionsActivity",
+        },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.google.android.permissioncontroller");
+    expect(payload.verified).toBeUndefined();
     expect(payload.message).toBe("Launched app com.android.settings");
+  });
+
+  // P1 review finding on #6239: a settled `activeWindow.appId` (a primary
+  // signal) must win over a lagging `foregroundActivity` naming the previous
+  // app — the fallback is only consulted when BOTH primary signals are absent.
+  test("a settled activeWindow.appId wins over a lagging foregroundActivity naming the previous app", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        activeWindow: {
+          appId: "com.android.settings",
+          activityName: "SubSettings",
+          layoutSeqSum: 1,
+        },
+        viewHierarchy: {
+          node: {},
+          packageName: "com.android.settings",
+          // Stale/lagging raw signal still naming the PREVIOUS app.
+          foregroundActivity: "com.example.previous/.MainActivity",
+        },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.android.settings");
+    expect(payload.verified).toBe(true);
+    expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
   });
 });

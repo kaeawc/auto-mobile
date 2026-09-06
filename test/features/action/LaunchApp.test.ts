@@ -3,6 +3,7 @@ import { promises as fsp } from "fs";
 import * as os from "os";
 import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
+import { buildLaunchAppResponse } from "../../../src/server/appTools";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -643,6 +644,175 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(false);
     expect(result.observation).toBeUndefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  // Issue #6220 follow-up (P1 review finding on #6239): a launch observation
+  // that reports NO foreground window at all (neither `activeWindow.appId` nor
+  // `viewHierarchy.packageName` name an app — the shape ObserveScreen's own
+  // freshness now marks `verified: false` for) must NOT be treated the same as
+  // "observed a different/stale app": that path rejects and deletes the
+  // observation, but the launch genuinely happened and the response builder
+  // needs the observation preserved to report a structured `verified: false` +
+  // `verifyFailureReason` instead of a thrown/silent failure.
+  test("preserves a no-foreground-window launch observation instead of rejecting it as stale", async () => {
+    fakeTimer.enableAutoAdvance();
+    const noWindowObservation = {
+      ...createObserveResult(undefined),
+      freshness: {
+        isFresh: false,
+        verified: false,
+        warning: "Observed hierarchy reports no foreground application window",
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(noWindowObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation).toBeDefined();
+    expect(result.observation?.freshness?.verified).toBe(false);
+    expect(result.observation?.activeWindow?.appId).toBeFalsy();
+    expect(result.observationOmitted).toBeUndefined();
+  });
+
+  // P1 review finding on #6239: a status-bar-ONLY final capture must be
+  // classified as "no foreground window" even when it still carries STALE
+  // `packageName`/`foregroundActivity`/`activeWindow.appId` metadata left over
+  // from a previously-resumed app. The package-count check alone would see
+  // those stale package names and misroute this to the wrong-app reject path
+  // (success:false, observation stripped, buildLaunchAppResponse throws)
+  // instead of the intended structured `verified:false` +
+  // `verifyFailureReason: "no_foreground_window"`. Reusing
+  // `resolveMissingForegroundWindow` (the SAME machine-readable verdict the
+  // observe freshness gate uses) catches this via geometry, independent of
+  // whatever stale identity survives on the wire.
+  test("preserves a status-bar-only launch observation with stale identity metadata as no-window, not wrong-app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const staleAppPackageName = "com.example.previous";
+    const statusBarOnlyObservation: ObserveResult = {
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 63, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: {
+        packageName: staleAppPackageName,
+        foregroundActivity: `${staleAppPackageName}/.MainActivity`,
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+            node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
+          },
+        },
+      } as any,
+      // Stale identity that survived on the wire even though the tree itself
+      // has collapsed to status-bar-only content.
+      activeWindow: { appId: staleAppPackageName, activityName: "MainActivity", layoutSeqSum: 1 },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(statusBarOnlyObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    // Preserved as a no-window outcome, NOT flipped to a wrong-app rejection.
+    expect(result.success).toBe(true);
+    expect(result.observation).toBeDefined();
+    expect(result.observationOmitted).toBeUndefined();
+
+    const payload = buildLaunchAppResponse(packageName, result);
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_foreground_window");
+  });
+
+  // P2 review finding on #6239: a hierarchy naming a DIFFERENT app only via
+  // `viewHierarchy.foregroundActivity` (no `activeWindow.appId`, no
+  // `viewHierarchy.packageName`) must be a detected wrong-app mismatch, not
+  // an empty-package vacuous accept — the omission previously let a genuine
+  // wrong-app landing through as if no app were observed at all.
+  test("detects a wrong-app landing named only by foregroundActivity, instead of an empty-package accept", async () => {
+    fakeTimer.enableAutoAdvance();
+    const wrongAppPackageName = "com.example.other";
+    const wrongAppObservation: ObserveResult = {
+      ...createObserveResult(undefined),
+      viewHierarchy: {
+        node: {},
+        foregroundActivity: `${wrongAppPackageName}/.MainActivity`,
+      } as any,
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(wrongAppObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      `Timed out waiting for launch observation to show ${packageName}`,
+    );
+    expect(result.error).toContain(wrongAppPackageName);
+    expect(result.observation).toBeUndefined();
+    expect(result.observationOmitted).toBeDefined();
+  });
+
+  // P1 review finding on #6239: `foregroundActivity` must be a FALLBACK
+  // identity signal, never a competing one. The reconciled/settled primary
+  // signals (`activeWindow.appId`, `viewHierarchy.packageName`) already agree
+  // on the just-launched app B, but the raw `foregroundActivity` wire field
+  // can lag a same-observation A->B transition and still name the PREVIOUS
+  // app A. Contributing A alongside a settled B must not fail the match and
+  // turn a successful launch into a failure.
+  test("succeeds when primary signals agree on the launched app despite a lagging foregroundActivity", async () => {
+    fakeTimer.enableAutoAdvance();
+    const previousPackageName = "com.example.previous";
+    const laggedObservation: ObserveResult = {
+      ...createObserveResult(packageName),
+      viewHierarchy: {
+        ...createObserveResult(packageName).viewHierarchy,
+        // Raw accessibility signal still names the PREVIOUS app A, even
+        // though activeWindow/viewHierarchy.packageName already settled on B.
+        foregroundActivity: `${previousPackageName}/.MainActivity`,
+      } as any,
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(laggedObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(result.observationOmitted).toBeUndefined();
+    // No retry needed: the primary signals alone decided the match.
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  // Counterpart to the wrong-app case above: when only `foregroundActivity`
+  // names an app (no primary signals at all) and it names the RIGHT app, the
+  // launch must succeed via that fallback rather than being rejected.
+  test("succeeds via foregroundActivity fallback when it names the launched app and no primary signal is present", async () => {
+    fakeTimer.enableAutoAdvance();
+    const rightAppObservation: ObserveResult = {
+      ...createObserveResult(undefined),
+      viewHierarchy: {
+        node: {},
+        foregroundActivity: `${packageName}/.MainActivity`,
+      } as any,
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(rightAppObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observationOmitted).toBeUndefined();
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
   });
 
   test("treats Android notification permission dialogs as valid launch observations", async () => {

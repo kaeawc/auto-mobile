@@ -503,3 +503,79 @@ describe("ensureTap flag expansion", () => {
     expect(capturedOptions!.retryIfNoChange).toBe(true);
   });
 });
+
+// Issue #6219: the response must never assert `freshness.verified/isFresh: true`
+// on an inline observation while `effect.screenChanged: true` is reported in the
+// SAME payload, when that observation's own content still matches the pre-tap
+// baseline (i.e. it predates the transition `effect` is describing).
+describe("enforceFreshnessConsistencyWithEffect", () => {
+  test("retracts verified/isFresh when the returned observation still matches the pre-tap baseline", () => {
+    const { tap } = createTapOnElement();
+    const activeWindow = {
+      appId: "com.android.deskclock",
+      activityName: "com.android.deskclock.DeskClock",
+      layoutSeqSum: 1,
+    };
+    const previous = makeObservation({ activeWindow });
+    // The exact #6219 shape: effect claims the screen changed, but the
+    // observation attached to the SAME response still shows the pre-tap window.
+    const result: { effect?: any; observation?: ObserveResult } = {
+      effect: { screenChanged: true, basis: "activeWindow changed" },
+      observation: makeObservation({
+        activeWindow: { ...activeWindow },
+        freshness: { isFresh: true, verified: true },
+      }),
+    };
+
+    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+
+    expect(result.observation?.freshness?.verified).toBe(false);
+    expect(result.observation?.freshness?.isFresh).toBe(false);
+    expect(result.observation?.freshness?.warning).toContain("predates the detected transition");
+  });
+
+  test("leaves freshness untouched when the observation is itself consistent with the detected change", () => {
+    const { tap } = createTapOnElement();
+    const previous = makeObservation({
+      activeWindow: {
+        appId: "com.android.deskclock",
+        activityName: "com.android.deskclock.DeskClock",
+        layoutSeqSum: 1,
+      },
+    });
+    const result: { effect?: any; observation?: ObserveResult } = {
+      effect: { screenChanged: true, basis: "activeWindow changed" },
+      observation: makeObservation({
+        activeWindow: {
+          appId: "com.android.deskclock",
+          activityName: "android.app.Dialog",
+          layoutSeqSum: 2,
+        },
+        freshness: { isFresh: true, verified: true },
+      }),
+    };
+
+    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+
+    expect(result.observation?.freshness?.verified).toBe(true);
+    expect(result.observation?.freshness?.isFresh).toBe(true);
+  });
+
+  test("does not touch freshness when effect reports no screen change", () => {
+    const { tap } = createTapOnElement();
+    const activeWindow = { appId: "com.example.app", activityName: "Main", layoutSeqSum: 1 };
+    const previous = makeObservation({ activeWindow });
+    const result: { effect?: any; observation?: ObserveResult } = {
+      effect: { screenChanged: false, basis: "activeWindow unchanged" },
+      observation: makeObservation({
+        activeWindow: { ...activeWindow },
+        freshness: { isFresh: true, verified: true },
+      }),
+    };
+
+    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+
+    expect(result.observation?.freshness?.verified).toBe(true);
+    expect(result.observation?.freshness?.isFresh).toBe(true);
+  });
+});

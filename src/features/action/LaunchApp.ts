@@ -17,6 +17,7 @@ import {
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
@@ -1027,6 +1028,32 @@ export class LaunchApp extends BaseVisualChange {
       }
     }
 
+    // Distinguish "genuinely launched but no foreground window could be read at
+    // all" from "observed a different/stale app" (issue #6220 follow-up). The
+    // latter is a real mismatch — reject and strip the stale observation, as
+    // before. The former is checked via `isMissingForegroundWindow`, a
+    // MACHINE-READABLE verdict reused verbatim from the observe freshness gate
+    // rather than re-derived from package-name absence: a status-bar-only
+    // capture can still carry STALE `packageName`/`foregroundActivity`
+    // metadata left over from a previously-resumed app, so "has package
+    // names" alone would wrongly classify it as a wrong-app mismatch (issue
+    // #6239 review follow-up). Checking the verdict FIRST — before
+    // package-count — means a status-bar-only/no-window capture is preserved
+    // as a structured `verified: false` + `verifyFailureReason` no matter what
+    // stale attribution it still carries; only a genuinely COMPLETE capture (a
+    // real foreground window) naming a different app falls through to the
+    // wrong-app reject path below.
+    if (this.isMissingForegroundWindow(latestObservation)) {
+      logger.warn(
+        `[LaunchApp] Launch observation for ${expectedPackageName} reports no foreground window after ${timeoutMs}ms; preserving it for the response instead of rejecting it as a stale/wrong-app capture`,
+      );
+      result.observation = this.preserveLaunchObservationMetadata(
+        latestObservation,
+        result.observation,
+      );
+      return result;
+    }
+
     return this.withoutStaleLaunchObservation(
       {
         ...result,
@@ -1104,13 +1131,66 @@ export class LaunchApp extends BaseVisualChange {
     return packageNames.length > 0 ? packageNames.join(", ") : "unknown app";
   }
 
+  /**
+   * Extract the package name from `viewHierarchy.foregroundActivity` (issue
+   * #6220 follow-up): the raw accessibility signal, in the standard
+   * `package/activity` (or `package/.RelativeActivity`) wire format. This is
+   * the ONE remaining app-identity signal on a hierarchy that carries neither
+   * `activeWindow.appId` nor `viewHierarchy.packageName` — e.g. no screen
+   * dimensions, so `ObserveScreen` never derives `activeWindow` from it — and
+   * it must feed the SAME match/mismatch decision this identity drives
+   * elsewhere, so a `foregroundActivity` naming a different app is a
+   * detected mismatch rather than an empty-package vacuous accept.
+   */
+  private packageFromForegroundActivity(observation: ObserveResult): string | undefined {
+    const foregroundActivity = observation.viewHierarchy?.foregroundActivity;
+    if (!foregroundActivity) {
+      return undefined;
+    }
+    return foregroundActivity.split("/")[0] || undefined;
+  }
+
+  /**
+   * `foregroundActivity` is a FALLBACK identity signal, not an equal-weight
+   * match requirement (issue #6220 follow-up, P1): the primary signals
+   * (`activeWindow.appId`, `viewHierarchy.packageName`) are reconciled/settled
+   * values, while `foregroundActivity` is the raw accessibility read and can
+   * lag a same-observation A->B transition — e.g. a successful launch to B
+   * where `activeWindow`/`viewHierarchy` already agree on B but the wire's
+   * `foregroundActivity` still names the PREVIOUS app A. Contributing A as a
+   * competing package alongside a settled B would fail the `every` match
+   * check on a launch that actually succeeded. So: when either primary signal
+   * is present, it ALONE decides the match/attribution and `foregroundActivity`
+   * is not even consulted; only when BOTH primary signals are absent does
+   * `foregroundActivity`'s package become the (sole) fallback.
+   */
   private getLaunchObservationPackageNames(observation: ObserveResult): string[] {
-    const packageNames = [
+    const primaryPackageNames = [
       observation.activeWindow?.appId,
       observation.viewHierarchy?.packageName,
     ].filter((packageName): packageName is string => !!packageName);
 
-    return [...new Set(packageNames)];
+    if (primaryPackageNames.length > 0) {
+      return [...new Set(primaryPackageNames)];
+    }
+
+    const fallbackPackageName = this.packageFromForegroundActivity(observation);
+    return fallbackPackageName ? [fallbackPackageName] : [];
+  }
+
+  /**
+   * Whether an observation reports no foreground window at all (issue #6220
+   * follow-up, #6239 review): either the same machine-readable verdict the
+   * observe freshness gate uses (`resolveMissingForegroundWindow` — catches a
+   * status-bar-only capture even when it still carries stale identity
+   * metadata), or the plain "no package names at all" case that verdict
+   * doesn't cover (e.g. no `viewHierarchy` at all).
+   */
+  private isMissingForegroundWindow(observation: ObserveResult): boolean {
+    return (
+      resolveMissingForegroundWindow(observation) !== undefined ||
+      this.getLaunchObservationPackageNames(observation).length === 0
+    );
   }
 
   /**

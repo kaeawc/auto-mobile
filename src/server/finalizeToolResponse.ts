@@ -194,6 +194,30 @@ function resolveDiffSkeleton(
 }
 
 /**
+ * The `context` to attach to a diff response (issue #6256), resolved the same
+ * way {@link resolveDiffSkeleton} resolves `skeleton` and for the same reason:
+ * `diffObserveResult` never sees `context` (it is dropped from `sanitized`
+ * before the diff runs), so without this a diff-mode response would carry the
+ * actionable `skeleton` but silently drop every non-actionable state-readout
+ * row — a timer countdown, a toggle's current-state text — leaving a client
+ * unable to tell a failed input from a successful one purely from the diff.
+ * Returns `undefined` (never an empty array) when no such row survives, so the
+ * emitted diff omits `context` entirely rather than carrying a pointless `[]`
+ * — matching how a full observation only ever carries `context` when it is
+ * non-empty (see `projectSkeletonOnto`).
+ */
+function resolveDiffContext(
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+  cfg: SanitizeObserveConfig,
+): SkeletonElement[] | undefined {
+  if (servedObservation.context) {
+    return servedObservation.context;
+  }
+  return sanitizeObserveResult(rawObservation, { ...cfg, project: "skeleton" }).context;
+}
+
+/**
  * Context needed to finalize a tool response at the serialization chokepoint.
  * `name` selects where the `ObserveResult` lives (top-level for `observe`, else
  * `.observation`); `sessionUuid` keys the diff baseline. `baselineStore` enables
@@ -485,6 +509,15 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           // cannot compute this itself — `elements` is already dropped from
           // `sanitized` by the time it runs — so it is resolved here instead.
           diff.skeleton = resolveDiffSkeleton(
+            servedObservation,
+            payload.observation as ObserveResult,
+            cfg,
+          );
+          // Issue #6256: a diff must not silently drop the state-readout
+          // `context` alongside `skeleton` — see resolveDiffContext. `undefined`
+          // (no surviving readout row) is dropped on serialization just like an
+          // absent key, so no extra branch is needed here.
+          diff.context = resolveDiffContext(
             servedObservation,
             payload.observation as ObserveResult,
             cfg,

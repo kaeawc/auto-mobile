@@ -950,6 +950,103 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
     });
 
+    test("a diffed observation ALSO carries the state-readout `context` alongside `skeleton` (issue #6256)", () => {
+      const { store } = makeStore();
+      // A zero-affordance readout (e.g. a timer countdown) plus one actionable
+      // button — the shape `--actions-diff-observe` must not silently drop the
+      // readout from, the same way #6221 item 4.1 already guarantees `skeleton`.
+      const withReadout = (readoutText: string): ObserveResult => ({
+        ...sameScreenObserve(),
+        elements: {
+          clickable: [
+            {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "com.example:id/btn",
+              text: "Start",
+              clickable: "true",
+            } as any,
+          ],
+          scrollable: [],
+          text: [
+            {
+              bounds: { left: 0, top: 60, right: 100, bottom: 90 },
+              "resource-id": "com.example:id/countdown",
+              text: readoutText,
+            } as any,
+          ],
+          media: [],
+        },
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withReadout("00h 20m 00s")), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      // A tap changes the hierarchy (so a real diff is emitted) AND the readout's
+      // own text updates — the exact failed-vs-successful-input distinction the
+      // client needs to make.
+      const next = withReadout("00h 19m 59s");
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed).toHaveLength(1);
+      expect(Array.isArray(obsSc.context)).toBe(true);
+      expect(obsSc.context).toHaveLength(1);
+      expect(obsSc.context[0]).toMatchObject({
+        elementId: "com.example:id/countdown",
+        label: "00h 19m 59s",
+        affordances: [],
+      });
+
+      // Text mirror agrees.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.context).toEqual(obsSc.context);
+    });
+
+    test("a diff with no surviving readout row omits `context` entirely rather than emitting `[]`", () => {
+      const { store } = makeStore();
+      const withSkeletonElements = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        elements: {
+          clickable: [
+            {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "com.example:id/btn",
+              text: "Submit",
+              clickable: "true",
+            } as any,
+          ],
+          scrollable: [],
+          text: [],
+          media: [],
+        },
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withSkeletonElements()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withSkeletonElements();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.context).toBeUndefined();
+    });
+
     test("returns a full observation when a reported screen change would emit an empty diff", () => {
       const { store } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {

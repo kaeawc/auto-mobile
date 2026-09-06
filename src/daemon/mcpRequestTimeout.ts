@@ -88,6 +88,23 @@ export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
 export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
 
 /**
+ * Floor for `setUIState` -- a multi-field call chains several fields' apply
+ * + verify device round trips sequentially, and on the direct CLI->daemon
+ * transport it never carries the MCP `_meta.progressToken` needed for
+ * `ProgressExtendableDeadline` to extend this budget (issue #6222 reopen):
+ * `runToolViaDaemon` in `src/cli/index.ts` calls `DaemonMcpProxy.callTool`
+ * with no progressToken, so `notifications/progress` -- and the deadline
+ * extension it drives -- never fires on that path, unlike the MCP-server
+ * proxy path (`src/server/proxyServer.ts`) which always forwards the
+ * caller's own token. `SetUIState` itself now self-limits to a smaller
+ * internal result deadline and returns a structured partial result before
+ * this transport-level timeout could fire -- that is the real safety net.
+ * This floor is a second line of defense, giving a legitimate multi-field
+ * form extra transport headroom even when progress relay never engages.
+ */
+export const MIN_SET_UI_STATE_MCP_TIMEOUT_MS = 60_000;
+
+/**
  * Headroom added to a `tapAny` longPress duration when sizing the OUTER MCP
  * request deadline. `TapAnyElement` raises the CtrlProxy-level request
  * timeout for a long press to `duration + LONG_PRESS_TIMEOUT_HEADROOM_MS`
@@ -129,6 +146,7 @@ const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
   crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
   getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
   setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+  setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
 };
 
 /**

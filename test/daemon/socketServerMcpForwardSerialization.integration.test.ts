@@ -13,6 +13,7 @@ import {
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/constants";
 import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -1930,8 +1931,45 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(args).toEqual({
       __mcpSessionId: expect.any(String),
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: expect.any(Number),
     });
     expect(typeof args.__mcpSessionId).toBe("string");
+  });
+
+  test("anchors __mcpRequestDeadlineMs to the capture instant, not a later re-derived time (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", async () => {
+    let forwardedCall: unknown;
+    const beforeNowMs = fakeTimer.now();
+
+    server.mcpClientFactory = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async (request) => {
+          forwardedCall = request;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const response = await sendToolsCallWithoutArgs(socketPath, "observe");
+    const afterNowMs = fakeTimer.now();
+
+    expect(response.success).toBe(true);
+    const args = (forwardedCall as { arguments: Record<string, unknown> }).arguments;
+    const anchoredDeadlineMs = args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] as number;
+    const timeoutMs = args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] as number;
+
+    // The anchored deadline must equal "now (at capture) + the remaining
+    // budget forwarded alongside it" -- anchored to the SAME instant the
+    // remaining budget itself was computed, bounded by whatever the fake
+    // clock did across the whole round trip, with no additional unaccounted
+    // gap on top of `timeoutMs`.
+    expect(anchoredDeadlineMs).toBeGreaterThanOrEqual(beforeNowMs + timeoutMs);
+    expect(anchoredDeadlineMs).toBeLessThanOrEqual(afterNowMs + timeoutMs);
   });
 
   test("queued request fails fast when queue wait exceeds its timeout", async () => {

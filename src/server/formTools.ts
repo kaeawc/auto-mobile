@@ -6,6 +6,13 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { elementIdTextFieldsSchema, validateElementIdTextSelector } from "./elementSelectorSchemas";
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+} from "../daemon/constants";
+import { getLiveDeadlineMs } from "../daemon/liveDeadlineRegistry";
 
 /**
  * Schema for a single field specification
@@ -53,6 +60,8 @@ const fieldResultSchema = z.object({
   error: z.string().optional(),
   fieldType: z.enum(["text", "checkbox", "toggle", "dropdown", "unknown"]).optional(),
   skipped: z.boolean().optional(),
+  notAttempted: z.boolean().optional(),
+  timedOut: z.boolean().optional(),
 });
 
 /**
@@ -90,6 +99,72 @@ export function resetSetUIStateFactory(): void {
   setUIStateFactory = createDefaultSetUIState;
 }
 
+/**
+ * Recover the ABSOLUTE deadline of the current MCP request from the internal
+ * params the server attaches to every daemon-forwarded call (issue #6222
+ * P1).
+ *
+ * Prefers `__mcpRequestDeadlineMs` ({@link INTERNAL_MCP_REQUEST_DEADLINE_PARAM}),
+ * an absolute deadline the DAEMON anchored at the instant it captured the
+ * remaining transport budget, immediately before the loopback
+ * `mcpClient.callTool` (`UnixSocketServer.withSocketSessionAutolockKey`).
+ * Falls back to recomputing `__executionStartTime + __mcpRequestTimeoutMs`
+ * only when the newer param is absent (an older daemon build): `startTime`
+ * is this execution's own start time on the SAME `defaultTimer` clock
+ * `SetUIState` uses, but it is recorded only AFTER this process's HTTP
+ * dispatch and admission/tool-selection repo reads -- re-deriving the
+ * deadline from it RE-GRANTS whatever time that gap consumed, which can push
+ * the computed deadline later than the daemon's actual outer abort (issue
+ * #6222 review, PRRT_kwDOP-GF5M6fuyts P1). The anchored param removes that
+ * gap entirely, so it is the preferred source whenever present.
+ *
+ * Neither field is present on a direct, non-daemon call, in which case there
+ * is no transport deadline to bound against and `SetUIState` falls back to
+ * its own conservative internal budget.
+ */
+function resolveTransportDeadlineMs(args: unknown): number | undefined {
+  if (!args || typeof args !== "object") {
+    return undefined;
+  }
+  const record = args as Record<string, unknown>;
+  const anchoredDeadlineMs = record[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  if (typeof anchoredDeadlineMs === "number" && Number.isFinite(anchoredDeadlineMs)) {
+    return anchoredDeadlineMs;
+  }
+  const remainingMs = record[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  const startTimeMs = record[INTERNAL_EXECUTION_START_TIME_PARAM];
+  if (
+    typeof remainingMs !== "number" ||
+    !Number.isFinite(remainingMs) ||
+    remainingMs <= 0 ||
+    typeof startTimeMs !== "number" ||
+    !Number.isFinite(startTimeMs)
+  ) {
+    return undefined;
+  }
+  return startTimeMs + remainingMs;
+}
+
+/**
+ * Resolve a getter for the LIVE (possibly progress-extended) transport
+ * deadline, when the daemon registered one for this exact request (issue
+ * #6222 P1 reopen). `__mcpLiveDeadlineKey` is only ever present on a
+ * daemon-forwarded, progress-capable call (see `INTERNAL_LIVE_DEADLINE_KEY_PARAM`
+ * and `liveDeadlineRegistry`) -- absent, this returns `undefined` and
+ * `SetUIState.execute()` falls back to the frozen `transportDeadlineMs`
+ * snapshot from {@link resolveTransportDeadlineMs}.
+ */
+function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | undefined) | undefined {
+  if (!args || typeof args !== "object") {
+    return undefined;
+  }
+  const key = (args as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
+  if (typeof key !== "string" || key.length === 0) {
+    return undefined;
+  }
+  return () => getLiveDeadlineMs(key);
+}
+
 export const setUIStateHandler = async (
   device: BootedDevice,
   args: SetUIStateArgs,
@@ -97,6 +172,8 @@ export const setUIStateHandler = async (
   signal?: AbortSignal,
 ) => {
   const setUIState = setUIStateFactory(device);
+  const transportDeadlineMs = resolveTransportDeadlineMs(args);
+  const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter(args);
 
   const result = await setUIState.execute(
     {
@@ -112,6 +189,8 @@ export const setUIStateHandler = async (
     },
     progress,
     signal,
+    transportDeadlineMs,
+    getLiveTransportDeadlineMs,
   );
 
   const response = createStructuredToolResponse({
@@ -124,6 +203,8 @@ export const setUIStateHandler = async (
       error: f.error,
       fieldType: f.fieldType,
       skipped: f.skipped,
+      notAttempted: f.notAttempted,
+      timedOut: f.timedOut,
     })),
     totalAttempts: result.totalAttempts,
     error: result.error,

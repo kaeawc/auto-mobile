@@ -363,7 +363,7 @@ class ResourceRegistryClass {
           `  - automobile:devices/{deviceId}/apps - List apps for a device\n` +
           `  - automobile:apps?deviceId={deviceId} - Query apps with filters\n` +
           `  - automobile:observation/latest - Latest screen observation\n\n` +
-          `Use the listApps tool for detailed guidance on listing apps.`,
+          `Use the listApps tool to list apps directly (params: device, type, search, profile; default type=user).`,
       );
     });
 

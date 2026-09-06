@@ -15,6 +15,7 @@ import { logger } from "../utils/logger";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
   getIosInstalledAppBundleId,
   getIosInstalledAppPath,
@@ -34,9 +35,10 @@ export const APPS_RESOURCE_URIS = {
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
 const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}{?${APPS_QUERY_KEYS.join(",")}}`;
 const APPS_QUERY_PARAM_KEYS = new Set<string>(APPS_QUERY_KEYS);
-type AppsQueryType = "user" | "system";
+type InstalledAppType = "user" | "system";
+export type AppsQueryType = InstalledAppType | "all";
 
-interface AppsQueryOptions {
+export interface AppsQueryOptions {
   platform?: Platform;
   search?: string;
   type?: AppsQueryType;
@@ -44,9 +46,9 @@ interface AppsQueryOptions {
   deviceId?: string;
 }
 
-interface AppsQueryAppInfo {
+export interface AppsQueryAppInfo {
   packageName: string;
-  type: AppsQueryType;
+  type: InstalledAppType;
   foreground: boolean;
   recent: boolean;
   userId?: number;
@@ -63,7 +65,7 @@ interface AppsQueryDeviceContent {
   apps: AppsQueryAppInfo[];
 }
 
-interface AppsQueryResourceContent {
+export interface AppsQueryResourceContent {
   query: AppsQueryOptions;
   observationComplete: boolean;
   totalCount: number;
@@ -92,8 +94,9 @@ interface AndroidInstalledAppInfo {
   recent: boolean;
 }
 
-interface IosInstalledAppInfo {
+export interface IosInstalledAppInfo {
   bundleId: string;
+  type: InstalledAppType;
   displayName?: string;
   version?: string;
   path?: string;
@@ -106,6 +109,13 @@ interface AppsCacheEntry {
   content: AppsResourceContent;
   appsByPackage: Map<string, InstalledAppInfo[]>;
   queryApps: AppsQueryAppInfo[];
+  /**
+   * True when at least one iOS app on this (physical) device could not be
+   * reliably classified user/system (#6216 review, round 5). Gates whether an
+   * explicit type=system/type=user filter is honored or rejected — see
+   * queryInstalledApps. Always false/undefined for Android and the simulator.
+   */
+  iosTypeClassificationUnreliable?: boolean;
 }
 
 const APPS_CACHE_TTL_MS = 60000;
@@ -230,11 +240,81 @@ function extractIosPath(app: Record<string, unknown>): string | undefined {
   return getIosInstalledAppPath(app);
 }
 
-function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
+/**
+ * Classifies an iOS app as "user" or "system" so `type=user` (the documented
+ * default, #6155) actually excludes preinstalled apps on iOS the same way it
+ * excludes them on Android.
+ *
+ * `simctl listapps` reports an explicit `ApplicationType` ("System"/"Hidden"
+ * vs "User") — when present it always wins. When it's absent:
+ *  - On the simulator, an unexpected/incomplete record still falls back to
+ *    Apple's `com.apple.` bundle-id namespace, which only first-party system
+ *    apps use there.
+ *  - On a PHYSICAL device, `devicectl device info apps --json-output` exposes
+ *    no equivalent field at all (only bundleIdentifier/name/version/
+ *    bundleVersion/url/appClip, per Apple's devicectl output), so the
+ *    `com.apple.` heuristic would misclassify a user's own Apple-published
+ *    apps (Pages, Numbers, Keynote, TestFlight, ...) as hidden system apps and
+ *    silently drop them from `type=user`. Without a reliable signal there,
+ *    default to "user" rather than guessing "system" (#6216 review).
+ */
+const IOS_APPLICATION_TYPE_KEYS = ["ApplicationType", "applicationType", "type", "Type"];
+
+function readIosRawApplicationType(app: Record<string, unknown>): string | undefined {
+  return readIosAppField(app, IOS_APPLICATION_TYPE_KEYS);
+}
+
+// Exported for tests: pure classification, no device/cache I/O (#6155).
+export function extractIosApplicationType(
+  app: Record<string, unknown>,
+  bundleId: string,
+  isPhysicalDevice: boolean,
+): InstalledAppType {
+  const raw = readIosRawApplicationType(app);
+  if (raw) {
+    const normalized = raw.toLowerCase();
+    if (normalized === "system" || normalized === "hidden") {
+      return "system";
+    }
+    if (normalized === "user") {
+      return "user";
+    }
+  }
+  if (isPhysicalDevice) {
+    return "user";
+  }
+  return bundleId.startsWith("com.apple.") ? "system" : "user";
+}
+
+/**
+ * True when `extractIosApplicationType` had no reliable signal and had to
+ * default a physical-device app to "user" — i.e. devicectl reported no
+ * `ApplicationType`-equivalent field. An explicit `type=system`/`type=user`
+ * filter must not be silently applied against such apps: it would report an
+ * empty or over-inclusive result that looks like "no system apps exist"
+ * rather than "we can't tell" (#6216 review, round 5). Always false on the
+ * simulator and for apps that do carry a real classification.
+ */
+// Exported for tests: pure check, no device/cache I/O (#6216 review, round 5).
+export function isIosApplicationTypeUnclassified(
+  app: Record<string, unknown>,
+  isPhysicalDevice: boolean,
+): boolean {
+  return isPhysicalDevice && !readIosRawApplicationType(app);
+}
+
+// Exported for tests: pure conversion, no device/cache I/O (#6216 review).
+export function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
   return {
     packageName: app.bundleId,
-    type: "user",
+    type: app.type,
     userId: 0,
+    // iOS has no Android-style multi-user profiles — every app belongs to the
+    // single (profile 0) user. filterAppsByQuery's profile check only reads
+    // `userIds` for non-"user" apps; without this, any profile filter (e.g.
+    // the common profile:0 case) would silently drop every iOS system app
+    // because `userIds` was left undefined (#6216 review).
+    userIds: [0],
     userProfile: "personal",
     foreground: false,
     recent: false,
@@ -353,11 +433,33 @@ interface FetchedAppsCacheEntry {
   cacheable: boolean;
 }
 
+/** Narrow surface `fetchAppsForDevice` needs from `ListInstalledApps`, so tests can
+ * inject a fake without driving the real adb/simctl/devicectl command chain. */
+type InstalledAppsLister = Pick<
+  ListInstalledApps,
+  "executeDetailedResult" | "executeIosDetailedResult"
+>;
+type ListInstalledAppsFactory = (device: BootedDevice) => InstalledAppsLister;
+
+const defaultListInstalledAppsFactory: ListInstalledAppsFactory = (device) =>
+  new ListInstalledApps(device);
+
+let listInstalledAppsFactory: ListInstalledAppsFactory = defaultListInstalledAppsFactory;
+
+/** Test-only seam: inject a fake app lister so a failed listing command can be
+ * simulated without real adb/simctl/devicectl I/O (#6155). Pass null to restore
+ * the default. */
+export function setListInstalledAppsFactoryForTests(
+  factory: ListInstalledAppsFactory | null,
+): void {
+  listInstalledAppsFactory = factory ?? defaultListInstalledAppsFactory;
+}
+
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
 ): Promise<FetchedAppsCacheEntry> {
-  const listInstalledApps = new ListInstalledApps(device);
+  const listInstalledApps = listInstalledAppsFactory(device);
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
@@ -387,17 +489,25 @@ async function fetchAppsForDevice(
   const result = await listInstalledApps.executeIosDetailedResult();
   const apps: IosInstalledAppInfo[] = [];
   const queryApps: AppsQueryAppInfo[] = [];
+  const isPhysicalDevice = isIosPhysicalUdid(device.deviceId);
+  let iosTypeClassificationUnreliable = false;
 
   for (const app of result.apps) {
     const bundleId = getIosInstalledAppBundleId(app);
     if (!bundleId) {
       continue;
     }
-    const displayName = extractIosDisplayName(app as Record<string, unknown>);
-    const version = extractIosVersion(app as Record<string, unknown>);
-    const path = extractIosPath(app as Record<string, unknown>);
+    const rawApp = app as Record<string, unknown>;
+    const displayName = extractIosDisplayName(rawApp);
+    const version = extractIosVersion(rawApp);
+    const path = extractIosPath(rawApp);
+    const type = extractIosApplicationType(rawApp, bundleId, isPhysicalDevice);
+    if (isIosApplicationTypeUnclassified(rawApp, isPhysicalDevice)) {
+      iosTypeClassificationUnreliable = true;
+    }
     const info: IosInstalledAppInfo = {
       bundleId,
+      type,
       displayName,
       ...(version ? { version } : {}),
       ...(path ? { path } : {}),
@@ -415,6 +525,7 @@ async function fetchAppsForDevice(
       content: createAppsResourceContent(device, apps, null, lastUpdated, result.successful),
       appsByPackage: buildAppsByPackage(apps),
       queryApps,
+      iosTypeClassificationUnreliable,
     },
   };
 }
@@ -470,7 +581,8 @@ function parseProfileParam(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions {
+// Exported for tests: pure query-string parsing, no device/cache I/O (#6155).
+export function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions {
   const unknownKeys = Object.keys(params).filter((key) => !APPS_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -493,9 +605,15 @@ function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions 
     platform = platformRaw;
   }
 
+  // Left undefined (not defaulted here) when omitted so callers downstream can
+  // tell "no type filter was requested" apart from an explicit "user"/"system"
+  // request — needed to reject an explicit filter on a physical iOS device
+  // where classification is unavailable (#6216 review, round 5) without also
+  // rejecting the default, silently-lenient case. filterAppsByQuery still
+  // applies the documented "user" default (#6155) when this is undefined.
   let type: AppsQueryType | undefined;
   if (typeRaw) {
-    if (typeRaw !== "user" && typeRaw !== "system") {
+    if (typeRaw !== "user" && typeRaw !== "system" && typeRaw !== "all") {
       throw new Error(`Invalid type: ${typeRaw}`);
     }
     type = typeRaw;
@@ -532,14 +650,22 @@ function buildAppsUri(options: AppsQueryOptions): string {
   return queryString ? `${APPS_RESOURCE_URIS.BASE}?${queryString}` : APPS_RESOURCE_URIS.BASE;
 }
 
-function filterAppsByQuery(
+// Exported for tests: pure filtering, no device/cache I/O (#6155).
+export function filterAppsByQuery(
   apps: AppsQueryAppInfo[],
   options: AppsQueryOptions,
 ): AppsQueryAppInfo[] {
-  const searchTerm = options.search?.toLowerCase();
+  // Trim + lowercase so callers get case-insensitive, whitespace-tolerant
+  // search (" Camera " matches "Camera") whether search arrives from the
+  // listApps tool schema (unnormalized) or the apps resource's query string
+  // (#6216 review).
+  const searchTerm = options.search?.trim().toLowerCase() || undefined;
+  // Documented default is "user" (#6155) — an omitted type must not fall through
+  // to "no filter" and return system apps too.
+  const effectiveType = options.type ?? "user";
 
   return apps.filter((app) => {
-    if (options.type && app.type !== options.type) {
+    if (effectiveType !== "all" && app.type !== effectiveType) {
       return false;
     }
 
@@ -584,41 +710,103 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
   throw new Error(`Device not found or not booted: ${options.deviceId}`);
 }
 
+/**
+ * Resolves the target device and returns the filtered installed-apps content
+ * for it, applying the documented `type` default (see filterAppsByQuery):
+ * an omitted `type` defaults to "user" everywhere EXCEPT a physical iOS
+ * device whose devicectl listing carries no user/system classification
+ * signal (`iosTypeClassificationUnreliable`) — there, an omitted `type`
+ * returns every app and reports `query.type: "all"` (the "user" default
+ * would otherwise silently let system apps through under a "user" label),
+ * and an explicit `type=user`/`type=system` is rejected rather than
+ * honored against data we cannot actually classify (#6216 review, rounds
+ * 5-6). Shared by the `apps` resource and the `listApps` tool (#6155) so
+ * both honor the same default and filtering behavior. Throws on failure —
+ * callers that need a resource-shaped error payload should catch via
+ * getAppsQueryResource.
+ */
+export async function queryInstalledApps(
+  options: AppsQueryOptions,
+): Promise<AppsQueryResourceContent> {
+  const device = await getAppsQueryDevice(options);
+  const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
+  if (!cacheEntry) {
+    throw new Error(`Device not found or not booted: ${device.deviceId}`);
+  }
+  // `observationComplete` is wired directly to whether the underlying adb /
+  // simctl / devicectl listing command itself succeeded (ListInstalledApps'
+  // `successful` flag) — false here means the listing FAILED, not "0 apps
+  // installed". Reporting that as a normal (possibly empty) app list would be
+  // a dishonest success; surface it as a failure instead (#6155).
+  if (!cacheEntry.content.observationComplete) {
+    throw new Error(
+      `Failed to list installed apps for device ${device.deviceId}: the app-listing command did not complete successfully`,
+    );
+  }
+  // An EXPLICIT type=system/type=user filter on a physical iOS device with no
+  // reliable classification signal must not silently return an empty (or
+  // over-inclusive) result — that reads as "no system apps exist" rather than
+  // "we can't tell". type=all is unaffected (#6216 review, round 5).
+  if (
+    options.type !== undefined &&
+    options.type !== "all" &&
+    cacheEntry.iosTypeClassificationUnreliable
+  ) {
+    throw new Error(
+      `Cannot filter by type=${options.type} for device ${device.deviceId}: iOS user/system ` +
+        "app classification is not available on this transport (physical device via devicectl). " +
+        "Use type=all (or omit type) to list every app.",
+    );
+  }
+  // An OMITTED type on such a device is the more common case, and must not be
+  // silently defaulted to "user" either: `--include-all-apps` is passed
+  // unconditionally when listing a physical device (DeviceAppManager), so the
+  // cached apps already include system records, and every unclassified one
+  // was defaulted to "user" (extractIosApplicationType). Applying the normal
+  // "user" default filter here would therefore let system apps straight
+  // through while the response still claimed `query.type: "user"` — exactly
+  // the over-inclusive-but-mislabeled result Codex flagged (#6216 review,
+  // round 6). Report the effective type as "all" (the truthful description
+  // of what this transport can actually filter) and skip the "user" default
+  // filter, rather than rejecting the common omitted-type call outright.
+  const effectiveType: AppsQueryType =
+    options.type === undefined && cacheEntry.iosTypeClassificationUnreliable
+      ? "all"
+      : (options.type ?? "user");
+  const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
+
+  const apps = filterAppsByQuery(cacheEntry.queryApps, effectiveOptions);
+  const deviceEntries: AppsQueryDeviceContent[] = [
+    {
+      deviceId: device.deviceId,
+      platform: device.platform,
+      totalCount: apps.length,
+      lastUpdated: cacheEntry.content.lastUpdated,
+      apps,
+    },
+  ];
+
+  const parsed = Date.parse(cacheEntry.content.lastUpdated);
+  const lastUpdated = Number.isNaN(parsed)
+    ? new Date().toISOString()
+    : new Date(parsed).toISOString();
+
+  return {
+    query: effectiveOptions,
+    observationComplete: cacheEntry.content.observationComplete,
+    totalCount: apps.length,
+    deviceCount: 1,
+    lastUpdated,
+    devices: deviceEntries,
+  };
+}
+
 async function getAppsQueryResource(
   options: AppsQueryOptions,
   uri: string,
 ): Promise<ResourceContent> {
   try {
-    const device = await getAppsQueryDevice(options);
-    const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
-    if (!cacheEntry) {
-      throw new Error(`Device not found or not booted: ${device.deviceId}`);
-    }
-
-    const apps = filterAppsByQuery(cacheEntry.queryApps, options);
-    const deviceEntries: AppsQueryDeviceContent[] = [
-      {
-        deviceId: device.deviceId,
-        platform: device.platform,
-        totalCount: apps.length,
-        lastUpdated: cacheEntry.content.lastUpdated,
-        apps,
-      },
-    ];
-
-    const parsed = Date.parse(cacheEntry.content.lastUpdated);
-    const lastUpdated = Number.isNaN(parsed)
-      ? new Date().toISOString()
-      : new Date(parsed).toISOString();
-
-    const content: AppsQueryResourceContent = {
-      query: options,
-      observationComplete: cacheEntry.content.observationComplete,
-      totalCount: apps.length,
-      deviceCount: 1,
-      lastUpdated,
-      devices: deviceEntries,
-    };
+    const content = await queryInstalledApps(options);
 
     if (options.deviceId) {
       recordAppsQueryUri(options.deviceId, uri);

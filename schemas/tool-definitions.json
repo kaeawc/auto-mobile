@@ -2871,12 +2871,43 @@
   },
   {
     "name": "listApps",
-    "description": "Guide for listing apps via MCP resources",
+    "description": "List installed apps on a device. Filters by type (default: user), search, and profile.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": {}
+      "properties": {
+        "type": {
+          "description": "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where user/system classification is unavailable (devicectl reports no such signal there): on such a device an omitted type returns every app (reported as 'all'), and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
+          "type": "string",
+          "enum": ["user", "system", "all"]
+        },
+        "search": {
+          "description": "Filter by a case-insensitive substring of the package name/bundle id. Also matches the app's display name where the platform reports one (iOS only today — Android's listing does not include app labels).",
+          "type": "string"
+        },
+        "profile": {
+          "description": "Filter to apps visible to this user profile id.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   {

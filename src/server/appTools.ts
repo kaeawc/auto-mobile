@@ -7,6 +7,7 @@ import {
   type LaunchAppResult,
   type TerminateAppResult,
 } from "../models";
+import { toActionableError } from "../models/ActionableError";
 import { CrashApp } from "../features/action/CrashApp";
 import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
@@ -27,17 +28,18 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import {
-  APPS_RESOURCE_URIS,
-  APP_RESOURCE_TEMPLATES,
   invalidateInstalledAppsCache,
   invalidateInstalledAppResourceCache,
   notifyInstalledAppResourceUpdated,
+  queryInstalledApps,
+  type AppsQueryType,
 } from "./appResources";
 import { logger } from "../utils/logger";
 import { isDeviceLostError } from "./deviceLossOutcome";
 
 export interface ListAppsToolDependencies {
   toolResponseFormatter: ToolResponseFormatter;
+  queryInstalledApps: typeof queryInstalledApps;
 }
 
 let listAppsToolDependencies: ListAppsToolDependencies | null = null;
@@ -46,6 +48,7 @@ function getListAppsToolDependencies(): ListAppsToolDependencies {
   if (!listAppsToolDependencies) {
     listAppsToolDependencies = {
       toolResponseFormatter: new DefaultToolResponseFormatter(),
+      queryInstalledApps,
     };
   }
   return listAppsToolDependencies;
@@ -55,6 +58,7 @@ export function setListAppsToolDependencies(deps: Partial<ListAppsToolDependenci
   const currentDeps = getListAppsToolDependencies();
   listAppsToolDependencies = {
     toolResponseFormatter: deps.toolResponseFormatter ?? currentDeps.toolResponseFormatter,
+    queryInstalledApps: deps.queryInstalledApps ?? currentDeps.queryInstalledApps,
   };
 }
 
@@ -410,7 +414,39 @@ export const resetKeychainSchema = withAppIdAliases(
   ),
 );
 
-export const listAppsSchema = z.object({}).passthrough();
+export const listAppsSchema = addDeviceTargetingToSchema(
+  z.object({
+    type: z
+      .enum(["user", "system", "all"])
+      .optional()
+      .describe(
+        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
+          "user/system classification is unavailable (devicectl reports no such signal there): " +
+          "on such a device an omitted type returns every app (reported as 'all'), and an " +
+          "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+      ),
+    search: z
+      .string()
+      .optional()
+      .describe(
+        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
+          "the app's display name where the platform reports one (iOS only today — Android's " +
+          "listing does not include app labels).",
+      ),
+    profile: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("Filter to apps visible to this user profile id."),
+  }),
+);
+
+export interface ListAppsArgs {
+  type?: AppsQueryType;
+  search?: string;
+  profile?: number;
+}
 
 // Export interfaces for type safety
 export interface AppActionArgs {
@@ -446,28 +482,24 @@ export type ResetKeychainArgs = z.infer<typeof resetKeychainSchema>;
 
 // Register tools
 export function registerAppTools() {
-  const listAppsHandler = async () => {
-    const { toolResponseFormatter } = getListAppsToolDependencies();
-    return toolResponseFormatter.createJSONToolResponse({
-      message:
-        "To list installed apps, follow this workflow:\n\n" +
-        "1. Get available devices:\n" +
-        "   Read resource: automobile:devices/booted\n\n" +
-        "2. List apps for a specific device (using deviceId from step 1):\n" +
-        "   Read resource: automobile:devices/{deviceId}/apps\n" +
-        "   Or query format: automobile:apps?deviceId={deviceId}\n\n" +
-        "Optional query filters:\n" +
-        "  - type=user|system (default: user)\n" +
-        "  - search=<term> (filter by package name)\n" +
-        "  - profile=<userId> (filter by user profile)\n\n" +
-        "Example: automobile:apps?deviceId=emulator-5554&type=system&search=google",
-      resources: [
-        "automobile:devices/booted",
-        APP_RESOURCE_TEMPLATES.DEVICE_APPS,
-        APPS_RESOURCE_URIS.BASE + "?deviceId={deviceId}",
-      ],
-      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://apps' are not supported.",
-    });
+  const listAppsHandler = async (device: BootedDevice, args: ListAppsArgs) => {
+    const { toolResponseFormatter, queryInstalledApps: queryApps } = getListAppsToolDependencies();
+    try {
+      const content = await queryApps({
+        deviceId: device.deviceId,
+        platform: device.platform,
+        type: args.type,
+        search: args.search,
+        profile: args.profile,
+      });
+
+      return toolResponseFormatter.createJSONToolResponse({
+        message: `Found ${content.totalCount} app(s) on ${device.deviceId}`,
+        ...content,
+      });
+    } catch (error) {
+      throw toActionableError(error, `Failed to list apps for device ${device.deviceId}`);
+    }
   };
 
   // Launch app handler
@@ -772,11 +804,17 @@ export function registerAppTools() {
     { defaultEnabled: false },
   );
 
-  ToolRegistry.register(
+  ToolRegistry.registerDeviceAware(
     "listApps",
-    "Guide for listing apps via MCP resources",
+    "List installed apps on a device. Filters by type (default: user), search, and profile.",
     listAppsSchema,
     listAppsHandler,
-    { defaultEnabled: true },
+    {
+      defaultEnabled: true,
+      // Listing installed apps only needs adb/simctl/devicectl — never CtrlProxy
+      // automation — so it should not pay for (or trigger) automation-readiness
+      // setup on the target device (#6216 review).
+      deviceReadiness: "booted",
+    },
   );
 }

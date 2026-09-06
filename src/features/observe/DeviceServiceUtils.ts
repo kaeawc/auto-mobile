@@ -244,6 +244,30 @@ interface SendCommandBaseOptions {
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
   errorLabel?: string;
+  /**
+   * Aborted by a caller-owned deadline that started before `ensureConnected()`
+   * was awaited (#6249 follow-up). `ensureConnected()` itself is not
+   * cancellable, so this cannot interrupt an in-flight reconnect/auto-setup —
+   * but it IS checked right after that await resolves and before the request
+   * is registered/sent, so a request whose deadline already expired while
+   * `ensureConnected()` was running is never dispatched to the device (no
+   * phantom action after the caller has already given up and returned).
+   */
+  abortSignal?: AbortSignal;
+  /**
+   * Invoked synchronously right after `ws.send()` succeeds — i.e. the wire
+   * request was actually dispatched to the device (#6249 P1 follow-up).
+   *
+   * A caller racing this call against its own deadline cannot tell, from the
+   * deadline firing alone, whether the request ever reached the device: if
+   * the deadline wins the race, `sendCommand`'s own response is abandoned and
+   * never observed. Without this signal a caller that sees only "timeout" has
+   * no way to distinguish "never dispatched, safe to retry" from "dispatched,
+   * outcome unknown — retrying may double-apply the action". Callers that
+   * care about that distinction (e.g. `ImeAction`) pass this to flip a local
+   * flag they can check when their own deadline fires.
+   */
+  onDispatch?: () => void;
 }
 
 export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
@@ -285,6 +309,23 @@ export async function sendCommand<T>(
     } as T;
   }
 
+  if (options.abortSignal?.aborted) {
+    // The caller's own deadline already fired while ensureConnected() was
+    // resolving (#6249) — do not register or dispatch a request the caller
+    // has already given up on.
+    logger.debug(
+      `[sendCommand] ${options.messageType} aborted before dispatch (deadline expired while connecting)`,
+    );
+    if (options.notConnectedError) {
+      return options.notConnectedError();
+    }
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error: options.notConnectedMessage ?? "Request aborted before dispatch",
+    } as T;
+  }
+
   const requestId = context.requestManager.generateId(options.idPrefix);
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
@@ -319,6 +360,7 @@ export async function sendCommand<T>(
       throw new Error("WebSocket not connected");
     }
     ws.send(msg);
+    options.onDispatch?.();
   } catch (error) {
     context.requestManager.reject(
       requestId,

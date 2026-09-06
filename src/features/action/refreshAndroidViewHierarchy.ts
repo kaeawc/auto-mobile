@@ -1,20 +1,27 @@
 import type { ViewHierarchyResult } from "../../models";
 import type { AndroidCtrlProxyClient } from "../observe/android";
-import type { ViewHierarchy } from "../observe/ViewHierarchy";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { logger } from "../../utils/logger";
 
 /**
- * Shared Android view hierarchy refresh: sync from accessibility service,
- * check for incomplete hierarchy, and merge with uiautomator fallback.
+ * Shared Android view hierarchy refresh: sync from the accessibility service
+ * and surface whether CtrlProxy reported the capture as incomplete.
+ *
+ * A uiautomator-dump fallback for the incomplete case was attempted here via
+ * `ViewHierarchy.getUiAutomatorHierarchy`/`mergeHierarchies`, but neither method
+ * was ever implemented (issue #6252) — the call always threw and was silently
+ * swallowed, so the "fallback" was dead code that never ran. Removed rather
+ * than reimplemented: building a real uiautomator-dump-and-merge pipeline is a
+ * separate feature, not a typecheck-baseline sweep fix. Callers already treat
+ * `ctrlProxyIncomplete` as a signal (see `ObserveScreen.ts`), so the incomplete
+ * hierarchy is still returned as-is for them to act on.
  *
  * Returns the raw (unfiltered) hierarchy — callers are responsible for
  * any post-processing (filtering, attachRawViewHierarchy, etc.).
  */
 export async function refreshAndroidViewHierarchy(
   accessibilityService: AndroidCtrlProxyClient,
-  viewHierarchy: ViewHierarchy,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<ViewHierarchyResult | null> {
@@ -25,7 +32,7 @@ export async function refreshAndroidViewHierarchy(
     timeoutMs,
   );
 
-  let rawHierarchy = syncResult
+  const rawHierarchy = syncResult
     ? accessibilityService.convertToViewHierarchyResult(syncResult.hierarchy)
     : null;
 
@@ -35,19 +42,8 @@ export async function refreshAndroidViewHierarchy(
 
   if (rawHierarchy.ctrlProxyIncomplete) {
     logger.debug(
-      "[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback",
+      "[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy; no uiautomator fallback is implemented, returning as-is",
     );
-    try {
-      const uiautomatorHierarchy = await viewHierarchy.getUiAutomatorHierarchy(
-        signal,
-        !serverConfig.isRawElementSearchEnabled(),
-      );
-      rawHierarchy = viewHierarchy.mergeHierarchies(rawHierarchy, uiautomatorHierarchy);
-    } catch (fallbackErr) {
-      logger.warn(
-        `[refreshAndroidViewHierarchy] Failed to get uiautomator fallback: ${fallbackErr}`,
-      );
-    }
   }
 
   return rawHierarchy;

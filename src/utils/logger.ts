@@ -6,7 +6,11 @@ import path from "path";
 import { statAsync, renameAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
 import { pruneLogFiles } from "./logPruner";
-import { resolveAutomobileLogFormat, resolveAutomobileLogSink } from "./loggingConfig";
+import {
+  resolveAutomobileLogFormat,
+  resolveAutomobileLogSink,
+  writeEmergencyLog,
+} from "./loggingConfig";
 
 export {
   parseAutomobileLogFormat,
@@ -167,6 +171,42 @@ const logsDir = logSink === "stderr" ? undefined : ensureSecureLogsDirSync();
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefined;
 
+interface FailureProneStream {
+  on(event: "error", listener: (error: Error) => void): void;
+}
+
+// A stream that opened successfully can still fail later — e.g. EACCES/ENOSPC
+// surfacing asynchronously once bun/node actually touches the fd. An 'error'
+// event with no listener throws and crashes the process, the exact failure
+// mode #6111/#6179 exists to prevent (just reached via the async path instead
+// of the synchronous constructor throw). Attach a handler so that instead: (a)
+// the error never goes unhandled, (b) the broken stream is dropped so the next
+// write retries opening it (or degrades to stderr, same as the sync path), and
+// (c) the diagnostic stays valid NDJSON in json mode (issue #6179).
+//
+// Deliberately NOT listening for 'close': checkAndRotateLog() ends the active
+// stream on purpose at the size cap and immediately opens its replacement —
+// a normal, expected close with no error. Clearing `logStream` on every close
+// (regardless of cause) raced that legitimate rotation and could drop the
+// freshly-opened replacement stream right after rotating, breaking logging
+// for the rest of the process. An unexpected close without a preceding
+// 'error' is rare enough (and self-healing via the next write's lazy retry
+// once a subsequent write actually fails) that it doesn't need a handler here.
+const attachStreamFailureHandlers = (stream: FailureProneStream, target: string): void => {
+  stream.on("error", (error) => {
+    try {
+      writeEmergencyLog(`Log stream error on ${target}`, error);
+    } catch (loggingError) {
+      // The emergency helper itself must never throw back into the stream's
+      // event emitter — that would just relocate the crash.
+      void loggingError;
+    }
+    if (logStream === stream) {
+      logStream = undefined;
+    }
+  });
+};
+
 // Constructing an appending WriteStream can throw synchronously — e.g. bun's
 // internal fast path occasionally races its epoll registration and throws
 // `EEXIST: ... epoll_ctl` (issue #5930 family). At module load this crashes the
@@ -175,10 +215,15 @@ const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefi
 // fall back to console-only logging rather than taking the process down.
 const openLogStream = (target: string): fs.WriteStream | undefined => {
   try {
-    return fs.createWriteStream(target, { flags: "a" });
+    const stream = fs.createWriteStream(target, { flags: "a" });
+    attachStreamFailureHandlers(stream, target);
+    return stream;
   } catch (error) {
-    // Logger init is the thing failing, so it cannot log itself — warn to stderr.
-    process.stderr.write(`Failed to open log stream ${target}: ${String(error)}\n`);
+    // Logger init is the thing failing, so it cannot log itself — route the
+    // diagnostic through the JSON-aware emergency helper so this line stays
+    // valid NDJSON in `AUTOMOBILE_LOG_FORMAT=json` mode instead of a raw-text
+    // line breaking an otherwise-NDJSON stderr stream (issue #6179).
+    writeEmergencyLog(`Failed to open log stream ${target}`, error);
     return undefined;
   }
 };
@@ -430,23 +475,56 @@ const reportLogFailure = async (context: string, error: unknown): Promise<void> 
 };
 
 const writeToFile = async (line: string): Promise<void> => {
-  if (!logStream) {
+  if (!logFilePath) {
+    // Stderr-only sink: no file stream is ever expected here.
     return;
   }
-  await checkAndRotateLog();
+  if (!logStream) {
+    // A prior open attempt failed — e.g. bun's transient EEXIST/epoll race
+    // (#5930 family). Retry lazily on the next write instead of leaving the
+    // sink permanently dead: the failure that killed it may have cleared.
+    logStream = openLogStream(logFilePath);
+  }
+  if (logStream) {
+    await checkAndRotateLog();
+  }
   const stream = logStream;
   if (!stream) {
+    // Still unavailable. When file is the only configured sink, degrade to
+    // stderr rather than silently discarding the record (issue #6179);
+    // `stderr`/`both` sinks already emit this line via writeToConfiguredStderr.
+    if (logSink === "file") {
+      await writeToStderr(line);
+    }
     return;
   }
-  await new Promise<void>((resolve, reject) => {
-    stream.write(line + "\n", (error) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      stream.write(line + "\n", (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
     });
-  });
+  } catch (error) {
+    // The write itself failed (e.g. EISDIR/ENOSPC surfacing on write rather
+    // than at open). The stream's own 'error' listener (attachStreamFailureHandlers)
+    // will also fire and drop `logStream` so later writes retry/degrade, but
+    // THIS record must not vanish too. `reportLogFailure` intentionally
+    // suppresses its diagnostic for the `file` sink, so degrade the record
+    // itself to stderr here rather than relying on that path (issue #6179).
+    // `stderr`/`both` sinks already have this line on stderr via
+    // writeToConfiguredStderr, so only handle it here for `file`; otherwise
+    // rethrow and let the existing writeToLogFile/reportLogFailure diagnostic
+    // stand, avoiding a duplicate of the same line.
+    if (logSink === "file") {
+      await writeToStderr(line);
+      return;
+    }
+    throw error;
+  }
 };
 
 const writeToConfiguredStderr = async (line: string): Promise<void> => {

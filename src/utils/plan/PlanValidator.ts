@@ -269,6 +269,7 @@ export class PlanValidator {
    * own per-step params.
    */
   private static validateCoordinationLocks(plan: Plan): void {
+    this.validateNoAuthoredLockNamespace(plan);
     this.validateCriticalSectionLocks(plan);
     this.validateBarrierParams(plan);
     this.validateNoCrossToolLockSharing(plan);
@@ -276,6 +277,34 @@ export class PlanValidator {
     this.validateBarrierDistinctDeviceCounts(plan);
     this.validateBarrierGenerationCompleteness(plan);
     this.validateBarrierExcessDeviceArrivals(plan);
+  }
+
+  /**
+   * Validates that no step authors the reserved `__lockNamespace` field
+   * (inline or under `params`). It is injected internally by PlanExecutor
+   * at runtime to scope a plan's lock state, and an authored plan must
+   * never set it: two participants authoring different truthy
+   * `__lockNamespace` values for the same lock would pass every per-lock
+   * feasibility check yet wait in separate namespaced barriers/critical
+   * sections at runtime until timeout, since CriticalSectionCoordinator
+   * keys runtime state by namespace+lock while the checks above aggregate
+   * by lock name alone.
+   */
+  private static validateNoAuthoredLockNamespace(plan: Plan): void {
+    const errors: string[] = [];
+
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+      if (this.effectiveField(step, "__lockNamespace") !== undefined) {
+        errors.push(
+          `step ${i} (${step.tool}) sets '__lockNamespace', which is a reserved field injected internally by the plan executor. Authored plans must not set it.`,
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
   }
 
   /**

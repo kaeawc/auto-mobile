@@ -819,6 +819,20 @@
                 }
               },
               {
+                "$comment": "__lockNamespace is a reserved internal field injected by PlanExecutor at runtime to scope a plan's lock state -- an authored plan must never set it, inline or under params. Rejected explicitly here because criticalSectionParams' additionalProperties stays true, so simply omitting it from the declared properties would not block it. The params branch requires params to be an object before trusting its 'required' check -- required vacuously passes against a non-object value like params: null, which would otherwise misfire this rejection on every step with params: null (#6215 review).",
+                "not": {
+                  "anyOf": [
+                    { "required": ["__lockNamespace"] },
+                    {
+                      "required": ["params"],
+                      "properties": {
+                        "params": { "type": "object", "required": ["__lockNamespace"] }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
                 "anyOf": [
                   { "required": ["lock"] },
                   {
@@ -1009,6 +1023,20 @@
                       "$ref": "#/$defs/barrierParams"
                     }
                   }
+                }
+              },
+              {
+                "$comment": "__lockNamespace is a reserved internal field injected by PlanExecutor at runtime to scope a plan's lock state -- an authored plan must never set it, inline or under params. Rejected explicitly here because barrierParams' additionalProperties stays true, so simply omitting it from the declared properties would not block it. The params branch requires params to be an object before trusting its 'required' check -- required vacuously passes against a non-object value like params: null, which would otherwise misfire this rejection on every step with params: null (#6215 review).",
+                "not": {
+                  "anyOf": [
+                    { "required": ["__lockNamespace"] },
+                    {
+                      "required": ["params"],
+                      "properties": {
+                        "params": { "type": "object", "required": ["__lockNamespace"] }
+                      }
+                    }
+                  ]
                 }
               },
               {
@@ -1923,13 +1951,9 @@
         "deviceId": {
           "type": "string",
           "description": "Device ID override"
-        },
-        "__lockNamespace": {
-          "type": "string",
-          "description": "Internal plan-scoped lock namespace (injected)"
         }
       },
-      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block."
+      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block. __lockNamespace is deliberately NOT declared here (and is explicitly rejected in the criticalSection/barrier if/then blocks below): it is injected internally by PlanExecutor at runtime to scope a plan's lock state, and an authored plan must never set it -- two participants authoring different truthy __lockNamespace values for the same lock would pass every per-lock feasibility check yet wait in separate namespaced barriers at runtime until timeout."
     }
   }
 }

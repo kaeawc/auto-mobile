@@ -687,6 +687,61 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("validateNoAuthoredLockNamespace", () => {
+    // __lockNamespace is injected internally by PlanExecutor to scope a
+    // plan's lock state; an authored plan must never set it, since
+    // CriticalSectionCoordinator keys runtime state by namespace+lock while
+    // the feasibility checks above aggregate arrivals by lock name alone.
+    test("throws when a barrier step authors '__lockNamespace' under params", () => {
+      const plan: Plan = {
+        name: "Authored lock namespace on barrier",
+        devices: ["A", "B"],
+        steps: [
+          {
+            tool: "barrier",
+            params: { device: "A", lock: "sync1", deviceCount: 2, __lockNamespace: "one" },
+          },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow("sets '__lockNamespace'");
+    });
+
+    test("throws when a criticalSection step authors '__lockNamespace' under params", () => {
+      const plan: Plan = {
+        name: "Authored lock namespace on criticalSection",
+        devices: ["A"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "A",
+              lock: "sync1",
+              deviceCount: 1,
+              __lockNamespace: "one",
+              steps: [{ tool: "observe", params: { device: "A" } }],
+            },
+          },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow("sets '__lockNamespace'");
+    });
+
+    test("accepts a normal plan that does not author '__lockNamespace'", () => {
+      const plan: Plan = {
+        name: "Normal barrier plan",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+  });
+
   describe("validateNoCrossToolLockSharing", () => {
     test("throws when the same lock name is used by both a criticalSection and a barrier step", () => {
       // Both tools share the runtime coordinator's lock namespace and

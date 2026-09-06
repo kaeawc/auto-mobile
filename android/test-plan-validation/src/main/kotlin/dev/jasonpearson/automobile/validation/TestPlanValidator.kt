@@ -730,6 +730,36 @@ object TestPlanValidator {
   }
 
   /**
+   * Validates that no step authors the reserved '__lockNamespace' field (inline or under params) --
+   * mirrors the daemon's PlanValidator.validateNoAuthoredLockNamespace. It is injected internally
+   * by PlanExecutor at runtime to scope a plan's lock state, and an authored plan must never set
+   * it: two participants authoring different truthy __lockNamespace values for the same lock would
+   * pass every per-lock feasibility check yet wait in separate namespaced barriers/critical
+   * sections at runtime until timeout, since CriticalSectionCoordinator keys runtime state by
+   * namespace+lock while the checks above aggregate by lock name alone.
+   */
+  private fun validateNoAuthoredLockNamespace(steps: List<*>): List<ValidationError> {
+    val errors = mutableListOf<ValidationError>()
+    for ((index, step) in steps.withIndex()) {
+      if (step !is Map<*, *>) {
+        continue
+      }
+      if (effectiveCoordinationField(step, "__lockNamespace") != null) {
+        val tool = step["tool"] as? String ?: "unknown"
+        errors.add(
+          ValidationError(
+            field = "steps",
+            message =
+              "step $index ($tool) sets '__lockNamespace', which is a reserved field injected internally by the plan executor. Authored plans must not set it.",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+    }
+    return errors
+  }
+
+  /**
    * Validates that no lock name is shared between a criticalSection step and a barrier step --
    * mirrors the daemon's PlanValidator.validateNoCrossToolLockSharing. Both tools share the runtime
    * coordinator's lock namespace and expected-device-count state (keyed by lock name alone), so
@@ -789,6 +819,7 @@ object TestPlanValidator {
     val (usageByLock, membershipErrors) = collectBarrierLockUsage(steps, declaredDevices)
 
     return membershipErrors +
+      validateNoAuthoredLockNamespace(steps) +
       validateNoCrossToolLockSharing(steps) +
       validateBarrierConsistentDeviceCount(usageByLock) +
       validateBarrierDistinctDeviceCounts(usageByLock) +

@@ -699,6 +699,100 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should reject an authored '__lockNamespace' on a barrier step's params", () => {
+      // __lockNamespace is a reserved field injected internally by
+      // PlanExecutor at runtime to scope a plan's lock state. If two
+      // participants authored different truthy values for the same lock,
+      // every per-lock feasibility check would pass yet they'd wait in
+      // separate namespaced barriers at runtime until timeout (#6215
+      // review).
+      const yaml = `
+name: barrier-authored-lock-namespace
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+      __lockNamespace: one
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+      __lockNamespace: two
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an authored inline '__lockNamespace' on a barrier step", () => {
+      const yaml = `
+name: barrier-authored-lock-namespace-inline
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: 2
+    __lockNamespace: one
+  - tool: barrier
+    device: B
+    lock: sync1
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an authored '__lockNamespace' on a criticalSection step's params", () => {
+      const yaml = `
+name: critical-section-authored-lock-namespace
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 1
+      __lockNamespace: one
+      steps:
+        - tool: observe
+          params:
+            device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a normal barrier plan that does not author '__lockNamespace'", () => {
+      const yaml = `
+name: barrier-normal-no-lock-namespace
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should provide line numbers for field errors when possible", () => {
       const yaml = `
 name: test-plan

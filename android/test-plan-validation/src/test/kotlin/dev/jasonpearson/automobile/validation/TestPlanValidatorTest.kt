@@ -778,6 +778,121 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects an authored __lockNamespace on a barrier step's params`() {
+    // __lockNamespace is a reserved field injected internally by
+    // PlanExecutor at runtime to scope a plan's lock state. If two
+    // participants authored different truthy values for the same lock,
+    // every per-lock feasibility check would pass yet they'd wait in
+    // separate namespaced barriers at runtime until timeout (#6215 review).
+    val yaml =
+      """
+      name: barrier-authored-lock-namespace
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+            __lockNamespace: one
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+            __lockNamespace: two
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An authored __lockNamespace on a barrier step should be invalid")
+  }
+
+  @Test
+  fun `rejects an authored inline __lockNamespace on a barrier step`() {
+    val yaml =
+      """
+      name: barrier-authored-lock-namespace-inline
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync1
+          deviceCount: 2
+          __lockNamespace: one
+        - tool: barrier
+          device: B
+          lock: sync1
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "An authored inline __lockNamespace on a barrier step should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects an authored __lockNamespace on a criticalSection step's params`() {
+    val yaml =
+      """
+      name: critical-section-authored-lock-namespace
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 1
+            __lockNamespace: one
+            steps:
+              - tool: observe
+                params:
+                  device: A
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "An authored __lockNamespace on a criticalSection step should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a normal barrier plan that does not author __lockNamespace`() {
+    val yaml =
+      """
+      name: barrier-normal-no-lock-namespace
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A normal barrier plan without __lockNamespace should be valid")
+  }
+
+  @Test
   fun `rejects devices mixing a plain-string label with a label platform definition`() {
     val yaml =
       """

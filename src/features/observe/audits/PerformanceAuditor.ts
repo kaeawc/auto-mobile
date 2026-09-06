@@ -240,16 +240,83 @@ export interface TouchLatencyPointDecision {
   /** A verified-inert coordinate to tap, present only when one was found. */
   touchPoint?: { x: number; y: number };
   /**
-   * True when there is no verified-inert point to tap - `windowBounds` was
-   * undefined (no app window found), the view hierarchy was truncated (so
-   * the obstacle map may be incomplete), or every scanned candidate
-   * overlapped an interactive element or a content-hidden region. The caller
-   * must skip the touch-latency measurement entirely in this case rather
-   * than fall through to `TouchLatencyTracker`'s own unverified default
-   * point, which risks activating a full-screen button, WebView, map, or a
-   * hidden or unemitted control (issue #6167).
+   * True when there is no verified-inert point to tap - the capture wasn't
+   * reliable enough to trust (see `isHierarchyReliableForTapProbe`), or
+   * every scanned candidate overlapped an interactive element or a
+   * content-hidden region. The caller must skip the touch-latency
+   * measurement entirely in this case rather than fall through to
+   * `TouchLatencyTracker`'s own unverified default point, which risks
+   * activating a full-screen button, WebView, map, or a hidden or unemitted
+   * control (issue #6167).
    */
   skipTouchLatency: boolean;
+}
+
+/**
+ * Reasons `isHierarchyReliableForTapProbe` can reject a capture, in check
+ * order. Kept as an explicit reason (rather than a bare boolean) so the one
+ * `deriveTouchLatencyPoint` log line can say *why* - useful when triaging a
+ * report of touch-latency going unexpectedly missing.
+ */
+function unreliableHierarchyReason(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+): string | null {
+  if (!windowBounds) {
+    return "no app window bounds were found";
+  }
+  if (!isValidWindowBounds(windowBounds)) {
+    return (
+      "window bounds are malformed (zero-area, inverted, or non-finite): " +
+      JSON.stringify(windowBounds)
+    );
+  }
+  // A stale cached tree was never verified against the device on this call -
+  // an element it reports as absent (or present) may no longer reflect
+  // what's actually on screen (issue #6167 follow-up).
+  if (result.viewHierarchy?.fresh === false) {
+    return "the view hierarchy is a stale cached snapshot (fresh: false), not verified against the device on this call";
+  }
+  // CtrlProxy can withhold the focused app's own root entirely (observed in
+  // split-screen) while still returning windows/elements from a DIFFERENT
+  // app - certifying a point here can tap the wrong app, not just an
+  // unemitted node of the right one (issue #6167 follow-up).
+  if (result.viewHierarchy?.ctrlProxyIncomplete) {
+    return "CtrlProxy reported an incomplete capture (ctrlProxyIncomplete) - the focused app's own root may have been withheld";
+  }
+  // CtrlProxy stops emitting descendants once it hits a hard limit
+  // (`max_nodes`, `max_depth`) or is cancelled mid-walk - the resulting
+  // hierarchy is silently PARTIAL, not "no obstacles here". Certifying a
+  // point inert against an incomplete obstacle map risks tapping a real
+  // control whose node was simply never emitted (issue #6167 follow-up).
+  const truncationReasons = result.viewHierarchy?.truncationReasons;
+  if (truncationReasons && truncationReasons.length > 0) {
+    return `view hierarchy is truncated (${truncationReasons.join(", ")}) - the obstacle map may be incomplete`;
+  }
+  return null;
+}
+
+/**
+ * Single gate for every known way a capture can be too unreliable to trust
+ * for a synthetic touch-latency tap: absent/malformed app window bounds, a
+ * stale cached tree (`fresh: false`), an incomplete CtrlProxy capture
+ * (`ctrlProxyIncomplete`), or a truncated hierarchy (`truncationReasons`).
+ * Consolidated into one predicate (issue #6167 follow-up) so a future
+ * reliability signal has exactly one place to live and can't be missed by
+ * only patching one of several scattered checks.
+ *
+ * Content-hidden regions (`contentHiddenRegions`) are deliberately NOT a
+ * blanket-reject signal here: unlike the checks above, the reliable part of
+ * the hierarchy elsewhere in the window is still trustworthy, so
+ * `findInertTouchPoint` continues to exclude those regions per-candidate
+ * (via `collectHiddenRegionBounds`) rather than discarding a window that
+ * still has a genuinely safe spot to tap.
+ */
+export function isHierarchyReliableForTapProbe(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+): boolean {
+  return unreliableHierarchyReason(windowBounds, result) === null;
 }
 
 /**
@@ -263,30 +330,11 @@ export function deriveTouchLatencyPoint(
   result: ObserveResult,
   elementParser: ElementParser = new DefaultElementParser(),
 ): TouchLatencyPointDecision {
-  if (!windowBounds) {
-    return { skipTouchLatency: true };
-  }
-
-  if (!isValidWindowBounds(windowBounds)) {
-    logger.warn(
-      "[PerformanceAudit] Skipping touch-latency measurement: window bounds are malformed " +
-        `(zero-area, inverted, or non-finite): ${JSON.stringify(windowBounds)}`,
-    );
-    return { skipTouchLatency: true };
-  }
-
-  // CtrlProxy stops emitting descendants once it hits a hard limit
-  // (`max_nodes`, `max_depth`) or is cancelled mid-walk - the resulting
-  // hierarchy is silently PARTIAL, not "no obstacles here". Certifying a
-  // point inert against an incomplete obstacle map risks tapping a real
-  // control whose node was simply never emitted (issue #6167 follow-up), so
-  // a truncated hierarchy can never produce a verified-inert point.
-  const truncationReasons = result.viewHierarchy?.truncationReasons;
-  if (truncationReasons && truncationReasons.length > 0) {
-    logger.warn(
-      "[PerformanceAudit] Skipping touch-latency measurement: view hierarchy is truncated " +
-        `(${truncationReasons.join(", ")}) - the obstacle map may be incomplete`,
-    );
+  const unreliableReason = unreliableHierarchyReason(windowBounds, result);
+  if (unreliableReason !== null || !windowBounds) {
+    if (unreliableReason !== null) {
+      logger.warn(`[PerformanceAudit] Skipping touch-latency measurement: ${unreliableReason}`);
+    }
     return { skipTouchLatency: true };
   }
 

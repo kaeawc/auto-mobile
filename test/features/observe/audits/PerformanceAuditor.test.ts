@@ -7,6 +7,7 @@ import {
   deriveTouchLatencyPoint,
   findAppWindowBounds,
   findInertTouchPoint,
+  isHierarchyReliableForTapProbe,
   PerformanceAuditor,
 } from "../../../../src/features/observe/audits/PerformanceAuditor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
@@ -680,5 +681,82 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
     const decision = deriveTouchLatencyPoint(appWindow, result);
     expect(decision.skipTouchLatency).toBe(false);
     expect(decision.touchPoint).toBeDefined();
+  });
+});
+
+describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified capture (#6167 follow-up)", () => {
+  const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
+
+  // P1: a stale cached tree was never verified against the device on this
+  // call - certifying a point from it can tap a control that has since
+  // moved, appeared, or disappeared.
+  test("skips touch-latency when fresh is false, even with an empty hierarchy", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, fresh: false } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
+  });
+
+  // P1: in the incomplete split-screen case CtrlProxy can withhold the
+  // focused app's own rootless window entirely while still returning
+  // ANOTHER app's package-less type-1 window - certifying a point here can
+  // tap the wrong app.
+  test("skips touch-latency when ctrlProxyIncomplete is true, even with an empty hierarchy", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, ctrlProxyIncomplete: true } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
+  });
+
+  test("is unaffected when fresh is true and ctrlProxyIncomplete is absent", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, fresh: true } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
+  });
+
+  test("is unaffected when fresh and ctrlProxyIncomplete are both absent (a fully-reliable capture)", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
+  });
+
+  test("isHierarchyReliableForTapProbe is false with no windowBounds", () => {
+    const result = makeResult();
+    expect(isHierarchyReliableForTapProbe(undefined, result)).toBe(false);
+  });
+
+  test("isHierarchyReliableForTapProbe is false with malformed windowBounds", () => {
+    const result = makeResult();
+    const zeroArea = { left: 100, top: 100, right: 100, bottom: 100 };
+    expect(isHierarchyReliableForTapProbe(zeroArea, result)).toBe(false);
+  });
+
+  test("isHierarchyReliableForTapProbe is false with non-empty truncationReasons", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, truncationReasons: ["max_nodes"] } as any,
+    });
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
   });
 });

@@ -4,14 +4,27 @@
  */
 
 import { expect, describe, it, beforeEach } from "bun:test";
+import * as fs from "fs";
+import * as path from "path";
 import { WcagAudit, type WcagBaselineStore } from "../../../src/features/accessibility/WcagAudit";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
-import type { ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
+import type {
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../../src/models/ViewHierarchyResult";
 import type {
   AccessibilityAuditConfig,
   WcagViolation,
 } from "../../../src/models/AccessibilityAudit";
+
+const FIXTURE_ROOT = path.join(__dirname, "../../fixtures/observe");
+
+function loadViewHierarchy(relativePath: string): ViewHierarchyResult {
+  const raw = fs.readFileSync(path.join(FIXTURE_ROOT, relativePath), "utf8");
+  const parsed = JSON.parse(raw) as { viewHierarchy: ViewHierarchyResult };
+  return parsed.viewHierarchy;
+}
 
 /**
  * Baseline-store fake that returns a canned baseline without touching persistence.
@@ -772,6 +785,120 @@ describe("WcagAudit", function () {
       });
 
       expect(recorder.lastScreenId).toBe("com.test:com.example.XmlActivity:xml-root");
+    });
+  });
+
+  describe("Baseline root selection on multi-window hierarchies (#6274)", function () {
+    /**
+     * Records the `screenId` passed to `getBaseline` so tests can assert on it
+     * without reaching into the private `generateScreenId`/`resolveRootNode`
+     * methods.
+     */
+    class RecordingBaselineManager implements WcagBaselineStore {
+      lastScreenId: string | undefined;
+
+      async getBaseline(
+        screenId: string,
+      ): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null> {
+        this.lastScreenId = screenId;
+        return null;
+      }
+
+      async saveBaseline(): Promise<void> {}
+      async clearBaseline(): Promise<void> {}
+    }
+
+    async function screenIdFor(
+      hierarchy: ViewHierarchyNode,
+      packageName: string,
+      windows?: ViewHierarchyResult["windows"],
+    ): Promise<string> {
+      const recorder = new RecordingBaselineManager();
+      const withRecorder = new WcagAudit(new FakeTimer(), recorder);
+      await withRecorder.audit([], hierarchy, undefined, packageName, {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: true,
+      });
+      return recorder.lastScreenId!;
+    }
+
+    it("picks the focused non-SystemUI window root over the SystemUI status-bar wrapper (windows[] present)", async function () {
+      // Two window roots, in the order a real capture produces them: the app
+      // content root first, the SystemUI status bar last — matching
+      // test/fixtures/observe/android-home.json's shape. Picking the LAST
+      // entry (the pre-fix behavior) lands on the attribute-less SystemUI
+      // wrapper.
+      const appRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        className: "com.example.AppContentRoot",
+      } as unknown as ViewHierarchyNode;
+      const systemUiRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+      } as unknown as ViewHierarchyNode;
+      const hierarchy: ViewHierarchyNode = { node: [appRoot, systemUiRoot] };
+      const windows: ViewHierarchyResult["windows"] = [
+        { isFocused: true, isActive: true, type: 1, bounds: appRoot.bounds },
+        { isFocused: false, isActive: false, type: 3, bounds: systemUiRoot.bounds },
+      ];
+
+      const screenId = await screenIdFor(hierarchy, "com.test", windows);
+
+      expect(screenId).toBe("com.test:com.example.AppContentRoot:");
+      expect(screenId).not.toContain(":unknown:");
+    });
+
+    it("falls back to the largest-bounds root when no windows[] metadata is present", async function () {
+      // Mirrors test/fixtures/observe/diff/scroll-before.json: the app root is
+      // full-screen, the SystemUI root is a thin status-bar sliver, and no
+      // `windows[]` metadata is available to match against.
+      const appRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        className: "com.example.AppContentRoot",
+      } as unknown as ViewHierarchyNode;
+      const systemUiRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+      } as unknown as ViewHierarchyNode;
+      const hierarchy: ViewHierarchyNode = { node: [appRoot, systemUiRoot] };
+
+      const screenId = await screenIdFor(hierarchy, "com.test", undefined);
+
+      expect(screenId).toBe("com.test:com.example.AppContentRoot:");
+      expect(screenId).not.toContain(":unknown:");
+    });
+
+    it("does not let the SystemUI root's screenId collide with the app root's on android-home.json", async function () {
+      const viewHierarchy = loadViewHierarchy("android-home.json");
+      const screenId = await screenIdFor(
+        viewHierarchy.hierarchy,
+        "com.google.android.apps.nexuslauncher",
+        viewHierarchy.windows,
+      );
+
+      // Pre-fix, this always produced "<appId>:unknown:" because the last
+      // array entry (the SystemUI status bar) carries no class/resource-id.
+      expect(screenId).not.toBe("com.google.android.apps.nexuslauncher:unknown:");
+      expect(screenId).not.toContain(":unknown:");
+    });
+
+    it("derives distinct, non-'unknown' screen ids for distinct multi-root screens (android-home.json vs scroll-before.json)", async function () {
+      const home = loadViewHierarchy("android-home.json");
+      const scroll = loadViewHierarchy("diff/scroll-before.json");
+
+      const homeScreenId = await screenIdFor(
+        home.hierarchy,
+        "com.google.android.apps.nexuslauncher",
+        home.windows,
+      );
+      const scrollScreenId = await screenIdFor(
+        scroll.hierarchy,
+        "dev.jasonpearson.automobile.playground",
+        scroll.windows,
+      );
+
+      expect(homeScreenId).not.toContain(":unknown:");
+      expect(scrollScreenId).not.toContain(":unknown:");
+      expect(homeScreenId).not.toBe(scrollScreenId);
     });
   });
 

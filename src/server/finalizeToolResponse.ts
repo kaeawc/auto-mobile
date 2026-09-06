@@ -1,4 +1,4 @@
-import type { ObserveResult } from "../models/ObserveResult";
+import type { ObserveResult, SkeletonElement } from "../models/ObserveResult";
 import {
   sanitizeObserveResult,
   diffObserveResult,
@@ -167,6 +167,30 @@ function resolveObserveProjection(args?: Record<string, unknown>): "full" | "ske
     return "full";
   }
   return "skeleton";
+}
+
+/**
+ * The `skeleton` to attach to a diff response (issue #6221 item 4.1), resolved
+ * independently of whatever projection `servedObservation` happens to carry.
+ * `servedObservation` only carries `.skeleton` when the tool defaults to it
+ * (issue #5872's `SKELETON_DEFAULT_ACTION_TOOLS`) AND the resolved projection
+ * is `"skeleton"` — a per-call `raw:true` / `project:"full"` request (or a
+ * tool outside that set) leaves it `undefined`. Without this, exactly THOSE
+ * modes would silently violate the always-usable-selector guarantee (PR #6242
+ * review PRRT_kwDOP-GF5M6fq3iK): a diff with no skeleton, in the one case the
+ * guarantee exists to prevent. So when `servedObservation.skeleton` is absent,
+ * this re-projects one from the underlying (pre-sanitize) observation, which
+ * still carries `.elements` regardless of what projection was requested.
+ */
+function resolveDiffSkeleton(
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+  cfg: SanitizeObserveConfig,
+): SkeletonElement[] {
+  if (servedObservation.skeleton) {
+    return servedObservation.skeleton;
+  }
+  return sanitizeObserveResult(rawObservation, { ...cfg, project: "skeleton" }).skeleton ?? [];
 }
 
 /**
@@ -453,6 +477,18 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
         ) {
           const diff = diffObserveResult(baseline, sanitized);
+          // Always attach a usable selector surface alongside the diff (issue #6221
+          // item 4.1): a client that gets a diff must never be left with no
+          // `skeleton` to act on — including when the request is `raw:true` /
+          // `project:"full"` (PR #6242 review PRRT_kwDOP-GF5M6fq3iK), where
+          // `servedObservation` itself carries no skeleton. `diffObserveResult`
+          // cannot compute this itself — `elements` is already dropped from
+          // `sanitized` by the time it runs — so it is resolved here instead.
+          diff.skeleton = resolveDiffSkeleton(
+            servedObservation,
+            payload.observation as ObserveResult,
+            cfg,
+          );
           const screenChangedWithEmptyDiff =
             hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;

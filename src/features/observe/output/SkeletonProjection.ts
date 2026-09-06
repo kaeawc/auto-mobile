@@ -28,6 +28,14 @@ import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./ele
  * with no new selector semantics (issue #4388 acceptance criterion 2). The
  * emitted key is named `elementId` (not `id`) to literally match the selector
  * field name — see issue #6153.
+ *
+ * `skeleton` is actionable-only (issue #6221 item 1): a row with zero
+ * affordances never appears there. Such rows (a screen title, the
+ * `com.android.systemui` status bar, a standalone notification line) instead
+ * go into the sibling `context` array, so the information survives without
+ * polluting the action surface — and the recurring systemui status-bar block
+ * collapses to a single summarized `context` entry rather than one row per
+ * icon. See {@link projectSkeleton}.
  */
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
@@ -508,11 +516,102 @@ function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
 }
 
 /**
- * Project the flattened `elements` block into an actionable-only skeleton
- * (issue #4388): merge + dedup the categories, apply the keep rule, and emit
- * `{ elementId, label, bounds, affordances }` rows with compact tuple bounds.
+ * Resource-id ALLOWLIST for the actual Android status-bar chrome — the clock,
+ * signal/battery icons, and their containers (`com.android.systemui:id/clock`,
+ * `:id/wifi_signal`, `:id/battery`, `:id/status_bar_container`, …). This block
+ * is re-emitted on EVERY observation of EVERY screen (issue #6221 item 1) and
+ * carries no affordances, so {@link collapseSystemUiBlock} folds every
+ * matching zero-affordance row into one summarized `context` entry instead of
+ * emitting each one separately.
+ *
+ * Deliberately an ALLOWLIST, not a `com.android.systemui:id/` prefix match
+ * (PR #6242 review PRRT_kwDOP-GF5M6fq3iH): the notification SHADE lives under
+ * the same `com.android.systemui` namespace (e.g. `:id/notification_row_1`,
+ * `:id/notification_stack_scroller` — see `test/server/systemTray.test.ts`),
+ * and those rows are ACTIONABLE and must stay individually selectable, never
+ * folded into this summary. Only genuine status-bar chrome collapses; a new
+ * systemui id that isn't on this list simply stays its own `context` entry
+ * (still correct, just not collapsed) rather than risking a false positive.
  */
-export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
+const SYSTEMUI_STATUS_BAR_ID_PATTERN =
+  /^com\.android\.systemui:id\/(status_bar[a-zA-Z_]*|clock|battery[a-zA-Z_]*|wifi_[a-zA-Z_]*|system_icons|statusIcons|notification_icon_area|notificationIcons)$/;
+
+/** Whether `acc` is genuine status-bar chrome (never the notification shade — see the pattern's doc). */
+function isSystemUiEntry(acc: SkeletonAccumulator): boolean {
+  return acc.elementId !== undefined && SYSTEMUI_STATUS_BAR_ID_PATTERN.test(acc.elementId);
+}
+
+/** The smallest bounds tuple enclosing every entry's bounds. */
+function unionBounds(entries: readonly SkeletonAccumulator[]): SkeletonElement["bounds"] {
+  let [left, top, right, bottom] = entries[0].bounds;
+  for (const entry of entries.slice(1)) {
+    left = Math.min(left, entry.bounds[0]);
+    top = Math.min(top, entry.bounds[1]);
+    right = Math.max(right, entry.bounds[2]);
+    bottom = Math.max(bottom, entry.bounds[3]);
+  }
+  return [left, top, right, bottom];
+}
+
+/**
+ * Synthetic elementId for the collapsed systemui summary row. Deliberately NOT
+ * shaped like a real `package:id/name` resource-id (no `:id/` segment) so it
+ * can never be mistaken for — or collide with — an actual selector; the row
+ * carries no affordances and is not meant to be tapped.
+ */
+const SYSTEMUI_SUMMARY_ELEMENT_ID = "com.android.systemui:status-bar-summary";
+
+/**
+ * Collapse every zero-affordance systemui status-bar row into ONE summarized
+ * `context` entry (issue #6221 item 1). The block (clock, wifi/battery icons,
+ * …) reappears verbatim on every observation of every screen, so emitting each
+ * icon as its own `context` row would just move the noise from `skeleton` to
+ * `context` instead of removing it. Non-systemui zero-affordance entries
+ * (e.g. a screen title, a standalone notification) pass through individually.
+ */
+function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAccumulator[] {
+  const systemUiEntries = nonActionable.filter(isSystemUiEntry);
+  if (systemUiEntries.length === 0) {
+    return nonActionable;
+  }
+  const other = nonActionable.filter((acc) => !isSystemUiEntry(acc));
+  const summaryParts = systemUiEntries
+    .map((entry) => entry.label?.trim())
+    .filter((label): label is string => !!label);
+  const summary: SkeletonAccumulator = {
+    elementId: SYSTEMUI_SUMMARY_ELEMENT_ID,
+    label:
+      summaryParts.length > 0
+        ? `Status bar: ${summaryParts.join(", ")}`
+        : "Status bar (no readable status text)",
+    bounds: unionBounds(systemUiEntries),
+    affordances: new Set<Affordance>(),
+  };
+  return [...other, summary];
+}
+
+/** The `skeleton` (actionable) and `context` (non-actionable) halves of a projection. */
+export interface SkeletonProjectionResult {
+  /** Actionable-only rows (`affordances.length >= 1`); the surface a client should act on. */
+  skeleton: SkeletonElement[];
+  /**
+   * Non-actionable rows (`affordances.length === 0`) that still carry readable
+   * information — a screen title, a status-bar summary, a standalone
+   * notification line (issue #6221 item 1). Kept out of `skeleton` so that
+   * array means what its schema says: actionable-only.
+   */
+  context: SkeletonElement[];
+}
+
+/**
+ * Project the flattened `elements` block into the actionable `skeleton` and
+ * informational `context` arrays (issue #6221 item 1): merge + dedup the
+ * categories, apply the keep rule, split on affordance count, and collapse
+ * the systemui status-bar block. Duplicate-id disambiguation (issue #6221 item
+ * 2) runs only over the actionable set — a non-actionable duplicate is not
+ * something a client will ever need to disambiguate for `tapOn`.
+ */
+export function projectSkeleton(elements: ObserveElements): SkeletonProjectionResult {
   const accumulators = accumulateByIdentity(elements);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
@@ -520,10 +619,30 @@ export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
   hoistContainerLabels(accumulators, clickable);
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
+  const actionable = kept.filter((acc) => acc.affordances.size > 0);
+  const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
+
   // Disambiguate duplicate ids (issue #6221 item 2) against the FINAL emitted
-  // set, not the pre-filter accumulators — a duplicate suppressed by the keep
-  // rule (e.g. folded/hoisted text) must not consume an index slot a client
-  // will never see.
-  assignDuplicateIndexes(kept);
-  return kept.map(toSkeletonEntry);
+  // actionable set, not the pre-filter accumulators — a duplicate suppressed by
+  // the keep rule (e.g. folded/hoisted text) must not consume an index slot a
+  // client will never see.
+  assignDuplicateIndexes(actionable);
+
+  return {
+    skeleton: actionable.map(toSkeletonEntry),
+    context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
+  };
+}
+
+/**
+ * Project the flattened `elements` block into an actionable-only skeleton
+ * (issue #4388): merge + dedup the categories, apply the keep rule, and emit
+ * `{ elementId, label, bounds, affordances }` rows with compact tuple bounds.
+ *
+ * A thin wrapper over {@link projectSkeleton} that drops `context` (issue
+ * #6221 item 1), kept for callers that only ever wanted the actionable rows
+ * (e.g. the #6218 elementId round-trip coverage).
+ */
+export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
+  return projectSkeleton(elements).skeleton;
 }

@@ -856,6 +856,100 @@ describe("finalizeToolResponse", () => {
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 
+    test("a diffed observation ALWAYS carries a usable `skeleton` alongside it (issue #6221 item 4.1)", () => {
+      const { store } = makeStore();
+      /** Same-screen observation whose `elements` block yields a non-empty skeleton. */
+      const withSkeletonElements = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        elements: {
+          clickable: [
+            {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "com.example:id/btn",
+              text: "Submit",
+              clickable: "true",
+            } as any,
+          ],
+          scrollable: [],
+          text: [],
+          media: [],
+        },
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withSkeletonElements()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withSkeletonElements();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      // Default projection (no `project`/`raw` arg) — the case the issue's dogfood
+      // repro hit: a diff response with no skeleton to act on.
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      // The diff is real (a change happened)...
+      expect(obsSc.changed).toHaveLength(1);
+      // ...AND it still carries a full, usable actionable-only skeleton — never
+      // absent just because a diff was emitted.
+      expect(Array.isArray(obsSc.skeleton)).toBe(true);
+      expect(obsSc.skeleton.length).toBeGreaterThan(0);
+      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
+      expect(obsSc.skeleton[0].affordances).toContain("tap");
+
+      // Text mirror agrees.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.skeleton.length).toBe(obsSc.skeleton.length);
+    });
+
+    test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {
+      const { store } = makeStore();
+      const withSkeletonElements = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        elements: {
+          clickable: [
+            {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "com.example:id/btn",
+              text: "Submit",
+              clickable: "true",
+            } as any,
+          ],
+          scrollable: [],
+          text: [],
+          media: [],
+        },
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withSkeletonElements()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withSkeletonElements();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      // `project: "full"` — servedObservation itself carries NO skeleton in this
+      // mode (it is the raw sanitized tree), so the diff must re-project one
+      // independently rather than emitting `skeleton: []`.
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.viewHierarchy).toBeUndefined();
+      expect(Array.isArray(obsSc.skeleton)).toBe(true);
+      expect(obsSc.skeleton.length).toBeGreaterThan(0);
+      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
+    });
+
     test("returns a full observation when a reported screen change would emit an empty diff", () => {
       const { store } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {

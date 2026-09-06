@@ -97,6 +97,194 @@ describe("diffObserveResult", () => {
     expect(diff.added[0].attributes.text).toBe("Added");
   });
 
+  test("diffObserveResult itself always emits a `skeleton` field (placeholder, filled in by finalizeToolResponse — issue #6221 item 4.1)", () => {
+    // `diffObserveResult` cannot compute the real skeleton itself — `elements`
+    // is already dropped from the sanitized observation by the time it runs —
+    // so it always emits the field (empty) rather than omitting it, keeping the
+    // `ObserveDiff` shape whole; `finalizeToolResponse` overwrites it with the
+    // real actionable-only rows before the diff reaches the client.
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const diff = diffObserveResult(obs({ ...node }), obs({ ...node }));
+    expect(diff.skeleton).toEqual([]);
+  });
+
+  test("added/removed entries already carry the real selector fields directly in `attributes` — no separate `selector` (issue #6221 item 4.3)", () => {
+    // added/removed nodes carry their FULL attribute set, so resource-id/text
+    // ARE the selector already — a synthesized `selector` field would just
+    // duplicate those bytes (see stableIdentityScrollDiff.test.ts's byte-budget
+    // guard). Only `changed` entries (no full attributes) get one.
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "gone",
+          bounds: { left: 1, top: 1, right: 2, bottom: 2 },
+          text: "Bye",
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "new",
+          bounds: { left: 1, top: 1, right: 2, bottom: 2 },
+          "content-desc": "Added row",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+
+    expect(diff.added).toHaveLength(1);
+    expect(diff.added[0].attributes["resource-id"]).toBe("new");
+    expect(diff.added[0].attributes["content-desc"]).toBe("Added row");
+    expect((diff.added[0] as Record<string, unknown>).selector).toBeUndefined();
+
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.removed[0].attributes["resource-id"]).toBe("gone");
+    expect(diff.removed[0].attributes.text).toBe("Bye");
+    expect((diff.removed[0] as Record<string, unknown>).selector).toBeUndefined();
+  });
+
+  test("changed entries carry a real selector recovered from resource-id/text, since they carry no full attributes (issue #6221 item 4.3)", () => {
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 5, top: 5, right: 15, bottom: 15 },
+          text: "Airplane mode",
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 5, top: 5, right: 15, bottom: 15 },
+          text: "Airplane mode",
+          checked: "true",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toEqual({ elementId: "toggle", label: "Airplane mode" });
+  });
+
+  test("a changed entry whose elementId AND label repeat elsewhere in `next` gets a disambiguating `index` (PR #6242 review PRRT_kwDOP-GF5M6fq3iI)", () => {
+    // Two identical toggle rows sharing both resource-id and label — without an
+    // occurrence index, both `changed` entries would emit the SAME selector, so
+    // tapOn would always hit the first match rather than the one that actually
+    // changed (#6238 already solved this exact ambiguity for `skeleton` rows).
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Airplane mode",
+        },
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+          text: "Airplane mode",
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Airplane mode",
+        },
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+          text: "Airplane mode",
+          checked: "true",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+
+    expect(diff.changed).toHaveLength(1);
+    // The SECOND occurrence (index 1) is the one that actually changed.
+    expect(diff.changed[0].selector).toEqual({
+      elementId: "toggle",
+      label: "Airplane mode",
+      index: 1,
+    });
+  });
+
+  test("a changed entry whose elementId is unique in `next` never carries a spurious `index`", () => {
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Wi-Fi",
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Wi-Fi",
+          checked: "true",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toEqual({ elementId: "toggle", label: "Wi-Fi" });
+    expect(diff.changed[0].selector?.index).toBeUndefined();
+  });
+
+  test("a changed entry with neither resource-id/view-id nor text/content-desc omits `selector`", () => {
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [{ bounds: { left: 1, top: 1, right: 2, bottom: 2 }, class: "android.view.View" }],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          bounds: { left: 1, top: 1, right: 2, bottom: 2 },
+          class: "android.view.View",
+          checked: "true",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toBeUndefined();
+  });
+
   test("a removed child node appears in `removed`", () => {
     const baseline = obs({
       "resource-id": "root",
@@ -408,6 +596,7 @@ describe("diffObserveResult", () => {
     });
     expect(diffObserveResult(empty, empty)).toEqual({
       isDiff: true,
+      skeleton: [],
       added: [],
       removed: [],
       changed: [],

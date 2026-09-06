@@ -1,6 +1,6 @@
-import type { ObserveResult } from "../../../models/ObserveResult";
+import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
-import { toSkeleton } from "./SkeletonProjection";
+import { projectSkeleton } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 
 /**
@@ -137,7 +137,7 @@ export function sanitizeObserveResult(
   // JSON round-trip strips, so reading `out.elements` would silently lose it and
   // revert hoisting/suppression to the pre-#5881 geometry fallback.
   if (cfg.project === "skeleton") {
-    projectSkeleton(out, obs);
+    projectSkeletonOnto(out, obs);
   }
 
   if (cfg.compact) {
@@ -159,17 +159,26 @@ export function sanitizeObserveResult(
 
 /**
  * Replace the full tree with the actionable-only skeleton (issue #4388): set
- * `out.skeleton` from the collector's `elements`, then drop `viewHierarchy` and
- * `elements` from the emitted copy. A hierarchy-less observation (capture
- * failure) yields an empty skeleton — still a valid, if empty, projection.
+ * `out.skeleton` (and the sibling `out.context`, issue #6221 item 1) from the
+ * collector's `elements`, then drop `viewHierarchy` and `elements` from the
+ * emitted copy. A hierarchy-less observation (capture failure) yields an empty
+ * skeleton and no `context` — still a valid, if empty, projection.
  *
  * `source` is the pre-clone `obs`: its elements still carry the non-enumerable
  * ancestry provenance (issue #5881) that the `sanitizeObserveResult` JSON clone
  * strips from `out`. The projection reads but never mutates them, so the "input
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
-function projectSkeleton(out: ObserveResult, source: ObserveResult): void {
-  out.skeleton = source.elements ? toSkeleton(source.elements) : [];
+function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
+  const { skeleton, context } = source.elements
+    ? projectSkeleton(source.elements)
+    : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[] };
+  out.skeleton = skeleton;
+  if (context.length > 0) {
+    out.context = context;
+  } else {
+    delete out.context;
+  }
   delete out.viewHierarchy;
   delete out.elements;
 }
@@ -427,18 +436,131 @@ function compactObserveBounds(value: unknown): void {
  * ------------------------------------------------------------------------ */
 
 /**
+ * A real, `tapOn`-usable selector recovered for a diff node/change (issue
+ * #6221 item 4.3). Same vocabulary the `skeleton` rows use — `elementId`
+ * (`resource-id ?? view-id`) and `label` (`text ?? content-desc`) — derived
+ * with the identical precedence {@link deriveDiffSelector} applies, so a
+ * client that already knows how to act on a skeleton row knows how to act on
+ * a diff entry. Omitted when the node's attributes carry neither.
+ */
+export interface ObserveDiffSelector {
+  elementId?: string;
+  label?: string;
+  /**
+   * Disambiguator (PR #6242 review PRRT_kwDOP-GF5M6fq3iI), present only when
+   * `elementId` repeats elsewhere among `next`'s nodes: without it, two
+   * `changed` entries for distinct repeated controls (same resource-id AND
+   * label — e.g. two identical toggle rows) would emit the SAME selector, so
+   * `tapOn` would act on the first match rather than the occurrence that
+   * actually changed. Same hierarchy-order semantics as the skeleton's #6238
+   * `index` — verbatim-usable as `tapOn({ selector, index })` — computed by
+   * {@link computeElementIdOccurrenceIndexes} over the SAME preorder walk
+   * `flattenForDiff` produces. Unique-id entries never carry this field.
+   */
+  index?: number;
+}
+
+/** `elementId = resource-id ?? view-id`, mirroring `SkeletonProjection.deriveId`. */
+function diffNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/** `elementId = resource-id ?? view-id` off a diff node's raw attributes — see {@link deriveDiffSelector}. */
+function diffElementId(attributes: Record<string, unknown>): string | undefined {
+  return diffNonEmptyString(attributes["resource-id"]) ?? diffNonEmptyString(attributes["view-id"]);
+}
+
+/**
+ * Recover a real selector from a diff node's raw attributes (issue #6221 item
+ * 4.3), reusing the exact `resource-id ?? view-id` / `text ?? content-desc`
+ * precedence `SkeletonProjection.deriveId`/`deriveLabel` use for `skeleton`
+ * rows — the same projection, so the same vocabulary. Returns `undefined` when
+ * neither an id nor a label is present (a diff entry with no stable identity at
+ * all), so callers can omit the field rather than emit an empty object. `index`
+ * (PR #6242 review PRRT_kwDOP-GF5M6fq3iI), when supplied, is attached only
+ * when a selector was actually derivable.
+ */
+function deriveDiffSelector(
+  attributes: Record<string, unknown>,
+  index?: number,
+): ObserveDiffSelector | undefined {
+  const elementId = diffElementId(attributes);
+  const label =
+    diffNonEmptyString(attributes["text"]) ?? diffNonEmptyString(attributes["content-desc"]);
+  if (elementId === undefined && label === undefined) {
+    return undefined;
+  }
+  return index === undefined ? { elementId, label } : { elementId, label, index };
+}
+
+/**
+ * Occurrence index for every flattened `next` node whose resolved `elementId`
+ * (`resource-id ?? view-id`) repeats elsewhere in the SAME preorder DFS walk
+ * `flattenForDiff` performs (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — the
+ * identical traversal order `tapOn.index` resolves against, and the same
+ * hierarchy-order semantics `SkeletonProjection.assignDuplicateIndexes` (issue
+ * #6238) already uses for the skeleton's own `index`. Keyed by `pathKey` (the
+ * one thing that uniquely identifies a specific flattened node instance) so a
+ * `changed` entry can look up its own index without re-deriving ambiguity from
+ * scratch. Only ambiguous elementIds (repeated 2+ times) get an entry — a
+ * unique id is left out, mirroring the skeleton's "no spurious index on the
+ * common case" rule.
+ *
+ * Scoped to the positional-match `changed` path only: content-identity
+ * re-paired `changed` entries (`repairByContentIdentity` /
+ * `repairByIosStableIdentity`) already require a UNIQUE content key among
+ * leftovers on both sides to re-pair at all, so they are inherently
+ * unambiguous and need no occurrence index.
+ */
+function computeElementIdOccurrenceIndexes(nodes: readonly FlatObserveNode[]): Map<string, number> {
+  const byElementId = new Map<string, FlatObserveNode[]>();
+  for (const node of nodes) {
+    const elementId = diffElementId(node.attributes);
+    if (elementId === undefined) {
+      continue;
+    }
+    const group = byElementId.get(elementId);
+    if (group) {
+      group.push(node);
+    } else {
+      byElementId.set(elementId, [node]);
+    }
+  }
+  const ambiguousEntries = [...byElementId.values()]
+    .filter((group) => group.length >= 2)
+    .flatMap((group) => group.map((node, position): [string, number] => [node.pathKey, position]));
+  return new Map(ambiguousEntries);
+}
+
+/**
  * A single node in an observation diff. `attributes` are the node's own
  * (non-child) attributes — for `added`/`removed` the full attribute set, so the
  * consumer can reconstruct the node without the baseline.
+ *
+ * No separate `selector` field here (issue #6221 item 4.3): `attributes`
+ * already carries `resource-id` / `view-id` / `text` / `content-desc`
+ * directly, so `attributes["resource-id"] ?? attributes["view-id"]` /
+ * `attributes["text"] ?? attributes["content-desc"]` — the same precedence
+ * `skeleton` rows use — IS the real selector. A synthesized duplicate field
+ * would just double those bytes on the wire for no new information (see
+ * {@link ObserveDiffNodeChange.selector}, which earns its keep precisely
+ * because `changed` entries do NOT carry full attributes).
  */
 export interface ObserveDiffNode {
-  /** Synthetic identity key: `resource-id \0 bounds \0 text \0 sibling-index`. */
+  /**
+   * INTERNAL positional identity key: `resource-id \0 bounds \0 text \0
+   * sibling-index`. NOT a selector (issue #6221 item 4.3) — it is capture-order
+   * plumbing for pairing nodes across two observations, not a stable handle a
+   * client should act on. Read a real selector off `attributes` instead (see
+   * above), or act on a `skeleton` row.
+   */
   key: string;
   attributes: Record<string, unknown>;
 }
 
 /** A node matched by key whose non-key attributes changed. */
 export interface ObserveDiffNodeChange {
+  /** INTERNAL positional identity key — see {@link ObserveDiffNode.key}. NOT a selector. */
   key: string;
   /**
    * The node's key on the *baseline* side, present only on entries produced by
@@ -450,6 +572,8 @@ export interface ObserveDiffNodeChange {
    * both sides).
    */
   fromKey?: string;
+  /** Real, tapOn-usable selector recovered for this entry, when available (issue #6221 item 4.3). */
+  selector?: ObserveDiffSelector;
   /** Per-attribute `{ from, to }`; a missing side is `undefined`. */
   changes: Record<string, { from?: unknown; to?: unknown }>;
 }
@@ -459,9 +583,22 @@ export interface ObserveDiffNodeChange {
  * so a consumer can tell a diff apart from a full `ObserveResult` (which has no
  * such marker). Empty `added`/`removed`/`changed` and absent `fields` means the
  * screen is unchanged.
+ *
+ * `skeleton` is populated by the `finalizeToolResponse` call site — never by
+ * {@link diffObserveResult} itself, which only ever sees the full sanitized
+ * tree — so that an agent-facing diff ALWAYS carries a usable actionable-only
+ * selector surface alongside it (issue #6221 item 4.1), the same array a full
+ * observation's `.skeleton` carries.
  */
 export interface ObserveDiff {
   isDiff: true;
+  /**
+   * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
+   * present alongside the diff — the same array a full observation's
+   * `.skeleton` carries. Populated by the `finalizeToolResponse` call site from
+   * the post-action observation, not by {@link diffObserveResult}.
+   */
+  skeleton: SkeletonElement[];
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];
@@ -934,7 +1071,12 @@ function repairByContentIdentity(
       // `key` is the post-move (added-side) key; `fromKey` carries the pre-move
       // (removed-side) key so a consumer can locate the node in the baseline
       // (#3088 limitation 2, #3107). Emitted only on re-paired entries.
-      changed.push({ key: addedNode.key, fromKey: removedNode.key, changes: attrChanges });
+      changed.push({
+        key: addedNode.key,
+        fromKey: removedNode.key,
+        selector: deriveDiffSelector(addedNode.attributes),
+        changes: attrChanges,
+      });
     }
   }
 
@@ -1129,7 +1271,12 @@ function repairByIosStableIdentity(
     consumedRemoved.add(removedIndices[0]);
     const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
     if (Object.keys(attrChanges).length > 0) {
-      changed.push({ key: addedNode.key, fromKey: removedNode.key, changes: attrChanges });
+      changed.push({
+        key: addedNode.key,
+        fromKey: removedNode.key,
+        selector: deriveDiffSelector(addedNode.attributes),
+        changes: attrChanges,
+      });
     }
   }
 
@@ -1142,6 +1289,18 @@ function repairByIosStableIdentity(
   };
 }
 
+/**
+ * `added`/`removed` entries deliberately do NOT carry a `selector` field: they
+ * already carry the node's FULL `attributes` (including `resource-id` /
+ * `view-id` / `text` / `content-desc`), so the real selector is already there —
+ * a synthesized `selector` would be pure duplication of bytes already on the
+ * wire (it would materially erode the diff-format's whole reason to exist: see
+ * the ~60%-of-full byte budget asserted in
+ * `test/features/observe/output/stableIdentityScrollDiff.test.ts`). Only
+ * `changed` entries lack full attributes (they carry only the delta), which is
+ * where {@link deriveDiffSelector} actually earns its bytes — see its use in
+ * {@link diffObserveResult}.
+ */
 function toObserveDiffNode(node: DiffRepairNode): ObserveDiffNode {
   return { key: node.key, attributes: node.attributes };
 }
@@ -1210,8 +1369,12 @@ export function diffObserveResult(
   next: ObserveResult,
   cfg?: DiffObserveConfig,
 ): ObserveDiff {
+  const nextFlatNodes = flattenForDiff(next);
   const baseByKey = groupByKey(flattenForDiff(baseline));
-  const nextByKey = groupByKey(flattenForDiff(next));
+  const nextByKey = groupByKey(nextFlatNodes);
+  // Occurrence-index map for ambiguous elementIds among `next`'s nodes (PR #6242
+  // review PRRT_kwDOP-GF5M6fq3iI) — see computeElementIdOccurrenceIndexes' doc.
+  const occurrenceIndexByPathKey = computeElementIdOccurrenceIndexes(nextFlatNodes);
 
   const added: DiffRepairNode[] = [];
   const removed: DiffRepairNode[] = [];
@@ -1224,7 +1387,14 @@ export function diffObserveResult(
     for (let i = 0; i < paired; i++) {
       const attrChanges = diffAttributes(baseNodes[i].attributes, nextNodes[i].attributes);
       if (Object.keys(attrChanges).length > 0) {
-        changed.push({ key: nextNodes[i].key, changes: attrChanges });
+        changed.push({
+          key: nextNodes[i].key,
+          selector: deriveDiffSelector(
+            nextNodes[i].attributes,
+            occurrenceIndexByPathKey.get(nextNodes[i].pathKey),
+          ),
+          changes: attrChanges,
+        });
       }
     }
     for (let i = paired; i < nextNodes.length; i++) {
@@ -1262,6 +1432,11 @@ export function diffObserveResult(
 
   const diff: ObserveDiff = {
     isDiff: true,
+    // Placeholder — `elements` is already dropped from `next` by the time it
+    // reaches this function (issue #6221 item 4.1), so the caller
+    // (`finalizeToolResponse`) overwrites this with the actionable-only
+    // skeleton it independently re-projects from the pre-drop payload.
+    skeleton: [],
     added: finalAdded.map(toObserveDiffNode),
     removed: finalRemoved.map(toObserveDiffNode),
     changed,

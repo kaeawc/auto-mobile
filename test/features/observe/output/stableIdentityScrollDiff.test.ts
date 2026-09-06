@@ -25,9 +25,13 @@ import type { ObserveResult } from "../../../../src/models/ObserveResult";
  * production formatter; compact (non-pretty) JSON and compact bounds tuples are
  * now unconditional defaults, which shrink the large `full` payload far more than
  * the small diff (there is little whitespace in the diff to drop), so the share
- * rises to ~60% bytes / ~63% tokens against today's formatter. The formatter-
- * independent teeth — the diff is strictly smaller than the legacy path-UUID diff
- * of the same pair — are unchanged.
+ * rose to ~60% bytes / ~63% tokens against today's formatter. Issue #6221 item
+ * 4.3 then added a real `{elementId, label}` `selector` to every `changed`
+ * entry that lacks one already in its `changes` delta — genuinely new bytes,
+ * traded deliberately for diff entries actually being actionable — pushing the
+ * share to ~70% bytes / ~72% tokens. The formatter-independent teeth — the
+ * diff is strictly smaller than the legacy path-UUID diff of the same pair —
+ * are unchanged.
  */
 
 function withStableIds(obs: ObserveResult): ObserveResult {
@@ -103,13 +107,17 @@ describe("capture-layer stable identity on the real scroll pair (#3228)", () => 
     expect(churn(stableDiff)).toBeLessThan(churn(legacyDiff));
   });
 
-  test("AC#2 — scroll diff stays a minority of full output under the compact-default formatter (~60% bytes / ~63% tokens)", () => {
+  test("AC#2 — scroll diff stays a minority of full output under the compact-default formatter (~70% bytes / ~72% tokens)", () => {
     const full = measureValue(after);
     const diff = measureValue(stableDiff);
-    // Thresholds recalibrated for the compact-JSON + tuple-bounds defaults (was
-    // 28.7% / 64% against the old pretty formatter — see the file docstring).
-    expect(diff.bytes / full.bytes).toBeLessThan(0.62);
-    expect(diff.tokens / full.tokens).toBeLessThan(0.64);
+    // Thresholds recalibrated twice: first for the compact-JSON + tuple-bounds
+    // defaults (was 28.7% / 64% against the old pretty formatter), then again
+    // for issue #6221 item 4.3 — a real `selector` field ({elementId, label})
+    // on every `changed` entry lacking one already in `changes` — which trades
+    // some of that compactness for diff entries actually being actionable
+    // (measured here: ~70.4% bytes / ~72.2% tokens). See the file docstring.
+    expect(diff.bytes / full.bytes).toBeLessThan(0.72);
+    expect(diff.tokens / full.tokens).toBeLessThan(0.74);
     // And strictly better than the legacy (path-UUID) diff of the same pair.
     const legacy = measureValue(legacyDiff);
     expect(diff.bytes).toBeLessThan(legacy.bytes);

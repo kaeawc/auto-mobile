@@ -147,8 +147,27 @@ const screenIdentitySchema = z
 // compact `skeleton` (issue #5872) and carry the raw `viewHierarchy` under
 // raw/project:"full"; both flow through without an explicit field here (the
 // schemas they'd reference are declared later in this module).
+//
+// This is one arm of the `observation` discriminated union documented on
+// `observationOutputSchema` further down this module (issue #6221 item 4): the
+// FULL-object arm, identified by the ABSENCE of `isDiff` (the diff arm,
+// `observeDiffSchema`, always carries `isDiff: true`). A consumer branches on
+// `"isDiff" in observation && observation.isDiff === true`.
+//
+// `isDiff: z.literal(false).optional()` (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)
+// makes this arm GENUINELY reject a diff-shaped object rather than silently
+// accepting it via `.passthrough()`: every OTHER field here is optional, so
+// without this an invalid diff (e.g. `{isDiff: true, added: [], removed: [],
+// changed: []}` missing the mandatory `skeleton`) would fail `observeDiffSchema`
+// and then fall through to match this permissive arm anyway. `isDiff` is a
+// genuinely-typed member of this schema, so a real `isDiff: true` payload now
+// fails HERE too — the union as a whole rejects the malformed diff instead of
+// silently accepting it under the wrong arm. The server itself never emits
+// `isDiff: false` explicitly (absence is the real-world full-observation
+// shape); the literal exists purely to close this validation gap.
 export const observationSummarySchema = z
   .object({
+    isDiff: z.literal(false).optional(),
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
     accessibilityFocusedElement: elementSchema.optional(),
@@ -234,34 +253,6 @@ const tapEffectSchema = z
       "viewHierarchy unchanged",
       "insufficient observation data",
     ]),
-  })
-  .passthrough();
-
-export const tapOnResultSchema = z
-  .object({
-    success: z.boolean(),
-    action: z.string().optional(),
-    message: z.string().optional(),
-    element: elementSchema.optional(),
-    observation: z.union([observationSummarySchema, toolOutputArtifactMetadataSchema]).optional(),
-    observationDiff: observationDiffMetadataSchema.optional(),
-    effect: tapEffectSchema.optional(),
-    selectedElement: selectedElementSchema.optional(),
-    activatedSubtext: z
-      .object({
-        text: z.string(),
-        occurrence: z.number().int().nonnegative(),
-      })
-      .optional()
-      .describe("Semantic accessibility link confirmed by the native runner"),
-    selectedElements: z.array(selectedElementSchema).optional(),
-    error: z.string().optional(),
-    pressRecognized: z.boolean().optional(),
-    contextMenuOpened: z.boolean().optional(),
-    selectionStarted: z.boolean().optional(),
-    searchUntil: tapOnSearchUntilSchema.optional(),
-    screenReaderNavigation: screenReaderNavigationSchema.optional(),
-    debug: z.any().optional(),
   })
   .passthrough();
 
@@ -595,6 +586,163 @@ export const skeletonElementSchema = z
   .passthrough();
 
 /**
+ * A selector recovered for a diff node/change (issue #6221 item 4). Same
+ * vocabulary the `skeleton` rows use (`elementId` / `label` — see {@link
+ * skeletonElementSchema}), derived from the SAME `resource-id ?? view-id` /
+ * `text ?? content-desc` precedence `SkeletonProjection` applies, so a client
+ * can act on a diff entry the same way it acts on a skeleton entry:
+ * `tapOn({ elementId })` (falling back to `tapOn({ text: label })` when
+ * `elementId` is absent). Omitted when the node carries neither.
+ */
+export const observeDiffSelectorSchema = z
+  .object({
+    elementId: z.string().optional(),
+    label: z.string().optional(),
+    index: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "Disambiguator present only when elementId repeats elsewhere among the " +
+          "next observation's nodes (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — same " +
+          "hierarchy-order semantics as the skeleton's #6238 `index`. Pass verbatim " +
+          "as tapOn({ selector, index }) to hit this exact occurrence.",
+      ),
+  })
+  .describe(
+    "Real, tapOn-usable selector for this diff entry, when one could be derived " +
+      "from its resource-id/view-id/text/content-desc — the same vocabulary skeleton " +
+      "rows use. Prefer this over `key` (issue #6221 item 4).",
+  );
+
+/** One `added`/`removed` node in an observation diff (issue #2761 / #6221 item 4). */
+export const observeDiffNodeSchema = z
+  .object({
+    key: z
+      .string()
+      .describe(
+        "INTERNAL positional identity key (NUL-delimited resource-id/bounds/text/" +
+          "sibling-index). NOT a selector — never pass this to tapOn or any other " +
+          "selector-accepting field. `attributes` already carries the real " +
+          "resource-id/view-id/text/content-desc — read a selector from there, or " +
+          "act on a `skeleton` row instead (issue #6221 item 4).",
+      ),
+    attributes: z
+      .record(z.string(), z.unknown())
+      .describe(
+        "This node's full raw attributes (including resource-id/view-id/text/" +
+          "content-desc — the real selector fields), so it can be reconstructed " +
+          "without the baseline.",
+      ),
+  })
+  .passthrough();
+
+/** A node matched across baseline/next whose non-key attributes changed. */
+export const observeDiffNodeChangeSchema = z
+  .object({
+    key: z
+      .string()
+      .describe(
+        "INTERNAL positional identity key — see observeDiffNodeSchema.key. NOT a selector.",
+      ),
+    fromKey: z
+      .string()
+      .optional()
+      .describe(
+        "The node's INTERNAL key on the baseline side, present only on content-identity re-pairs.",
+      ),
+    selector: observeDiffSelectorSchema.optional(),
+    changes: z.record(
+      z.string(),
+      z.object({ from: z.unknown().optional(), to: z.unknown().optional() }),
+    ),
+  })
+  .passthrough();
+
+/**
+ * Compact diff of one observation against the previous one
+ * (`--actions-diff-observe`, issue #2761). This is the DIFF arm of the
+ * `observation` discriminated union (issue #6221 item 4): identified by
+ * `isDiff: true`, which the full-object arm ({@link observationSummarySchema})
+ * never carries.
+ *
+ * `skeleton` is ALWAYS present here (issue #6221 item 4.1) — the same
+ * actionable-only rows `observe`/action tools emit on a full observation — so a
+ * client always has a selector surface to act on, regardless of whether a
+ * diff baseline happened to exist. Every entry's internal `key` is documented
+ * as non-selector so it is never mistaken for one (item 4.3): `added`/`removed`
+ * entries already carry a real selector directly in their `attributes`
+ * (resource-id/view-id/text/content-desc), and `changed` entries — which do NOT
+ * carry full attributes — get an explicit `selector` field recovered from the
+ * same precedence.
+ */
+export const observeDiffSchema = z
+  .object({
+    isDiff: z.literal(true),
+    skeleton: z
+      .array(skeletonElementSchema)
+      .describe(
+        "Always present alongside a diff (issue #6221 item 4.1): the same " +
+          "actionable-only selector surface a full observation's `skeleton` carries.",
+      ),
+    added: z.array(observeDiffNodeSchema),
+    removed: z.array(observeDiffNodeSchema),
+    changed: z.array(observeDiffNodeChangeSchema),
+    fields: z
+      .record(z.string(), z.object({ from: z.unknown().optional(), to: z.unknown().optional() }))
+      .optional(),
+  })
+  .passthrough();
+
+/**
+ * `observation`, as embedded on an action tool result (issue #6221 item 4): a
+ * discriminated union of a full `ObserveResult` summary ({@link
+ * observationSummarySchema}) and a compact diff ({@link observeDiffSchema}).
+ * The discriminator is `isDiff`: present and `true` on the diff arm, absent on
+ * the full arm — and REJECTED as `true` on the full arm (issue #6221 item 4,
+ * PR #6242 review PRRT_kwDOP-GF5M6fq3iN), so a malformed diff (missing its
+ * mandatory `skeleton`) cannot silently fall through and validate against the
+ * full arm's `.passthrough()` instead. A client should branch on
+ * `"isDiff" in observation && observation.isDiff === true` and, in EITHER
+ * branch, can read `observation.skeleton` for a usable selector surface — the
+ * diff arm always carries one (item 4.1).
+ */
+export const observationOutputSchema = z.union([
+  observeDiffSchema,
+  observationSummarySchema,
+  toolOutputArtifactMetadataSchema,
+]);
+
+export const tapOnResultSchema = z
+  .object({
+    success: z.boolean(),
+    action: z.string().optional(),
+    message: z.string().optional(),
+    element: elementSchema.optional(),
+    observation: observationOutputSchema.optional(),
+    observationDiff: observationDiffMetadataSchema.optional(),
+    effect: tapEffectSchema.optional(),
+    selectedElement: selectedElementSchema.optional(),
+    activatedSubtext: z
+      .object({
+        text: z.string(),
+        occurrence: z.number().int().nonnegative(),
+      })
+      .optional()
+      .describe("Semantic accessibility link confirmed by the native runner"),
+    selectedElements: z.array(selectedElementSchema).optional(),
+    error: z.string().optional(),
+    pressRecognized: z.boolean().optional(),
+    contextMenuOpened: z.boolean().optional(),
+    selectionStarted: z.boolean().optional(),
+    searchUntil: tapOnSearchUntilSchema.optional(),
+    screenReaderNavigation: screenReaderNavigationSchema.optional(),
+    debug: z.any().optional(),
+  })
+  .passthrough();
+
+/**
  * Progressive-disclosure scoping metadata (issue #4344), present only when a
  * per-call `scope.focus` / `scope.overview` / `scope.region` request scoped the
  * payload. `regionPx` routes through {@link elementBoundsSchema} so its bounds
@@ -671,6 +819,16 @@ export const observeResultSchema = z
       .optional(),
     viewHierarchy: viewHierarchyResultSchema.optional(),
     skeleton: z.array(skeletonElementSchema).optional(),
+    context: z
+      .array(skeletonElementSchema)
+      .optional()
+      .describe(
+        "Non-actionable rows (affordances: []) from the same projection as `skeleton` " +
+          "(issue #6221 item 1) — a screen title, a standalone notification, or the " +
+          "com.android.systemui status bar (collapsed to one summarized entry). " +
+          'Present only under project:"skeleton" (the default) when at least one ' +
+          "such row survived.",
+      ),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
     elements: observeElementsSchema.optional(),

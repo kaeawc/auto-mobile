@@ -57,9 +57,34 @@ describe("advertiseBoundsForCompact (#2990)", () => {
     expect(bounds.description).toContain("left, top, right, bottom");
   });
 
+  /**
+   * Strip every `skeleton` property node from a JSON-Schema tree (recursively,
+   * any depth/nesting — `anyOf` arms included). Mirrors the equivalent exclusion
+   * in `observeOutputSchema.test.ts`: the `skeleton` projection field (#4388,
+   * embedded on `tapOnResultSchema.observation`'s diff arm since issue #6221 item
+   * 4.1) carries a deliberately ALWAYS-tuple bounds that never depends on
+   * `--observe-result-compact`, so it is not a collapsible bounds *union* and
+   * must be excluded before asserting the union-collapse invariant below.
+   */
+  function stripSkeletonNodes(node: unknown): unknown {
+    if (Array.isArray(node)) {
+      return node.map(stripSkeletonNodes);
+    }
+    if (node && typeof node === "object") {
+      const { skeleton: _skeleton, ...rest } = node as Record<string, unknown>;
+      void _skeleton;
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(rest)) {
+        out[key] = stripSkeletonNodes(value);
+      }
+      return out;
+    }
+    return node;
+  }
+
   test("compact OFF advertises no positional tuple anywhere in the schema", () => {
     const out = advertiseBoundsForCompact(boundsJson(), false);
-    const json = JSON.stringify(out);
+    const json = JSON.stringify(stripSkeletonNodes(out));
     // The tuple arm renders as a JSON-Schema array with prefixItems; none should remain.
     expect(json).not.toContain("prefixItems");
   });

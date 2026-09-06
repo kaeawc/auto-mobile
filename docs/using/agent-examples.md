@@ -5,11 +5,6 @@
   <input id="am-app-name" data-prompt-var="app" type="text" placeholder="e.g. Acme Shopping" autocomplete="off" spellcheck="false">
 </div>
 
-## Example prompts
-
-Pick a platform once — the **Android / iOS** choice follows you as you switch
-between examples.
-
 === "Take a tour"
 
     === "Android"

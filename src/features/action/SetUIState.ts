@@ -215,10 +215,17 @@ export class SetUIState extends BaseVisualChange {
       transportDeadlineMs !== undefined
         ? transportDeadlineMs - PER_FIELD_ADMISSION_HEADROOM_MS
         : undefined;
-    const resultDeadlineMs =
-      transportBoundDeadlineMs !== undefined
-        ? Math.min(internalResultDeadlineMs, transportBoundDeadlineMs)
-        : internalResultDeadlineMs;
+    // When the caller knows the ACTUAL transport deadline, that is always the
+    // bound that matters -- respect it even when it is LARGER than the fixed
+    // internal budget (e.g. a progress-aware caller whose
+    // `ProgressExtendableDeadline` has extended the transport deadline toward
+    // its ceiling). Clamping to the fixed 45s here would silently undo that
+    // extension and under-cut a legitimately larger budget, which also
+    // truncates `executePlan` steps that route through this same `execute()`
+    // (issue #6222 P1). The fixed `RESULT_DEADLINE_BUDGET_MS` is a FALLBACK
+    // for when no transport deadline is known at all (a direct, non-daemon
+    // call) -- never a ceiling imposed on top of a known one.
+    const resultDeadlineMs = transportBoundDeadlineMs ?? internalResultDeadlineMs;
     // Only used to phrase the "why we stopped" message below -- the actual
     // bound applied is whichever of the internal/transport-derived deadlines
     // is tighter, which may be smaller OR larger than RESULT_DEADLINE_BUDGET_MS.
@@ -279,6 +286,25 @@ export class SetUIState extends BaseVisualChange {
         await progress(candidate, overallProgressTotal, message);
       };
     };
+
+    // Check the budget BEFORE paying for the initial observation, not just at
+    // the top of the field loop below. Queueing on the daemon path can by
+    // itself consume most of a 60s transport budget before `execute()` is
+    // even invoked; if the admission deadline is already gone (or too tight
+    // to admit even one field's headroom), a cold/stalled initial observe can
+    // still blow the transport deadline before any field is attempted,
+    // discarding the whole call. Fail fast into the same structured
+    // all-`notAttempted` shape used below instead (issue #6222 P1).
+    if (this.timer.now() >= resultDeadlineMs) {
+      const missing = options.fields.map((f) => this.describeSelector(f.selector));
+      const notAttemptedReason = `Not attempted: setUIState's result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) was already reached before the initial observation`;
+      return {
+        success: false,
+        fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
+        totalAttempts: 0,
+        error: `setUIState result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) was already reached before the initial observation; not attempted: ${missing.join(", ")}`,
+      };
+    }
 
     // Get initial observation
     let lastObservation = await this.getObserveScreen().execute(

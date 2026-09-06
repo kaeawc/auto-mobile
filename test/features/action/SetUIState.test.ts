@@ -1705,4 +1705,92 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     expect(result.error).toContain("Phone");
     expect(fakeTimer.now()).toBeLessThan(1_000);
   });
+
+  test("a progress-extended transport deadline (200s) is respected, NOT capped at the internal 45s budget (issue #6222 P1)", async () => {
+    // Models a progress-aware caller (executePlan, or a daemon call with a
+    // progressToken) whose ProgressExtendableDeadline has extended the
+    // transport deadline well past the fixed internal RESULT_DEADLINE_BUDGET_MS
+    // fallback -- e.g. toward the 300s ceiling. Three fields at 50s each (150s
+    // total) would have been truncated at ~45s by the old `Math.min` against
+    // the fixed internal budget; with a known, larger transport deadline all
+    // three must be admitted and none marked `notAttempted`.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 200_000;
+
+    const result = await build(50_000).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.success)).toBe(true);
+    expect(result.fields.every((f) => !f.notAttempted)).toBe(true);
+
+    // The whole call ran well past the fixed 45s internal budget (the
+    // fallback used only when no transport deadline is known) -- proof the
+    // extended transport deadline was actually honored rather than clamped.
+    const INTERNAL_RESULT_DEADLINE_BUDGET_MS = 45_000;
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(INTERNAL_RESULT_DEADLINE_BUDGET_MS);
+    // And it still lands safely under the ACTUAL (extended) transport deadline.
+    expect(fakeTimer.now()).toBeLessThan(transportDeadlineMs);
+  });
+
+  test("checks the budget BEFORE the initial observation: an already-expired admission deadline returns all-notAttempted without observing (issue #6222 P1)", async () => {
+    // Models queueing having already consumed more than 40s of a 60s socket
+    // budget before execute() is even invoked: the transport deadline handed
+    // in has only 20s left, which is entirely eaten by
+    // PER_FIELD_ADMISSION_HEADROOM_MS, so there is no budget left for even one
+    // field. The initial observation must never be awaited in this case -- a
+    // cold/stalled observe could otherwise blow the transport deadline before
+    // any field is attempted, discarding everything.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 20_000;
+
+    // If the initial observe were ever called, this would burn 30s of
+    // simulated time -- proving (via the call count and elapsed time
+    // assertions below) that execute() never reached it.
+    fakeObserve.setResultFactory(() => {
+      fakeTimer.advanceTime(30_000);
+      return {
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      };
+    });
+
+    const result = await build(500).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.totalAttempts).toBe(0);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.notAttempted)).toBe(true);
+    expect(result.fields.every((f) => !f.success)).toBe(true);
+    expect(result.error).toContain("before the initial observation");
+
+    // The initial observe was never awaited -- no simulated time was burned
+    // and the fake was never invoked.
+    expect(fakeObserve.getCallCount()).toBe(0);
+    expect(fakeTimer.now()).toBe(callStartMs);
+  });
 });

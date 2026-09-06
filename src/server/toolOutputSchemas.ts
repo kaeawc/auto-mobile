@@ -581,6 +581,16 @@ export const skeletonElementSchema = z
     ),
     affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
     checked: z.boolean().optional(),
+    index: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "Disambiguator present only when elementId repeats elsewhere in this " +
+          "skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to " +
+          "hit this exact entry.",
+      ),
   })
   .passthrough();
 

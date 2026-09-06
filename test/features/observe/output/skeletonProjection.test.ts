@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { toSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
+import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
@@ -679,6 +681,203 @@ describe("toSkeleton — acceptance criteria", () => {
   describe("empty input", () => {
     test("no elements yields an empty skeleton", () => {
       expect(toSkeleton(makeElements({}))).toEqual([]);
+    });
+  });
+
+  describe("#6221 item 2: duplicate-id disambiguator", () => {
+    test("unique-id entries never carry an index", () => {
+      const a: Element = { bounds: bounds(0, 0, 10, 10), "resource-id": "a", clickable: "true" };
+      const b: Element = { bounds: bounds(0, 20, 10, 30), "resource-id": "b", clickable: "true" };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [a, b] }));
+
+      expect(skeleton).toHaveLength(2);
+      for (const entry of skeleton) {
+        expect("index" in entry).toBe(false);
+      }
+    });
+
+    test("a repeated id gets a per-entry index ranked by provenance hierarchy order", () => {
+      const withProvenance = (el: Element, enter: number): Element => {
+        setElementProvenance(el, { group: 0, enter, exit: enter });
+        return el;
+      };
+      // Deliberately out of array order to prove ranking follows hierarchy
+      // order (provenance.enter), not array position or geometry.
+      const third = withProvenance(
+        { bounds: bounds(0, 400, 100, 450), "resource-id": "dup", clickable: "true" },
+        5,
+      );
+      const first = withProvenance(
+        { bounds: bounds(0, 0, 100, 50), "resource-id": "dup", clickable: "true" },
+        1,
+      );
+      const second = withProvenance(
+        { bounds: bounds(0, 200, 100, 250), "resource-id": "dup", clickable: "true" },
+        3,
+      );
+      const unrelated = withProvenance(
+        { bounds: bounds(0, 600, 100, 650), "resource-id": "solo", clickable: "true" },
+        7,
+      );
+
+      const skeleton = toSkeleton(makeElements({ clickable: [third, first, second, unrelated] }));
+
+      const byBoundsTop = (a: SkeletonElement, b: SkeletonElement) => a.bounds[1] - b.bounds[1];
+      const dupEntries = skeleton.filter((e) => e.elementId === "dup").sort(byBoundsTop);
+      expect(dupEntries.map((e) => e.index)).toEqual([0, 1, 2]);
+      expect(findById(skeleton, "solo")?.index).toBeUndefined();
+    });
+
+    test("the emitted index is verbatim usable by tapOn's own index resolution (ordering contract)", () => {
+      // Three rows sharing a resource-id, built through the REAL collector so
+      // provenance.enter is the real DFS counter — the same one
+      // ElementFinder.findElementsByResourceId walks for an explicit index.
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+            node: [
+              {
+                "resource-id": "com.example:id/onoff",
+                clickable: "true",
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              },
+              {
+                "resource-id": "com.example:id/onoff",
+                clickable: "true",
+                bounds: { left: 0, top: 200, right: 100, bottom: 300 },
+              },
+              {
+                "resource-id": "com.example:id/onoff",
+                clickable: "true",
+                bounds: { left: 0, top: 400, right: 100, bottom: 500 },
+              },
+            ],
+          },
+        },
+      } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const skeleton = toSkeleton(elements!);
+      const dupEntries = skeleton
+        .filter((e) => e.elementId === "com.example:id/onoff")
+        .sort((a, b) => (a.index ?? -1) - (b.index ?? -1));
+      expect(dupEntries).toHaveLength(3);
+      expect(dupEntries.map((e) => e.index)).toEqual([0, 1, 2]);
+
+      const selector = new DefaultElementSelector();
+      for (const entry of dupEntries) {
+        const result = selector.selectByResourceId(
+          viewHierarchy as unknown as ViewHierarchyResult,
+          "com.example:id/onoff",
+          { index: entry.index },
+        );
+        expect(result.element).not.toBeNull();
+        const chosenBounds = result.element?.bounds;
+        expect([
+          chosenBounds?.left,
+          chosenBounds?.top,
+          chosenBounds?.right,
+          chosenBounds?.bottom,
+        ]).toEqual(entry.bounds);
+      }
+    });
+  });
+
+  describe("#6221 item 3: identifying descendant text is not dropped from a generic own label", () => {
+    test("a leading-space generic own label folds in the identifying descendant text, trimmed", () => {
+      // Mirrors the dogfood repro: an alarm row whose own text/content-desc
+      // template dropped the time (" Alarm", leading space) while a sibling
+      // digital_clock descendant still carries the real distinguishing text,
+      // and a schedule descendant carries secondary state.
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "com.google.android.deskclock:id/alarm_item",
+        "content-desc": " Alarm",
+        clickable: "true",
+      };
+      const digitalClock: Element = {
+        bounds: bounds(72, 20, 400, 80),
+        "resource-id": "com.google.android.deskclock:id/digital_clock",
+        text: "8:30 AM",
+      };
+      const daysOfWeek: Element = {
+        bounds: bounds(72, 140, 600, 200),
+        "resource-id": "com.google.android.deskclock:id/days_of_week",
+        text: "Mon, Tue, Wed, Thu, Fri",
+      };
+
+      const skeleton = toSkeleton(
+        makeElements({ clickable: [row], text: [digitalClock, daysOfWeek] }),
+      );
+
+      const entry = findById(skeleton, "com.google.android.deskclock:id/alarm_item");
+      expect(entry?.label).toBe("8:30 AM Alarm");
+      expect(entry?.sublabel).toBe("Mon, Tue, Wed, Thu, Fri");
+      // No leading/trailing whitespace anywhere in the emitted strings.
+      expect(entry?.label).not.toMatch(/^\s|\s$/);
+      expect(entry?.sublabel).not.toMatch(/^\s|\s$/);
+    });
+
+    test("a clean (non-templated) own label is left alone; descendant text still folds into sublabel", () => {
+      // The "good" sibling row from the same repro: own text is already
+      // complete ("6:45 AM Alarm", no stray whitespace), so nothing is
+      // rewritten — this must keep working exactly as before (AC2 #5869).
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "com.google.android.deskclock:id/alarm_item",
+        text: "6:45 AM Alarm",
+        clickable: "true",
+      };
+      const notScheduled: Element = {
+        bounds: bounds(72, 140, 600, 200),
+        "resource-id": "com.google.android.deskclock:id/status",
+        text: "Not scheduled",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [notScheduled] }));
+
+      const entry = findById(skeleton, "com.google.android.deskclock:id/alarm_item");
+      expect(entry?.label).toBe("6:45 AM Alarm");
+      expect(entry?.sublabel).toBe("Not scheduled");
+    });
+
+    test("an ordinary single-word own label is NOT clobbered by descendant state text", () => {
+      // Regression guard: a clean, non-templated single-word label ("Wi-Fi")
+      // must still route descendant text to sublabel, not get rewritten just
+      // because it happens to be short/generic-looking.
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "wifi-row",
+        text: "Wi-Fi",
+        clickable: "true",
+      };
+      const state: Element = {
+        bounds: bounds(72, 140, 600, 200),
+        "resource-id": "wifi-state",
+        text: "Connected",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [state] }));
+
+      const entry = findById(skeleton, "wifi-row");
+      expect(entry?.label).toBe("Wi-Fi");
+      expect(entry?.sublabel).toBe("Connected");
+    });
+
+    test("a leading-space own label with no hoist candidates is still trimmed", () => {
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "lonely-row",
+        "content-desc": " Alarm",
+        clickable: "true",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row] }));
+
+      const entry = findById(skeleton, "lonely-row");
+      expect(entry?.label).toBe("Alarm");
     });
   });
 });

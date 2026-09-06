@@ -131,6 +131,8 @@ interface SkeletonAccumulator {
    * where hoisting/suppression fall back to geometric containment.
    */
   provenance?: ElementProvenance;
+  /** Disambiguator assigned by {@link assignDuplicateIndexes} (issue #6221 item 2). */
+  index?: number;
 }
 
 /** NUL-joined identity so `(elementId, label, bounds)` triples dedup without straddling. */
@@ -322,9 +324,32 @@ function distinctHoistParts(
 }
 
 /**
- * Fold `parts` onto the container: the first becomes `label` when it has none,
- * and the remainder join into `sublabel`. A container with an own label keeps it
- * and takes every part as `sublabel`.
+ * Whether `label` is an incomplete/templated own-label rather than a genuine
+ * one (issue #6221 item 3). A real Android row label built from a
+ * `"$time $name"`-style template (e.g. an alarm row) leaves its leading
+ * delimiter behind when the interpolated part comes back empty — the observed
+ * repro was a row whose own text/content-desc read literally `" Alarm"`
+ * (leading space, no time), while a sibling row of the same type read
+ * `"6:45 AM Alarm"` (own text already complete, nothing to fold in). Stray
+ * leading/trailing whitespace on the RAW (untrimmed) label is a narrow, strong
+ * signal of exactly that dropped-placeholder shape — unlike an ordinary clean
+ * single-word label ("Wi-Fi", "Alarm" with no stray space), which must NOT be
+ * clobbered by a descendant's state text (that text belongs in `sublabel`,
+ * per the AC2 #5869 behavior above).
+ */
+function isIncompleteOwnLabel(label: string): boolean {
+  return label !== label.trim();
+}
+
+/**
+ * Fold `parts` onto the container: the first becomes `label` when it has none
+ * — or when its existing own label is an incomplete template
+ * ({@link isIncompleteOwnLabel}), in which case the first part is prepended to
+ * the trimmed own label so the row keeps its generic noun ("Alarm") without
+ * losing the identifying descendant text ("8:30 AM") that made the row unique
+ * (issue #6221 item 3). The remainder always joins into `sublabel`. A
+ * container with a genuine own label keeps it verbatim and takes every part
+ * as `sublabel`.
  */
 function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): void {
   if (parts.length === 0) {
@@ -332,6 +357,11 @@ function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): vo
   }
   if (container.label === undefined) {
     container.label = parts[0];
+    if (parts.length > 1) {
+      container.sublabel = parts.slice(1).join(", ");
+    }
+  } else if (isIncompleteOwnLabel(container.label)) {
+    container.label = `${parts[0]} ${container.label.trim()}`;
     if (parts.length > 1) {
       container.sublabel = parts.slice(1).join(", ");
     }
@@ -390,10 +420,16 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
     entry.elementId = acc.elementId;
   }
   if (acc.label !== undefined) {
-    entry.label = acc.label;
+    // Never emit a leading/trailing space (issue #6221 item 3(b)) — a
+    // templated own label whose interpolated part came back empty (e.g. an
+    // alarm row's `" Alarm"`) leaves the delimiter behind even after
+    // {@link applyHoistedLabels} has folded in the identifying descendant
+    // text, and a container with no hoist candidates at all never runs that
+    // fold in the first place.
+    entry.label = acc.label.trim();
   }
   if (acc.sublabel !== undefined) {
-    entry.sublabel = acc.sublabel;
+    entry.sublabel = acc.sublabel.trim();
   }
   if (acc.testTag !== undefined) {
     entry.testTag = acc.testTag;
@@ -404,7 +440,71 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   if (acc.checked !== undefined) {
     entry.checked = acc.checked;
   }
+  if (acc.index !== undefined) {
+    entry.index = acc.index;
+  }
   return entry;
+}
+
+/**
+ * Order two accumulators the way `tapOn`'s own explicit-`index` resolution
+ * does, so a per-entry `index` this file emits is guaranteed usable verbatim
+ * as `tapOn.index` (issue #6221 item 2).
+ *
+ * `DefaultElementSelector.pickMatch` treats an explicit `index` as "the Nth
+ * on-screen match in hierarchy order" and — critically — resolves it against
+ * the RAW DFS traversal order `ElementFinder.findElementsByResourceId` returns
+ * with `preserveTraversalOrder: true` (selecting by index skips the by-area
+ * sort `selectionStrategy: "first"` otherwise applies). That traversal order
+ * is exactly the pre-order DFS counter this file's provenance already carries:
+ * `ElementProvenance.enter`, assigned once per element by
+ * `DefaultObserveElementCollector` while walking the SAME root-group order
+ * `ElementFinder` walks (main roots, then window roots topmost-first) — so
+ * ranking duplicate entries by `enter` reproduces tapOn's index assignment
+ * exactly. Provenance-less producers (hand-built fixtures, non-provenance
+ * callers) fall back to the skeleton's own top-to-bottom/left-to-right reading
+ * order, the closest available approximation without a real traversal to rank
+ * against.
+ */
+function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
+  if (a.provenance && b.provenance) {
+    return a.provenance.enter - b.provenance.enter;
+  }
+  return byReadingOrder(a, b);
+}
+
+/**
+ * Emit a stable per-entry `index` (issue #6221 item 2) on every entry whose
+ * `elementId` repeats within this skeleton, so a client can disambiguate with
+ * `tapOn({ selector: { elementId }, index: entry.index })` instead of
+ * guessing against the undocumented default `selectionStrategy: "first"`.
+ * Entries with a unique `elementId` (including all entries with no
+ * `elementId` at all) are left untouched — no spurious `index` on the common
+ * case. See {@link byHierarchyOrder} for why ranking by `enter` reproduces
+ * `tapOn.index` verbatim.
+ */
+function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
+  const byElementId = new Map<string, SkeletonAccumulator[]>();
+  for (const entry of entries) {
+    if (entry.elementId === undefined) {
+      continue;
+    }
+    const group = byElementId.get(entry.elementId);
+    if (group) {
+      group.push(entry);
+    } else {
+      byElementId.set(entry.elementId, [entry]);
+    }
+  }
+  for (const group of byElementId.values()) {
+    if (group.length < 2) {
+      continue;
+    }
+    group.sort(byHierarchyOrder);
+    group.forEach((entry, position) => {
+      entry.index = position;
+    });
+  }
 }
 
 /**
@@ -419,5 +519,11 @@ export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
   // #5869) before the keep filter suppresses the now-folded text accumulators.
   hoistContainerLabels(accumulators, clickable);
 
-  return accumulators.filter((acc) => shouldKeep(acc, clickable)).map(toSkeletonEntry);
+  const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
+  // Disambiguate duplicate ids (issue #6221 item 2) against the FINAL emitted
+  // set, not the pre-filter accumulators — a duplicate suppressed by the keep
+  // rule (e.g. folded/hoisted text) must not consume an index slot a client
+  // will never see.
+  assignDuplicateIndexes(kept);
+  return kept.map(toSkeletonEntry);
 }

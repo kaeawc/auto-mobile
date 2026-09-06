@@ -137,4 +137,62 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     expect(result.freshness?.verified).toBe(true);
     expect(result.freshness?.isFresh).toBe(true);
   });
+
+  // Regression (P1 review finding on #6239): a READABLE hierarchy carrying a
+  // real `viewHierarchy.packageName` but no usable `foregroundActivity` used to
+  // be reported as having no foreground window at all. The accessibility path
+  // never sets `activeWindow` in this shape, so the legacy `Window.getActive()`
+  // fallback runs and, on failure, returns its normal TRUTHY sentinel
+  // (`{appId:"", ...}`) — which must not (a) block the package-name fallback
+  // from running, nor (b) itself be read as "no foreground window" by the new
+  // #6220 predicate. A package-attributed capture must stay verified/fresh.
+  test("a package-attributed hierarchy with no usable foregroundActivity stays verified/isFresh:true", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      // Real package attribution, but no usable foregroundActivity: the
+      // accessibility path leaves `activeWindow` unset, so the legacy Window
+      // query (mocked below to fail) and then the package-name fallback run.
+      packageName: "com.google.android.deskclock",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.deskclock", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        // The legacy Window query's normal failure sentinel: a TRUTHY object
+        // with an empty appId, not `undefined`/`null`.
+        window: noOpWindow(""),
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.google.android.deskclock");
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
+  });
 });

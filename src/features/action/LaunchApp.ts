@@ -1020,6 +1020,28 @@ export class LaunchApp extends BaseVisualChange {
       }
     }
 
+    // Distinguish "genuinely launched but no foreground window could be read at
+    // all" from "observed a different/stale app" (issue #6220 follow-up). The
+    // latter is a real mismatch — reject and strip the stale observation, as
+    // before. The former names no app whatsoever (`activeWindow.appId` AND
+    // `viewHierarchy.packageName` both empty) — most commonly the status-bar-only
+    // shape ObserveScreen's own freshness now marks `verified: false` for
+    // (#6220). That is not evidence of a wrong app; treating it identically
+    // would reject-and-delete the very observation `buildLaunchAppResponse`
+    // needs to report a structured `verified: false` + `verifyFailureReason`
+    // instead of a silent/thrown failure. Preserve it: the launch action itself
+    // already succeeded, only window verification could not be confirmed.
+    if (this.getLaunchObservationPackageNames(latestObservation).length === 0) {
+      logger.warn(
+        `[LaunchApp] Launch observation for ${expectedPackageName} reports no foreground window after ${timeoutMs}ms; preserving it for the response instead of rejecting it as a stale/wrong-app capture`,
+      );
+      result.observation = this.preserveLaunchObservationMetadata(
+        latestObservation,
+        result.observation,
+      );
+      return result;
+    }
+
     return this.withoutStaleLaunchObservation(
       {
         ...result,

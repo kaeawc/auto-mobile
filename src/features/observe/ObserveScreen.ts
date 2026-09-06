@@ -232,7 +232,18 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
 function resolveMissingForegroundWindow(
   result: ObserveResult,
 ): { reason: "status_bar_only" | "empty_active_window" } | undefined {
-  if (result.activeWindow?.appId || !result.viewHierarchy?.hierarchy?.node) {
+  // `viewHierarchy.packageName` is checked directly (not only via
+  // `activeWindow.appId`, which the package-attribution fallback above should
+  // already have backfilled from it): later stages (e.g.
+  // `reconcileActiveWindowAttribution`, the SystemUI-overlay mirroring) can
+  // still re-derive `activeWindow` after this point, and a package-attributed
+  // capture must never be reported as having no foreground window regardless
+  // of what runs afterward (issue #6220 false-positive).
+  if (
+    result.activeWindow?.appId ||
+    result.viewHierarchy?.packageName ||
+    !result.viewHierarchy?.hierarchy?.node
+  ) {
     return undefined;
   }
   return { reason: isStatusBarOnlyHierarchy(result) ? "status_bar_only" : "empty_active_window" };
@@ -968,7 +979,12 @@ export class RealObserveScreen implements ObserveScreen {
 
         // Preserve package attribution when the accessibility service did not
         // provide a usable activity and the legacy window query also failed.
-        if (result.viewHierarchy?.packageName && !result.activeWindow) {
+        // `!result.activeWindow?.appId` (not `!result.activeWindow`): the legacy
+        // query's own failure sentinel is a TRUTHY object with an empty appId
+        // (`Window.getActive`'s catch branch), which would otherwise short-circuit
+        // this fallback and leave a readable, package-attributed capture wrongly
+        // reporting no foreground window (issue #6220 false-positive).
+        if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
           result.activeWindow = {
             appId: result.viewHierarchy.packageName,
             activityName: "",

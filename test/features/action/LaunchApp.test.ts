@@ -600,6 +600,38 @@ describe("LaunchApp", () => {
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 
+  // Issue #6220 follow-up (P1 review finding on #6239): a launch observation
+  // that reports NO foreground window at all (neither `activeWindow.appId` nor
+  // `viewHierarchy.packageName` name an app — the shape ObserveScreen's own
+  // freshness now marks `verified: false` for) must NOT be treated the same as
+  // "observed a different/stale app": that path rejects and deletes the
+  // observation, but the launch genuinely happened and the response builder
+  // needs the observation preserved to report a structured `verified: false` +
+  // `verifyFailureReason` instead of a thrown/silent failure.
+  test("preserves a no-foreground-window launch observation instead of rejecting it as stale", async () => {
+    fakeTimer.enableAutoAdvance();
+    const noWindowObservation = {
+      ...createObserveResult(undefined),
+      freshness: {
+        isFresh: false,
+        verified: false,
+        warning: "Observed hierarchy reports no foreground application window",
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(noWindowObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation).toBeDefined();
+    expect(result.observation?.freshness?.verified).toBe(false);
+    expect(result.observation?.activeWindow?.appId).toBeFalsy();
+    expect(result.observationOmitted).toBeUndefined();
+  });
+
   test("treats Android notification permission dialogs as valid launch observations", async () => {
     fakeTimer.enableAutoAdvance();
     const permissionControllerPackageName = "com.google.android.permissioncontroller";

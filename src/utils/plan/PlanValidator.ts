@@ -255,6 +255,7 @@ export class PlanValidator {
     this.validateCriticalSectionLocks(plan);
     this.validateBarrierParams(plan);
     this.validateBarrierDistinctDeviceCounts(plan);
+    this.validateBarrierGenerationCompleteness(plan);
   }
 
   /**
@@ -422,10 +423,53 @@ export class PlanValidator {
     }
   }
 
+  /**
+   * Validates that a reused barrier lock's total arrivals form complete
+   * generations, catching a class of deadlock the distinct-device check
+   * above cannot: e.g. arrivals A, B, A with deviceCount=2 has 2 distinct
+   * devices (passes that check) but the 3rd (trailing) arrival starts a new
+   * generation that only ever gets 1 of the 2 devices it needs, so it waits
+   * forever.
+   *
+   * Sound WITHOUT reconstructing rounds: only checked when a lock has a
+   * single consistent deviceCount N (an inconsistent lock isn't itself an
+   * error here — barrier legitimately allows different deviceCount values
+   * across its reuses — but there's no single N to divide by, so this
+   * check is skipped for it). For that N, the total number of barrier steps
+   * referencing the lock must be an exact multiple of N: each generation
+   * consumes exactly N arrivals, so a non-multiple total necessarily leaves
+   * an incomplete trailing generation that can never complete. This never
+   * false-rejects a valid plan.
+   */
+  private static validateBarrierGenerationCompleteness(plan: Plan): void {
+    const usageByLock = this.collectBarrierLockUsage(plan);
+    const errors: string[] = [];
+
+    for (const [lock, usage] of usageByLock.entries()) {
+      if (usage.deviceCounts.size !== 1) {
+        continue;
+      }
+      const deviceCount = usage.deviceCounts.values().next().value as number;
+      if (deviceCount < 1 || usage.arrivals % deviceCount === 0) {
+        continue;
+      }
+      errors.push(
+        `barrier lock "${lock}" has ${usage.arrivals} total arrival${usage.arrivals === 1 ? "" : "s"} across the plan, which is not a multiple of its deviceCount=${deviceCount}. At least one generation is necessarily incomplete and would deadlock waiting for a device that never arrives.`,
+      );
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
+  }
+
   private static collectBarrierLockUsage(
     plan: Plan,
-  ): Map<string, { devices: Set<string>; deviceCounts: Set<number> }> {
-    const usageByLock = new Map<string, { devices: Set<string>; deviceCounts: Set<number> }>();
+  ): Map<string, { devices: Set<string>; deviceCounts: Set<number>; arrivals: number }> {
+    const usageByLock = new Map<
+      string,
+      { devices: Set<string>; deviceCounts: Set<number>; arrivals: number }
+    >();
 
     for (const step of plan.steps) {
       if (step.tool === "barrier") {
@@ -437,7 +481,7 @@ export class PlanValidator {
   }
 
   private static recordBarrierLockUsage(
-    usageByLock: Map<string, { devices: Set<string>; deviceCounts: Set<number> }>,
+    usageByLock: Map<string, { devices: Set<string>; deviceCounts: Set<number>; arrivals: number }>,
     step: PlanStep,
   ): void {
     const lock = this.effectiveField(step, "lock");
@@ -448,7 +492,9 @@ export class PlanValidator {
     const usage = usageByLock.get(lock) ?? {
       devices: new Set<string>(),
       deviceCounts: new Set<number>(),
+      arrivals: 0,
     };
+    usage.arrivals += 1;
 
     const device = this.effectiveField(step, "device");
     if (typeof device === "string" && device.length > 0) {

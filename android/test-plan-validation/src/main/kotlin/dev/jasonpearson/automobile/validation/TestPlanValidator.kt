@@ -95,19 +95,21 @@ object TestPlanValidator {
 
     // Validate multi-device requirements (a plan using criticalSection/barrier
     // or any step-level device label must declare top-level 'devices') and
-    // barrier-lock distinct-device-count feasibility -- mirrors the daemon's
-    // PlanValidator.validateMultiDeviceRequirements /
-    // validateBarrierDistinctDeviceCounts so a plan that validates here also
-    // survives daemon-side load instead of passing IDE/JUnit validation and
-    // then failing at execution (#6215 review).
+    // barrier-lock coordination feasibility (declared-device membership,
+    // distinct-device count, generation completeness) -- mirrors the
+    // daemon's PlanValidator.validateMultiDeviceRequirements /
+    // validateBarrierDistinctDeviceCounts / validateBarrierGenerationCompleteness
+    // so a plan that validates here also survives daemon-side load instead
+    // of passing IDE/JUnit validation and then failing at execution (#6215
+    // review).
     val multiDeviceErrors = validateMultiDeviceRequirements(parsedObject)
-    val barrierDeviceCountErrors = validateBarrierDistinctDeviceCounts(parsedObject)
+    val barrierCoordinationErrors = validateBarrierCoordination(parsedObject)
 
     if (
       validationErrors.isEmpty() &&
         toolNameErrors.isEmpty() &&
         multiDeviceErrors.isEmpty() &&
-        barrierDeviceCountErrors.isEmpty()
+        barrierCoordinationErrors.isEmpty()
     ) {
       return ValidationResult(valid = true)
     }
@@ -118,7 +120,7 @@ object TestPlanValidator {
     // Add tool name and coordination validation errors
     errors.addAll(toolNameErrors)
     errors.addAll(multiDeviceErrors)
-    errors.addAll(barrierDeviceCountErrors)
+    errors.addAll(barrierCoordinationErrors)
 
     return ValidationResult(valid = false, errors = errors)
   }
@@ -231,28 +233,42 @@ object TestPlanValidator {
     return step[field]
   }
 
-  private class BarrierLockUsage {
-    val devices = mutableSetOf<String>()
-    val deviceCounts = mutableSetOf<Int>()
+  /**
+   * The plan's declared top-level 'devices' labels, or null when the plan declares none. Accepts
+   * both the plain-label and label/platform-definition forms.
+   */
+  private fun declaredDeviceLabels(parsedObject: Any?): Set<String>? {
+    val devices = (parsedObject as? Map<*, *>)?.get("devices") as? List<*> ?: return null
+    if (devices.isEmpty()) {
+      return null
+    }
+    return devices
+      .mapNotNull { entry ->
+        when (entry) {
+          is String -> entry
+          is Map<*, *> -> entry["label"] as? String
+          else -> null
+        }
+      }
+      .toSet()
   }
 
-  /**
-   * Validates that every barrier lock is populated by enough distinct devices to ever satisfy its
-   * declared deviceCount -- mirrors the daemon's PlanValidator.validateBarrierDistinctDeviceCounts.
-   * Sound without reconstructing rounds: a single round needs deviceCount distinct arrivals, so if
-   * fewer distinct devices ever target a given lock across the whole plan, no round can ever
-   * complete.
-   */
-  private fun validateBarrierDistinctDeviceCounts(parsedObject: Any?): List<ValidationError> {
-    if (parsedObject !is Map<*, *>) {
-      return emptyList()
-    }
-    val steps = parsedObject["steps"]
-    if (steps !is List<*>) {
-      return emptyList()
-    }
+  private class BarrierLockUsage {
+    val devices = mutableSetOf<String>()
+    // Long, not Int: a schema-valid deviceCount can exceed Int.MAX_VALUE, and narrowing it with
+    // Int.toInt() would silently wrap/truncate instead of rejecting it (#6215 review).
+    val deviceCounts = mutableSetOf<Long>()
+    var arrivals = 0
+  }
 
+  /** Collects each barrier step's lock/device/deviceCount usage, keyed by lock name. */
+  private fun collectBarrierLockUsage(
+    steps: List<*>,
+    declaredDevices: Set<String>?,
+  ): Pair<Map<String, BarrierLockUsage>, List<ValidationError>> {
     val usageByLock = mutableMapOf<String, BarrierLockUsage>()
+    val errors = mutableListOf<ValidationError>()
+
     for (step in steps) {
       if (step !is Map<*, *> || step["tool"] as? String != "barrier") {
         continue
@@ -263,18 +279,44 @@ object TestPlanValidator {
         continue
       }
       val usage = usageByLock.getOrPut(lock) { BarrierLockUsage() }
+      usage.arrivals += 1
 
       val device = effectiveCoordinationField(step, "device") as? String
       if (!device.isNullOrEmpty()) {
-        usage.devices.add(device)
+        if (declaredDevices != null && device !in declaredDevices) {
+          errors.add(
+            ValidationError(
+              field = "steps",
+              message =
+                "barrier step references device \"$device\" for lock \"$lock\", but the plan's declared devices are [${declaredDevices.joinToString(", ")}]. Every barrier device must be a declared device label.",
+              severity = ValidationSeverity.ERROR,
+            )
+          )
+        } else {
+          usage.devices.add(device)
+        }
       }
 
-      val deviceCount = (effectiveCoordinationField(step, "deviceCount") as? Number)?.toInt()
+      val deviceCount = (effectiveCoordinationField(step, "deviceCount") as? Number)?.toLong()
       if (deviceCount != null && deviceCount >= 1) {
         usage.deviceCounts.add(deviceCount)
       }
     }
 
+    return usageByLock to errors
+  }
+
+  /**
+   * Validates that every barrier lock is populated by enough distinct, declared devices to ever
+   * satisfy its declared deviceCount -- mirrors the daemon's
+   * PlanValidator.validateBarrierDistinctDeviceCounts (plus PlanValidator's generic device-label
+   * check, which the daemon runs separately via validateDeviceLabelsPresent). Sound without
+   * reconstructing rounds: a single round needs deviceCount distinct arrivals, so if fewer distinct
+   * devices ever target a given lock across the whole plan, no round can ever complete.
+   */
+  private fun validateBarrierDistinctDeviceCounts(
+    usageByLock: Map<String, BarrierLockUsage>
+  ): List<ValidationError> {
     val errors = mutableListOf<ValidationError>()
     for ((lock, usage) in usageByLock) {
       for (deviceCount in usage.deviceCounts) {
@@ -291,8 +333,60 @@ object TestPlanValidator {
         }
       }
     }
-
     return errors
+  }
+
+  /**
+   * Validates that a reused barrier lock's total arrivals form complete generations -- mirrors the
+   * daemon's PlanValidator.validateBarrierGenerationCompleteness. Sound without reconstructing
+   * rounds: only checked when a lock has a single consistent deviceCount N (an inconsistent
+   * deviceCount across reuses of the same lock is legitimate, and there is no single N to divide
+   * by); for that N, the total arrival count must be an exact multiple of N or a trailing
+   * generation is necessarily incomplete and would deadlock forever.
+   */
+  private fun validateBarrierGenerationCompleteness(
+    usageByLock: Map<String, BarrierLockUsage>
+  ): List<ValidationError> {
+    val errors = mutableListOf<ValidationError>()
+    for ((lock, usage) in usageByLock) {
+      if (usage.deviceCounts.size != 1) {
+        continue
+      }
+      val deviceCount = usage.deviceCounts.first()
+      if (deviceCount < 1 || usage.arrivals % deviceCount == 0L) {
+        continue
+      }
+      errors.add(
+        ValidationError(
+          field = "steps",
+          message =
+            "barrier lock \"$lock\" has ${usage.arrivals} total arrival(s) across the plan, which is not a multiple of its deviceCount=$deviceCount. At least one generation is necessarily incomplete and would deadlock waiting for a device that never arrives.",
+          severity = ValidationSeverity.ERROR,
+        )
+      )
+    }
+    return errors
+  }
+
+  /**
+   * Runs all barrier-lock coordination checks (declared-device membership, distinct-device count,
+   * generation completeness) in one pass over the plan's steps.
+   */
+  private fun validateBarrierCoordination(parsedObject: Any?): List<ValidationError> {
+    if (parsedObject !is Map<*, *>) {
+      return emptyList()
+    }
+    val steps = parsedObject["steps"]
+    if (steps !is List<*>) {
+      return emptyList()
+    }
+
+    val declaredDevices = declaredDeviceLabels(parsedObject)
+    val (usageByLock, membershipErrors) = collectBarrierLockUsage(steps, declaredDevices)
+
+    return membershipErrors +
+      validateBarrierDistinctDeviceCounts(usageByLock) +
+      validateBarrierGenerationCompleteness(usageByLock)
   }
 
   /** Find the line number of a tool name in a specific step */

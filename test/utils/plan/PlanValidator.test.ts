@@ -463,6 +463,87 @@ describe("PlanValidator", () => {
       };
       expect(() => PlanValidator.validate(plan)).not.toThrow();
     });
+
+    test("throws when a barrier plan targets device labels outside the declared 'devices' set", () => {
+      // devices=[A,B] but the barrier steps target C/D: the distinct-device
+      // count (2) would otherwise satisfy deviceCount=2, but C/D are not
+      // declared devices at all, so this must be rejected regardless.
+      const plan: Plan = {
+        name: "Barrier targets undeclared devices",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "C", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "D", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "the following steps use invalid device labels",
+      );
+    });
+  });
+
+  describe("validateBarrierGenerationCompleteness", () => {
+    // Sound generation-completeness check: for a lock with a single
+    // consistent deviceCount N, the total arrival count across the plan
+    // must be an exact multiple of N, or a trailing generation is
+    // necessarily incomplete and deadlocks forever. This is checked without
+    // reconstructing rounds (deliberately not per-device-ordinal grouping,
+    // which was removed earlier as unsound).
+    test("throws when a reused barrier lock's total arrivals are not a multiple of deviceCount", () => {
+      // A, B, A with deviceCount=2: 2 distinct devices satisfies the
+      // distinct-device check, but 3 total arrivals is not a multiple of 2
+      // -- generation 1 {A,B} completes and clears, then the trailing A
+      // waits alone forever.
+      const plan: Plan = {
+        name: "Incomplete trailing barrier generation",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        'barrier lock "sync1" has 3 total arrivals across the plan, which is not a multiple of its deviceCount=2',
+      );
+    });
+
+    test("accepts a reused barrier lock whose total arrivals form complete generations", () => {
+      // A, B, A, B with deviceCount=2: 4 total arrivals is a multiple of 2,
+      // so both generations complete cleanly.
+      const plan: Plan = {
+        name: "Complete barrier generations",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+
+    test("skips the generation-completeness check when a lock has no single consistent deviceCount", () => {
+      // barrier legitimately allows different deviceCount values across
+      // reuses of the same lock (different rounds, different participant
+      // counts); there's no single N to divide by, so this check must not
+      // false-reject it.
+      const plan: Plan = {
+        name: "Inconsistent deviceCount reused lock",
+        devices: ["A", "B", "C"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "C", lock: "sync1", deviceCount: 3 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
   });
 
   describe("params-wins precedence for split inline/params coordination fields", () => {

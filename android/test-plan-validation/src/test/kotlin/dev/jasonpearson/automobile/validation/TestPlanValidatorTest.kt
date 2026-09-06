@@ -544,6 +544,146 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects a barrier plan targeting device labels outside the declared devices set`() {
+    // devices=[A,B] but the barrier steps target C/D: the distinct-device
+    // count (2) would otherwise satisfy deviceCount=2, but C/D are not
+    // declared devices at all, so this must be rejected regardless --
+    // mirrors the daemon's PlanValidator.validateDeviceLabelsPresent.
+    val yaml =
+      """
+      name: barrier-targets-undeclared-devices
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: D
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier targeting undeclared device labels should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier deviceCount that overflows Int instead of silently truncating it`() {
+    // 4294967298 = 2^32 + 2, which truncates to 2 via a naive Int narrowing
+    // -- that would make this A/B plan pass. The declared count must be
+    // honored at its real magnitude (held as Long) and rejected as
+    // underpopulated, not silently truncated to something satisfiable.
+    val yaml =
+      """
+      name: barrier-devicecount-overflows-int
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 4294967298
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 4294967298
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A deviceCount exceeding Int range must not be silently truncated into a satisfiable value",
+    )
+  }
+
+  @Test
+  fun `rejects a reused barrier lock whose total arrivals are not a multiple of deviceCount`() {
+    // A, B, A with deviceCount=2: 2 distinct devices satisfies the
+    // distinct-device check, but 3 total arrivals is not a multiple of 2 --
+    // generation 1 {A,B} completes and clears, then the trailing A waits
+    // alone forever. Mirrors the daemon's
+    // PlanValidator.validateBarrierGenerationCompleteness.
+    val yaml =
+      """
+      name: barrier-incomplete-trailing-generation
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "3 total arrivals is not a multiple of deviceCount=2, so this should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a reused barrier lock whose total arrivals form complete generations`() {
+    // A, B, A, B with deviceCount=2: 4 total arrivals is a multiple of 2,
+    // so both generations complete cleanly.
+    val yaml =
+      """
+      name: barrier-complete-generations
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "4 total arrivals is a multiple of deviceCount=2, so this is valid")
+  }
+
+  @Test
   fun `validates expectations array`() {
     val yaml =
       """

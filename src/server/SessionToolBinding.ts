@@ -86,6 +86,29 @@ export class SessionToolBinding {
       : (this.directToolSelectionProfileUuid ?? this.initialToolSelectionProfileUuid);
   }
 
+  /**
+   * True only when `sessionUuid` is the profile THIS instance itself generated
+   * and bound for this exact connection (via {@link createAndBindToolSelectionProfile}
+   * / {@link bindToolSelectionProfile}) — never the `initialToolSelectionProfileUuid`
+   * fallback, which is threaded verbatim from an unauthenticated, caller-controlled
+   * transport header (DAEMON_TOOL_SELECTION_PROFILE_HEADER, see src/daemon/daemon.ts)
+   * with no issuance check of its own.
+   *
+   * A proxied caller can set that header to any string, including one it also
+   * sends as an explicit `sessionUuid` argument, so `connectionToolSelectionProfileUuid`
+   * alone is not a safe provenance signal for bypassing session admission (#6148
+   * round 2). This narrower check is: callers may freely re-affirm a profile the
+   * server actually minted for them, but an unverified header value never counts.
+   */
+  isServerIssuedToolSelectionProfile(
+    mcpSessionId: string | undefined,
+    sessionUuid: string,
+  ): boolean {
+    return mcpSessionId
+      ? this.toolSelectionProfiles.get(mcpSessionId) === sessionUuid
+      : this.directToolSelectionProfileUuid === sessionUuid;
+  }
+
   bind(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
     if (!sessionUuid?.trim()) {
       return false;

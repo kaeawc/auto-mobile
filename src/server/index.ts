@@ -664,22 +664,32 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         providedSessionUuid &&
         !tool.requiresDevice &&
         !isDeviceSessionAcquisitionTool(name) &&
-        name !== "setActiveDevice"
-        // #6148 (#6069 residual, review round 2): setToolEnabled previously got
-        // a blanket exemption from this gate, then a narrower exemption for a
-        // sessionUuid matching `connectionProfileUuid` — but that profile uuid
-        // has NO server-verified provenance: it is threaded from a raw,
+        name !== "setActiveDevice" &&
+        // #6148 (#6069 residual, review round 3): setToolEnabled is exempt ONLY
+        // when the explicit sessionUuid is a profile THIS server instance itself
+        // minted and bound for this exact connection
+        // (SessionToolBinding.isServerIssuedToolSelectionProfile — set only by
+        // createAndBindToolSelectionProfile, keyed by the real mcpSessionId the
+        // MCP initialize handshake assigned). That is deliberately narrower than
+        // `connectionProfileUuid`, which also falls back to the unauthenticated
+        // `initialToolSelectionProfileUuid` threaded verbatim from a
         // caller-controlled HTTP header (DAEMON_TOOL_SELECTION_PROFILE_HEADER,
-        // see src/daemon/daemon.ts) with no issuance check, so a proxied caller
-        // can set the header to the same fabricated string it also sends as
-        // `arguments.sessionUuid` and satisfy the equality, reopening the exact
-        // hole this fix closes. The legitimate cross-connection resume path
-        // never touches `arguments.sessionUuid` at all (it flows solely through
-        // that header/DAEMON_TOOL_SELECTION_PROFILE_PARAM), so there is no
-        // legitimate case where an explicit `sessionUuid` argument to
-        // setToolEnabled should bypass admission. No exemption: every explicit
-        // sessionUuid argument, self-referential or not, clears the same
-        // admission check every sibling plain session tool already enforces.
+        // see src/daemon/daemon.ts) with no issuance check — a proxied caller
+        // could set that header to the same fabricated string it also sends as
+        // `arguments.sessionUuid` and satisfy a plain equality check (round 2's
+        // bug). The cross-connection resume path never puts the profile in
+        // `arguments.sessionUuid` at all (it flows solely through that
+        // header/DAEMON_TOOL_SELECTION_PROFILE_PARAM), so it never reaches this
+        // branch; a caller that DOES pass its own server-minted profile back as
+        // `sessionUuid` (the documented "update this connection's profile"
+        // contract) is legitimate and must not be forced through device-session
+        // admission. Any other explicit sessionUuid — including one that merely
+        // echoes the unverified header value — clears the same admission check
+        // every sibling plain session tool already enforces.
+        !(
+          name === SET_TOOL_ENABLED_TOOL_NAME &&
+          sessionToolBinding.isServerIssuedToolSelectionProfile(sessionId, providedSessionUuid)
+        )
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware
         // tools carry their admitted identity into execution in ToolRegistry.

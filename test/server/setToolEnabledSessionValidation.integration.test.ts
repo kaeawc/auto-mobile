@@ -26,9 +26,18 @@ import type { BootedDevice } from "../../src/models";
  * `sessionContext.initialToolSelectionProfile` with no issuance check, so a
  * proxied caller could set that header to the same fabricated string it also
  * sends as `arguments.sessionUuid` and satisfy the equality — reopening the
- * exact hole this fix closes. The fix now has NO exemption: every explicit
- * `sessionUuid` argument to setToolEnabled clears the same admission check
- * every sibling plain session tool already enforces, self-referential or not.
+ * exact hole this fix closes. Round 2 removed the exemption entirely.
+ *
+ * Round 3 (post-review): removing the exemption entirely broke the documented,
+ * legitimate contract — "sessionUuid: ... Omit to update this MCP connection's
+ * profile" — because a caller that first omits `sessionUuid` (server mints and
+ * binds a profile) and then explicitly re-affirms that SAME server-minted
+ * profile as `sessionUuid` was wrongly forced through device-session admission
+ * and rejected. The fix now exempts setToolEnabled ONLY when the explicit
+ * sessionUuid is a profile THIS server instance itself minted and bound for
+ * this exact connection (`SessionToolBinding.isServerIssuedToolSelectionProfile`,
+ * populated solely by `createAndBindToolSelectionProfile`) — never the
+ * unauthenticated header fallback, which is what closes the round-2 hole.
  */
 describe("setToolEnabled sessionUuid validation (#6148)", () => {
   let sessionManager: SessionManager;
@@ -181,6 +190,52 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
       sessionUuid: "server-issued-profile-uuid",
       toolName: "clipboard",
       enabled: true,
+    });
+  });
+
+  test("preserves an explicit update to a genuinely server-issued connection profile", async () => {
+    // The client first OMITS sessionUuid entirely, so the server mints and
+    // binds a fresh profile for this connection (createAndBindToolSelectionProfile).
+    // A later call explicitly re-affirms that SAME server-minted uuid as
+    // `sessionUuid` — this must succeed, not be forced through device-session
+    // admission (it is not a device session; it never will be one).
+    fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: "conn-2" } });
+    await fixture.setup();
+    const { client } = fixture.getContext();
+
+    const first = (await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", enabled: true },
+        },
+      },
+      z.any(),
+    )) as { content?: Array<{ type: string; text?: string }> };
+    const mintedProfileUuid = JSON.parse(
+      first.content?.find((c) => c.type === "text")?.text ?? "{}",
+    ).sessionUuid as string;
+    expect(typeof mintedProfileUuid).toBe("string");
+    expect(mintedProfileUuid.length).toBeGreaterThan(0);
+
+    const second = (await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", enabled: false, sessionUuid: mintedProfileUuid },
+        },
+      },
+      z.any(),
+    )) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+
+    expect(second.isError ?? false).toBe(false);
+    const secondText = second.content?.find((c) => c.type === "text")?.text ?? "";
+    expect(JSON.parse(secondText)).toMatchObject({
+      sessionUuid: mintedProfileUuid,
+      toolName: "clipboard",
+      enabled: false,
     });
   });
 });

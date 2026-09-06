@@ -793,11 +793,13 @@ steps:
       expect(result.valid).toBe(true);
     });
 
-    it("should reject a barrier timeout exceeding Number.MAX_SAFE_INTEGER", () => {
-      // barrierTools.ts declares timeout as z.number().int().positive() --
-      // a value beyond the IEEE-754 safe-integer range passes this
-      // schema's simple exclusiveMinimum check yet fails the runtime
-      // contract, so the plan would only fail at execution (#6215 review).
+    it("should reject a barrier timeout exceeding setTimeout's usable range", () => {
+      // barrierTools.ts declares timeout as z.number().int().positive(), and
+      // CriticalSectionCoordinator.waitAtBarrier passes it straight to
+      // production setTimeout -- Node/Bun clamp any delay >= 2^31
+      // (2147483648) to 1ms instead of honoring it, so a value at or beyond
+      // that range passes this schema's simple exclusiveMinimum check yet
+      // times out almost instantly at runtime (#6215 review).
       const yaml = `
 name: barrier-timeout-over-cap
 devices:
@@ -809,7 +811,7 @@ steps:
       device: A
       lock: sync1
       deviceCount: 2
-      timeout: 9007199254740992
+      timeout: 2147483648
   - tool: barrier
     params:
       device: B
@@ -820,7 +822,7 @@ steps:
       expect(result.valid).toBe(false);
     });
 
-    it("should accept a barrier timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+    it("should accept a barrier timeout at exactly setTimeout's usable range", () => {
       const yaml = `
 name: barrier-timeout-at-cap
 devices:
@@ -832,7 +834,7 @@ steps:
       device: A
       lock: sync1
       deviceCount: 2
-      timeout: 9007199254740991
+      timeout: 2147483647
   - tool: barrier
     params:
       device: B
@@ -843,7 +845,7 @@ steps:
       expect(result.valid).toBe(true);
     });
 
-    it("should reject a criticalSection timeout exceeding Number.MAX_SAFE_INTEGER", () => {
+    it("should reject a criticalSection timeout exceeding setTimeout's usable range", () => {
       // criticalSectionTools.ts has the identical z.number().int().positive()
       // contract as barrier, so the same cap applies.
       const yaml = `
@@ -856,7 +858,7 @@ steps:
       device: A
       lock: sync1
       deviceCount: 1
-      timeout: 9007199254740992
+      timeout: 2147483648
       steps:
         - tool: observe
           params:
@@ -866,7 +868,7 @@ steps:
       expect(result.valid).toBe(false);
     });
 
-    it("should accept a criticalSection timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+    it("should accept a criticalSection timeout at exactly setTimeout's usable range", () => {
       const yaml = `
 name: critical-section-timeout-at-cap
 devices:
@@ -877,7 +879,7 @@ steps:
       device: A
       lock: sync1
       deviceCount: 1
-      timeout: 9007199254740991
+      timeout: 2147483647
       steps:
         - tool: observe
           params:

@@ -16,10 +16,12 @@ object TestPlanValidator {
   private val yaml = Yaml()
 
   /**
-   * JS Number.MAX_SAFE_INTEGER (2^53 - 1) -- the upper bound the runtime's z.number().int() timeout
-   * contract implicitly enforces for barrier/criticalSection steps.
+   * setTimeout's real usable range: Node/Bun clamp any delay >= 2^31 (2147483648) to 1ms with a
+   * TimeoutOverflowWarning instead of honoring it, so a coordination timeout at or above that value
+   * times out almost immediately rather than waiting as requested. 2^31 - 1 = 2147483647ms (~24.8
+   * days).
    */
-  private const val JS_MAX_SAFE_INTEGER = 9007199254740991L
+  private const val MAX_SETTIMEOUT_DELAY_MS = 2147483647L
 
   /** Load the JSON schema from resources */
   @Synchronized
@@ -737,11 +739,13 @@ object TestPlanValidator {
 
   /**
    * Validates that an optional 'timeout' on a criticalSection or barrier step, when declared, is a
-   * positive integer that does not exceed JS's Number.MAX_SAFE_INTEGER -- mirrors the daemon's
+   * positive integer that does not exceed MAX_SETTIMEOUT_DELAY_MS -- mirrors the daemon's
    * PlanValidator.validateCoordinationTimeouts. Both tools' runtime schemas
-   * (criticalSectionTools.ts / barrierTools.ts) declare z.number().int().positive() for timeout, so
-   * a value beyond the IEEE-754 safe-integer range passes the authoring schema's simple
-   * exclusiveMinimum check yet fails the runtime contract, and the plan only fails at execution.
+   * (criticalSectionTools.ts / barrierTools.ts) declare z.number().int().positive() for timeout,
+   * and CriticalSectionCoordinator.waitAtBarrier passes the value straight to production setTimeout
+   * -- Node/Bun clamp any delay >= 2^31 to 1ms instead of honoring it, so a value at or beyond that
+   * range passes the authoring schema's simple exclusiveMinimum check yet times out almost
+   * instantly at runtime instead of honoring the requested wait.
    */
   private fun validateCoordinationTimeouts(steps: List<*>): List<ValidationError> {
     val errors = mutableListOf<ValidationError>()
@@ -755,14 +759,14 @@ object TestPlanValidator {
       }
       val raw = effectiveCoordinationField(step, "timeout") ?: continue
       val timeout = exactPositiveLong(raw)
-      if (timeout != null && timeout <= JS_MAX_SAFE_INTEGER) {
+      if (timeout != null && timeout <= MAX_SETTIMEOUT_DELAY_MS) {
         continue
       }
       errors.add(
         ValidationError(
           field = "steps",
           message =
-            "$tool step $index declares 'timeout' of $raw, which must be a positive integer no greater than Number.MAX_SAFE_INTEGER ($JS_MAX_SAFE_INTEGER).",
+            "$tool step $index declares 'timeout' of $raw, which must be a positive integer no greater than setTimeout's usable range (${MAX_SETTIMEOUT_DELAY_MS}ms, ~24.8 days) -- Node/Bun clamp larger delays to 1ms instead of honoring them.",
           severity = ValidationSeverity.ERROR,
         )
       )

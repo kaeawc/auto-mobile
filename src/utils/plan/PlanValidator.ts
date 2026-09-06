@@ -281,14 +281,24 @@ export class PlanValidator {
   }
 
   /**
+   * setTimeout's real usable range: Bun/Node clamp any delay >= 2^31
+   * (2147483648) to 1ms with a `TimeoutOverflowWarning` instead of honoring
+   * it, so a coordination timeout at or above that value times out almost
+   * immediately rather than waiting as requested.
+   */
+  private static readonly MAX_SETTIMEOUT_DELAY_MS = 2147483647;
+
+  /**
    * Validates that an optional `timeout` on a criticalSection or barrier
    * step, when declared, is a positive integer that does not exceed
-   * `Number.MAX_SAFE_INTEGER`. Both tools' runtime schemas
-   * (criticalSectionTools.ts / barrierTools.ts) declare
-   * `z.number().int().positive()` for timeout, so a value beyond the
-   * IEEE-754 safe-integer range passes the authoring schema's simple
-   * `exclusiveMinimum` check yet fails the runtime contract, and the plan
-   * only fails at execution.
+   * `MAX_SETTIMEOUT_DELAY_MS` (2^31 - 1, ~24.8 days). Both tools' runtime
+   * schemas (criticalSectionTools.ts / barrierTools.ts) declare
+   * `z.number().int().positive()` for timeout, and `CriticalSectionCoordinator
+   * .waitAtBarrier` passes the value straight to production `setTimeout` --
+   * Node/Bun's `setTimeout` silently clamps any delay >= 2^31 to 1ms, so a
+   * value beyond that range passes the authoring schema's simple
+   * `exclusiveMinimum` check yet times out almost instantly at runtime
+   * instead of honoring the requested wait.
    */
   private static validateCoordinationTimeouts(plan: Plan): void {
     const errors: string[] = [];
@@ -306,10 +316,10 @@ export class PlanValidator {
         typeof timeout !== "number" ||
         !Number.isInteger(timeout) ||
         timeout < 1 ||
-        timeout > Number.MAX_SAFE_INTEGER
+        timeout > this.MAX_SETTIMEOUT_DELAY_MS
       ) {
         errors.push(
-          `${step.tool} step ${i} declares 'timeout' of ${JSON.stringify(timeout)}, which must be a positive integer no greater than Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER}).`,
+          `${step.tool} step ${i} declares 'timeout' of ${JSON.stringify(timeout)}, which must be a positive integer no greater than setTimeout's usable range (${this.MAX_SETTIMEOUT_DELAY_MS}ms, ~24.8 days) -- Node/Bun clamp larger delays to 1ms instead of honoring them.`,
         );
       }
     }

@@ -744,11 +744,14 @@ describe("PlanValidator", () => {
 
   describe("validateCoordinationTimeouts", () => {
     // barrierTools.ts / criticalSectionTools.ts both declare timeout as
-    // z.number().int().positive() -- a value beyond the IEEE-754
-    // safe-integer range passes the schema's exclusiveMinimum check yet
-    // fails the runtime contract, so the plan would only fail at execution
-    // (#6215 review).
-    test("throws when a barrier timeout exceeds Number.MAX_SAFE_INTEGER", () => {
+    // z.number().int().positive(), and CriticalSectionCoordinator.waitAtBarrier
+    // passes the value straight to production setTimeout -- Node/Bun clamp
+    // any delay >= 2^31 (2147483648) to 1ms instead of honoring it, so a
+    // timeout at or beyond that range passes the schema's exclusiveMinimum
+    // check yet times out almost instantly at runtime (#6215 review).
+    const MAX_SETTIMEOUT_DELAY_MS = 2147483647;
+
+    test("throws when a barrier timeout exceeds setTimeout's usable range", () => {
       const plan: Plan = {
         name: "Barrier timeout over cap",
         devices: ["A", "B"],
@@ -759,7 +762,7 @@ describe("PlanValidator", () => {
               device: "A",
               lock: "sync1",
               deviceCount: 2,
-              timeout: Number.MAX_SAFE_INTEGER + 1,
+              timeout: MAX_SETTIMEOUT_DELAY_MS + 1,
             },
           },
           { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
@@ -767,11 +770,11 @@ describe("PlanValidator", () => {
       };
       expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
       expect(() => PlanValidator.validate(plan)).toThrow(
-        "must be a positive integer no greater than Number.MAX_SAFE_INTEGER",
+        "must be a positive integer no greater than setTimeout's usable range",
       );
     });
 
-    test("accepts a barrier timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+    test("accepts a barrier timeout at exactly setTimeout's usable range", () => {
       const plan: Plan = {
         name: "Barrier timeout at cap",
         devices: ["A", "B"],
@@ -782,7 +785,7 @@ describe("PlanValidator", () => {
               device: "A",
               lock: "sync1",
               deviceCount: 2,
-              timeout: Number.MAX_SAFE_INTEGER,
+              timeout: MAX_SETTIMEOUT_DELAY_MS,
             },
           },
           { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
@@ -791,7 +794,7 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).not.toThrow();
     });
 
-    test("throws when a criticalSection timeout exceeds Number.MAX_SAFE_INTEGER", () => {
+    test("throws when a criticalSection timeout exceeds setTimeout's usable range", () => {
       const plan: Plan = {
         name: "criticalSection timeout over cap",
         devices: ["A"],
@@ -802,7 +805,7 @@ describe("PlanValidator", () => {
               device: "A",
               lock: "sync1",
               deviceCount: 1,
-              timeout: Number.MAX_SAFE_INTEGER + 1,
+              timeout: MAX_SETTIMEOUT_DELAY_MS + 1,
               steps: [{ tool: "observe", params: { device: "A" } }],
             },
           },
@@ -810,11 +813,11 @@ describe("PlanValidator", () => {
       };
       expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
       expect(() => PlanValidator.validate(plan)).toThrow(
-        "must be a positive integer no greater than Number.MAX_SAFE_INTEGER",
+        "must be a positive integer no greater than setTimeout's usable range",
       );
     });
 
-    test("accepts a criticalSection timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+    test("accepts a criticalSection timeout at exactly setTimeout's usable range", () => {
       const plan: Plan = {
         name: "criticalSection timeout at cap",
         devices: ["A"],
@@ -825,7 +828,7 @@ describe("PlanValidator", () => {
               device: "A",
               lock: "sync1",
               deviceCount: 1,
-              timeout: Number.MAX_SAFE_INTEGER,
+              timeout: MAX_SETTIMEOUT_DELAY_MS,
               steps: [{ tool: "observe", params: { device: "A" } }],
             },
           },

@@ -926,7 +926,7 @@
                       "type": "integer",
                       "description": "Barrier timeout in milliseconds (default: 30000ms)",
                       "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
+                      "maximum": 2147483647,
                       "default": 30000
                     }
                   }
@@ -1105,7 +1105,7 @@
                       "type": "integer",
                       "description": "Barrier timeout in milliseconds (default: 30000ms)",
                       "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
+                      "maximum": 2147483647,
                       "default": 30000
                     }
                   }
@@ -1887,7 +1887,7 @@
           "type": "integer",
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
           "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
+          "maximum": 2147483647,
           "default": 30000
         },
         "platform": {
@@ -1932,7 +1932,7 @@
           "type": "integer",
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
           "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
+          "maximum": 2147483647,
           "default": 30000
         },
         "platform": {

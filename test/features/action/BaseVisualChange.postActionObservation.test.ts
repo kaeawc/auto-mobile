@@ -163,9 +163,7 @@ describe("BaseVisualChange post-action observation", () => {
       failureMode: "report",
       useBaseline: false,
     });
-    fakeObserveScreen.setObserveResult(
-      makeObserve({ activeWindow: { appId: "com.example.app" } }),
-    );
+    fakeObserveScreen.setObserveResult(makeObserve({ activeWindow: { appId: "com.example.app" } }));
 
     await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,

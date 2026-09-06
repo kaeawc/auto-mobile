@@ -33,6 +33,13 @@ export class PlanSchemaValidator {
   private ajv: Ajv;
   private schema: any;
   private schemaLoaded = false;
+  // Ajv schema compilation (walking every $ref in the plan schema) is
+  // expensive relative to validating a single document. `validateYaml` used
+  // to call `this.ajv.compile(this.schema)` on every invocation; cache the
+  // compiled validator after the first compile so repeated calls (as in a
+  // long-lived daemon process, or a test file validating many plans) pay the
+  // compile cost once instead of per call.
+  private validateFn?: ((data: unknown) => boolean) & { errors?: ErrorObject[] | null };
 
   constructor() {
     this.ajv = new Ajv({
@@ -167,16 +174,18 @@ export class PlanSchemaValidator {
       };
     }
 
-    // Validate against schema
-    const validate = this.ajv.compile(this.schema);
-    const valid = validate(parsed);
+    // Validate against schema (compiled once and cached; see `validateFn`).
+    if (!this.validateFn) {
+      this.validateFn = this.ajv.compile(this.schema);
+    }
+    const valid = this.validateFn(parsed);
 
     if (valid) {
       return { valid: true };
     }
 
     // Format validation errors with line/column information
-    const errors = this.formatErrors(validate.errors || [], yamlContent);
+    const errors = this.formatErrors(this.validateFn.errors || [], yamlContent);
 
     return {
       valid: false,

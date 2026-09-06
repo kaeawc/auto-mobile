@@ -518,6 +518,162 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("session-race-fresh-both")).toBe("automationReady");
   });
 
+  // #6227 P1 follow-up (round 4): a `booted`-only caller (e.g. `listApps`)
+  // must not join — or fail because of — an in-flight `automationReady`
+  // setup started by a concurrent caller for the same session. Reaching
+  // `ensureReadinessUpgraded` already implies the device itself is booted
+  // (`devicePool.assertSessionReadyForAutomation` ran earlier), so a booted
+  // caller has nothing to gain from waiting on stricter automation setup and
+  // must not inherit its rejection.
+  test("a concurrent booted call bypasses (and does not fail from) an in-flight automationReady setup that later rejects (#6227)", async () => {
+    let automationSetupCalls = 0;
+    let setupEnteredResolve!: () => void;
+    const setupEntered = new Promise<void>((resolve) => {
+      setupEnteredResolve = resolve;
+    });
+    let triggerReject!: () => void;
+    const rejectSignal = new Promise<void>((resolve) => {
+      triggerReject = resolve;
+    });
+
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          automationSetupCalls += 1;
+          setupEnteredResolve();
+          await rejectSignal;
+          throw new Error("simulated automation setup failure");
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    await sessionManager.createSession("session-booted-bypass", "device-1", "android");
+
+    const automationCall = createToolExecutionContext(
+      "session-booted-bypass",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+
+    // Let the automationReady call actually enter (and register as the
+    // in-flight upgrade for) setup before the concurrent booted call starts.
+    await setupEntered;
+
+    const bootedContext = await createToolExecutionContext(
+      "session-booted-bypass",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "booted" },
+    );
+
+    // The booted call must succeed without waiting for the still-pending
+    // automationReady setup, and must record the booted baseline itself.
+    expect(bootedContext.deviceId).toBe("device-1");
+    expect(sessionManager.getDeviceReadiness("session-booted-bypass")).toBe("booted");
+
+    // Now let the automationReady setup actually reject — the booted call
+    // above already resolved and must be unaffected by this.
+    triggerReject();
+    await expect(automationCall).rejects.toThrow();
+    expect(automationSetupCalls).toBe(1);
+  });
+
+  // #6227 P2 follow-up: the single-flight map must be scoped to the session
+  // INCARNATION, not the bare session UUID. A recreated session with the
+  // same UUID (e.g. restart recovery re-binding it after a nonterminal
+  // release's setup-drain timeout) must never join a stale flight left
+  // behind by its predecessor.
+  test("scopes the readiness single-flight to the session incarnation, not the bare UUID (#6227 P2 follow-up)", async () => {
+    let setupCalls = 0;
+    let oldEnteredResolve!: () => void;
+    const oldEntered = new Promise<void>((resolve) => {
+      oldEnteredResolve = resolve;
+    });
+    let releaseOldGate!: () => void;
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOldGate = resolve;
+    });
+    let mode: "old" | "new" = "old";
+
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          if (mode === "old") {
+            oldEnteredResolve();
+            await oldGate;
+          }
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    const original = await sessionManager.createSession(
+      "session-incarnation-scope",
+      "device-1",
+      "android",
+    );
+
+    // The old incarnation's readiness setup starts and hangs mid-flight — it
+    // is never released within this test, standing in for setup that is
+    // still pending when the release below reaches its drain timeout.
+    const oldCall = createToolExecutionContext(
+      "session-incarnation-scope",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+      undefined,
+      original,
+    );
+    await oldEntered;
+
+    // A nonterminal release reaches the ~1s setup-drain timeout while the
+    // old incarnation's setup is still pending, and proceeds anyway
+    // (fakeTimer auto-advance fires the drain timeout without a real wait).
+    await sessionManager.releaseSession("session-incarnation-scope");
+
+    // The UUID is recreated as a brand-new incarnation (e.g. restart
+    // recovery re-binding it, possibly to a different device).
+    const replacement = await sessionManager.createSession(
+      "session-incarnation-scope",
+      "device-1",
+      "android",
+    );
+    expect(replacement).not.toBe(original);
+    mode = "new";
+
+    // The replacement must start its OWN flight rather than joining (and
+    // hanging on) the predecessor's still-pending one.
+    const newContext = await createToolExecutionContext(
+      "session-incarnation-scope",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+      undefined,
+      replacement,
+    );
+
+    expect(newContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(2);
+    expect(sessionManager.getDeviceReadiness("session-incarnation-scope")).toBe("automationReady");
+
+    releaseOldGate();
+    await oldCall.catch(() => {
+      // The old incarnation's own call is expected to fail once its setup
+      // finally resolves against an already-released session; only the
+      // replacement's outcome is under test here.
+    });
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

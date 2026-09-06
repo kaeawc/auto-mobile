@@ -178,10 +178,10 @@ function isReadinessSatisfied(
  * `getDeviceReadiness` result and both invoke `runDeviceReadinessSetup`,
  * which calls `AndroidCtrlProxyManager.resetSetupState()` on the *shared*
  * per-device manager — the second caller's reset can land mid-setup for the
- * first, corrupting both. Keying by session UUID and having a concurrent
- * caller await the same in-flight promise (rather than starting its own)
- * closes that race; each waiter re-checks the achieved readiness once the
- * in-flight setup settles, upgrading further only if still insufficient.
+ * first, corrupting both. Having a concurrent caller await the same
+ * in-flight promise (rather than starting its own) closes that race; each
+ * waiter re-checks the achieved readiness once the in-flight setup settles,
+ * upgrading further only if still insufficient.
  *
  * This map is shared by BOTH the fresh-session setup path (`setupSession`'s
  * `!existingSession` branch) and the existing-session upgrade path
@@ -192,11 +192,28 @@ function isReadinessSatisfied(
  * path went through this map, the fresh-path call would run
  * `runDeviceReadinessSetup` directly and unguarded, concurrently with a
  * guarded upgrade for the very same session. Routing the fresh path through
- * `ensureReadinessUpgraded` too (keyed by the same `session.sessionId`)
+ * `ensureReadinessUpgraded` too (keyed by the same session incarnation)
  * ensures any concurrent caller — fresh or existing — for that session joins
  * the one in-flight setup instead of starting a second.
+ *
+ * Keyed by the `Session` object itself (its incarnation), NOT by the bare
+ * session UUID (#6227 P2 follow-up). `SessionManager` creates a brand-new
+ * `Session` object per incarnation (`createSession` / restart recovery), and
+ * a session's `cacheData` — where `getDeviceReadiness` reads from — lives on
+ * that object, so a replacement incarnation with the same UUID always starts
+ * with a clean readiness slate. Keying this map by the bare UUID string
+ * would break that isolation: if a nonterminal release reaches its ~1s
+ * setup-drain timeout while the old incarnation's setup is still pending and
+ * the same UUID is then recreated (possibly bound to a different device),
+ * the replacement would find the *predecessor's* promise still registered
+ * under that UUID and join it — waiting on, and possibly resolving to, a
+ * flight that belongs to a session that no longer exists. A `WeakMap` keyed
+ * by the `Session` object scopes each flight to its own incarnation for
+ * free: a replacement session is a distinct object, so it can only ever see
+ * its own flights, and the predecessor's entry becomes eligible for GC once
+ * nothing else references that stale `Session`.
  */
-const readinessUpgradeInFlight = new Map<string, Promise<void>>();
+const readinessUpgradeInFlight = new WeakMap<Session, Promise<void>>();
 
 async function ensureReadinessUpgraded(
   session: Session,
@@ -210,7 +227,24 @@ async function ensureReadinessUpgraded(
       return;
     }
 
-    const inFlight = readinessUpgradeInFlight.get(session.sessionId);
+    if (requiredReadiness === "booted") {
+      // #6227 P1 follow-up: by the time we get here,
+      // `devicePool.assertSessionReadyForAutomation` has already confirmed
+      // the device itself is booted — a `booted`-only caller (e.g.
+      // `listApps`) needs nothing further that a stricter, possibly
+      // in-flight `automationReady` setup provides. Joining that flight
+      // below would make the `booted` call wait on, and fail from,
+      // automation setup (CtrlProxy / accessibility-service) it was
+      // specifically routed around. Record the booted baseline directly
+      // instead of consulting/joining `readinessUpgradeInFlight` — this
+      // executes synchronously up to (and including) the
+      // `setDeviceReadiness` write, so it can't race a concurrent
+      // automationReady flight's own write.
+      await runDeviceReadinessSetup(session, sessionManager, "booted");
+      return;
+    }
+
+    const inFlight = readinessUpgradeInFlight.get(session);
     if (inFlight) {
       // Another caller is already upgrading this session's readiness — wait
       // for it rather than racing a second `runDeviceReadinessSetup` call,
@@ -224,11 +258,11 @@ async function ensureReadinessUpgraded(
       sessionManager,
       requiredReadiness,
     ).finally(() => {
-      if (readinessUpgradeInFlight.get(session.sessionId) === setupPromise) {
-        readinessUpgradeInFlight.delete(session.sessionId);
+      if (readinessUpgradeInFlight.get(session) === setupPromise) {
+        readinessUpgradeInFlight.delete(session);
       }
     });
-    readinessUpgradeInFlight.set(session.sessionId, setupPromise);
+    readinessUpgradeInFlight.set(session, setupPromise);
     await setupPromise;
     return;
   }
@@ -261,9 +295,10 @@ async function setupSession(
   ensureSessionIsCurrent(session, sessionManager);
   // #6227 P1 follow-up: route the fresh-session setup through the same
   // single-flight map used by the existing-session upgrade path (keyed by
-  // `session.sessionId`) so a concurrent caller racing for the same
-  // recovered session — whether it takes the fresh or existing-session path
-  // — joins the one in-flight setup instead of starting a second.
+  // this session's own incarnation, #6227 P2 follow-up) so a concurrent
+  // caller racing for the same recovered session — whether it takes the
+  // fresh or existing-session path — joins the one in-flight setup instead
+  // of starting a second.
   await ensureReadinessUpgraded(session, sessionManager, requiredReadiness);
   ensureSessionIsCurrent(session, sessionManager);
 

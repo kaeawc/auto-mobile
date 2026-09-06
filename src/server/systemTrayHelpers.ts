@@ -1272,7 +1272,7 @@ export const waitForNotificationMatch = async (
     }
 
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+    observation = await observeSystemTray(observeScreen, minTimestamp);
   }
 };
 

@@ -141,6 +141,7 @@ export class SwipeOn extends BaseVisualChange {
       resolveBoomerangConfig: this.resolveBoomerangConfig.bind(this),
       buildPredictionArgs: this.buildPredictionArgs.bind(this),
       observedInteraction: this.observedInteraction.bind(this),
+      captureTerminalObservationScreenshot: this.captureTerminalObservationScreenshot.bind(this),
     });
   }
 

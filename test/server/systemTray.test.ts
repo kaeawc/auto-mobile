@@ -184,6 +184,12 @@ describe("systemTray find", () => {
     const minTimestamps = fakeObserveScreen.getMinTimestamps();
     expect(minTimestamps[0]).toBe(1000);
     expect(minTimestamps[1]).toBe(2000);
+    expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+      true,
+    );
+    expect(
+      fakeObserveScreen.getExecuteOptions().every((options) => options.skipAccessibilityAudit),
+    ).toBe(true);
   });
 
   test("does not return matches while the tray is closed", async () => {

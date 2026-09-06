@@ -31,6 +31,7 @@ import {
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { exponentialBackoff } from "../../../utils/Backoff";
+import type { ProgressCallback } from "../BaseVisualChange";
 
 function oppositeDirection(dir: SwipeDirection): SwipeDirection {
   switch (dir) {
@@ -65,8 +66,8 @@ interface ScrollUntilVisibleDependencies {
     action: (observeResult: ObserveResult) => Promise<T>,
     options: {
       changeExpected: boolean;
-      timeoutMs: number;
-      progress?: unknown;
+      timeoutMs?: number;
+      progress?: ProgressCallback;
       perf?: PerformanceTracker;
       skipPreviousObserve?: boolean;
       queryOptions?: {
@@ -78,8 +79,13 @@ interface ScrollUntilVisibleDependencies {
         toolName: string;
         toolArgs: Record<string, unknown>;
       };
+      deferPostActionScreenshot?: boolean;
     },
   ) => Promise<T & { observation?: ObserveResult }>;
+  captureTerminalObservationScreenshot?: (
+    observation: ObserveResult | undefined,
+    perf: PerformanceTracker,
+  ) => Promise<void>;
 }
 
 export class ScrollUntilVisible {
@@ -89,7 +95,7 @@ export class ScrollUntilVisible {
 
   async execute(
     options: SwipeOnResolvedOptions,
-    progress?: unknown,
+    progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeOnResult> {
     logger.info(
@@ -98,7 +104,10 @@ export class ScrollUntilVisible {
 
     // Get initial observation
     let lastObservation = await perf.track("initialObserve", () =>
-      this.deps.observeScreen.execute(),
+      this.deps.observeScreen.execute({
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+      }),
     );
     if (!lastObservation.viewHierarchy || !lastObservation.screenSize) {
       throw new Error("Failed to get initial observation for scrolling until visible.");
@@ -196,6 +205,7 @@ export class ScrollUntilVisible {
       }
 
       perf.end();
+      await this.deps.captureTerminalObservationScreenshot?.(lastObservation, perf);
       return {
         success: true,
         targetType: "element",
@@ -300,6 +310,7 @@ export class ScrollUntilVisible {
           progress,
           perf,
           skipPreviousObserve: scrollIteration > 1,
+          deferPostActionScreenshot: true,
           predictionContext: {
             toolName: "swipeOn",
             toolArgs: this.deps.buildPredictionArgs(options),
@@ -307,8 +318,13 @@ export class ScrollUntilVisible {
         },
       );
 
+      if (swipeResult.observation?.viewHierarchy) {
+        lastObservation = swipeResult.observation;
+      }
+
       if (!swipeResult.success && this.deps.device.platform === "ios") {
         perf.end();
+        await this.deps.captureTerminalObservationScreenshot?.(lastObservation, perf);
         return {
           ...swipeResult,
           targetType: "screen",
@@ -319,9 +335,7 @@ export class ScrollUntilVisible {
       }
 
       // Update observation
-      if (swipeResult.observation && swipeResult.observation.viewHierarchy) {
-        lastObservation = swipeResult.observation;
-      } else {
+      if (!swipeResult.observation?.viewHierarchy) {
         throw new Error("Lost observation after swipe during scroll until visible.");
       }
 
@@ -424,6 +438,7 @@ export class ScrollUntilVisible {
     }
 
     perf.end();
+    await this.deps.captureTerminalObservationScreenshot?.(lastObservation, perf);
     return {
       success: true,
       targetType: "element",
@@ -690,7 +705,10 @@ export class ScrollUntilVisible {
     let latestObservation = currentObservation;
 
     while (this.deps.timer.now() - startTime < maxWaitMs) {
-      const newObservation = await this.deps.observeScreen.execute();
+      const newObservation = await this.deps.observeScreen.execute({
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+      });
       if (!newObservation.viewHierarchy) {
         break;
       }

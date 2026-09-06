@@ -45,6 +45,7 @@ import {
 } from "../server/sessionReleaseBroadcast";
 import {
   toolSelectionProfileUuidFromResponse,
+  IDE_SET_SESSION_TOOL_ENABLED_METHOD,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -2618,6 +2619,10 @@ export class UnixSocketServer {
         declaredDefault,
         [undefined],
         this.sessionToolSelectionService,
+        // No connectionProfileUuid on this channel — a caller here is on the direct IDE
+        // socket, which has no MCP connection profile and cannot invoke an MCP tool.
+        undefined,
+        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
       );
       return;
     }
@@ -2633,6 +2638,12 @@ export class UnixSocketServer {
       declaredDefault,
       [baseSessionUuid, derivedSessionUuid],
       this.sessionToolSelectionService,
+      // This IDE socket-gate path never has a connection profile of its own (see
+      // formatToolEnabledRemediationSentence in toolSelectionPolicy.ts) — the remediation must
+      // name the daemon's own `ide/setSessionToolEnabled` method, not the MCP `setToolEnabled`
+      // tool, since a caller on this channel cannot invoke an MCP tool (issue #6259).
+      undefined,
+      IDE_SET_SESSION_TOOL_ENABLED_METHOD,
     );
   }
 

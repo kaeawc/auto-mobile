@@ -345,7 +345,9 @@ describe("device loss MCP outcome", () => {
     expect(JSON.parse(result.content[0].text)).toEqual({
       error: {
         code: "session_ownership_lost",
-        message: "Session ownership lost for device-session-a: heartbeat-timeout",
+        message:
+          "Session ownership lost for device-session-a: heartbeat-timeout. " +
+          "Call getAndroid, getApple, or startDevice to acquire a new device session.",
         sessionUuid: "device-session-a",
         reason: "heartbeat-timeout",
         release,

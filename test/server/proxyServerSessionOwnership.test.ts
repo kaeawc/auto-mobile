@@ -72,7 +72,9 @@ describe("proxy server session ownership errors", () => {
             text: JSON.stringify({
               error: {
                 code: "session_ownership_lost",
-                message: "Session ownership lost for session-123: heartbeat-timeout",
+                message:
+                  "Session ownership lost for session-123: heartbeat-timeout. " +
+                  "Call getAndroid, getApple, or startDevice to acquire a new device session.",
                 sessionUuid: "session-123",
                 reason: "heartbeat-timeout",
                 release: {

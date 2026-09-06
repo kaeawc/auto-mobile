@@ -151,6 +151,45 @@ function isVerifiedLaunchObservation(
 }
 
 /**
+ * Reason a launch could not be verified (issue #6220), for the case where no
+ * foreground application window was observed at all — as opposed to an
+ * observed-but-different foreground (an accepted surface, e.g. a permission
+ * dialog, which `LaunchApp.execute` already treats as success and this
+ * response layer must not second-guess with a misleading `verified: false`).
+ */
+type LaunchVerificationFailureReason = "no_observation" | "no_foreground_window";
+
+function launchVerificationFailureReason(
+  observedAppId: string | undefined,
+  observation: LaunchAppResult["observation"],
+): LaunchVerificationFailureReason | undefined {
+  if (observedAppId) {
+    return undefined;
+  }
+  return observation === undefined ? "no_observation" : "no_foreground_window";
+}
+
+function launchVerificationFailureMessage(reason: LaunchVerificationFailureReason): string {
+  return reason === "no_observation"
+    ? "no observation was captured after launch"
+    : "no foreground application window could be observed after launch";
+}
+
+function buildLaunchMessage(
+  appId: string,
+  verified: boolean | undefined,
+  verifyFailureReason: LaunchVerificationFailureReason | undefined,
+): string {
+  if (verified === true) {
+    return `Launched app ${appId} (foreground verified)`;
+  }
+  if (verifyFailureReason) {
+    return `Launched app ${appId} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
+  }
+  return `Launched app ${appId}`;
+}
+
+/**
  * Build the launchApp tool response from a {@link LaunchAppResult}, enforcing the
  * launch postcondition instead of reporting a flat "Launched app X" success
  * regardless of what actually happened (#5868).
@@ -163,6 +202,15 @@ function isVerifiedLaunchObservation(
  * them behind a success message. On success it additionally reports the observed
  * foreground appId and whether it matched, so a client can skip a confirming
  * `observe` round-trip.
+ *
+ * `verified` is a three-way signal, never a silent `undefined` when the launch
+ * genuinely could not be confirmed (issue #6220): `true` on an exact foreground
+ * match against a fresh, verified observation; `false` (with `verifyFailureReason`
+ * naming why) when no foreground window could be observed for the launched app at
+ * all; and `undefined` only for the deliberately-ambiguous case of an observed,
+ * DIFFERENT real foreground (an accepted surface such as a permission dialog,
+ * which `LaunchApp.execute` already accepted as success) or a matching-but-stale
+ * observation, where asserting `false` would contradict the tool's own success.
  */
 export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   if (!result.success) {
@@ -173,20 +221,26 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
 
   // Mirror `LaunchApp`'s own reconciliation, which accepts either the active
   // window's appId or the view hierarchy's packageName — so a launch verified via
-  // the hierarchy (active window absent) still reports the observed app.
+  // the hierarchy (active window absent) still reports the observed app. `||`
+  // (not `??`) so an empty-string appId (no foreground window identified, issue
+  // #6220) also falls back to the hierarchy's package rather than being treated
+  // as a real observed app.
   const observedAppId =
-    result.observation?.activeWindow?.appId ?? result.observation?.viewHierarchy?.packageName;
+    result.observation?.activeWindow?.appId || result.observation?.viewHierarchy?.packageName;
   // Only assert verification on an exact foreground match with a fresh, verified
   // observation. `LaunchApp.execute` retries an unverified observation, but this
   // response-level guard preserves the true-or-undefined contract for any direct
   // caller that supplies one.
-  const verified = isVerifiedLaunchObservation(appId, observedAppId, result.observation)
-    ? true
-    : undefined;
+  const isVerified = isVerifiedLaunchObservation(appId, observedAppId, result.observation);
+  const verifyFailureReason = isVerified
+    ? undefined
+    : launchVerificationFailureReason(observedAppId, result.observation);
+  const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {
-    message: verified ? `Launched app ${appId} (foreground verified)` : `Launched app ${appId}`,
+    message: buildLaunchMessage(appId, verified, verifyFailureReason),
     verified,
+    ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
     observation: result.observation,
     ...result,

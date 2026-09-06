@@ -123,7 +123,10 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
   });
 
-  test("omits verification when no observation is available", () => {
+  // #6220: no observation at all is squarely "could not observe the launched
+  // app's window" — the response must say so explicitly (verified:false with a
+  // reason) instead of a silent, success-shaped `verified: undefined`.
+  test("reports an explicit verification failure when no observation is available", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
@@ -131,8 +134,34 @@ describe("buildLaunchAppResponse", () => {
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
 
-    expect(payload.verified).toBeUndefined();
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_observation");
     expect(payload.observedAppId).toBeUndefined();
-    expect(payload.message).toBe("Launched app com.android.settings");
+    expect(payload.message).toBe(
+      "Launched app com.android.settings (verification failed: no observation was captured after launch)",
+    );
+  });
+
+  // #6220 repro: the observation is present but reports no foreground window at
+  // all (activeWindow.appId is empty, e.g. a status-bar-only hierarchy) — the
+  // launch must not silently drop `verified`.
+  test("reports an explicit verification failure when the observation shows no foreground window", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        activeWindow: { appId: "", activityName: "", layoutSeqSum: 0 },
+        freshness: { isFresh: false, verified: false, warning: "no foreground window" },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_foreground_window");
+    expect(payload.observedAppId).toBeUndefined();
+    expect(payload.message).toBe(
+      "Launched app com.android.settings (verification failed: no foreground application window could be observed after launch)",
+    );
   });
 });

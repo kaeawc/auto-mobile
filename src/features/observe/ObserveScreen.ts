@@ -218,6 +218,27 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
 }
 
 /**
+ * Synchronous counterpart to the async, device-confirmed status-bar-only gate
+ * below (issue #6220): `activeWindow.appId` is empty even after every
+ * fallback (viewHierarchy packageName, bootstrap attribution, etc.) has
+ * already run against this result, so nothing identifies which app — if any —
+ * the captured hierarchy belongs to. The async gate needs an independent
+ * dumpsys read of the foreground app to name the mismatch; when that
+ * confirming read itself comes back empty (or races), this still catches the
+ * case without a device round-trip. A missing `viewHierarchy` is left to the
+ * `unavailable` freshness path instead — this is only about a hierarchy that
+ * WAS captured but carries no window identity.
+ */
+function resolveMissingForegroundWindow(
+  result: ObserveResult,
+): { reason: "status_bar_only" | "empty_active_window" } | undefined {
+  if (result.activeWindow?.appId || !result.viewHierarchy?.hierarchy?.node) {
+    return undefined;
+  }
+  return { reason: isStatusBarOnlyHierarchy(result) ? "status_bar_only" : "empty_active_window" };
+}
+
+/**
  * The status-bar-only verdict inputs (issue #6151): whether the service itself
  * reported the focused window as unreadable, and the device API level that
  * decides whether that can be Android 14+ data-sensitive withholding.
@@ -675,6 +696,7 @@ export class RealObserveScreen implements ObserveScreen {
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined,
+        missingForegroundWindow: resolveMissingForegroundWindow(result),
         statusBarOnlyHierarchy: await this.resolveStatusBarOnlyHierarchy(
           result,
           foregroundIdentity,

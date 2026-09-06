@@ -280,6 +280,56 @@ describe("computeFreshness", () => {
     });
   });
 
+  // --- issue #6220: no foreground window at all (status-bar-only / empty appId) ---
+  describe("missing foreground window (issue #6220)", () => {
+    test("a status-bar-only hierarchy with no foreground window is NOT verified or fresh", () => {
+      const v = computeFreshness({
+        actualTimestamp: NOW - 50,
+        now: NOW,
+        verified: true,
+        missingForegroundWindow: { reason: "status_bar_only" },
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("status-bar content");
+      expect(v.warning).toContain("no foreground application window");
+    });
+
+    test("an empty activeWindow.appId with a non-status-bar hierarchy is still NOT verified or fresh", () => {
+      const v = computeFreshness({
+        actualTimestamp: NOW - 50,
+        now: NOW,
+        verified: true,
+        missingForegroundWindow: { reason: "empty_active_window" },
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("no foreground application window");
+    });
+
+    test("dominates a requested-minimum poll too", () => {
+      const v = computeFreshness({
+        requestedAfter: NOW - 1_000,
+        actualTimestamp: NOW,
+        now: NOW,
+        missingForegroundWindow: { reason: "status_bar_only" },
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+    });
+
+    test("a normal successful capture with a real foreground window is unaffected", () => {
+      const v = computeFreshness({
+        actualTimestamp: NOW - 50,
+        now: NOW,
+        verified: true,
+        missingForegroundWindow: undefined,
+      });
+      expect(v.verified).toBe(true);
+      expect(v.isFresh).toBe(true);
+    });
+  });
+
   test("every `isFresh: false` names its cause", () => {
     const falseCases = [
       computeFreshness({ actualTimestamp: NOW - 999_999, now: NOW }),

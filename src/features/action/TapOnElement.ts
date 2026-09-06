@@ -607,6 +607,46 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
+  /**
+   * Guard against a self-contradicting response (issue #6219): `effect` says the
+   * screen already changed (`screenChanged: true`), but the observation attached
+   * to the SAME payload predates that transition and still stamps
+   * `freshness.verified/isFresh: true` — a client sees a stale, pre-tap tree
+   * asserted as trustworthy in the very response that also reports the window
+   * changed. Re-derives the comparison against `result.observation` as it
+   * stands right before it is returned (after any downstream mutation, e.g.
+   * `selectionStateTracker.finalize`), rather than trusting whichever
+   * intermediate observation `effect` was originally computed from, so a later
+   * mutation cannot leave the two fields disagreeing in the response.
+   *
+   * Only ever retracts freshness — never invents a `screenChanged: true` an
+   * observation didn't earn — and only when `effect` itself claims a change.
+   */
+  private enforceFreshnessConsistencyWithEffect(
+    previousObservation: ObserveResult | null,
+    result: { effect?: TapOnElementResult["effect"]; observation?: ObserveResult },
+  ): void {
+    if (!previousObservation || !result.observation || result.effect?.screenChanged !== true) {
+      return;
+    }
+    const reDerived = this.deriveTapEffect(previousObservation, result.observation);
+    if (reDerived?.screenChanged === true) {
+      // The observation being returned is itself consistent with the detected
+      // transition — nothing to correct.
+      return;
+    }
+    const existing = result.observation.freshness;
+    result.observation.freshness = {
+      ...(existing ?? { isFresh: true }),
+      verified: false,
+      isFresh: false,
+      warning:
+        "effect.screenChanged is true, but this observation's own capture still matches the " +
+        "pre-action screen — it predates the detected transition. Call observe again for the " +
+        "current, post-action state.",
+    };
+  }
+
   private isElementTapTargetOffScreen(
     element: Element,
     screenSize?: ObserveResult["screenSize"],
@@ -1763,6 +1803,7 @@ export class TapOnElement extends BaseVisualChange {
         if (selectedElements.length > 0) {
           result.observation.selectedElements = selectedElements;
         }
+        this.enforceFreshnessConsistencyWithEffect(previousObserveResult, result);
       }
 
       if (options.action === "longPress") {

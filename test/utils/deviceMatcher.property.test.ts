@@ -84,6 +84,92 @@ describe("compareVersions (property-based)", () => {
   });
 });
 
+// Lettered/QPR release qualifiers (#6182). A dedicated generator + independent
+// oracle over the full (components, letter, qpr) triple, rather than only
+// example-based tests, per the tracking issue's explicit ask -- the
+// interactions between the three parts are easy to under-specify by hand.
+const letterOrUndefined = fc.option(fc.constantFrom("A", "L", "Q", "Z"), { nil: undefined });
+const qprOrUndefined = fc.option(fc.nat(5), { nil: undefined });
+const releaseQualifier = fc.record({
+  parts: versionParts,
+  letter: letterOrUndefined,
+  qpr: qprOrUndefined,
+});
+type ReleaseQualifier = { parts: number[]; letter: string | undefined; qpr: number | undefined };
+
+const qualifierToString = (q: ReleaseQualifier): string =>
+  `${versionOf(q.parts)}${q.letter ?? ""}${q.qpr === undefined ? "" : `-QPR${q.qpr}`}`;
+
+// Independent oracle: components first (missing trailing components as 0),
+// then the letter qualifier (absent sorts before any letter, otherwise
+// alphabetical), then the QPR suffix (absent treated as 0).
+const refQualifierCompareSign = (a: ReleaseQualifier, b: ReleaseQualifier): number => {
+  const componentsSign = refCompareSign(a.parts, b.parts);
+  if (componentsSign !== 0) {
+    return componentsSign;
+  }
+  if (a.letter !== b.letter) {
+    if (a.letter === undefined) {
+      return -1;
+    }
+    if (b.letter === undefined) {
+      return 1;
+    }
+    return a.letter < b.letter ? -1 : 1;
+  }
+  return Math.sign((a.qpr ?? 0) - (b.qpr ?? 0));
+};
+
+describe("compareVersions over lettered/QPR release qualifiers (property-based)", () => {
+  test("is reflexive", () => {
+    fc.assert(
+      fc.property(
+        releaseQualifier,
+        (q) => compareVersions(qualifierToString(q), qualifierToString(q)) === 0,
+      ),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("is sign-antisymmetric", () => {
+    fc.assert(
+      fc.property(releaseQualifier, releaseQualifier, (a, b) => {
+        const sa = qualifierToString(a);
+        const sb = qualifierToString(b);
+        return Math.sign(compareVersions(sa, sb)) === -Math.sign(compareVersions(sb, sa));
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("agrees in sign with the independent (components, letter, qpr) oracle", () => {
+    fc.assert(
+      fc.property(releaseQualifier, releaseQualifier, (a, b) => {
+        return (
+          Math.sign(compareVersions(qualifierToString(a), qualifierToString(b))) ===
+          refQualifierCompareSign(a, b)
+        );
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("ordering is transitive", () => {
+    fc.assert(
+      fc.property(releaseQualifier, releaseQualifier, releaseQualifier, (a, b, c) => {
+        const sa = qualifierToString(a);
+        const sb = qualifierToString(b);
+        const sc = qualifierToString(c);
+        return (
+          !(compareVersions(sa, sb) <= 0 && compareVersions(sb, sc) <= 0) ||
+          compareVersions(sa, sc) <= 0
+        );
+      }),
+      RUN_OPTIONS,
+    );
+  });
+});
+
 const platform = fc.constantFrom<Platform>("android", "ios");
 const device: fc.Arbitrary<BootedDevice> = fc.record({
   name: fc.string({ maxLength: 12 }),

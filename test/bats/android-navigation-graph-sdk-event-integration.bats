@@ -41,6 +41,13 @@ make_mock() {
   make_executable "${MOCK_BIN}/$1" "$2"
 }
 
+# Sentinel returned by the getAndroid mock below. It is deliberately distinct
+# from the fabricated UUID removed from the production script by #6104
+# ("52150000-0000-4000-8000-000000000000") so the assertions in this test can
+# tell a genuinely-forwarded acquired session apart from a regression that
+# keeps forwarding the old hardcoded value.
+export ACQUIRED_SESSION_UUID="9f860000-0000-4000-8000-000000000000"
+
 @test "binds the Android graph session before emitting and polling an SDK navigation event" {
   make_mock adb '
 printf "%s\n" "$*" >> "$ADB_LOG"
@@ -97,10 +104,14 @@ if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && 
     echo "getAndroid acquired without target deviceId" >&2
     exit 1
   }
-  printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
+  printf "{\"sessionUuid\":\"%s\"}\n" "$ACQUIRED_SESSION_UUID"
   exit 0
 fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ]; then
+  [ "$5" = "$ACQUIRED_SESSION_UUID" ] || {
+    echo "session-scoped call forwarded an unexpected --session-uuid: $5" >&2
+    exit 1
+  }
   case "$6" in
     launchApp)
       [ -f "$DEVICE_READY_FILE" ] || {
@@ -153,6 +164,14 @@ exit 1
   # Regression for issue #4579: scope the graph read to the fixture package so a
   # concurrent hierarchy push cannot redirect the query to another app's graph.
   grep -q -- "getNavigationGraph --platform android --deviceId emulator-5554 --appId dev.jasonpearson.automobile.playground" "$AUTO_MOBILE_LOG"
+  # Regression for #6180: every session-scoped call must forward the UUID that
+  # getAndroid actually acquired, not a fabricated one. The session-scoped mock
+  # above already fails the run if a forwarded UUID does not match
+  # ACQUIRED_SESSION_UUID; this asserts at least one such call was made and none
+  # of them carried the old hardcoded UUID that #6104 removed from the script.
+  session_uuid_calls="$(grep -c -- "--session-uuid ${ACQUIRED_SESSION_UUID}" "$AUTO_MOBILE_LOG")"
+  [ "$session_uuid_calls" -ge 3 ]
+  ! grep -q -- '--session-uuid 52150000-0000-4000-8000-000000000000' "$AUTO_MOBILE_LOG"
 }
 
 @test "uses the workspace CLI entrypoint when the global auto-mobile install is unavailable" {

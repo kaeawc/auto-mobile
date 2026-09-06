@@ -70,13 +70,31 @@ const hostileUnit = fc.oneof(
 );
 const hostileName = fc.string({ unit: hostileUnit, maxLength: 24 });
 
+// The guard's *documented* forbidden cases (see assertSafeSnapshotName's
+// doc comment and reject() call sites): a NUL byte, a path separator, the
+// bare traversal segments, or an empty/whitespace-only name. Everything else
+// — including non-ASCII text like "é", spaces inside the name, emoji, and
+// other unicode — is accepted. This is restated independently of the
+// implementation (rather than calling assertSafeSnapshotName itself) so a
+// regression that narrows the guard's real accepted domain shows up here.
+function isDocumentedlyForbidden(name: string): boolean {
+  return (
+    name.trim().length === 0 ||
+    name.includes("\0") ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name === "." ||
+    name === ".."
+  );
+}
+
 // Ordinary single-segment names — the accepted domain the store relies on.
-const safeUnit = fc.constantFrom(..."abcdefghijABCDEFGHIJ0123456789 ._-".split(""));
+// Drawn from full printable-grapheme unicode (not just ASCII) so the
+// "acceptance" property below actually exercises non-ASCII names such as
+// "é" rather than only ever sampling a small hand-picked alphabet.
 const safeName = fc
-  .string({ unit: safeUnit, minLength: 1, maxLength: 20 })
-  // Exclude the strings the guard legitimately rejects even under a safe
-  // alphabet: whitespace-only names and the bare traversal segments.
-  .filter((s) => s.trim().length > 0 && s !== "." && s !== "..");
+  .string({ unit: "grapheme", minLength: 1, maxLength: 20 })
+  .filter((s) => !isDocumentedlyForbidden(s));
 
 describe("assertSafeSnapshotName (property-based, #5705)", () => {
   test("soundness: every accepted name joins to a direct child of the base directory", () => {

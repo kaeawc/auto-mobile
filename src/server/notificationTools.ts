@@ -150,10 +150,14 @@ export function registerNotificationTools() {
         ? `Posted notification${result.method ? ` via ${result.method}` : ""}`
         : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
 
-      return createJSONToolResponse({
+      const response = createJSONToolResponse({
         message,
         ...result,
       });
+      // A receiver-reported failure means the notification was never delivered
+      // — the primary operation did not succeed, so the MCP envelope must say
+      // so too, exactly as tapOn/inputText do (#6200, #6251).
+      return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throw new ActionableError(`Failed to post notification: ${error}`);
     }

@@ -799,12 +799,19 @@ export function registerAppTools() {
       scheduleExactAlarm: args.scheduleExactAlarm,
     });
 
-    return createJSONToolResponse({
+    const response = createJSONToolResponse({
       message: result.success
         ? `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
         : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
       ...result,
     });
+    // `result.success` requires every requested change to have applied, so a
+    // partial success (some permissions changed, others didn't) already
+    // reports per-operation status via `operations`/`changedCount` and may
+    // stay isError:false. But when NOTHING applied, the primary operation did
+    // not succeed and must be reported as such (#6200, #6251).
+    const wholeOperationFailed = !result.success && result.changedCount === 0;
+    return wholeOperationFailed ? { ...response, isError: true as const } : response;
   };
 
   const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {

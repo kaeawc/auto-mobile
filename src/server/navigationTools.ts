@@ -102,10 +102,15 @@ export function registerNavigationTools() {
           ...result,
         });
       } else {
-        return createJSONToolResponse({
-          error: result.error || "Navigation failed",
-          ...result,
-        });
+        // A failed navigation must not read as a completed one: mark the MCP
+        // envelope `isError`, exactly as tapOn/inputText do (#6200, #6251).
+        return {
+          ...createJSONToolResponse({
+            error: result.error || "Navigation failed",
+            ...result,
+          }),
+          isError: true as const,
+        };
       }
     } catch (error) {
       throw new ActionableError(`Failed to navigate: ${error}`);

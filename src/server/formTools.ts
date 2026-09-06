@@ -99,7 +99,7 @@ export function registerFormTools(): void {
         signal,
       );
 
-      return createStructuredToolResponse({
+      const response = createStructuredToolResponse({
         success: result.success,
         fields: result.fields.map((f) => ({
           selector: f.selector,
@@ -113,6 +113,12 @@ export function registerFormTools(): void {
         totalAttempts: result.totalAttempts,
         error: result.error,
       });
+      // Genuine partial success (some fields set, others failed) keeps
+      // isError:false — the per-field `fields` array is the actionable status
+      // (#6237). But when EVERY field failed, the primary operation did not
+      // succeed at all and must be reported as such (#6200, #6251).
+      const allFieldsFailed = result.fields.length > 0 && result.fields.every((f) => !f.success);
+      return allFieldsFailed ? { ...response, isError: true as const } : response;
     },
     {
       defaultEnabled: true,

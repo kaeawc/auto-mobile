@@ -408,15 +408,46 @@ export class WcagAudit {
     // Use package name + root activity/fragment identifier
     // This is a simplified approach - could be enhanced with more specific identifiers
     //
-    // Node attributes (class, resource-id) live under `$`, not directly on the
-    // node (issue #6252) -- `rootNode.class`/`rootNode["resource-id"]` were
-    // always undefined, so every screen collapsed to the same "unknown:" id,
-    // defeating per-screen baseline tracking.
+    // Node attributes (class, resource-id) live in one of TWO shapes depending on
+    // the hierarchy's source (issue #6252): xml2js-parsed uiautomator dumps nest
+    // them under `$` (`node.$.class`), while CtrlProxy's accessibility-service
+    // conversion (`CtrlProxyHierarchy.convertAccessibilityNode`) writes `class`/
+    // `resource-id` directly on the node and never creates `$`. Reading only one
+    // shape leaves the other always undefined, collapsing every screen on that
+    // source to the same "unknown:" id and defeating per-screen baseline
+    // tracking. `getNodeClass`/`getNodeResourceId` check both.
     const rootNode = this.resolveRootNode(hierarchy);
-    const rootClass = (rootNode.$?.class as string | undefined) || "unknown";
-    const rootId = (rootNode.$?.["resource-id"] as string | undefined) || "";
+    const rootClass = this.getNodeClass(rootNode) || "unknown";
+    const rootId = this.getNodeResourceId(rootNode) || "";
 
     return `${packageName}:${rootClass}:${rootId}`;
+  }
+
+  /**
+   * A `ViewHierarchyNode` as actually produced by the CtrlProxy accessibility
+   * conversion path, which writes `class`/`resource-id` as flat properties
+   * instead of nesting them under `$` (see `generateScreenId`). Declared as an
+   * intersection (additional optional properties), not a cast to an unrelated
+   * type, so it does not trip TS2352 the way `as ViewHierarchyNode` would.
+   */
+  private asFlatAttrNode(
+    node: ViewHierarchyNode,
+  ): ViewHierarchyNode & { class?: unknown; "resource-id"?: unknown } {
+    return node as ViewHierarchyNode & { class?: unknown; "resource-id"?: unknown };
+  }
+
+  /** Read `class` from either node-attribute shape (see `generateScreenId`). */
+  private getNodeClass(node: ViewHierarchyNode): string | undefined {
+    const flat = this.asFlatAttrNode(node);
+    const value = flat.$?.class ?? flat.class;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  /** Read `resource-id` from either node-attribute shape (see `generateScreenId`). */
+  private getNodeResourceId(node: ViewHierarchyNode): string | undefined {
+    const flat = this.asFlatAttrNode(node);
+    const value = flat.$?.["resource-id"] ?? flat["resource-id"];
+    return typeof value === "string" ? value : undefined;
   }
 
   private resolveRootNode(hierarchy: ViewHierarchyNode): ViewHierarchyNode {

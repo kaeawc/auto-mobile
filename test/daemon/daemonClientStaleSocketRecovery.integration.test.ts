@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { DaemonClient, STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS } from "../../src/daemon/client";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
-import type { SocketHolderProbe } from "../../src/daemon/socketHolderProbe";
+import type {
+  SocketHolderProbe,
+  SocketHolderProbeOptions,
+} from "../../src/daemon/socketHolderProbe";
 import type { PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -410,6 +413,130 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
 
       await expect(client.connect()).rejects.toThrow();
       expect(holderProbe.calls).toBe(1);
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    },
+  );
+
+  // #6140 P2: the holder-probe await must be bounded by the caller's remaining
+  // `connect(timeoutMs)` budget and cancellable via its AbortSignal — otherwise a
+  // stalled `lsof` could keep this attempt (and the underlying process) pending
+  // indefinitely past both the deadline and any cancellation. A probe that
+  // consumes its entire bounded budget and then reports it could not complete
+  // (the real `LsofSocketHolderProbe`'s own timeout/abort handling surfaces this
+  // as `undefined`) must be treated as inconclusive — never grounds to unlink.
+  (isWindows ? test.skip : test)(
+    "does not unlink when the authoritative holder probe stalls past its bounded budget",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "socket placeholder");
+      writePidFile(pidFilePath, socketPath);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      class NeverReachable implements DaemonSocketReachabilityLike {
+        async isReachable(): Promise<boolean> {
+          return false;
+        }
+      }
+
+      class StallingHolder implements SocketHolderProbe {
+        calls = 0;
+        receivedOptions: SocketHolderProbeOptions[] = [];
+        constructor(private readonly timer: FakeTimer) {}
+        async getHolderPids(
+          _socketPath: string,
+          options: SocketHolderProbeOptions = {},
+        ): Promise<number[] | undefined> {
+          this.calls++;
+          this.receivedOptions.push(options);
+          // Simulate a stalled `lsof`: consume the ENTIRE bounded budget it was
+          // given, then report inconclusive — mirroring what
+          // `LsofSocketHolderProbe`'s own exec-seam timeout handling would surface.
+          await this.timer.sleep(options.timeoutMs ?? 0);
+          return undefined;
+        }
+      }
+      const holderProbe = new StallingHolder(fakeTimer);
+
+      let cleanupCalls = 0;
+      const client = new DaemonClient(socketPath, 300, fakeTimer, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability: new NeverReachable(),
+        socketHolderProbe: holderProbe,
+      });
+
+      await expect(client.connect()).rejects.toThrow();
+      expect(holderProbe.calls).toBe(1);
+      // The probe must have been given a bounded, finite budget — never left
+      // unbounded.
+      expect(holderProbe.receivedOptions[0]?.timeoutMs).toBeGreaterThan(0);
+      expect(holderProbe.receivedOptions[0]?.timeoutMs).toBeLessThan(Number.POSITIVE_INFINITY);
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    },
+  );
+
+  // #6140 P2: even a CONFIRMED-empty holder result must not authorize the unlink
+  // if it arrives after connect()'s own deadline has already passed — otherwise
+  // the unlink could run past the caller's advertised timeout, the exact
+  // regression class this PR exists to prevent.
+  (isWindows ? test.skip : test)(
+    "does not unlink when the holder probe resolves empty only after the deadline has passed",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "socket placeholder");
+      writePidFile(pidFilePath, socketPath);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      class NeverReachable implements DaemonSocketReachabilityLike {
+        async isReachable(): Promise<boolean> {
+          return false;
+        }
+      }
+
+      class LateEmptyHolder implements SocketHolderProbe {
+        calls = 0;
+        constructor(private readonly timer: FakeTimer) {}
+        async getHolderPids(
+          _socketPath: string,
+          options: SocketHolderProbeOptions = {},
+        ): Promise<number[]> {
+          this.calls++;
+          // Consume the entire bounded budget it was given, landing exactly AT the
+          // deadline, then report a CONFIRMED empty result — too late to act on.
+          await this.timer.sleep(options.timeoutMs ?? 0);
+          return [];
+        }
+      }
+      const holderProbe = new LateEmptyHolder(fakeTimer);
+
+      let cleanupCalls = 0;
+      const client = new DaemonClient(socketPath, 300, fakeTimer, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability: new NeverReachable(),
+        socketHolderProbe: holderProbe,
+      });
+
+      await expect(client.connect()).rejects.toThrow();
+      expect(holderProbe.calls).toBe(1);
+      // The dead-PID cleanup must never run despite the CONFIRMED empty result:
+      // it arrived only once the deadline had already passed.
       expect(cleanupCalls).toBe(0);
       expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);

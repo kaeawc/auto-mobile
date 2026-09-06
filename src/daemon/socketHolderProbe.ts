@@ -15,12 +15,26 @@ import { logger } from "../utils/logger";
  * - a non-empty array: one or more live processes hold the path — a winner owns it.
  * - an empty array: CONFIRMED — no live process holds the path.
  * - `undefined`: ownership could NOT be authoritatively determined (no `lsof`, an
- *   unexpected error, an unsupported platform). Callers MUST treat this the same as
- *   "a live holder exists" for the purpose of gating a destructive unlink — an
- *   inconclusive check is never grounds to unlink.
+ *   unexpected error, a timeout, an abort, an unsupported platform). Callers MUST
+ *   treat this the same as "a live holder exists" for the purpose of gating a
+ *   destructive unlink — an inconclusive check is never grounds to unlink.
  */
+export interface SocketHolderProbeOptions {
+  /**
+   * Upper bound on the underlying `lsof` invocation (issue #6140 P2). Without this,
+   * a stalled `lsof` could keep the caller's `connect(timeoutMs)` attempt — and the
+   * underlying process — pending indefinitely past its own advertised deadline.
+   */
+  timeoutMs?: number;
+  /** Cancels the underlying `lsof` invocation when the caller aborts. */
+  signal?: AbortSignal;
+}
+
 export interface SocketHolderProbe {
-  getHolderPids(socketPath: string): Promise<number[] | undefined>;
+  getHolderPids(
+    socketPath: string,
+    options?: SocketHolderProbeOptions,
+  ): Promise<number[] | undefined>;
 }
 
 function textFrom(value: string | Buffer | undefined): string {
@@ -65,11 +79,17 @@ export class LsofSocketHolderProbe implements SocketHolderProbe {
     this.platform = platformOverride;
   }
 
-  async getHolderPids(socketPath: string): Promise<number[] | undefined> {
+  async getHolderPids(
+    socketPath: string,
+    options: SocketHolderProbeOptions = {},
+  ): Promise<number[] | undefined> {
     if (this.platform === "win32") {
       // No `lsof` on Windows, and a named pipe has no filesystem entry `lsof` could
       // query in the first place — ownership can never be authoritatively
       // established this way there.
+      return undefined;
+    }
+    if (options.signal?.aborted) {
       return undefined;
     }
     if (!existsSync(socketPath)) {
@@ -78,9 +98,15 @@ export class LsofSocketHolderProbe implements SocketHolderProbe {
     }
 
     try {
+      // Bound the invocation by the caller's remaining budget and let it be
+      // cancelled by the caller's AbortSignal (issue #6140 P2) — both flow through
+      // the shared exec seam's existing `timeout`/`signal` support, never a raw
+      // `execFile` call. A timed-out or aborted invocation rejects and lands in the
+      // catch block below, which already treats any non-"confirmed empty" shape as
+      // inconclusive.
       const { stdout } = await runExecSeam(
         (execOptions) => this.execAsync("lsof", ["-Fp", "--", socketPath], execOptions),
-        {},
+        { timeoutMs: options.timeoutMs, signal: options.signal },
         { command: "lsof", args: ["-Fp", "--", socketPath] },
         { preserveError: true },
       );

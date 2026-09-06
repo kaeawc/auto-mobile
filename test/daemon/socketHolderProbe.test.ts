@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LsofSocketHolderProbe, parseLsofHolderPids } from "../../src/daemon/socketHolderProbe";
 import type { ExecFileAsync } from "../../src/utils/HostCommandExecutor";
+import type { ExecSeamOptions } from "../../src/utils/ExecSeam";
 
 type NodeExecError = Error & { code?: number | string; stdout?: string; stderr?: string };
 
@@ -128,6 +129,50 @@ describe("LsofSocketHolderProbe", () => {
       const probe = new LsofSocketHolderProbe(execAsync, "win32");
 
       await expect(probe.getHolderPids(socketPath)).resolves.toBeUndefined();
+      expect(execCalls).toBe(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  // #6140 P2: without this, a stalled `lsof` could keep the caller's connect()
+  // attempt (and the underlying process) pending indefinitely past its own
+  // deadline and any cancellation.
+  test("forwards timeoutMs and the AbortSignal into the exec seam's options", async () => {
+    const socketPath = createTempSocketPathFile();
+    try {
+      let seenOptions: ExecSeamOptions | undefined;
+      const execAsync: ExecFileAsync = async (_file, _args, options) => {
+        seenOptions = options;
+        return { stdout: "", stderr: "" };
+      };
+      const probe = new LsofSocketHolderProbe(execAsync, "darwin");
+      const controller = new AbortController();
+
+      await probe.getHolderPids(socketPath, { timeoutMs: 1234, signal: controller.signal });
+
+      expect(seenOptions?.timeout).toBe(1234);
+      expect(seenOptions?.signal).toBe(controller.signal);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("returns undefined (inconclusive) without shelling out when already aborted", async () => {
+    const socketPath = createTempSocketPathFile();
+    try {
+      let execCalls = 0;
+      const execAsync: ExecFileAsync = async () => {
+        execCalls++;
+        return { stdout: "p123\n", stderr: "" };
+      };
+      const probe = new LsofSocketHolderProbe(execAsync, "darwin");
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        probe.getHolderPids(socketPath, { signal: controller.signal }),
+      ).resolves.toBeUndefined();
       expect(execCalls).toBe(0);
     } finally {
       cleanup();

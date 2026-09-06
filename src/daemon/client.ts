@@ -375,12 +375,40 @@ export class DaemonClient {
     if (signal?.aborted || !likelyUnreachable) {
       return false;
     }
-    const holderPids = await this.socketHolderProbe().getHolderPids(this.socketPath);
-    // Recheck abort again: the holder probe is itself an awaited call.
-    if (signal?.aborted || holderPids === undefined || holderPids.length > 0) {
+    // Bound the authoritative holder probe by whatever remains of the caller's own
+    // deadline and let it be cancelled by the same AbortSignal (issue #6140 P2) —
+    // otherwise a stalled `lsof` could keep this connect() attempt, and the
+    // underlying process, pending indefinitely past both the caller's timeout and
+    // any cancellation. A timed-out/aborted probe surfaces as `undefined`
+    // (inconclusive) from `socketHolderProbe()`'s own error handling.
+    const remainingForHolderProbe = deadline - this.timer.now();
+    if (remainingForHolderProbe <= 0) {
+      return false;
+    }
+    const holderPids = await this.socketHolderProbe().getHolderPids(this.socketPath, {
+      timeoutMs: remainingForHolderProbe,
+      signal,
+    });
+    // Recheck BOTH abort and the DEADLINE after this await: the probe consuming
+    // its entire bounded budget (or resolving right at the boundary) must never
+    // itself let the unlink run after connect()'s own advertised timeout — the
+    // exact regression class this PR exists to prevent. A merely-empty result
+    // reported too late is treated the same as an inconclusive one.
+    if (!this.isConfirmedNoLiveHolder(holderPids, deadline, signal)) {
       return false;
     }
     return DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions);
+  }
+
+  private isConfirmedNoLiveHolder(
+    holderPids: number[] | undefined,
+    deadline: number,
+    signal?: AbortSignal,
+  ): boolean {
+    if (signal?.aborted || this.timer.now() >= deadline) {
+      return false;
+    }
+    return holderPids !== undefined && holderPids.length === 0;
   }
 
   private staleSocketRecoveryReachability(): DaemonSocketReachabilityLike {

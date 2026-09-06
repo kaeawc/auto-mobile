@@ -28,13 +28,13 @@ _An AI agent searching YouTube and browsing results_
 
 ### Explore and Test
 
-| Task                                                      | What it does                                                                         |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **[Explore app UX](docs/using/agent-examples.md)**        | Navigate your app, discover screens, map user flows, identify confusing interactions |
-| **[Reproduce bugs](docs/using/agent-examples.md)**        | Paste a bug report and get exact reproduction steps with screenshots                 |
-| **[Create UI tests](docs/using/ui-tests.md)**             | Describe test scenarios in plain English, get executable test plans                  |
-| **[Measure startup time](docs/using/agent-examples.md)**  | Profile cold and warm launch performance                                             |
-| **[Check scroll performance](docs/using/agent-examples.md)** | Detect jank and dropped frames                                                    |
+| Task                                                         | What it does                                                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| **[Explore app UX](docs/using/agent-examples.md)**           | Navigate your app, discover screens, map user flows, identify confusing interactions |
+| **[Reproduce bugs](docs/using/agent-examples.md)**           | Paste a bug report and get exact reproduction steps with screenshots                 |
+| **[Create UI tests](docs/using/ui-tests.md)**                | Describe test scenarios in plain English, get executable test plans                  |
+| **[Measure startup time](docs/using/agent-examples.md)**     | Profile cold and warm launch performance                                             |
+| **[Check scroll performance](docs/using/agent-examples.md)** | Detect jank and dropped frames                                                       |
 
 ## How it works
 

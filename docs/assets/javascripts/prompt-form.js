@@ -21,9 +21,7 @@
     '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M21 7 9 19l-5.5-5.5 1.41-1.41L9 16.17 19.59 5.59z"/></svg>';
 
   function updateVar(key, value) {
-    var spans = document.querySelectorAll(
-      '.prompt-var[data-prompt-var="' + key + '"]'
-    );
+    var spans = document.querySelectorAll('.prompt-var[data-prompt-var="' + key + '"]');
     for (var i = 0; i < spans.length; i++) {
       var span = spans[i];
       span.textContent = value || span.getAttribute("data-default") || "";
@@ -31,9 +29,7 @@
   }
 
   function wireInputs() {
-    var inputs = document.querySelectorAll(
-      "input[data-prompt-var], textarea[data-prompt-var]"
-    );
+    var inputs = document.querySelectorAll("input[data-prompt-var], textarea[data-prompt-var]");
     for (var i = 0; i < inputs.length; i++) {
       (function (input) {
         var key = input.getAttribute("data-prompt-var");
@@ -100,7 +96,7 @@
             },
             function () {
               flash(button, false);
-            }
+            },
           );
         });
       })(button, source);

@@ -12,16 +12,16 @@ This page assumes you already have a device coordinate to send.
 
 ## The socket
 
-| | |
-| --- | --- |
-| **Path** | `/tmp/auto-mobile-daemon-<uid>.sock`, where `<uid>` is your OS user id (per-user socket). Override with `AUTOMOBILE_DAEMON_SOCKET_PATH`. |
-| **Framing** | Newline-delimited JSON (NDJSON): one JSON request object per line terminated by `\n`; the daemon replies with one JSON line per request. |
-| **Correlation** | Each response carries the `id` of its request, so a client may pipeline requests and match replies by `id`. |
+|                 |                                                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Path**        | `/tmp/auto-mobile-daemon-<uid>.sock`, where `<uid>` is your OS user id (per-user socket). Override with `AUTOMOBILE_DAEMON_SOCKET_PATH`. |
+| **Framing**     | Newline-delimited JSON (NDJSON): one JSON request object per line terminated by `\n`; the daemon replies with one JSON line per request. |
+| **Correlation** | Each response carries the `id` of its request, so a client may pipeline requests and match replies by `id`.                              |
 
 ### Request envelope
 
 ```json
-{ "id": "1", "type": "daemon_request", "method": "input/tap", "params": { }, "timeoutMs": 10000 }
+{ "id": "1", "type": "daemon_request", "method": "input/tap", "params": {}, "timeoutMs": 10000 }
 ```
 
 `type` is `"daemon_request"` for every input command. `timeoutMs` is optional
@@ -30,7 +30,7 @@ This page assumes you already have a device coordinate to send.
 ### Response envelope
 
 ```json
-{ "id": "1", "type": "mcp_response", "success": true, "result": { } }
+{ "id": "1", "type": "mcp_response", "success": true, "result": {} }
 ```
 
 On failure `success` is `false` and `error` holds a human-readable message.
@@ -41,13 +41,13 @@ Every command's `params` takes `platform` (`"android"` or `"ios"`) and an
 optional `deviceId` — omit `deviceId` to target the daemon's active device. All
 coordinates are **canonical device pixels**.
 
-| `method` | `params` |
-| --- | --- |
-| `input/tap` | `x`, `y`, `duration?` |
-| `input/swipe` | `startX`, `startY`, `endX`, `endY`, `durationMs` |
-| `input/pressButton` | `button` (e.g. `back`, `home`, `recent`) |
-| `input/key` | `key` (e.g. `enter`, `tab`, `arrow_up`) — Android only |
-| `input/typeText` | `text`, `append`, `submit` |
+| `method`                                                        | `params`                                                  |
+| --------------------------------------------------------------- | --------------------------------------------------------- |
+| `input/tap`                                                     | `x`, `y`, `duration?`                                     |
+| `input/swipe`                                                   | `startX`, `startY`, `endX`, `endY`, `durationMs`          |
+| `input/pressButton`                                             | `button` (e.g. `back`, `home`, `recent`)                  |
+| `input/key`                                                     | `key` (e.g. `enter`, `tab`, `arrow_up`) — Android only    |
+| `input/typeText`                                                | `text`, `append`, `submit`                                |
 | `input/gestureStart` · `input/gestureMove` · `input/gestureEnd` | `gestureId`, `x`, `y`, `cancel?` — Android streaming drag |
 
 Two rules to get right:

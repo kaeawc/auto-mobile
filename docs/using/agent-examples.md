@@ -1,9 +1,6 @@
 # Agent Examples
 
-<div class="prompt-form" markdown>
-  <label for="am-app-name">Your app name</label>
-  <input id="am-app-name" data-prompt-var="app" type="text" placeholder="e.g. Acme Shopping" autocomplete="off" spellcheck="false">
-</div>
+<input id="am-app-name" class="prompt-search" data-prompt-var="app" type="search" placeholder="Type app or category" autocomplete="off" spellcheck="false" aria-label="App or category">
 
 === "Take a tour"
 

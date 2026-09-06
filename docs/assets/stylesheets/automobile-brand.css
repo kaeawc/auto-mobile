@@ -85,42 +85,23 @@
   white-space: nowrap;
 }
 
-/* Interactive prompt forms (see assets/javascripts/prompt-form.js). */
-.prompt-form {
-  align-items: center;
-  background: var(--md-code-bg-color);
-  border: 1px solid var(--md-default-fg-color--lightest);
-  border-radius: 0.5rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  margin: 1.25rem 0 1.75rem;
-  padding: 0.85rem 1rem;
-}
-
-.prompt-form label {
-  font-weight: 600;
-}
-
-.prompt-form input {
+/* Live prompt search bar (see assets/javascripts/prompt-form.js). */
+.md-typeset .prompt-search {
   background: var(--md-default-bg-color);
   border: 1px solid var(--md-default-fg-color--lighter);
-  border-radius: 0.35rem;
+  border-radius: 0.4rem;
   color: var(--md-default-fg-color);
-  font-size: 0.9rem;
-  min-width: 14rem;
-  padding: 0.4rem 0.6rem;
+  display: block;
+  font-size: 0.95rem;
+  margin: 1.25rem 0 1.75rem;
+  max-width: 24rem;
+  padding: 0.5rem 0.75rem;
+  width: 100%;
 }
 
-.prompt-form input:focus {
+.md-typeset .prompt-search:focus {
   border-color: var(--md-accent-fg-color);
   outline: none;
-}
-
-.prompt-form__hint {
-  color: var(--md-default-fg-color--light);
-  flex-basis: 100%;
-  font-size: 0.75rem;
 }
 
 .md-typeset code.prompt-var {
@@ -161,7 +142,10 @@
   position: absolute;
   right: 0.5rem;
   top: 0.5rem;
-  transition: opacity 125ms, color 125ms, border-color 125ms;
+  transition:
+    opacity 125ms,
+    color 125ms,
+    border-color 125ms;
 }
 
 .copyable-prompt:hover .copy-prompt,

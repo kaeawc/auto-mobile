@@ -759,4 +759,37 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
     });
     expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
   });
+
+  // P2: when a status bar / notification shade / keyguard owns focus,
+  // ObserveScreen.reconcileActiveWindowAttribution rewrites
+  // activeWindow.appId to com.android.systemui, but the real window entries
+  // never carry packageName - so the app-window predicate still accepts the
+  // occluded app's own type-1 window as "SystemUI's" window. Certifying a
+  // point there would tap the occluded app while gfxinfo samples
+  // com.android.systemui.
+  test("skips touch-latency when activeWindow.appId is com.android.systemui, even with a normal hierarchy", () => {
+    const result = makeResult({
+      activeWindow: { appId: "com.android.systemui", activityName: "StatusBar" } as any,
+      viewHierarchy: { hierarchy: {} as any } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
+  });
+
+  test("is unaffected when activeWindow.appId is a normal app package", () => {
+    const result = makeResult({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity" } as any,
+      viewHierarchy: { hierarchy: {} as any } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
+  });
 });

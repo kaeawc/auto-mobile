@@ -18,6 +18,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../../utility/ElementParser";
+import { SYSTEM_TRAY_PACKAGE } from "../../../server/system-tray/notificationHints";
 
 /**
  * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1): the
@@ -293,6 +294,18 @@ function unreliableHierarchyReason(
   if (truncationReasons && truncationReasons.length > 0) {
     return `view hierarchy is truncated (${truncationReasons.join(", ")}) - the obstacle map may be incomplete`;
   }
+  // When a SystemUI surface (status bar, notification shade, keyguard) owns
+  // focus, `ObserveScreen.reconcileActiveWindowAttribution` rewrites
+  // `activeWindow.appId` to `com.android.systemui` - but the real
+  // accessibility window entries never carry a `packageName`
+  // (`isCandidateAppWindow` above), so `findAppWindowBounds` still happily
+  // accepts the underlying type-1 APPLICATION window as "SystemUI's" window.
+  // A point certified inert there would tap the occluded app underneath
+  // while `gfxinfo` samples `com.android.systemui`, measuring the wrong
+  // surface's response entirely (issue #6167 follow-up).
+  if (result.activeWindow?.appId === SYSTEM_TRAY_PACKAGE) {
+    return `a SystemUI overlay owns focus (activeWindow.appId === "${SYSTEM_TRAY_PACKAGE}") - the app window beneath it cannot be safely probed`;
+  }
   return null;
 }
 
@@ -300,10 +313,13 @@ function unreliableHierarchyReason(
  * Single gate for every known way a capture can be too unreliable to trust
  * for a synthetic touch-latency tap: absent/malformed app window bounds, a
  * stale cached tree (`fresh: false`), an incomplete CtrlProxy capture
- * (`ctrlProxyIncomplete`), or a truncated hierarchy (`truncationReasons`).
- * Consolidated into one predicate (issue #6167 follow-up) so a future
- * reliability signal has exactly one place to live and can't be missed by
- * only patching one of several scattered checks.
+ * (`ctrlProxyIncomplete`), a truncated hierarchy (`truncationReasons`), or a
+ * SystemUI overlay owning focus (`activeWindow.appId ===
+ * "com.android.systemui"`, which can pass through a real but occluded app
+ * window as if it belonged to the overlay). Consolidated into one predicate
+ * (issue #6167 follow-up) so a future reliability signal has exactly one
+ * place to live and can't be missed by only patching one of several
+ * scattered checks.
  *
  * Content-hidden regions (`contentHiddenRegions`) are deliberately NOT a
  * blanket-reject signal here: unlike the checks above, the reliable part of

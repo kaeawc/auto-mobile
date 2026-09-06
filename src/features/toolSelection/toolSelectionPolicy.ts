@@ -176,8 +176,18 @@ export async function assertToolEnabledForAnySession(
   const target = candidates.join(" / ") || "(not yet bound)";
   // Only a single resolvable candidate can be named as the real sessionUuid in the
   // remediation call — a composite of multiple profiles is not something
-  // resolveSelectionSessionUuid would accept, so it falls back to the connection-profile form.
-  const realSessionUuid = candidates.length === 1 ? candidates[0] : undefined;
+  // resolveSelectionSessionUuid would accept, so it falls back to the connection-profile form
+  // ONLY when a connection profile is actually part of what gets rechecked (`connectionProfileUuid`
+  // is defined, as on the MCP-server path). Callers with no connection profile at all — the IDE
+  // socket-gate path (`assertSocketToolEnabled`), which rechecks only its base/derived session
+  // profiles — have no connection profile for the omitted form to land on, so name the first
+  // (base-preferring, per the caller's ordering) candidate the retry will actually recheck instead.
+  const realSessionUuid =
+    candidates.length === 1
+      ? candidates[0]
+      : connectionProfileUuid === undefined
+        ? candidates[0]
+        : undefined;
   throw new ActionableError(
     `Tool ${toolName} is disabled for device session ${target}. ` +
       `Enable it with ${formatSetToolEnabledRemediation(toolName, realSessionUuid)}.`,

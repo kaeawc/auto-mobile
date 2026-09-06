@@ -214,20 +214,56 @@ describe("exact-tool selection union policy", () => {
     );
   });
 
-  test("assertToolEnabledForAnySession omits sessionUuid across composite connection/base/label profiles (PRRT_kwDOP-GF5M6fuHM5)", async () => {
+  test("assertToolEnabledForAnySession omits sessionUuid across composite connection/base/label profiles when a connection profile is actually rechecked (PRRT_kwDOP-GF5M6fuHM5)", async () => {
     const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async () => false,
     };
+    // The MCP-server path (src/server/index.ts) always passes its `connectionProfileUuid` as
+    // the 5th arg, so the omitted-sessionUuid remediation lands on a profile the retry actually
+    // rechecks.
     await expect(
       assertToolEnabledForAnySession(
         "systemTray",
         false,
         ["connection", "base", "base:label"],
         disabled,
+        "connection",
       ),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session connection / base / base:label. " +
         'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
+    );
+  });
+
+  test("assertToolEnabledForAnySession names the first (base-preferring) candidate rather than the connection-profile form when no connection profile is rechecked (PRRT_kwDOP-GF5M6fuRKy — socket gate)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    // The IDE socket-gate path (`assertSocketToolEnabled` in src/daemon/socketServer.ts) never
+    // has a connection profile — it rechecks only [baseSessionUuid, derivedSessionUuid]. Omitting
+    // sessionUuid there would create/enable an unrelated MCP connection profile that the retry
+    // never looks at, so the remediation must name a real profile the gate rechecks instead —
+    // the first (base) candidate.
+    await expect(
+      assertToolEnabledForAnySession(
+        "setKeyValue",
+        false,
+        ["base-session", "base-session:label"],
+        disabled,
+      ),
+    ).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
+    );
+  });
+
+  test("assertToolEnabledForAnySession names the sole candidate even without a connection profile", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    await expect(
+      assertToolEnabledForAnySession("setKeyValue", false, ["derived-only"], disabled),
+    ).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "derived-only" }.',
     );
   });
 

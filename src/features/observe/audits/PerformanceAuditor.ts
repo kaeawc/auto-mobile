@@ -3,7 +3,12 @@ import { PerformanceAudit } from "../../performance/PerformanceAudit";
 import { ThresholdManager } from "../../performance/ThresholdManager";
 import { isPerformanceAuditEnabled } from "../../performance/performanceAuditConfig";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
-import type { BootedDevice, ElementBounds, ObserveResult } from "../../../models";
+import type {
+  BootedDevice,
+  ElementBounds,
+  ObserveResult,
+  ViewHierarchyWindowInfo,
+} from "../../../models";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -11,12 +16,35 @@ import {
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
 /**
+ * Android's `AccessibilityWindowInfo.TYPE_SYSTEM` constant (status bar,
+ * navigation bar, and other SystemUI chrome). The wire `WindowInfo` CtrlProxy
+ * actually emits (`android/control-proxy/.../models/WindowInfo.kt`) carries
+ * only `id`/`type`/`isActive`/`isFocused`/`bounds` - critically, no
+ * per-window `packageName` (see the real fixture,
+ * `test/fixtures/observe/android-home.json`, whose `viewHierarchy.windows`
+ * has this exact shape). A `type === 3` window is the SystemUI surface;
+ * anything else (application, IME, overlay, ...) is a candidate for "the
+ * audited app's own window".
+ */
+const ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
+
+function isCandidateAppWindow(window: ViewHierarchyWindowInfo, appId: string): boolean {
+  if (!window.bounds || window.type === ACCESSIBILITY_WINDOW_TYPE_SYSTEM) {
+    return false;
+  }
+  // packageName is never populated by the real Android accessibility window
+  // list, but keep the check for forward-compat with a future/other source
+  // that does populate it (e.g. a merged uiautomator window list).
+  return window.packageName === undefined || window.packageName === appId;
+}
+
+/**
  * Find the audited app's own window bounds from the accessibility service's
  * window list, so the touch-latency synthetic tap can be placed inside the
  * app's actual window rather than a fixed screen fraction - correct under
  * split-screen/freeform where the app doesn't occupy the full screen
- * (issue #6167). Prefers the window marked focused; falls back to any window
- * for the package if none is marked focused. Returns undefined when no
+ * (issue #6167). Prefers the window marked focused; falls back to any
+ * non-SystemUI window if none is marked focused. Returns undefined when no
  * matching window bounds are available.
  */
 export function findAppWindowBounds(
@@ -28,9 +56,9 @@ export function findAppWindowBounds(
     return undefined;
   }
 
-  const forApp = windows.filter((w) => w.packageName === appId && w.bounds);
-  const focused = forApp.find((w) => w.isFocused);
-  return (focused ?? forApp[0])?.bounds;
+  const candidates = windows.filter((w) => isCandidateAppWindow(w, appId));
+  const focused = candidates.find((w) => w.isFocused);
+  return (focused ?? candidates[0])?.bounds;
 }
 
 export interface PerformanceAuditorOptions {

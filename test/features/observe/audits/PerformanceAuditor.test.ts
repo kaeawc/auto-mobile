@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   findAppWindowBounds,
   PerformanceAuditor,
@@ -9,7 +11,7 @@ import {
   setDebugPerfEnabled,
 } from "../../../../src/utils/PerformanceTracker";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
-import type { BootedDevice, ObserveResult } from "../../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyWindowInfo } from "../../../../src/models";
 
 function makeResult(overrides: Partial<ObserveResult> = {}): ObserveResult {
   return {
@@ -154,54 +156,102 @@ describe("PerformanceAuditor", () => {
 });
 
 describe("findAppWindowBounds (#6167)", () => {
+  // Real production shape from CtrlProxy's `WindowInfo` wire type
+  // (android/control-proxy/.../models/WindowInfo.kt): id/type/isActive/
+  // isFocused/bounds only - notably NO per-window packageName. Loaded
+  // straight from the actual fixture rather than hand-made, per the #6167
+  // follow-up review (the earlier version of this test invented a
+  // `packageName` field the real device never emits).
+  const androidHomeFixture = JSON.parse(
+    readFileSync(resolve(__dirname, "../../../fixtures/observe/android-home.json"), "utf-8"),
+  ) as { viewHierarchy: { windows: ViewHierarchyWindowInfo[] } };
+  const realWindows = androidHomeFixture.viewHierarchy.windows;
+
   test("returns undefined when the result has no window list", () => {
     const result = makeResult();
     expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
   });
 
-  test("prefers the focused window for the app over an unfocused one", () => {
-    const focusedBounds = { left: 0, top: 960, right: 1080, bottom: 1920 };
+  test("against the real fixture: picks the focused application window, not the status bar", () => {
+    // Fixture has a type=3 (SYSTEM/status bar) window and a focused type=1
+    // (APPLICATION) window - neither carries packageName.
+    expect(realWindows.some((w) => w.packageName !== undefined)).toBe(false);
+
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, windows: realWindows } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toEqual({
+      left: 0,
+      top: 0,
+      right: 1080,
+      bottom: 2400,
+    });
+  });
+
+  test("excludes the SystemUI (type=3) window even when it is focused", () => {
+    const statusBarBounds = { left: 0, top: 0, right: 1080, bottom: 63 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        windows: [
+          { id: 67, type: 3, isActive: false, isFocused: true, bounds: statusBarBounds },
+          {
+            id: 63,
+            type: 1,
+            isActive: true,
+            isFocused: false,
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          },
+        ] as ViewHierarchyWindowInfo[],
+      } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toEqual({
+      left: 0,
+      top: 0,
+      right: 1080,
+      bottom: 2400,
+    });
+  });
+
+  test("split-screen lower half: falls back to the non-SystemUI window when none is focused", () => {
+    // Split-screen, no window explicitly marked focused in this snapshot -
+    // the audited app occupies only the lower half. Real wire shape: no
+    // packageName on either window.
+    const lowerHalf = { left: 0, top: 960, right: 1080, bottom: 1920 };
     const result = makeResult({
       viewHierarchy: {
         hierarchy: {} as any,
         windows: [
           {
-            packageName: "com.example",
+            id: 1,
+            type: 3,
+            isActive: false,
             isFocused: false,
-            bounds: { left: 0, top: 0, right: 1080, bottom: 960 },
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
           },
-          { packageName: "com.example", isFocused: true, bounds: focusedBounds },
-          {
-            packageName: "com.other",
-            isFocused: true,
-            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-          },
-        ],
-      } as any,
-    });
-
-    expect(findAppWindowBounds(result, "com.example")).toEqual(focusedBounds);
-  });
-
-  test("falls back to any matching window when none is marked focused", () => {
-    // Split-screen: the audited app occupies the lower half, no window
-    // explicitly marked focused in this hierarchy snapshot.
-    const lowerHalf = { left: 0, top: 960, right: 1080, bottom: 1920 };
-    const result = makeResult({
-      viewHierarchy: {
-        hierarchy: {} as any,
-        windows: [{ packageName: "com.example", bounds: lowerHalf }],
+          { id: 2, type: 1, isActive: true, isFocused: false, bounds: lowerHalf },
+        ] as ViewHierarchyWindowInfo[],
       } as any,
     });
 
     expect(findAppWindowBounds(result, "com.example")).toEqual(lowerHalf);
   });
 
-  test("returns undefined when no window matches the app id", () => {
+  test("returns undefined when only a SystemUI window is present", () => {
     const result = makeResult({
       viewHierarchy: {
         hierarchy: {} as any,
-        windows: [{ packageName: "com.other", bounds: { left: 0, top: 0, right: 10, bottom: 10 } }],
+        windows: [
+          {
+            id: 1,
+            type: 3,
+            isActive: true,
+            isFocused: true,
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          },
+        ] as ViewHierarchyWindowInfo[],
       } as any,
     });
 

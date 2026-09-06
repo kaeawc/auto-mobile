@@ -719,6 +719,90 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.success).toBe(false);
     });
 
+    test("flags animating via the jank-counter fallback when Total frames rendered is absent (#6167)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        // Some gfxinfo variants omit "Total frames rendered" entirely, but
+        // still report jank counters. A nonzero jank counter right after a
+        // reset is still evidence the app rendered with no input.
+        return {
+          stdout: `
+            Number Missed Vsync: 2
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.animating).toBe(true);
+      expect(result.success).toBe(false);
+    });
+
+    test("does not flag animating when every fallback counter reads zero and Total frames rendered is absent", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let pollCount = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          pollCount = 0;
+          return { stdout: "", stderr: "" };
+        }
+        pollCount++;
+        // No "Total frames rendered" line at all in this gfxinfo variant.
+        // Baseline (first read) is a true zero on every counter; only after
+        // the tap does a jank counter move.
+        const missedVsync = pollCount === 1 ? 0 : 1;
+        return {
+          stdout: `
+            Number Missed Vsync: ${missedVsync}
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.animating).toBeFalsy();
+      expect(result.success).toBe(true);
+      expect(result.latencyMs).toBeGreaterThan(0);
+    });
+
     test("should not flag a genuinely static app (0 frames in the idle window)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
       let pollCount = 0;

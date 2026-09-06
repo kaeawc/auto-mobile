@@ -33,15 +33,21 @@ interface TouchLatencyResult {
   animating?: boolean;
 }
 
-/**
- * A baseline `Total frames rendered` above this during the pre-tap idle
- * window is treated as the app animating on its own. Any frame rendered
- * with zero input is evidence of animation, including a slow/low-frame-rate
- * one that only manages a frame or two in the 50ms window — so this is 0,
- * not a tolerance band. A genuinely static app reports 0 frames in the
- * window and is unaffected.
- */
-const ANIMATING_BASELINE_FRAME_THRESHOLD = 0;
+/** The subset of `Idle.parseMetrics` used to detect frame activity. */
+interface FrameStats {
+  totalFrames: number | null;
+  missedVsync: number | null;
+  slowUiThread: number | null;
+  frameDeadlineMissed: number | null;
+}
+
+/** A `FrameStats` reading representing "nothing has rendered yet". */
+const ZERO_FRAME_STATS: FrameStats = {
+  totalFrames: 0,
+  missedVsync: 0,
+  slowUiThread: 0,
+  frameDeadlineMissed: 0,
+};
 
 /**
  * True when a gfxinfo counter was parsed on both sides and grew. A `null` on
@@ -50,6 +56,22 @@ const ANIMATING_BASELINE_FRAME_THRESHOLD = 0;
  */
 function counterIncreased(before: number | null, current: number | null): boolean {
   return before !== null && current !== null && current > before;
+}
+
+/**
+ * True when any gfxinfo counter grew between two readings. `Total frames
+ * rendered` is the primary signal (#6124: any rendered frame is a UI
+ * response, not just a janky one); the jank counters (missed vsync, slow UI
+ * thread, frame deadline missed) are a fallback for gfxinfo variants that
+ * omit `Total frames rendered` entirely (#6167).
+ */
+function hasFrameActivity(before: FrameStats, current: FrameStats): boolean {
+  return (
+    counterIncreased(before.totalFrames, current.totalFrames) ||
+    counterIncreased(before.missedVsync, current.missedVsync) ||
+    counterIncreased(before.slowUiThread, current.slowUiThread) ||
+    counterIncreased(before.frameDeadlineMissed, current.frameDeadlineMissed)
+  );
 }
 
 /**
@@ -145,12 +167,7 @@ export class TouchLatencyTracker {
    */
   private async measureFrameResponse(
     packageName: string,
-    beforeStats: {
-      totalFrames: number | null;
-      missedVsync: number | null;
-      slowUiThread: number | null;
-      frameDeadlineMissed: number | null;
-    },
+    beforeStats: FrameStats,
     maxWaitMs: number,
     perf: PerformanceTracker,
   ): Promise<number | null> {
@@ -167,16 +184,7 @@ export class TouchLatencyTracker {
 
         const currentStats = this.idle.parseMetrics(stdout);
 
-        // Any rendered frame is a response (#6124). A smooth app never trips a
-        // jank counter, so `Total frames rendered` is the primary signal; the
-        // jank counters remain as a fallback for gfxinfo variants without it.
-        const hasFrameActivity =
-          counterIncreased(beforeStats.totalFrames, currentStats.totalFrames) ||
-          counterIncreased(beforeStats.missedVsync, currentStats.missedVsync) ||
-          counterIncreased(beforeStats.slowUiThread, currentStats.slowUiThread) ||
-          counterIncreased(beforeStats.frameDeadlineMissed, currentStats.frameDeadlineMissed);
-
-        if (hasFrameActivity) {
+        if (hasFrameActivity(beforeStats, currentStats)) {
           const latency = this.timer.now() - startTime;
           logger.debug(`[TouchLatency] Frame activity detected after ${latency}ms`);
           return latency;
@@ -219,16 +227,17 @@ export class TouchLatencyTracker {
     );
     const baselineStats = this.idle.parseMetrics(baselineStdout);
 
-    // If frames already accumulated during the idle window above, the app is
-    // rendering on its own (spinner/video/ongoing transition) — any frame
-    // delta seen after the tap can't be attributed to it.
-    if (
-      baselineStats.totalFrames !== null &&
-      baselineStats.totalFrames > ANIMATING_BASELINE_FRAME_THRESHOLD
-    ) {
+    // `dumpsys gfxinfo <pkg> reset` above zeroes these counters, so any
+    // activity in this baseline reading is activity that happened during the
+    // no-input idle window itself — the app is rendering on its own
+    // (spinner/video/ongoing transition) and any frame delta seen after the
+    // tap can't be attributed to it. Mirrors the post-tap detection
+    // (`hasFrameActivity`) so a gfxinfo variant that omits `Total frames
+    // rendered` still gets caught via the jank counters (#6167).
+    if (hasFrameActivity(ZERO_FRAME_STATS, baselineStats)) {
       logger.warn(
-        `[TouchLatency] Sample ${sampleIndex + 1}: ${baselineStats.totalFrames} frame(s) ` +
-          "rendered during the pre-tap idle window - app is animating, skipping this sample",
+        `[TouchLatency] Sample ${sampleIndex + 1}: frame activity detected during the ` +
+          "pre-tap idle window - app is animating, skipping this sample",
       );
       return { latencyMs: null, animating: true };
     }

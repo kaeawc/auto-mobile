@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { toSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
+import {
+  toSkeleton,
+  projectSkeleton,
+} from "../../../../src/features/observe/output/SkeletonProjection";
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
@@ -91,7 +94,7 @@ describe("toSkeleton — acceptance criteria", () => {
     });
   });
 
-  test("retains compact semantic links and a Compose owner test tag when present", () => {
+  test("retains compact semantic links and a Compose owner test tag when present, in context (issue #6221 item 1)", () => {
     const composeText: Element = {
       bounds: bounds(0, 0, 200, 40),
       text: "Terms of Service",
@@ -99,9 +102,11 @@ describe("toSkeleton — acceptance criteria", () => {
       "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
     };
 
-    const skeleton = toSkeleton(makeElements({ text: [composeText] }));
+    const { skeleton, context } = projectSkeleton(makeElements({ text: [composeText] }));
 
-    expect(skeleton).toEqual([
+    // Zero affordances -> never in the actionable-only skeleton (issue #6221 item 1).
+    expect(skeleton).toEqual([]);
+    expect(context).toEqual([
       {
         bounds: [0, 0, 200, 40],
         label: "Terms of Service",
@@ -197,10 +202,13 @@ describe("toSkeleton — acceptance criteria", () => {
         class: "android.widget.TextView",
         text: "Heading",
       };
-      const skeleton = toSkeleton(makeElements({ text: [el] }));
-      // Kept as pure text (no clickable ancestor), but with no affordance.
-      expect(skeleton).toHaveLength(1);
-      expect(skeleton[0].affordances).toEqual([]);
+      const { skeleton, context } = projectSkeleton(makeElements({ text: [el] }));
+      // Kept as pure text (no clickable ancestor), but with no affordance —
+      // so it lands in `context`, not the actionable-only `skeleton` (issue
+      // #6221 item 1).
+      expect(skeleton).toHaveLength(0);
+      expect(context).toHaveLength(1);
+      expect(context[0].affordances).toEqual([]);
     });
 
     test("checkable carries checked; non-checkable never does", () => {
@@ -250,7 +258,7 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("AC4: pure-text screens still surface their text", () => {
-    test("text nodes with no clickable ancestor are kept with empty affordances", () => {
+    test("text nodes with no clickable ancestor are kept with empty affordances, in context (issue #6221 item 1)", () => {
       const heading: Element = {
         bounds: bounds(0, 0, 200, 40),
         text: "Welcome",
@@ -262,11 +270,13 @@ describe("toSkeleton — acceptance criteria", () => {
         "view-id": "s-body",
       };
 
-      const skeleton = toSkeleton(makeElements({ text: [heading, body] }));
+      const { skeleton, context } = projectSkeleton(makeElements({ text: [heading, body] }));
 
-      expect(skeleton).toHaveLength(2);
-      expect(skeleton.map((e) => e.label).sort()).toEqual(["Some paragraph", "Welcome"]);
-      expect(skeleton.every((e) => e.affordances.length === 0)).toBe(true);
+      // Zero-affordance rows never appear in the actionable-only skeleton.
+      expect(skeleton).toHaveLength(0);
+      expect(context).toHaveLength(2);
+      expect(context.map((e) => e.label).sort()).toEqual(["Some paragraph", "Welcome"]);
+      expect(context.every((e) => e.affordances.length === 0)).toBe(true);
     });
 
     test("text with a clickable ancestor is dropped (represented by the clickable row)", () => {
@@ -302,10 +312,17 @@ describe("toSkeleton — acceptance criteria", () => {
         "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
       };
 
-      const skeleton = toSkeleton(makeElements({ clickable: [card], text: [linkedText] }));
+      const { skeleton, context } = projectSkeleton(
+        makeElements({ clickable: [card], text: [linkedText] }),
+      );
 
-      expect(skeleton).toHaveLength(2);
-      expect(skeleton.find((entry) => entry.testTag === "legal-copy")).toMatchObject({
+      // The clickable card is actionable (in skeleton); the linked text has no
+      // affordance of its own and lands in context (issue #6221 item 1) —
+      // still discoverable via its semantic link, per AC4.
+      expect(skeleton).toHaveLength(1);
+      expect(skeleton[0].elementId).toBe("card");
+      expect(context).toHaveLength(1);
+      expect(context.find((entry) => entry.testTag === "legal-copy")).toMatchObject({
         label: "Terms of Service",
         semanticLinks: [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
       });
@@ -542,11 +559,14 @@ describe("toSkeleton — acceptance criteria", () => {
         1,
       );
 
-      const skeleton = toSkeleton(makeElements({ clickable: [underlying], text: [overlayText] }));
+      const { context } = projectSkeleton(
+        makeElements({ clickable: [underlying], text: [overlayText] }),
+      );
 
-      // The overlay text survives as its own affordance-less row — the
-      // clickable-ancestor suppression no longer crosses the window boundary.
-      const overlay = skeleton.find((entry) => entry.label === "Permission required");
+      // The overlay text survives as its own affordance-less row in `context`
+      // (issue #6221 item 1) — the clickable-ancestor suppression no longer
+      // crosses the window boundary.
+      const overlay = context.find((entry) => entry.label === "Permission required");
       expect(overlay).toBeDefined();
       expect(overlay?.affordances).toEqual([]);
     });
@@ -652,12 +672,13 @@ describe("toSkeleton — acceptance criteria", () => {
       } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
 
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
-      const skeleton = toSkeleton(elements!);
+      const { skeleton, context } = projectSkeleton(elements!);
 
       // The clickable is not mislabelled from the disjoint faraway text...
       expect(findById(skeleton, "clickable-a")?.label).toBeUndefined();
-      // ...and the faraway text survives as its own row.
-      expect(skeleton.some((entry) => entry.label === "Faraway")).toBe(true);
+      // ...and the faraway text survives as its own row, in `context` (zero
+      // affordances — issue #6221 item 1).
+      expect(context.some((entry) => entry.label === "Faraway")).toBe(true);
     });
 
     test("end-to-end: the real collector emits provenance that hoists the exact-fill descendant", () => {
@@ -878,6 +899,130 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const entry = findById(skeleton, "lonely-row");
       expect(entry?.label).toBe("Alarm");
+    });
+  });
+
+  describe("projectSkeleton — actionable-only skeleton + context (issue #6221 item 1)", () => {
+    test("zero-affordance entries are absent from skeleton and present in context", () => {
+      const title: Element = {
+        bounds: bounds(0, 0, 1080, 120),
+        "resource-id": "com.google.android.deskclock:id/action_bar_title",
+        text: "Alarm",
+      };
+      const addButton: Element = {
+        bounds: bounds(900, 1800, 1080, 1980),
+        "resource-id": "com.google.android.deskclock:id/fab",
+        "content-desc": "Add alarm",
+        clickable: "true",
+      };
+
+      const { skeleton, context } = projectSkeleton(
+        makeElements({ clickable: [addButton], text: [title] }),
+      );
+
+      expect(skeleton).toHaveLength(1);
+      expect(skeleton[0].elementId).toBe("com.google.android.deskclock:id/fab");
+      expect(skeleton.every((entry) => entry.affordances.length > 0)).toBe(true);
+
+      expect(context).toHaveLength(1);
+      expect(context[0].elementId).toBe("com.google.android.deskclock:id/action_bar_title");
+      expect(context[0].affordances).toEqual([]);
+    });
+
+    test("the com.android.systemui status-bar block collapses to a single context entry", () => {
+      const clock: Element = {
+        bounds: bounds(30, 10, 120, 60),
+        "resource-id": "com.android.systemui:id/clock",
+        text: "7:09",
+      };
+      const wifi: Element = {
+        bounds: bounds(900, 10, 950, 60),
+        "resource-id": "com.android.systemui:id/wifi_signal",
+        "content-desc": "Wifi signal full.",
+      };
+      const battery: Element = {
+        bounds: bounds(960, 10, 1050, 60),
+        "resource-id": "com.android.systemui:id/battery",
+        "content-desc": "Battery charging, 100 percent.",
+      };
+      // Non-systemui zero-affordance entry — must NOT be folded into the
+      // systemui summary, and must survive as its own context row.
+      const screenTitle: Element = {
+        bounds: bounds(0, 100, 1080, 200),
+        "resource-id": "com.google.android.deskclock:id/action_bar_title",
+        text: "Alarm",
+      };
+
+      const { skeleton, context } = projectSkeleton(
+        makeElements({ text: [clock, wifi, battery, screenTitle] }),
+      );
+
+      expect(skeleton).toEqual([]);
+      // ONE collapsed systemui entry + the unrelated screen title, not four
+      // separate systemui rows (issue #6221 item 1).
+      expect(context).toHaveLength(2);
+
+      const summary = context.find((entry) => entry.elementId?.startsWith("com.android.systemui"));
+      expect(summary).toBeDefined();
+      expect(summary?.affordances).toEqual([]);
+      expect(summary?.label).toContain("7:09");
+      expect(summary?.label).toContain("Wifi signal full.");
+      expect(summary?.label).toContain("Battery charging, 100 percent.");
+      // The summary's bounds enclose every collapsed entry.
+      expect(summary?.bounds).toEqual([30, 10, 1050, 60]);
+
+      const title = context.find((entry) => entry.label === "Alarm");
+      expect(title).toBeDefined();
+      expect(title?.elementId).toBe("com.google.android.deskclock:id/action_bar_title");
+    });
+
+    test("actionable entries with duplicate ids keep their #6238 index/label in the filtered actionable set", () => {
+      // Four alarm rows sharing one resource-id, mixed in with a zero-affordance
+      // systemui block — the duplicate-index disambiguator (issue #6221 item 2)
+      // must still apply correctly once the non-actionable entries are filtered
+      // out into `context`.
+      const makeAlarmRow = (top: number, time: string): Element => ({
+        bounds: bounds(0, top, 1080, top + 200),
+        "resource-id": "com.google.android.deskclock:id/digital_clock",
+        text: time,
+        clickable: "true",
+      });
+      const rows = [
+        makeAlarmRow(300, "6:45 AM"),
+        makeAlarmRow(500, "8:30 AM"),
+        makeAlarmRow(700, "9:00 AM"),
+      ];
+      // Outside every alarm row's bounds (0-30 vs rows starting at 300) so the
+      // clock is not geometrically suppressed as text-with-a-clickable-ancestor —
+      // that suppression is a separate, unrelated concern from this test.
+      const clock: Element = {
+        bounds: bounds(30, 10, 120, 60),
+        "resource-id": "com.android.systemui:id/clock",
+        text: "7:09",
+      };
+
+      const { skeleton, context } = projectSkeleton(
+        makeElements({ clickable: rows, text: [clock] }),
+      );
+
+      expect(skeleton).toHaveLength(3);
+      expect(
+        skeleton.every(
+          (entry) => entry.elementId === "com.google.android.deskclock:id/digital_clock",
+        ),
+      ).toBe(true);
+      // Every duplicate carries a distinct index, ranked by hierarchy order —
+      // same guarantee as before the actionable/context split (issue #6238).
+      const indexes = skeleton.map((entry) => entry.index).sort();
+      expect(indexes).toEqual([0, 1, 2]);
+      expect(new Set(skeleton.map((entry) => entry.label))).toEqual(
+        new Set(["6:45 AM", "8:30 AM", "9:00 AM"]),
+      );
+
+      // The systemui entry collapses into context and never consumes/interferes
+      // with the actionable duplicate-index assignment.
+      expect(context).toHaveLength(1);
+      expect(context[0].index).toBeUndefined();
     });
   });
 });

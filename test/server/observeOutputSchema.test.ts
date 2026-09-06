@@ -502,13 +502,15 @@ describe("observeResultSchema: every bounds site is the advertised union (#3025)
 
   test("compact OFF: every bounds union collapses to its object arm (no tuple)", () => {
     const out = advertiseBoundsForCompact(observeJson(), false) as Record<string, unknown>;
-    // The `skeleton` projection field (#4388) carries a deliberately always-tuple
-    // bounds — it is emitted only under project:"skeleton" and its bounds never
-    // depend on --observe-result-compact — so it is not a collapsible bounds
-    // *union*. Exclude it structurally before asserting the union-collapse invariant.
+    // The `skeleton` projection field (#4388) — and its sibling `context` array
+    // (issue #6221 item 1), same row shape — carry a deliberately always-tuple
+    // bounds: emitted only under project:"skeleton" and never dependent on
+    // --observe-result-compact, so neither is a collapsible bounds *union*.
+    // Exclude both structurally before asserting the union-collapse invariant.
     const properties = out.properties as Record<string, unknown> | undefined;
     if (properties) {
       delete properties.skeleton;
+      delete properties.context;
     }
     const json = JSON.stringify(out);
     expect(json).not.toContain("prefixItems");

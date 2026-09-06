@@ -178,8 +178,27 @@ export interface ObserveResult {
    * summary emitted in place of `viewHierarchy` / `elements`. The `"skeleton"`
    * projection is now the default; it is absent only when a caller opts out with
    * a per-call `project: "full"` arg (or `raw: true`).
+   *
+   * Actionable-only (issue #6221 item 1): every entry has `affordances.length
+   * >= 1`. A row with zero affordances is never emitted here — it goes into
+   * the sibling {@link context} array instead, so `skeleton` means what its
+   * name says and a client's action surface is not diluted by rows it can
+   * never `tapOn`/`inputText`/etc.
    */
   skeleton?: SkeletonElement[];
+
+  /**
+   * Non-actionable rows from the same projection that produces `skeleton`
+   * (issue #6221 item 1): every entry has `affordances.length === 0`. Covers
+   * things like a screen title, a standalone notification line, or the
+   * `com.android.systemui` status bar — the latter collapsed to a SINGLE
+   * summarized entry rather than one row per icon, since it otherwise
+   * reappears verbatim on every observation of every screen. Present
+   * alongside `skeleton` whenever `project: "skeleton"` is in effect (the
+   * default) and at least one non-actionable row survived the keep rule;
+   * absent under `project: "full"` / `raw: true`.
+   */
+  context?: SkeletonElement[];
 
   /** Active window information */
   activeWindow?: ActiveWindowInfo;

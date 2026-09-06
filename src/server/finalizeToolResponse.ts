@@ -453,6 +453,12 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
         ) {
           const diff = diffObserveResult(baseline, sanitized);
+          // Always attach a usable selector surface alongside the diff (issue #6221
+          // item 4.1): a client that gets a diff must never be left with no
+          // `skeleton` to act on. `diffObserveResult` cannot compute this itself —
+          // `elements` is already dropped from `sanitized` by the time it runs — so
+          // it is filled in here from the independently re-projected `servedObservation`.
+          diff.skeleton = servedObservation.skeleton ?? [];
           const screenChangedWithEmptyDiff =
             hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;

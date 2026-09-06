@@ -1136,6 +1136,40 @@ function describeCtrlProxyForwardingLeaseConflict(
   );
 }
 
+/**
+ * Raise the appropriate error for a failed {@link CtrlProxyForwardLease.tryAcquire}
+ * (issue #6260 / PRRT_kwDOP-GF5M6fuKn9). Split out of `setupPortForwarding` to keep
+ * that method's branching complexity down; always throws.
+ */
+function throwCtrlProxyForwardingLeaseConflict(
+  deviceId: string,
+  ownerPid: number | undefined,
+): never {
+  if (ownerPid === process.pid) {
+    // Same-process transient, NOT an orphan: shutdown recovery can evict a
+    // singleton while its in-flight setup still holds the lease, so a
+    // REPLACEMENT client constructed in THIS SAME process can observe its own
+    // PID as the current owner. Naming and suggesting `kill` on that PID would
+    // tell the caller to kill itself. This case must keep waiting for the live
+    // in-process lease to release rather than reclaim it (see
+    // `FileCtrlProxyForwardLease.tryAcquire` — reclaiming mid-setup would let
+    // two instances race the same port forward), so throw the same plain,
+    // non-actionable-kill error this path threw before this diagnostic existed
+    // and let the caller's existing retry path recover once the lease frees.
+    throw new Error(describeCtrlProxyForwardingLeaseConflict(deviceId, undefined));
+  }
+  // Named explicitly (issue #6260): this exact string is matched by
+  // RunnerReadinessService to replace a generic, device-blaming
+  // "runner did not become responsive" failure with the real, actionable
+  // cause — a stale/orphaned AutoMobile process still holding forwarding
+  // for this device, most commonly left behind by a `--daemon restart`
+  // that could not confirm the previous daemon stopped.
+  throw new CtrlProxyForwardingLeaseConflictError(
+    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid),
+    ownerPid,
+  );
+}
+
 class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
   public tryAcquire(): boolean {
     return true;
@@ -3263,16 +3297,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return;
     }
     if (!this.ctrlProxyForwardLease.tryAcquire()) {
-      // Named explicitly (issue #6260): this exact string is matched by
-      // RunnerReadinessService to replace a generic, device-blaming
-      // "runner did not become responsive" failure with the real, actionable
-      // cause — a stale/orphaned AutoMobile process still holding forwarding
-      // for this device, most commonly left behind by a `--daemon restart`
-      // that could not confirm the previous daemon stopped.
-      const ownerPid = this.ctrlProxyForwardLease.getLastOwnerPid();
-      throw new CtrlProxyForwardingLeaseConflictError(
-        describeCtrlProxyForwardingLeaseConflict(this.device.deviceId, ownerPid),
-        ownerPid,
+      throwCtrlProxyForwardingLeaseConflict(
+        this.device.deviceId,
+        this.ctrlProxyForwardLease.getLastOwnerPid(),
       );
     }
     // Verify port forwarding is still active even if we think it's set up

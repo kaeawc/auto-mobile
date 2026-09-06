@@ -35,10 +35,16 @@ function formatSetToolEnabledRemediation(
  *    `connectionProfileUuid` to fall back to).
  * 2. A `connectionProfileUuid` is part of what gets rechecked — omit `sessionUuid` entirely,
  *    which updates the connection profile the retry rechecks.
- * 3. Zero candidates AND no `connectionProfileUuid` (e.g. an IDE storage request against a
- *    booted device with no owning daemon session) — there is nothing `setToolEnabled` could
- *    enable that the retry would recheck, so do not advertise it at all. Instead, tell the
- *    caller to acquire a device session first.
+ * 3. Zero candidates AND no `connectionProfileUuid`, on the IDE-socket channel (e.g. an IDE
+ *    storage request against a booted device with no owning daemon session) — that channel has
+ *    no MCP connection profile to create, so there is nothing `ide/setSessionToolEnabled` could
+ *    enable that the retry would recheck. Tell the caller to acquire a device session first.
+ *
+ *    On the MCP channel this same zero/zero state is a BRAND-NEW connection that has not yet
+ *    called `setToolEnabled` at all (issue #6259 follow-up) — `src/server/index.ts:512-536`
+ *    creates the connection profile lazily, the first time `setToolEnabled` is called
+ *    sessionless, so the sessionless form IS real remediation here and case 3 must not apply.
+ *    It naturally falls through to case 2's omitted-`sessionUuid` form below.
  */
 function formatToolEnabledRemediationSentence(
   toolName: string,
@@ -46,7 +52,11 @@ function formatToolEnabledRemediationSentence(
   connectionProfileUuid: string | undefined,
   remediationMethodName: string = SET_TOOL_ENABLED_TOOL_NAME,
 ): string {
-  if (candidates.length === 0 && connectionProfileUuid === undefined) {
+  if (
+    candidates.length === 0 &&
+    connectionProfileUuid === undefined &&
+    remediationMethodName !== SET_TOOL_ENABLED_TOOL_NAME
+  ) {
     return (
       `No device session owns this device yet, so there is nothing ${remediationMethodName} could enable ` +
       "that a retry would recheck. Acquire a device session with getAndroid { deviceId } " +

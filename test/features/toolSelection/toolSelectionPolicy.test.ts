@@ -204,27 +204,61 @@ describe("exact-tool selection union policy", () => {
     );
   });
 
-  test("assertToolEnabledForAnySession instructs acquiring a session instead of advertising a sessionless setToolEnabled when unbound (PRRT_kwDOP-GF5M6fucGA)", async () => {
+  test("assertToolEnabledForAnySession instructs acquiring a session instead of advertising a sessionless remediation when unbound on the IDE-socket channel (PRRT_kwDOP-GF5M6fucGA)", async () => {
     const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async () => false,
     };
-    // Zero candidates and no connectionProfileUuid (e.g. assertSocketToolEnabled against a
-    // booted device with no owning daemon session): a sessionless setToolEnabled would mint a
-    // new MCP connection profile that the retry (ide/setKeyValue etc.) never rechecks, so the
-    // tool would stay disabled. There is nothing to advertise — tell the caller to acquire a
-    // session first.
+    // Zero candidates and no connectionProfileUuid on the IDE-socket channel (e.g.
+    // assertSocketToolEnabled against a booted device with no owning daemon session): that
+    // channel has no MCP connection profile to create, so a sessionless remediation would mint
+    // a new one the retry (ide/setKeyValue etc.) never rechecks, and the tool would stay
+    // disabled. There is nothing to advertise — tell the caller to acquire a session first.
     await expect(
-      assertToolEnabledForAnySession("systemTray", false, [undefined], disabled),
+      assertToolEnabledForAnySession(
+        "systemTray",
+        false,
+        [undefined],
+        disabled,
+        undefined,
+        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      ),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session (not yet bound). " +
-        "No device session owns this device yet, so there is nothing setToolEnabled could enable " +
+        "No device session owns this device yet, so there is nothing ide/setSessionToolEnabled could enable " +
         "that a retry would recheck. Acquire a device session with getAndroid { deviceId } " +
         "(or getApple { deviceId }), then enable the tool with " +
-        'setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.',
+        'ide/setSessionToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.',
     );
-    await expect(assertToolEnabledForAnySession("systemTray", false, [], disabled)).rejects.toThrow(
-      /Acquire a device session with getAndroid \{ deviceId \}/,
+    await expect(
+      assertToolEnabledForAnySession(
+        "systemTray",
+        false,
+        [],
+        disabled,
+        undefined,
+        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      ),
+    ).rejects.toThrow(/Acquire a device session with getAndroid \{ deviceId \}/);
+  });
+
+  test("assertToolEnabledForAnySession advertises sessionless setToolEnabled (not device acquisition) for a fresh MCP connection with no sessionUuid and no profile yet (issue #6259)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    // Zero candidates and no connectionProfileUuid on the default (MCP) channel: this is a
+    // brand-new MCP connection that has never called setToolEnabled. src/server/index.ts:512-536
+    // creates the connection profile the FIRST time setToolEnabled is called sessionless, so —
+    // unlike the IDE-socket channel above — the sessionless form is real remediation here, even
+    // for a non-device tool. Device acquisition is not required just to enable the tool.
+    await expect(
+      assertToolEnabledForAnySession("debugSearch", false, [undefined], disabled),
+    ).rejects.toThrow(
+      "Tool debugSearch is disabled for device session (not yet bound). " +
+        'Enable it with setToolEnabled { toolName: "debugSearch", enabled: true }.',
     );
+    await expect(
+      assertToolEnabledForAnySession("debugSearch", false, [], disabled),
+    ).rejects.toThrow('Enable it with setToolEnabled { toolName: "debugSearch", enabled: true }.');
   });
 
   test("assertToolEnabledForAnySession omits sessionUuid across composite connection/base/label profiles when a connection profile is actually rechecked (PRRT_kwDOP-GF5M6fuHM5)", async () => {

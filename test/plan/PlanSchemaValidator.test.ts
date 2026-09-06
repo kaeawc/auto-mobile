@@ -793,6 +793,100 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should reject a barrier timeout exceeding Number.MAX_SAFE_INTEGER", () => {
+      // barrierTools.ts declares timeout as z.number().int().positive() --
+      // a value beyond the IEEE-754 safe-integer range passes this
+      // schema's simple exclusiveMinimum check yet fails the runtime
+      // contract, so the plan would only fail at execution (#6215 review).
+      const yaml = `
+name: barrier-timeout-over-cap
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+      timeout: 9007199254740992
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+      const yaml = `
+name: barrier-timeout-at-cap
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 2
+      timeout: 9007199254740991
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection timeout exceeding Number.MAX_SAFE_INTEGER", () => {
+      // criticalSectionTools.ts has the identical z.number().int().positive()
+      // contract as barrier, so the same cap applies.
+      const yaml = `
+name: critical-section-timeout-over-cap
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 1
+      timeout: 9007199254740992
+      steps:
+        - tool: observe
+          params:
+            device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a criticalSection timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+      const yaml = `
+name: critical-section-timeout-at-cap
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync1
+      deviceCount: 1
+      timeout: 9007199254740991
+      steps:
+        - tool: observe
+          params:
+            device: A
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should provide line numbers for field errors when possible", () => {
       const yaml = `
 name: test-plan

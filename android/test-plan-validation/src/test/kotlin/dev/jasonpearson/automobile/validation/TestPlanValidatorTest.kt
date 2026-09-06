@@ -893,6 +893,121 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects a barrier timeout exceeding Number MAX_SAFE_INTEGER`() {
+    val yaml =
+      """
+      name: barrier-timeout-over-cap
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+            timeout: 9007199254740992
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A barrier timeout exceeding Number.MAX_SAFE_INTEGER should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a barrier timeout at exactly Number MAX_SAFE_INTEGER`() {
+    val yaml =
+      """
+      name: barrier-timeout-at-cap
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 2
+            timeout: 9007199254740991
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A barrier timeout at exactly Number.MAX_SAFE_INTEGER should be valid")
+  }
+
+  @Test
+  fun `rejects a criticalSection timeout exceeding Number MAX_SAFE_INTEGER`() {
+    val yaml =
+      """
+      name: critical-section-timeout-over-cap
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 1
+            timeout: 9007199254740992
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: OK
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A criticalSection timeout exceeding Number.MAX_SAFE_INTEGER should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a criticalSection timeout at exactly Number MAX_SAFE_INTEGER`() {
+    val yaml =
+      """
+      name: critical-section-timeout-at-cap
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync1
+            deviceCount: 1
+            timeout: 9007199254740991
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: OK
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A criticalSection timeout at exactly Number.MAX_SAFE_INTEGER should be valid",
+    )
+  }
+
+  @Test
   fun `rejects devices mixing a plain-string label with a label platform definition`() {
     val yaml =
       """

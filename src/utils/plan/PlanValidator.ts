@@ -272,11 +272,51 @@ export class PlanValidator {
     this.validateNoAuthoredLockNamespace(plan);
     this.validateCriticalSectionLocks(plan);
     this.validateBarrierParams(plan);
+    this.validateCoordinationTimeouts(plan);
     this.validateNoCrossToolLockSharing(plan);
     this.validateBarrierConsistentDeviceCount(plan);
     this.validateBarrierDistinctDeviceCounts(plan);
     this.validateBarrierGenerationCompleteness(plan);
     this.validateBarrierExcessDeviceArrivals(plan);
+  }
+
+  /**
+   * Validates that an optional `timeout` on a criticalSection or barrier
+   * step, when declared, is a positive integer that does not exceed
+   * `Number.MAX_SAFE_INTEGER`. Both tools' runtime schemas
+   * (criticalSectionTools.ts / barrierTools.ts) declare
+   * `z.number().int().positive()` for timeout, so a value beyond the
+   * IEEE-754 safe-integer range passes the authoring schema's simple
+   * `exclusiveMinimum` check yet fails the runtime contract, and the plan
+   * only fails at execution.
+   */
+  private static validateCoordinationTimeouts(plan: Plan): void {
+    const errors: string[] = [];
+
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+      if (step.tool !== "criticalSection" && step.tool !== "barrier") {
+        continue;
+      }
+      const timeout = this.effectiveField(step, "timeout");
+      if (timeout === undefined) {
+        continue;
+      }
+      if (
+        typeof timeout !== "number" ||
+        !Number.isInteger(timeout) ||
+        timeout < 1 ||
+        timeout > Number.MAX_SAFE_INTEGER
+      ) {
+        errors.push(
+          `${step.tool} step ${i} declares 'timeout' of ${JSON.stringify(timeout)}, which must be a positive integer no greater than Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER}).`,
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
   }
 
   /**

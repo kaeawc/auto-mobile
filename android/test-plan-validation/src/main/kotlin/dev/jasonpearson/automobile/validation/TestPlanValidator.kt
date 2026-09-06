@@ -15,6 +15,12 @@ object TestPlanValidator {
   private var schema: Schema? = null
   private val yaml = Yaml()
 
+  /**
+   * JS Number.MAX_SAFE_INTEGER (2^53 - 1) -- the upper bound the runtime's z.number().int() timeout
+   * contract implicitly enforces for barrier/criticalSection steps.
+   */
+  private const val JS_MAX_SAFE_INTEGER = 9007199254740991L
+
   /** Load the JSON schema from resources */
   @Synchronized
   private fun loadSchema(): Schema {
@@ -730,6 +736,41 @@ object TestPlanValidator {
   }
 
   /**
+   * Validates that an optional 'timeout' on a criticalSection or barrier step, when declared, is a
+   * positive integer that does not exceed JS's Number.MAX_SAFE_INTEGER -- mirrors the daemon's
+   * PlanValidator.validateCoordinationTimeouts. Both tools' runtime schemas
+   * (criticalSectionTools.ts / barrierTools.ts) declare z.number().int().positive() for timeout, so
+   * a value beyond the IEEE-754 safe-integer range passes the authoring schema's simple
+   * exclusiveMinimum check yet fails the runtime contract, and the plan only fails at execution.
+   */
+  private fun validateCoordinationTimeouts(steps: List<*>): List<ValidationError> {
+    val errors = mutableListOf<ValidationError>()
+    for ((index, step) in steps.withIndex()) {
+      if (step !is Map<*, *>) {
+        continue
+      }
+      val tool = step["tool"] as? String
+      if (tool != "criticalSection" && tool != "barrier") {
+        continue
+      }
+      val raw = effectiveCoordinationField(step, "timeout") ?: continue
+      val timeout = exactPositiveLong(raw)
+      if (timeout != null && timeout <= JS_MAX_SAFE_INTEGER) {
+        continue
+      }
+      errors.add(
+        ValidationError(
+          field = "steps",
+          message =
+            "$tool step $index declares 'timeout' of $raw, which must be a positive integer no greater than Number.MAX_SAFE_INTEGER ($JS_MAX_SAFE_INTEGER).",
+          severity = ValidationSeverity.ERROR,
+        )
+      )
+    }
+    return errors
+  }
+
+  /**
    * Validates that no step authors the reserved '__lockNamespace' field (inline or under params) --
    * mirrors the daemon's PlanValidator.validateNoAuthoredLockNamespace. It is injected internally
    * by PlanExecutor at runtime to scope a plan's lock state, and an authored plan must never set
@@ -820,6 +861,7 @@ object TestPlanValidator {
 
     return membershipErrors +
       validateNoAuthoredLockNamespace(steps) +
+      validateCoordinationTimeouts(steps) +
       validateNoCrossToolLockSharing(steps) +
       validateBarrierConsistentDeviceCount(usageByLock) +
       validateBarrierDistinctDeviceCounts(usageByLock) +

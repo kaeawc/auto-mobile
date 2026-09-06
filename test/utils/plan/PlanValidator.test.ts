@@ -742,6 +742,99 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("validateCoordinationTimeouts", () => {
+    // barrierTools.ts / criticalSectionTools.ts both declare timeout as
+    // z.number().int().positive() -- a value beyond the IEEE-754
+    // safe-integer range passes the schema's exclusiveMinimum check yet
+    // fails the runtime contract, so the plan would only fail at execution
+    // (#6215 review).
+    test("throws when a barrier timeout exceeds Number.MAX_SAFE_INTEGER", () => {
+      const plan: Plan = {
+        name: "Barrier timeout over cap",
+        devices: ["A", "B"],
+        steps: [
+          {
+            tool: "barrier",
+            params: {
+              device: "A",
+              lock: "sync1",
+              deviceCount: 2,
+              timeout: Number.MAX_SAFE_INTEGER + 1,
+            },
+          },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "must be a positive integer no greater than Number.MAX_SAFE_INTEGER",
+      );
+    });
+
+    test("accepts a barrier timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+      const plan: Plan = {
+        name: "Barrier timeout at cap",
+        devices: ["A", "B"],
+        steps: [
+          {
+            tool: "barrier",
+            params: {
+              device: "A",
+              lock: "sync1",
+              deviceCount: 2,
+              timeout: Number.MAX_SAFE_INTEGER,
+            },
+          },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+
+    test("throws when a criticalSection timeout exceeds Number.MAX_SAFE_INTEGER", () => {
+      const plan: Plan = {
+        name: "criticalSection timeout over cap",
+        devices: ["A"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "A",
+              lock: "sync1",
+              deviceCount: 1,
+              timeout: Number.MAX_SAFE_INTEGER + 1,
+              steps: [{ tool: "observe", params: { device: "A" } }],
+            },
+          },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "must be a positive integer no greater than Number.MAX_SAFE_INTEGER",
+      );
+    });
+
+    test("accepts a criticalSection timeout at exactly Number.MAX_SAFE_INTEGER", () => {
+      const plan: Plan = {
+        name: "criticalSection timeout at cap",
+        devices: ["A"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "A",
+              lock: "sync1",
+              deviceCount: 1,
+              timeout: Number.MAX_SAFE_INTEGER,
+              steps: [{ tool: "observe", params: { device: "A" } }],
+            },
+          },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+  });
+
   describe("validateNoCrossToolLockSharing", () => {
     test("throws when the same lock name is used by both a criticalSection and a barrier step", () => {
       // Both tools share the runtime coordinator's lock namespace and

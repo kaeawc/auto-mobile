@@ -838,10 +838,11 @@ export class DaemonMcpProxy {
     this.throwIfClosing();
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
-    // This is an observation-only probe. A daemon from another checkout may own
-    // this namespace's socket without its PID record; cleaning the path before
-    // DaemonManager can verify that candidate would sever a live daemon.
-    const isAvailable = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
+    // This is an observation-only probe (issue #6140: isAvailable never touches
+    // the filesystem). A daemon from another checkout may own this namespace's
+    // socket without its PID record; cleaning the path before DaemonManager can
+    // verify that candidate would sever a live daemon.
+    const isAvailable = await DaemonClient.isAvailable(socketPath);
 
     if (!isAvailable) {
       if (!this.config.autoStartDaemon) {

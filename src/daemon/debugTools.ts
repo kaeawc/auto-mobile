@@ -101,9 +101,9 @@ export async function getDaemonHealthReport(
   // serving via socket even when PID bookkeeping is stale or missing.
   if (report.socketExists) {
     try {
-      // Observation-only probe: never unlink a live daemon's socket if PID
-      // bookkeeping is momentarily stale (issue #2658).
-      const available = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
+      // Observation-only probe: never unlinks a live daemon's socket, even if
+      // PID bookkeeping is momentarily stale (issue #2658, #6140).
+      const available = await DaemonClient.isAvailable(socketPath);
       report.socketConnectable = available;
       if (!available) {
         report.recommendations.push(
@@ -234,11 +234,11 @@ export async function runSocketDiagnostics(
     return diagnostics;
   }
 
-  // Try to connect. Observation-only probe: never unlink a live daemon's
-  // socket if PID bookkeeping is momentarily stale (issue #2658).
+  // Try to connect. Observation-only probe: never unlinks a live daemon's
+  // socket, even if PID bookkeeping is momentarily stale (issue #2658, #6140).
   try {
     const startTime = timer.now();
-    const available = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
+    const available = await DaemonClient.isAvailable(socketPath);
     const latency = timer.now() - startTime;
 
     if (available) {

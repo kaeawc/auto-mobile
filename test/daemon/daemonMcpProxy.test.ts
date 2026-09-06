@@ -460,7 +460,7 @@ describe("DaemonMcpProxy", () => {
         await proxy.listTools();
 
         expect(fakeManager.startCalled).toBe(true);
-        expect(isAvailableSpy).toHaveBeenCalledWith(expect.any(String), { skipStaleCleanup: true });
+        expect(isAvailableSpy).toHaveBeenCalledWith(expect.any(String));
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

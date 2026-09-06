@@ -7,6 +7,7 @@ import { ActionableError } from "../models";
 import { DaemonRequest, DaemonResponse, DaemonNotification, isDaemonNotification } from "./types";
 import {
   SOCKET_PATH,
+  PID_FILE_PATH,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
@@ -21,67 +22,7 @@ import {
   DeviceControlTransportError,
   sanitizeDeviceControlTransportFailure,
 } from "./deviceControlTransportFailure";
-import {
-  cleanupStaleDaemonFilesForDeadPidSync,
-  getDaemonSocketPathList,
-  type StaleDaemonFileCleanupOptions,
-} from "./daemonFiles";
-import {
-  DaemonSocketReachability,
-  type DaemonSocketReachabilityLike,
-} from "./daemonSocketReachability";
-import { LsofSocketHolderProbe, type SocketHolderProbe } from "./socketHolderProbe";
-import {
-  defaultSocketInodeProbe,
-  sameSocketInode,
-  type SocketInodeProbe,
-} from "./socketInodeProbe";
-
-/**
- * Upper bound on the observation-only reachability probe consulted before a
- * stale-socket recovery unlink in {@link DaemonClient.connect} (issue #6140).
- * Short by design: it only needs to distinguish "something is already bound to
- * this path" from "nothing is listening" before falling back to the existing
- * dead-PID cleanup, not to wait out a slow daemon. `connect()` additionally
- * caps this against whatever remains of the caller's own deadline, so the
- * probe can never itself make `connect(timeoutMs)` overrun its advertised
- * timeout.
- */
-export const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
-
-/**
- * Number of consecutive failed reachability probes required before
- * {@link DaemonClient.connect} treats the stale-socket recovery unlink as safe
- * (issue #6140). A SINGLE negative probe is not authoritative ownership evidence:
- * a full Unix accept backlog or a transient refusal can make a live winner's
- * socket look momentarily unreachable, and trusting that one observation would
- * recreate the exact brick this PR exists to prevent. Mirrors the retry count
- * `verifyDaemonConnection` already uses for the analogous readiness-probe
- * decision in `manager.ts` ({@link READINESS_PROBE_MAX_ATTEMPTS}). Attempts run
- * back-to-back with no artificial backoff between them — each is already a real
- * socket-connect attempt bounded by its own probe timeout, so no extra delay is
- * needed to give a momentarily busy socket a chance to answer, and adding one
- * would eat into callers with a tight overall `connect(timeoutMs)` budget for no
- * benefit.
- */
-export const STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS = 3;
-
-/**
- * A single lazily-constructed default probe, shared across instances that don't
- * inject their own (mirrors the module-level default the manager's rejoin path
- * uses). Constructed once so a real `DaemonSocketReachability` isn't allocated
- * per connect attempt.
- */
-const defaultStaleSocketRecoveryReachability: DaemonSocketReachabilityLike =
-  new DaemonSocketReachability();
-
-/**
- * A single lazily-constructed default authoritative socket-holder probe, shared
- * across instances that don't inject their own (mirrors
- * {@link defaultStaleSocketRecoveryReachability}). Constructed once so a real
- * `LsofSocketHolderProbe` isn't allocated per connect attempt.
- */
-const defaultSocketHolderProbe: SocketHolderProbe = new LsofSocketHolderProbe();
+import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -115,54 +56,31 @@ export function toDaemonTransportError(error: Error): DaemonUnavailableError {
   return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`);
 }
 
-export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptions {
-  /**
-   * When true, `isAvailable()` performs an observation-only probe and never
-   * unlinks socket/PID files, even if the recorded PID is dead. Used by
-   * doctor/debug diagnostics so a momentary refusal or timeout from a loaded
-   * daemon cannot delete its live socket (issue #2658).
-   */
-  skipStaleCleanup?: boolean;
+/**
+ * Options consulted ONLY to produce a helpful diagnostic hint on a failed
+ * `connect()` — never to unlink anything (issue #6140 design change).
+ *
+ * `DaemonClient` used to perform client-side stale-socket recovery: on a failed
+ * connect with the PID file's recorded owner confirmed dead, it would unlink the
+ * socket/PID files and retry. That unlink had no lock to coordinate against —
+ * `UnixSocketServer.start()` (`socketServer.ts`) already unconditionally unlinks
+ * the socket path before `listen()`, and that runs under `DaemonManager`'s
+ * `O_EXCL` startup lock (`manager.ts`) — so a client-side unlink outside that
+ * lock could only ever race a concurrent startup winner and delete ITS live
+ * socket: the exact brick #6140 is about. Recovery already happens, correctly,
+ * at daemon bind time under a lock; the client now never touches the
+ * filesystem, only reads the PID file to decide whether a hint is warranted.
+ */
+export interface DaemonClientRecoveryOptions {
+  /** PID-file path consulted for the stale-socket diagnostic hint. Defaults to `PID_FILE_PATH`. */
+  pidFilePath?: string;
 
   /**
-   * Observation-only reachability probe consulted before {@link DaemonClient.connect}
-   * falls back to a stale-socket unlink (issue #6140). Even when the recorded PID
-   * is confirmed dead, a peer process can already be bound to the same socket path
-   * during a startup race (the PID file still names the just-exited loser while a
-   * winner has taken over the path but not yet updated it) — unlinking then would
-   * destroy the live winner's endpoint, exactly the class of bug PR #6109's
-   * observation-only rejoin probe exists to avoid. Defaults to a real
-   * `DaemonSocketReachability`; injectable so tests can drive the outcome without a
-   * real socket.
+   * Injectable liveness check for the diagnostic hint, so tests can drive a
+   * "recorded PID confirmed dead" outcome without a real dead/live PID. Defaults
+   * to a real `process.kill(pid, 0)` probe ({@link isProcessRunning}).
    */
-  reachability?: DaemonSocketReachabilityLike;
-
-  /**
-   * AUTHORITATIVE socket-ownership probe consulted before {@link DaemonClient.connect}
-   * actually performs the stale-socket unlink (issue #6140 P1). The reachability
-   * probe above is a fast HEURISTIC — a full accept backlog or a slow accept can make
-   * every attempt fail even while a live winner owns the socket, so a fixed probe
-   * count alone is not authoritative ownership proof. This probe asks the OS directly
-   * which live processes hold the socket path open; the unlink proceeds only when it
-   * returns a CONFIRMED empty list (see {@link SocketHolderProbe}). Defaults to a real
-   * `LsofSocketHolderProbe`; injectable so tests can drive the outcome without a real
-   * socket or a real `lsof`.
-   */
-  socketHolderProbe?: SocketHolderProbe;
-
-  /**
-   * Inode-identity probe that makes the "confirmed no live holder" check ATOMIC
-   * with the eventual unlink (issue #6140 TOCTOU). `socketHolderProbe` above only
-   * samples ownership at one point in time; between that sample and the actual
-   * unlink, a concurrent startup winner can unlink the stale socket and bind a NEW
-   * one at the same path — `cleanupStaleSocketIfDaemonDead` only re-checks the PID
-   * file (still the dead loser), so it would delete the winner's live socket.
-   * `connect()` captures the socket's `{dev, ino}` before the holder probe and
-   * requires it to be unchanged immediately before authorizing the unlink.
-   * Defaults to a real `FsSocketInodeProbe`; injectable so tests can drive the
-   * outcome without a real socket.
-   */
-  socketInodeProbe?: SocketInodeProbe;
+  isProcessRunning?: (pid: number) => boolean;
 }
 
 /**
@@ -274,22 +192,23 @@ export class DaemonClient {
   /**
    * Check if daemon is available (socket file exists and is connectable).
    * Uses a lightweight raw socket probe — no logging, no DaemonClient overhead.
+   *
+   * Purely observation-only (issue #6140 design change): this NEVER unlinks the
+   * socket or PID file, even when the path is a stale non-socket file or the
+   * connect attempt fails. Stale-socket recovery already happens, correctly, at
+   * daemon bind time under `DaemonManager`'s startup lock (`UnixSocketServer.start()`
+   * unconditionally unlinks before `listen()`); a client-side unlink here had no
+   * lock to coordinate against and could only ever delete a concurrent startup
+   * winner's live socket.
    */
-  static async isAvailable(
-    socketPath: string = SOCKET_PATH,
-    recoveryOptions: DaemonClientRecoveryOptions = {},
-  ): Promise<boolean> {
+  static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
     // and let createConnection determine reachability.
-    const skipCleanup = recoveryOptions.skipStaleCleanup === true;
     if (platform() !== "win32") {
       try {
         const stats = statSync(socketPath);
         if (!stats.isSocket()) {
-          if (!skipCleanup) {
-            DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
-          }
           return false;
         }
       } catch (error) {
@@ -317,23 +236,26 @@ export class DaemonClient {
       socket.on("error", () => {
         defaultTimer.clearTimeout(timeout);
         socket.destroy();
-        if (!skipCleanup) {
-          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
-        }
         settle(false);
       });
       const timeout = defaultTimer.setTimeout(() => {
         socket.destroy();
-        if (!skipCleanup) {
-          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
-        }
         settle(false);
       }, 1000);
     });
   }
 
   /**
-   * Connect to the daemon
+   * Connect to the daemon.
+   *
+   * Never performs client-side stale-socket recovery (issue #6140 design
+   * change): a failed connect is rethrown as-is, annotated with a diagnostic
+   * hint when the PID file names a confirmed-dead process ({@link
+   * annotateStaleSocketHint}), but the socket and PID file are never touched.
+   * Recovery is the daemon's own job — `UnixSocketServer.start()` unconditionally
+   * unlinks a stale socket path before `listen()`, under `DaemonManager`'s
+   * `O_EXCL` startup lock — so the next daemon start reclaims a stale socket
+   * regardless of anything this client does.
    */
   async connect(timeoutMs: number = this.connectionTimeout, signal?: AbortSignal): Promise<void> {
     if (this.connected) {
@@ -345,179 +267,33 @@ export class DaemonClient {
       await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       return;
     } catch (error) {
-      if (await this.recoverStaleSocketAndUnlink(deadline, signal)) {
-        await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
-        return;
-      }
-      throw error;
+      throw this.annotateStaleSocketHint(error);
     }
   }
 
   /**
-   * Decides whether it is safe to unlink the socket path after a failed connect
-   * attempt, and does so when it is (issue #6140). Non-destructive by default:
-   * returns `true` (safe to retry `connectOnce`) only when EVERY one of these
-   * holds, otherwise `false` (never unlinks, caller rethrows the original error):
-   *
-   * 1. The caller's own `connect(timeoutMs)` deadline has budget remaining and
-   *    was not aborted — recovery must never itself overrun the advertised
-   *    timeout or ignore cancellation.
-   * 2. {@link isStaleSocketRecoveryLikelyUnreachable}, a fast HEURISTIC pre-filter
-   *    (a handful of reachability probes), reports the socket is likely dead.
-   *    This is deliberately NOT authoritative — a full accept backlog or a slow
-   *    accept can make every probe attempt fail even while a live winner
-   *    genuinely owns the socket — so it only decides whether the slower,
-   *    AUTHORITATIVE check below is worth running at all.
-   * 3. {@link socketHolderProbe}, which asks the OS directly which live processes
-   *    hold the socket path open, returns a CONFIRMED empty list. `undefined`
-   *    (ownership could not be determined — no `lsof`, an unexpected error) is
-   *    treated the same as "a live holder exists": inconclusive is never grounds
-   *    to unlink.
-   * 4. {@link socketInodeProbe} confirms the socket path is still the EXACT SAME
-   *    `{dev, ino}` captured before the holder probe — the atomicity gate (issue
-   *    #6140 TOCTOU): the holder probe only samples ownership at one point in
-   *    time, so a concurrent startup winner could unlink the stale socket and
-   *    bind a NEW one at the same path in the window before the unlink below. A
-   *    changed or now-missing inode means "no longer provably the socket we
-   *    checked" and is never grounds to unlink.
-   * 5. {@link cleanupStaleSocketIfDaemonDead} independently confirms the PID
-   *    file's recorded owner is dead and performs the unlink.
+   * Adds a diagnostic hint to a failed connect's error when the PID file names a
+   * PID that is confirmed dead — otherwise returns the error unchanged. NEVER
+   * touches the filesystem (issue #6140): this only reads the PID file to decide
+   * whether the hint applies.
    */
-  private async recoverStaleSocketAndUnlink(
-    deadline: number,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    // Bound the recovery probes by whatever remains of the caller's own deadline
-    // instead of always spending the full fixed cap — otherwise a stalled probe
-    // could make connect(timeoutMs) overrun its advertised timeout. Skip recovery
-    // entirely once nothing remains: there is no budget left for a retried
-    // connectOnce anyway.
-    if (signal?.aborted || deadline - this.timer.now() <= 0) {
-      return false;
+  private annotateStaleSocketHint(error: unknown): Error {
+    const originalError =
+      error instanceof Error ? error : new DaemonUnavailableError(String(error));
+    const pidFilePath = this.recoveryOptions.pidFilePath ?? PID_FILE_PATH;
+    const pidData = readPidFileDataSync(pidFilePath);
+    if (!pidData || typeof pidData.pid !== "number") {
+      return originalError;
     }
-    const likelyUnreachable = await this.isStaleSocketRecoveryLikelyUnreachable(deadline, signal);
-    // Recheck after the await: the caller can abort WHILE this probe is in
-    // flight, and the pre-await check above cannot see that.
-    if (signal?.aborted || !likelyUnreachable) {
-      return false;
+    const processRunning = this.recoveryOptions.isProcessRunning ?? isProcessRunning;
+    if (processRunning(pidData.pid)) {
+      return originalError;
     }
-    // Bound the authoritative holder probe by whatever remains of the caller's own
-    // deadline and let it be cancelled by the same AbortSignal (issue #6140 P2) —
-    // otherwise a stalled `lsof` could keep this connect() attempt, and the
-    // underlying process, pending indefinitely past both the caller's timeout and
-    // any cancellation. A timed-out/aborted probe surfaces as `undefined`
-    // (inconclusive) from `socketHolderProbe()`'s own error handling.
-    const remainingForHolderProbe = deadline - this.timer.now();
-    if (remainingForHolderProbe <= 0) {
-      return false;
-    }
-    // Capture the socket's inode identity BEFORE the (async, potentially slow)
-    // holder probe below — not after — so a concurrent winner replacing the
-    // stale socket with a NEW one WHILE the probe is in flight is still caught
-    // by the re-stat immediately before the unlink (issue #6140 TOCTOU).
-    const capturedInode = this.socketInodeProbe().statSocket(this.socketPath);
-    const holderPids = await this.socketHolderProbe().getHolderPids(this.socketPath, {
-      timeoutMs: remainingForHolderProbe,
-      signal,
-    });
-    // Recheck BOTH abort and the DEADLINE after this await: the probe consuming
-    // its entire bounded budget (or resolving right at the boundary) must never
-    // itself let the unlink run after connect()'s own advertised timeout — the
-    // exact regression class this PR exists to prevent. A merely-empty result
-    // reported too late is treated the same as an inconclusive one.
-    if (!this.isConfirmedNoLiveHolder(holderPids, deadline, signal)) {
-      return false;
-    }
-    // Immediately before authorizing the unlink: re-stat and require the socket
-    // to still be the EXACT SAME inode captured above. This is the atomicity
-    // gate — a missing path or a changed `{dev, ino}` means a concurrent winner
-    // replaced (or removed) it while the holder probe was in flight, so the
-    // "confirmed no live holder" sample above no longer describes what is
-    // actually at this path. Never unlink in that case, even though every prior
-    // guard passed.
-    const currentInode = this.socketInodeProbe().statSocket(this.socketPath);
-    if (!sameSocketInode(capturedInode, currentInode)) {
-      return false;
-    }
-    return DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions);
-  }
-
-  private isConfirmedNoLiveHolder(
-    holderPids: number[] | undefined,
-    deadline: number,
-    signal?: AbortSignal,
-  ): boolean {
-    if (signal?.aborted || this.timer.now() >= deadline) {
-      return false;
-    }
-    return holderPids !== undefined && holderPids.length === 0;
-  }
-
-  private staleSocketRecoveryReachability(): DaemonSocketReachabilityLike {
-    return this.recoveryOptions.reachability ?? defaultStaleSocketRecoveryReachability;
-  }
-
-  private socketHolderProbe(): SocketHolderProbe {
-    return this.recoveryOptions.socketHolderProbe ?? defaultSocketHolderProbe;
-  }
-
-  private socketInodeProbe(): SocketInodeProbe {
-    return this.recoveryOptions.socketInodeProbe ?? defaultSocketInodeProbe;
-  }
-
-  /**
-   * Fast HEURISTIC pre-filter for the stale-socket recovery unlink (issue #6140):
-   * the socket path must fail {@link STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS}
-   * consecutive reachability probes within the caller's remaining deadline before
-   * recovery even CONSIDERS the unlink. This is deliberately NOT authoritative —
-   * a full accept backlog or a transient refusal can produce a false negative on
-   * every attempt even while a live winner owns the socket, so a fixed probe count
-   * alone is not proof of ownership. `connect()` additionally gates the actual
-   * unlink on {@link socketHolderProbe}'s authoritative OS-level check; this method
-   * only decides whether that slower, more expensive check is worth running at all.
-   * Exhausting the remaining deadline mid-check (or an abort) is treated the same
-   * as "not (yet) likely unreachable" — recovery must stay non-destructive rather
-   * than act on a partial observation.
-   */
-  private async isStaleSocketRecoveryLikelyUnreachable(
-    deadline: number,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    for (let attempt = 1; attempt <= STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS; attempt++) {
-      const remaining = deadline - this.timer.now();
-      if (remaining <= 0 || signal?.aborted) {
-        return false;
-      }
-      const reachable = await this.staleSocketRecoveryReachability().isReachable(
-        this.socketPath,
-        Math.min(STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS, remaining),
-      );
-      if (signal?.aborted) {
-        return false;
-      }
-      if (reachable) {
-        // Something IS listening on this path — never treat it as confirmed dead,
-        // regardless of how many attempts remain.
-        return false;
-      }
-      // Recheck the deadline immediately after this probe's await, including after
-      // the FINAL attempt: a probe capped to the last remaining milliseconds can
-      // itself consume the whole remainder and resolve exactly AT (or past) the
-      // deadline. Without this recheck, that attempt's negative result would fall
-      // through the loop unconditionally to "likely unreachable" — letting the
-      // caller escalate to the authoritative holder check (and, on an empty
-      // result, the dead-PID unlink) AFTER `connect()`'s own advertised timeout,
-      // which could delete a live winner's socket that a slower, still-in-flight
-      // retry would have found reachable. Budget exhaustion must never itself
-      // count as a signal.
-      if (this.timer.now() >= deadline) {
-        return false;
-      }
-    }
-    // Every attempt within budget failed, with time still remaining after the
-    // last one: likely unreachable — worth escalating to the authoritative
-    // holder check below, but still not itself proof.
-    return true;
+    return new DaemonUnavailableError(
+      `${originalError.message} — the recorded daemon PID ${pidData.pid} is not running; ` +
+        "the socket may be stale and will be reclaimed automatically the next time the daemon " +
+        "starts (run `--daemon restart` if this persists)",
+    );
   }
 
   private remainingConnectTimeout(deadline: number, timeoutMs: number): number {
@@ -526,6 +302,18 @@ export class DaemonClient {
       throw new DaemonUnavailableError(`Failed to connect to daemon within ${timeoutMs}ms`);
     }
     return remaining;
+  }
+
+  /**
+   * Whether the daemon socket/pipe is observable at the filesystem layer before
+   * attempting a connect. A Unix domain socket has a filesystem entry, so a
+   * missing path means nothing is listening; a Windows named pipe has none, so
+   * this gate must be skipped there entirely and the connect attempted
+   * regardless (issue #6140) — mirroring {@link DaemonManager}'s identical
+   * `socketPathObservable()` helper.
+   */
+  private socketPathObservable(): boolean {
+    return this.platform === "win32" || existsSync(this.socketPath);
   }
 
   private async connectOnce(connectionTimeout: number, signal?: AbortSignal): Promise<void> {
@@ -537,10 +325,7 @@ export class DaemonClient {
       throw new DaemonUnavailableError("Daemon connection attempt aborted");
     }
 
-    // Unix domain sockets have a filesystem entry; Windows named pipes do not, so
-    // this precheck must be skipped there and the connect attempted regardless
-    // (issue #6140) — mirroring the platform branch already in {@link isAvailable}.
-    if (this.platform !== "win32" && !existsSync(this.socketPath)) {
+    if (!this.socketPathObservable()) {
       throw new DaemonUnavailableError(`Daemon socket not found: ${this.socketPath}`);
     }
 
@@ -627,20 +412,6 @@ export class DaemonClient {
           );
         }
       });
-    });
-  }
-
-  private static cleanupStaleSocketIfDaemonDead(
-    socketPath: string,
-    recoveryOptions: DaemonClientRecoveryOptions,
-  ): boolean {
-    const socketPaths =
-      recoveryOptions.socketPaths ??
-      (socketPath === SOCKET_PATH ? getDaemonSocketPathList() : [socketPath]);
-
-    return cleanupStaleDaemonFilesForDeadPidSync({
-      ...recoveryOptions,
-      socketPaths,
     });
   }
 

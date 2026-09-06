@@ -2,11 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  cleanupDaemonFiles,
-  cleanupDaemonFilesSync,
-  cleanupStaleDaemonFilesForDeadPidSync,
-} from "../../src/daemon/daemonFiles";
+import { cleanupDaemonFiles, cleanupDaemonFilesSync } from "../../src/daemon/daemonFiles";
 import type { PidFileData } from "../../src/daemon/types";
 
 describe("daemon file cleanup", () => {
@@ -54,60 +50,6 @@ describe("daemon file cleanup", () => {
 
     expect(existsSync(socketPath)).toBe(false);
     expect(existsSync(pidFilePath)).toBe(false);
-  });
-
-  test("cleanupStaleDaemonFilesForDeadPidSync only removes files for dead recorded PIDs", () => {
-    const { socketPath, pidFilePath } = createTempFiles();
-
-    const cleaned = cleanupStaleDaemonFilesForDeadPidSync({
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => false,
-    });
-
-    expect(cleaned).toBe(true);
-    expect(existsSync(socketPath)).toBe(false);
-    expect(existsSync(pidFilePath)).toBe(false);
-  });
-
-  test("cleanupStaleDaemonFilesForDeadPidSync leaves files for live recorded PIDs", () => {
-    const { socketPath, pidFilePath } = createTempFiles();
-
-    const cleaned = cleanupStaleDaemonFilesForDeadPidSync({
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => true,
-    });
-
-    expect(cleaned).toBe(false);
-    expect(existsSync(socketPath)).toBe(true);
-    expect(existsSync(pidFilePath)).toBe(true);
-  });
-
-  test("cleanupStaleDaemonFilesForDeadPidSync rechecks PID ownership before cleanup", () => {
-    const { socketPath, pidFilePath } = createTempFiles();
-
-    const cleaned = cleanupStaleDaemonFilesForDeadPidSync({
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => {
-        writeFileSync(
-          pidFilePath,
-          JSON.stringify({
-            pid: 67890,
-            socketPath,
-            port: 3000,
-            startedAt: 0,
-            version: "test",
-          } satisfies PidFileData),
-        );
-        return false;
-      },
-    });
-
-    expect(cleaned).toBe(false);
-    expect(existsSync(socketPath)).toBe(true);
-    expect(existsSync(pidFilePath)).toBe(true);
   });
 
   test("cleanupDaemonFilesSync skips cleanup when PID file belongs to another process", () => {

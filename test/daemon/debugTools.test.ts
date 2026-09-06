@@ -31,10 +31,7 @@ describe("getDaemonHealthReport", () => {
         pidFilePath: pidPath,
       });
 
-      expect(isAvailable).toHaveBeenCalledWith(
-        socketPath,
-        expect.objectContaining({ skipStaleCleanup: true }),
-      );
+      expect(isAvailable).toHaveBeenCalledWith(socketPath);
       expect(report.socketExists).toBe(true);
       expect(report.pidFileExists).toBe(false);
       expect(report.socketConnectable).toBe(true);

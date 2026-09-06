@@ -1,23 +1,33 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createServer, type Server } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { DaemonClient, STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS } from "../../src/daemon/client";
-import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
-import type {
-  SocketHolderProbe,
-  SocketHolderProbeOptions,
-} from "../../src/daemon/socketHolderProbe";
-import type { SocketInodeIdentity, SocketInodeProbe } from "../../src/daemon/socketInodeProbe";
+import { DaemonClient } from "../../src/daemon/client";
 import type { PidFileData } from "../../src/daemon/types";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
 
-describe("DaemonClient stale socket recovery", () => {
+/**
+ * Issue #6140 design change: `DaemonClient` no longer performs ANY client-side
+ * destructive stale-socket recovery. `UnixSocketServer.start()`
+ * (`src/daemon/socketServer.ts`) already unconditionally unlinks the socket path
+ * before `listen()`, and that runs under `DaemonManager`'s `O_EXCL` startup lock
+ * (`src/daemon/manager.ts`) — so stale-socket recovery already happens,
+ * correctly, at daemon bind time under a lock. The client-side unlink this suite
+ * used to cover had no lock to coordinate against: a concurrent startup winner
+ * could bind a NEW socket at the same path between the client's "is this dead?"
+ * check and its unlink, and the client would delete the winner's live socket —
+ * the exact brick #6140 is about. Removing the client-side unlink makes that
+ * brick impossible by construction and loses no auto-recovery: the next daemon
+ * start reclaims a stale socket under its lock regardless.
+ *
+ * This suite asserts the invariant that replaces the old multi-layered
+ * probe/holder/inode recovery machinery: `connect()` and `isAvailable()` NEVER
+ * unlink the socket or PID file, even when the PID file names a confirmed-dead
+ * process. `connect()` still surfaces a helpful diagnostic hint in that case.
+ */
+describe("DaemonClient never destructively recovers a stale socket (#6140)", () => {
   const tempDirs: string[] = [];
-  let server: Server | null = null;
 
   function createTempPaths(): { dir: string; socketPath: string; pidFilePath: string } {
     const dir = mkdtempSync(join(tmpdir(), "daemon-stale-socket-test-"));
@@ -29,109 +39,9 @@ describe("DaemonClient stale socket recovery", () => {
     };
   }
 
-  async function createClosedSocketFile(socketPath: string): Promise<void> {
-    server = createServer();
-    await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
-    await new Promise<void>((resolve) => server!.close(() => resolve()));
-    server = null;
-  }
-
-  function writePidFile(pidFilePath: string, socketPath: string): void {
+  function writePidFile(pidFilePath: string, socketPath: string, pid = 12345): void {
     const pidData: PidFileData = {
-      pid: 12345,
-      socketPath,
-      port: 3000,
-      startedAt: 0,
-      version: "test",
-    };
-    writeFileSync(pidFilePath, JSON.stringify(pidData));
-  }
-
-  afterEach(async () => {
-    if (server) {
-      await new Promise<void>((resolve) => server!.close(() => resolve()));
-      server = null;
-    }
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
-
-  (isWindows ? test.skip : test)(
-    "isAvailable removes socket and PID files when the recorded daemon PID is dead",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "stale socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      const available = await DaemonClient.isAvailable(socketPath, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => false,
-      });
-
-      expect(available).toBe(false);
-      expect(existsSync(socketPath)).toBe(false);
-      expect(existsSync(pidFilePath)).toBe(false);
-    },
-  );
-
-  (isWindows ? test.skip : test)(
-    "isAvailable leaves files intact when the recorded daemon PID is alive",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "stale socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      const available = await DaemonClient.isAvailable(socketPath, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => true,
-      });
-
-      expect(available).toBe(false);
-      expect(existsSync(socketPath)).toBe(true);
-      expect(existsSync(pidFilePath)).toBe(true);
-    },
-  );
-
-  (isWindows ? test.skip : test)(
-    "connect cleans stale files and retries after a failed socket connection",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      await createClosedSocketFile(socketPath);
-      writePidFile(pidFilePath, socketPath);
-
-      const client = new DaemonClient(socketPath, 50, undefined, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => false,
-      });
-
-      await expect(client.connect()).rejects.toThrow("Daemon socket not found");
-      expect(existsSync(socketPath)).toBe(false);
-      expect(existsSync(pidFilePath)).toBe(false);
-    },
-  );
-});
-
-describe("DaemonClient stale socket recovery — winner-race reachability guard (#6140)", () => {
-  const tempDirs: string[] = [];
-
-  function createTempPaths(): { dir: string; socketPath: string; pidFilePath: string } {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-winner-race-test-"));
-    tempDirs.push(dir);
-    return {
-      dir,
-      socketPath: join(dir, "daemon.sock"),
-      pidFilePath: join(dir, "daemon.pid"),
-    };
-  }
-
-  function writePidFile(pidFilePath: string, socketPath: string): void {
-    const pidData: PidFileData = {
-      pid: 12345,
+      pid,
       socketPath,
       port: 3000,
       startedAt: 0,
@@ -148,606 +58,117 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
   });
 
   (isWindows ? test.skip : test)(
-    "propagates the original error instead of unlinking when the reachability probe reports a live peer",
+    "isAvailable never touches the socket or PID file, regardless of PID-file state",
     async () => {
       const { socketPath, pidFilePath } = createTempPaths();
-      // No listener at all: connectOnce's real attempt fails (ENOENT/ECONNREFUSED).
-      writePidFile(pidFilePath, socketPath);
-
-      let cleanupCalls = 0;
-      class AlwaysReachable implements DaemonSocketReachabilityLike {
-        async isReachable(): Promise<boolean> {
-          return true;
-        }
-      }
-
-      const client = new DaemonClient(socketPath, 50, undefined, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        // The recorded PID is dead — the OLD guard alone would consider this
-        // stale and unlink.
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability: new AlwaysReachable(),
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      // The reachability probe reporting "live" must short-circuit BEFORE the
-      // dead-PID cleanup ever runs.
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-    },
-  );
-
-  // The whole point of #6140 is to never unlink a live winner's socket. A SINGLE
-  // negative probe is not authoritative: a full accept backlog or a transient
-  // refusal can make a live winner's socket look momentarily unreachable. This
-  // fake fails the first probe, then reports the (live) winner reachable on the
-  // second — recovery must never unlink on that one transient miss.
-  (isWindows ? test.skip : test)(
-    "does not unlink a live winner's socket after one transient probe failure, even with a dead-loser PID",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "live winner socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      let calls = 0;
-      class TransientThenReachable implements DaemonSocketReachabilityLike {
-        async isReachable(): Promise<boolean> {
-          calls++;
-          // First probe: transient miss (e.g. a full accept backlog). Second probe:
-          // the live winner answers.
-          return calls >= 2;
-        }
-      }
-
-      let cleanupCalls = 0;
-      const client = new DaemonClient(socketPath, 500, undefined, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        // The recorded PID is dead — the OLD single-probe guard would have unlinked
-        // on the first (transient) negative probe.
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability: new TransientThenReachable(),
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      expect(calls).toBeGreaterThanOrEqual(2);
-      // The dead-PID cleanup must never run once ANY probe in the sequence reports
-      // a live winner.
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    },
-  );
-
-  // #6140 P2 review finding: the multi-probe confirmation rechecks ABORT after
-  // each await but must also recheck the DEADLINE after the FINAL probe. When
-  // that last probe is capped to the last remaining milliseconds and resolves
-  // exactly AT the deadline, the loop must not fall through to an unconditional
-  // "confirmed unreachable" — that would let connect() run the dead-PID unlink
-  // AFTER its own advertised timeout, potentially deleting a live winner's
-  // socket a slower, still-in-flight retry would have found reachable.
-  (isWindows ? test.skip : test)(
-    "does not confirm unreachable when the final probe consumes the entire remaining deadline",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "live winner socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      const fakeTimer = new FakeTimer();
-      fakeTimer.enableAutoAdvance();
-
-      class ExactBudgetOnFinalAttempt implements DaemonSocketReachabilityLike {
-        calls = 0;
-        constructor(private readonly timer: FakeTimer) {}
-        async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
-          this.calls++;
-          if (this.calls < STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS) {
-            // Earlier attempts resolve instantly, leaving the full budget for the
-            // final attempt below.
-            return false;
-          }
-          // Final attempt: consume the ENTIRE supplied (deadline-capped) timeout,
-          // landing this.timer.now() exactly AT the deadline.
-          await this.timer.sleep(timeoutMs);
-          return false;
-        }
-      }
-      const reachability = new ExactBudgetOnFinalAttempt(fakeTimer);
-
-      let cleanupCalls = 0;
-      const client = new DaemonClient(socketPath, 300, fakeTimer, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability,
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      expect(reachability.calls).toBe(STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS);
-      // Running out of budget exactly as the last probe resolves must NEVER be
-      // treated as confirmation — the dead-PID cleanup must not run.
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    },
-  );
-
-  (isWindows ? test.skip : test)(
-    "still cleans up and retries when the reachability probe reports nothing live",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
+      // A non-socket regular file represents a stale socket a dead daemon left
+      // behind.
       writeFileSync(socketPath, "stale socket placeholder");
       writePidFile(pidFilePath, socketPath);
 
-      class NeverReachable implements DaemonSocketReachabilityLike {
-        async isReachable(): Promise<boolean> {
-          return false;
-        }
-      }
-      // No live process holds this path — the authoritative check confirms it.
-      // Injected (rather than relying on the real `lsof`-backed default) so this
-      // stays a fast, deterministic unit test with no real subprocess dependency.
-      class NoHolder implements SocketHolderProbe {
-        async getHolderPids(): Promise<number[]> {
-          return [];
-        }
-      }
+      const available = await DaemonClient.isAvailable(socketPath);
 
-      const client = new DaemonClient(socketPath, 50, undefined, {
+      expect(available).toBe(false);
+      expect(existsSync(socketPath)).toBe(true);
+      expect(existsSync(pidFilePath)).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "connect() rejects without unlinking the socket or PID file when the recorded PID is dead",
+    async () => {
+      // No socket file: connectOnce's own existsSync precheck fails deterministically
+      // (issue #6140 note: this deliberately avoids attempting a REAL connection to
+      // a non-socket placeholder file — that failure path is delivered async via a
+      // socket 'error' event, whose exact timing is not under this test's control;
+      // the existsSync short-circuit is synchronous and gives every assertion below
+      // a deterministic, non-flaky failure to work with).
+      const { socketPath, pidFilePath } = createTempPaths();
+      writePidFile(pidFilePath, socketPath);
+
+      const client = new DaemonClient(socketPath, 100, undefined, {
         pidFilePath,
-        socketPaths: [socketPath],
         isProcessRunning: () => false,
-        reachability: new NeverReachable(),
-        socketHolderProbe: new NoHolder(),
+      });
+
+      await expect(client.connect()).rejects.toThrow("Daemon socket not found");
+      // The whole point of #6140: recovery is the daemon's lock-guarded bind-time
+      // unlink, never the client's. The PID file must survive.
+      expect(existsSync(pidFilePath)).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "connect() rejects without unlinking anything when the recorded PID is alive",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writePidFile(pidFilePath, socketPath);
+
+      const client = new DaemonClient(socketPath, 100, undefined, {
+        pidFilePath,
+        isProcessRunning: () => true,
+      });
+
+      await expect(client.connect()).rejects.toThrow("Daemon socket not found");
+      expect(existsSync(pidFilePath)).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "connect() includes a stale-socket hint in the error when the recorded PID is confirmed dead",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writePidFile(pidFilePath, socketPath, 54321);
+
+      const client = new DaemonClient(socketPath, 100, undefined, {
+        pidFilePath,
+        isProcessRunning: () => false,
+      });
+
+      const error: unknown = await client.connect().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("54321");
+      expect((error as Error).message.toLowerCase()).toContain("stale");
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "connect() does not add a stale-socket hint when the recorded PID is still alive",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writePidFile(pidFilePath, socketPath, 54321);
+
+      const client = new DaemonClient(socketPath, 100, undefined, {
+        pidFilePath,
+        isProcessRunning: () => true,
+      });
+
+      const error: unknown = await client.connect().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain("54321");
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "connect() rejects without unlinking when there is no PID file at all",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      // No socket file, no PID file: the simplest "nothing here" case.
+
+      const client = new DaemonClient(socketPath, 100, undefined, {
+        pidFilePath,
+        isProcessRunning: () => false,
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");
       expect(existsSync(socketPath)).toBe(false);
       expect(existsSync(pidFilePath)).toBe(false);
-    },
-  );
-
-  // #6140 P1 re-raised: a fixed reachability-probe count is a HEURISTIC, not
-  // authoritative ownership proof. A full accept backlog or a slow accept can
-  // make every probe fail even while a live winner genuinely owns the socket —
-  // exactly this scenario. The unlink must additionally be gated on the
-  // AUTHORITATIVE socket-holder check; when that check finds a live PID, recovery
-  // must stay non-destructive regardless of how many probes failed.
-  (isWindows ? test.skip : test)(
-    "does not unlink when every reachability probe fails but the authoritative holder check finds a live winner (accept-backlog scenario)",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "live winner socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      class NeverReachable implements DaemonSocketReachabilityLike {
-        calls = 0;
-        async isReachable(): Promise<boolean> {
-          this.calls++;
-          // Every reachability probe fails — e.g. a full accept backlog — even
-          // though a live winner genuinely holds the socket.
-          return false;
-        }
-      }
-      const reachability = new NeverReachable();
-
-      class LiveHolder implements SocketHolderProbe {
-        calls = 0;
-        async getHolderPids(): Promise<number[]> {
-          this.calls++;
-          return [777777]; // the live winner's PID
-        }
-      }
-      const holderProbe = new LiveHolder();
-
-      let cleanupCalls = 0;
-      const client = new DaemonClient(socketPath, 500, undefined, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        // The recorded PID is dead — the probe-count-only guard would have
-        // unlinked here once every reachability probe failed.
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability,
-        socketHolderProbe: holderProbe,
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      expect(reachability.calls).toBe(STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS);
-      // The heuristic escalated to the authoritative check exactly once...
-      expect(holderProbe.calls).toBe(1);
-      // ...which found a live holder, so the dead-PID cleanup must never run.
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    },
-  );
-
-  // Same accept-backlog scenario, but the authoritative check itself cannot
-  // determine ownership (e.g. `lsof` missing/erroring). An inconclusive result
-  // must be treated the same as "a live holder exists" — never grounds to unlink.
-  (isWindows ? test.skip : test)(
-    "does not unlink when the authoritative holder check is inconclusive",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      class NeverReachable implements DaemonSocketReachabilityLike {
-        async isReachable(): Promise<boolean> {
-          return false;
-        }
-      }
-
-      class InconclusiveHolder implements SocketHolderProbe {
-        calls = 0;
-        async getHolderPids(): Promise<number[] | undefined> {
-          this.calls++;
-          return undefined;
-        }
-      }
-      const holderProbe = new InconclusiveHolder();
-
-      let cleanupCalls = 0;
-      const client = new DaemonClient(socketPath, 500, undefined, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability: new NeverReachable(),
-        socketHolderProbe: holderProbe,
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      expect(holderProbe.calls).toBe(1);
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    },
-  );
-
-  // #6140 P2: the holder-probe await must be bounded by the caller's remaining
-  // `connect(timeoutMs)` budget and cancellable via its AbortSignal — otherwise a
-  // stalled `lsof` could keep this attempt (and the underlying process) pending
-  // indefinitely past both the deadline and any cancellation. A probe that
-  // consumes its entire bounded budget and then reports it could not complete
-  // (the real `LsofSocketHolderProbe`'s own timeout/abort handling surfaces this
-  // as `undefined`) must be treated as inconclusive — never grounds to unlink.
-  (isWindows ? test.skip : test)(
-    "does not unlink when the authoritative holder probe stalls past its bounded budget",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      const fakeTimer = new FakeTimer();
-      fakeTimer.enableAutoAdvance();
-
-      class NeverReachable implements DaemonSocketReachabilityLike {
-        async isReachable(): Promise<boolean> {
-          return false;
-        }
-      }
-
-      class StallingHolder implements SocketHolderProbe {
-        calls = 0;
-        receivedOptions: SocketHolderProbeOptions[] = [];
-        constructor(private readonly timer: FakeTimer) {}
-        async getHolderPids(
-          _socketPath: string,
-          options: SocketHolderProbeOptions = {},
-        ): Promise<number[] | undefined> {
-          this.calls++;
-          this.receivedOptions.push(options);
-          // Simulate a stalled `lsof`: consume the ENTIRE bounded budget it was
-          // given, then report inconclusive — mirroring what
-          // `LsofSocketHolderProbe`'s own exec-seam timeout handling would surface.
-          await this.timer.sleep(options.timeoutMs ?? 0);
-          return undefined;
-        }
-      }
-      const holderProbe = new StallingHolder(fakeTimer);
-
-      let cleanupCalls = 0;
-      const client = new DaemonClient(socketPath, 300, fakeTimer, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability: new NeverReachable(),
-        socketHolderProbe: holderProbe,
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      expect(holderProbe.calls).toBe(1);
-      // The probe must have been given a bounded, finite budget — never left
-      // unbounded.
-      expect(holderProbe.receivedOptions[0]?.timeoutMs).toBeGreaterThan(0);
-      expect(holderProbe.receivedOptions[0]?.timeoutMs).toBeLessThan(Number.POSITIVE_INFINITY);
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    },
-  );
-
-  // #6140 P2: even a CONFIRMED-empty holder result must not authorize the unlink
-  // if it arrives after connect()'s own deadline has already passed — otherwise
-  // the unlink could run past the caller's advertised timeout, the exact
-  // regression class this PR exists to prevent.
-  (isWindows ? test.skip : test)(
-    "does not unlink when the holder probe resolves empty only after the deadline has passed",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      writeFileSync(socketPath, "socket placeholder");
-      writePidFile(pidFilePath, socketPath);
-
-      const fakeTimer = new FakeTimer();
-      fakeTimer.enableAutoAdvance();
-
-      class NeverReachable implements DaemonSocketReachabilityLike {
-        async isReachable(): Promise<boolean> {
-          return false;
-        }
-      }
-
-      class LateEmptyHolder implements SocketHolderProbe {
-        calls = 0;
-        constructor(private readonly timer: FakeTimer) {}
-        async getHolderPids(
-          _socketPath: string,
-          options: SocketHolderProbeOptions = {},
-        ): Promise<number[]> {
-          this.calls++;
-          // Consume the entire bounded budget it was given, landing exactly AT the
-          // deadline, then report a CONFIRMED empty result — too late to act on.
-          await this.timer.sleep(options.timeoutMs ?? 0);
-          return [];
-        }
-      }
-      const holderProbe = new LateEmptyHolder(fakeTimer);
-
-      let cleanupCalls = 0;
-      const client = new DaemonClient(socketPath, 300, fakeTimer, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability: new NeverReachable(),
-        socketHolderProbe: holderProbe,
-      });
-
-      await expect(client.connect()).rejects.toThrow();
-      expect(holderProbe.calls).toBe(1);
-      // The dead-PID cleanup must never run despite the CONFIRMED empty result:
-      // it arrived only once the deadline had already passed.
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    },
-  );
-
-  // #6140 TOCTOU: getHolderPids() sampling no live holder and the actual unlink
-  // are not atomic on their own. A concurrent startup winner could unlink the
-  // stale socket and bind a NEW one at the same path in that window;
-  // cleanupStaleSocketIfDaemonDead only re-checks the (still-dead-loser) PID
-  // file, so it would delete the winner's live socket. The inode-identity gate
-  // closes that window by comparing {dev, ino} captured before the holder probe
-  // against a fresh stat immediately before the unlink.
-  describe("socket-inode atomicity gate (#6140)", () => {
-    function neverReachable(): DaemonSocketReachabilityLike {
-      return {
-        async isReachable(): Promise<boolean> {
-          return false;
-        },
-      };
-    }
-
-    function noHolder(): SocketHolderProbe {
-      return {
-        async getHolderPids(): Promise<number[]> {
-          return [];
-        },
-      };
-    }
-
-    (isWindows ? test.skip : test)(
-      "unlinks when the socket inode is unchanged between capture and the unlink",
-      async () => {
-        const { socketPath, pidFilePath } = createTempPaths();
-        writeFileSync(socketPath, "stale socket placeholder");
-        writePidFile(pidFilePath, socketPath);
-
-        const sameIdentity: SocketInodeIdentity = { dev: 1, ino: 42 };
-        class UnchangedInode implements SocketInodeProbe {
-          calls = 0;
-          statSocket(): SocketInodeIdentity {
-            this.calls++;
-            return sameIdentity;
-          }
-        }
-        const inodeProbe = new UnchangedInode();
-
-        let cleanupCalls = 0;
-        const client = new DaemonClient(socketPath, 500, undefined, {
-          pidFilePath,
-          socketPaths: [socketPath],
-          isProcessRunning: () => {
-            cleanupCalls++;
-            return false;
-          },
-          reachability: neverReachable(),
-          socketHolderProbe: noHolder(),
-          socketInodeProbe: inodeProbe,
-        });
-
-        await expect(client.connect()).rejects.toThrow("Daemon socket not found");
-        // Captured once before the holder probe, compared once immediately before
-        // the unlink.
-        expect(inodeProbe.calls).toBe(2);
-        expect(cleanupCalls).toBeGreaterThanOrEqual(1);
-        expect(existsSync(socketPath)).toBe(false);
-        expect(existsSync(pidFilePath)).toBe(false);
-      },
-    );
-
-    (isWindows ? test.skip : test)(
-      "does not unlink when the socket inode changed between capture and the unlink (a winner replaced it)",
-      async () => {
-        const { socketPath, pidFilePath } = createTempPaths();
-        writeFileSync(socketPath, "stale socket placeholder");
-        writePidFile(pidFilePath, socketPath);
-
-        class ChangingInode implements SocketInodeProbe {
-          calls = 0;
-          statSocket(): SocketInodeIdentity {
-            this.calls++;
-            // First stat (captured before the holder probe): the stale socket.
-            // Second stat (immediately before the unlink): a DIFFERENT inode — a
-            // concurrent winner unlinked it and bound a new one at the same path.
-            return this.calls === 1 ? { dev: 1, ino: 42 } : { dev: 1, ino: 999 };
-          }
-        }
-        const inodeProbe = new ChangingInode();
-
-        let cleanupCalls = 0;
-        const client = new DaemonClient(socketPath, 500, undefined, {
-          pidFilePath,
-          socketPaths: [socketPath],
-          isProcessRunning: () => {
-            cleanupCalls++;
-            return false;
-          },
-          reachability: neverReachable(),
-          socketHolderProbe: noHolder(),
-          socketInodeProbe: inodeProbe,
-        });
-
-        await expect(client.connect()).rejects.toThrow();
-        expect(inodeProbe.calls).toBe(2);
-        // The dead-PID cleanup (and thus the unlink) must never run: the winner's
-        // NEW socket must survive.
-        expect(cleanupCalls).toBe(0);
-        expect(existsSync(pidFilePath)).toBe(true);
-        expect(existsSync(socketPath)).toBe(true);
-      },
-    );
-
-    (isWindows ? test.skip : test)(
-      "does not unlink, and does not throw unexpectedly, when the socket is gone at the final stat",
-      async () => {
-        const { socketPath, pidFilePath } = createTempPaths();
-        writeFileSync(socketPath, "stale socket placeholder");
-        writePidFile(pidFilePath, socketPath);
-
-        class GoneAtFinalStat implements SocketInodeProbe {
-          calls = 0;
-          statSocket(): SocketInodeIdentity | undefined {
-            this.calls++;
-            // First stat: the stale socket existed. Second stat: gone (removed by
-            // someone else in the window).
-            return this.calls === 1 ? { dev: 1, ino: 42 } : undefined;
-          }
-        }
-        const inodeProbe = new GoneAtFinalStat();
-
-        let cleanupCalls = 0;
-        const client = new DaemonClient(socketPath, 500, undefined, {
-          pidFilePath,
-          socketPaths: [socketPath],
-          isProcessRunning: () => {
-            cleanupCalls++;
-            return false;
-          },
-          reachability: neverReachable(),
-          socketHolderProbe: noHolder(),
-          socketInodeProbe: inodeProbe,
-        });
-
-        // Rejects with the ORIGINAL connect failure — no unexpected exception from
-        // the inode-compare logic itself.
-        await expect(client.connect()).rejects.toThrow();
-        expect(inodeProbe.calls).toBe(2);
-        expect(cleanupCalls).toBe(0);
-        expect(existsSync(pidFilePath)).toBe(true);
-        expect(existsSync(socketPath)).toBe(true);
-      },
-    );
-  });
-
-  // The caller can abort WHILE the reachability probe from the fix above is
-  // in flight. The pre-await `!signal?.aborted` check cannot see an abort that
-  // happens during the awaited call, so the abort must be rechecked immediately
-  // after it resolves — otherwise connect() would ignore the cancellation and
-  // proceed to the dead-PID cleanup/retry anyway.
-  (isWindows ? test.skip : test)(
-    "bails without stale-socket cleanup when aborted while the reachability probe is pending",
-    async () => {
-      const { socketPath, pidFilePath } = createTempPaths();
-      // No listener: connectOnce's real attempt fails quickly (ENOENT/ECONNREFUSED).
-      writePidFile(pidFilePath, socketPath);
-
-      class PendingReachability implements DaemonSocketReachabilityLike {
-        calls = 0;
-        private resolvers: Array<(value: boolean) => void> = [];
-        isReachable(): Promise<boolean> {
-          this.calls++;
-          return new Promise((resolve) => {
-            this.resolvers.push(resolve);
-          });
-        }
-        resolveNext(value: boolean): void {
-          this.resolvers.shift()?.(value);
-        }
-      }
-      const reachability = new PendingReachability();
-
-      let cleanupCalls = 0;
-      const controller = new AbortController();
-      const client = new DaemonClient(socketPath, 500, undefined, {
-        pidFilePath,
-        socketPaths: [socketPath],
-        isProcessRunning: () => {
-          cleanupCalls++;
-          return false;
-        },
-        reachability,
-      });
-
-      const connectPromise = client.connect(500, controller.signal);
-
-      // Wait until connect() has entered the recovery probe (deterministic:
-      // poll the fake's call counter rather than a fixed sleep).
-      while (reachability.calls === 0) {
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-
-      // Abort WHILE the probe is still pending, then let it resolve.
-      controller.abort();
-      reachability.resolveNext(false);
-
-      await expect(connectPromise).rejects.toThrow();
-      // The abort must be rechecked after the probe settles: cleanup (and any
-      // retried connectOnce) must never run once the caller has cancelled.
-      expect(cleanupCalls).toBe(0);
-      expect(existsSync(pidFilePath)).toBe(true);
     },
   );
 });
@@ -768,34 +189,32 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
     tempDirs.length = 0;
   });
 
-  test("does not gate connectOnce on existsSync when simulating win32 (named pipes have no filesystem entry)", async () => {
-    // A path that does not exist on disk — modeling a Windows named pipe, which
-    // never has a filesystem entry to begin with.
+  // Verifies the gate condition directly (via the private `socketPathObservable`
+  // helper) rather than through a real end-to-end connect attempt: connecting to
+  // a path that genuinely does not exist reaches the OS's own Unix-pipe-connect
+  // error handling, whose async delivery timing is not reliably observable from
+  // a bun:test test body (a real connect failure to an absent path can surface
+  // as an unhandled error outside any Promise this test can await/catch,
+  // independent of anything `connectOnce` does). Testing the pure boolean gate
+  // exercises the exact same production logic deterministically.
+  test("socketPathObservable treats a nonexistent path as observable when simulating win32 (named pipes have no filesystem entry)", () => {
     const nonExistentSocketPath = join(
       tmpdir(),
       `daemon-client-win32-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
     );
-    const pidFilePath = createTempPidPath(); // no PID file written: nothing to clean up
 
     const client = new DaemonClient(
       nonExistentSocketPath,
       100,
       undefined,
-      { pidFilePath, socketPaths: [nonExistentSocketPath] },
+      {},
       null,
       undefined,
       "win32",
     );
 
-    const error: unknown = await client.connect().then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-    expect(error).toBeInstanceOf(Error);
-    // The win32 branch skips the synchronous existsSync precheck entirely, so the
-    // failure comes from the actual (failed) connection attempt, never from the
-    // "Daemon socket not found" short-circuit that precheck would have produced.
-    expect((error as Error).message).not.toContain("Daemon socket not found");
+    const internals = client as unknown as { socketPathObservable(): boolean };
+    expect(internals.socketPathObservable()).toBe(true);
   });
 
   // Asserts the DEFAULT (unoverridden) platform still gates on existsSync, which
@@ -814,7 +233,6 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
 
       const client = new DaemonClient(nonExistentSocketPath, 100, undefined, {
         pidFilePath,
-        socketPaths: [nonExistentSocketPath],
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");

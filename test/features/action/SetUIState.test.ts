@@ -2261,3 +2261,94 @@ describe("SetUIState off-screen search device I/O is bounded by the result deadl
     expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
   });
 });
+
+describe("SetUIState post-success observation refresh is bounded by the result deadline (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  test("a stalled post-success observation refresh after a verification-skipped field returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // Password fields skip verification, so `processField()` returns without
+    // a `freshObservation` -- `observationAfterSuccess()`'s fallback then
+    // issues an unbounded `ObserveScreen.execute()`. If THAT stalls, it must
+    // still be bounded by the same live cutoff every other device call in
+    // this method already respects.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 30_000;
+
+    const passwordHierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "password",
+              text: "",
+              class: "android.widget.EditText",
+              password: "true",
+            },
+          },
+        ],
+      },
+    };
+
+    fakeFieldTypeDetector.setFieldType("password", "text");
+    fakeFieldTypeDetector.setIsPasswordField("password", true);
+
+    let observeCalls = 0;
+    const observeScreen = {
+      execute: async () => {
+        observeCalls++;
+        if (observeCalls === 1) {
+          return {
+            updatedAt: fakeTimer.now(),
+            screenSize: { width: 1080, height: 1920 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: passwordHierarchy,
+          };
+        }
+        // The post-success observation refresh -- never resolves.
+        return new Promise<never>(() => {});
+      },
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: { execute: async () => ({ success: true }) } as unknown as FakeSwipeOn,
+      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "password" }, value: "secret123" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && observeCalls < 2; i++) {
+      await Promise.resolve();
+    }
+    expect(observeCalls).toBe(2);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(30_000);
+    const result = await resultPromise;
+
+    // The field itself succeeded and must be reported as such -- only the
+    // follow-up observation stalled -- and the call must return a real,
+    // structured result rather than hang past the deadline.
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].success).toBe(true);
+    expect(result.error).toContain("post-success observation refresh");
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+});

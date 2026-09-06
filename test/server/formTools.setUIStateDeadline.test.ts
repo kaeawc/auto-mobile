@@ -13,6 +13,7 @@ import {
 } from "../../src/server/formTools";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "../../src/daemon/constants";
@@ -131,5 +132,61 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
 
     expect(capturedGetLiveTransportDeadlineMs).toBeDefined();
     expect(capturedGetLiveTransportDeadlineMs?.()).toBeUndefined();
+  });
+
+  test("prefers the anchored __mcpRequestDeadlineMs over recomputing startTime + remainingMs (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", async () => {
+    // Simulate dispatch/admission delay between when the daemon captured the
+    // remaining budget (executionStartTime here is the LATER, post-dispatch
+    // timestamp `INTERNAL_EXECUTION_START_TIME_PARAM` carries) and when it
+    // actually captured `remainingMs` moments earlier -- the anchored
+    // deadline must win regardless of that gap.
+    const anchoredDeadlineMs = 5_000;
+    const executionStartTime = 4_000; // recorded AFTER a dispatch delay
+    const remainingMs = 10_000; // captured BEFORE that delay
+
+    let capturedTransportDeadlineMs: number | undefined;
+    setSetUIStateFactory(() => ({
+      execute: async (_options, _progress, _signal, transportDeadlineMs) => {
+        capturedTransportDeadlineMs = transportDeadlineMs;
+        return { success: true, fields: [], totalAttempts: 0 };
+      },
+    }));
+
+    const argsWithBothParams = {
+      ...baseArgs,
+      [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: anchoredDeadlineMs,
+    } as unknown as SetUIStateArgs;
+
+    await setUIStateHandler(androidDevice, argsWithBothParams);
+
+    // Naively recomputing from startTime + remainingMs would yield 14_000 --
+    // LATER than the daemon's real outer abort. The anchored value must win.
+    expect(capturedTransportDeadlineMs).toBe(anchoredDeadlineMs);
+    expect(capturedTransportDeadlineMs).not.toBe(executionStartTime + remainingMs);
+  });
+
+  test("falls back to startTime + remainingMs when no anchored deadline is present (older daemon build)", async () => {
+    const executionStartTime = 1_000;
+    const remainingMs = 10_000;
+
+    let capturedTransportDeadlineMs: number | undefined;
+    setSetUIStateFactory(() => ({
+      execute: async (_options, _progress, _signal, transportDeadlineMs) => {
+        capturedTransportDeadlineMs = transportDeadlineMs;
+        return { success: true, fields: [], totalAttempts: 0 };
+      },
+    }));
+
+    const argsWithLegacyParamsOnly = {
+      ...baseArgs,
+      [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
+    } as unknown as SetUIStateArgs;
+
+    await setUIStateHandler(androidDevice, argsWithLegacyParamsOnly);
+
+    expect(capturedTransportDeadlineMs).toBe(executionStartTime + remainingMs);
   });
 });

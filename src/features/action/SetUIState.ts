@@ -510,7 +510,49 @@ export class SetUIState extends BaseVisualChange {
         // observe against the device, which is exactly the per-field cost that
         // was pushing multi-field calls past the request timeout (#6222).
         if (result.success) {
-          lastObservation = await this.observationAfterSuccess(result, signal);
+          // The field itself already succeeded and is recorded in
+          // `fieldResults` above -- only the follow-up observation used to
+          // locate the NEXT field is at risk here. Without a
+          // `freshObservation`, `observationAfterSuccess`'s fallback issues
+          // an UNBOUNDED `ObserveScreen.execute()`; if that stalls, awaiting
+          // it directly would let the daemon's outer transport deadline win
+          // and discard everything already applied -- exactly the failure
+          // mode this whole feature exists to prevent. Race it against the
+          // SAME live cutoff every other device call in this method already
+          // respects (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev).
+          const observationRaced = await this.raceAgainstDeadline<ObserveResult>(
+            () => this.observationAfterSuccess(result, signal),
+            () => cutoffMs(),
+            "post-success observation refresh",
+          );
+
+          if (observationRaced === "timed-out") {
+            logger.warn(
+              `[SetUIState] Post-success observation refresh stalled after field ${this.describeSelector(fieldSpec.selector)}; returning ${processed.size}/${options.fields.length} accumulated field result(s) without a fresh observation`,
+            );
+            const notAttemptedReason =
+              processed.size < options.fields.length
+                ? `Not attempted: setUIState's post-success observation refresh stalled after applying ${processed.size}/${options.fields.length} field(s)`
+                : undefined;
+            return {
+              success: false,
+              fields: this.collectResults(
+                fieldResults,
+                options.fields,
+                processed,
+                notAttemptedReason,
+              ),
+              totalAttempts,
+              // Keep whatever observation is already on hand (from the
+              // PREVIOUS successful field, or the initial observation)
+              // rather than blocking on the unbounded refresh -- omitted
+              // only when no observation was ever captured.
+              observation: lastObservation,
+              error: `setUIState's post-success observation refresh did not settle within the result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) after applying ${processed.size}/${options.fields.length} field(s); the applied field(s) succeeded but the refreshed observation is unavailable`,
+            };
+          }
+
+          lastObservation = observationRaced;
         }
 
         // Fail fast on failure

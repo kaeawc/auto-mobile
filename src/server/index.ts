@@ -14,6 +14,7 @@ import { TerminalSessionError } from "../daemon/sessionManager";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
@@ -185,6 +186,22 @@ function extractInternalMcpRequestTimeoutMs(params: unknown): number | undefined
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * Extract {@link INTERNAL_MCP_REQUEST_DEADLINE_PARAM} -- the ABSOLUTE
+ * deadline the daemon anchored at capture time, before this process's own
+ * HTTP dispatch and admission/tool-selection repo reads could consume any of
+ * `requestTimeoutMs`'s budget (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1).
+ * A handler that receives this should prefer it outright over recomputing
+ * `execution.startTime + requestTimeoutMs`, which re-grants that gap.
+ */
+function extractInternalMcpRequestDeadlineMs(params: unknown): number | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return undefined;
@@ -212,6 +229,7 @@ function stripInternalToolParams(params: unknown): unknown {
   delete rest[INTERNAL_EXECUTION_ID_PARAM];
   delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
   delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  delete rest[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
   delete rest[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
   // Safety net: revival already strips this transport-provenance flag (#5863), but
   // guard the tool boundary against any future path that sets it without reviving.
@@ -612,6 +630,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestTimeoutMs = daemonMode
       ? extractInternalMcpRequestTimeoutMs(toolParams)
       : undefined;
+    const requestDeadlineMs = daemonMode
+      ? extractInternalMcpRequestDeadlineMs(toolParams)
+      : undefined;
     const requestLiveDeadlineKey = daemonMode
       ? extractInternalLiveDeadlineKey(toolParams)
       : undefined;
@@ -684,6 +705,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // is the first consumer).
             ...(requestTimeoutMs !== undefined
               ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: requestTimeoutMs }
+              : {}),
+            // The daemon's own capture-time-anchored absolute deadline, when
+            // present -- see `INTERNAL_MCP_REQUEST_DEADLINE_PARAM`. Forwarded
+            // through unchanged so a handler can prefer it over recomputing
+            // `execution.startTime + requestTimeoutMs`, which would re-grant
+            // whatever time this dispatch/admission step itself consumed
+            // (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1).
+            ...(requestDeadlineMs !== undefined
+              ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: requestDeadlineMs }
               : {}),
             // Same daemon-only provenance as `requestTimeoutMs` above -- lets
             // `setUIStateHandler` resolve the LIVE (possibly progress-extended)

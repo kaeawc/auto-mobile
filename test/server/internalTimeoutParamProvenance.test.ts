@@ -7,12 +7,15 @@
  * see `withSocketSessionAutolockKey` in `src/daemon/socketServer.ts`) may
  * have it honored and reattached onto the handler's arguments.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
-import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../../src/daemon/constants";
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+} from "../../src/daemon/constants";
 
 const TOOL = "__internal_timeout_provenance_probe_6222__";
 
@@ -31,15 +34,20 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       z.object({}),
       async (args: unknown) => {
         const received = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+        const receivedDeadline = (args as Record<string, unknown>)[
+          INTERNAL_MCP_REQUEST_DEADLINE_PARAM
+        ];
         return createStructuredToolResponse({
           success: true,
           receivedTimeoutMs: typeof received === "number" ? received : null,
+          receivedDeadlineMs: typeof receivedDeadline === "number" ? receivedDeadline : null,
         });
       },
       {
         outputSchema: z.object({
           success: z.boolean(),
           receivedTimeoutMs: z.number().nullable(),
+          receivedDeadlineMs: z.number().nullable(),
         }),
       },
     );
@@ -52,7 +60,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
   describe("daemonMode: false (direct, non-daemon server)", () => {
     let fixture: McpTestFixture;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       fixture = new McpTestFixture({ daemonMode: false });
       await fixture.setup();
     });
@@ -70,12 +78,22 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
 
       expect(getStructuredField(result, "receivedTimeoutMs")).toBeNull();
     });
+
+    test("a caller-supplied __mcpRequestDeadlineMs is IGNORED, never reattached", async () => {
+      const { client } = fixture.getContext();
+      const result = await client.callTool({
+        name: TOOL,
+        arguments: { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1 },
+      });
+
+      expect(getStructuredField(result, "receivedDeadlineMs")).toBeNull();
+    });
   });
 
   describe("daemonMode: true (daemon-forwarded loopback server)", () => {
     let fixture: McpTestFixture;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       fixture = new McpTestFixture({ daemonMode: true });
       await fixture.setup();
     });
@@ -92,6 +110,16 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       });
 
       expect(getStructuredField(result, "receivedTimeoutMs")).toBe(12_345);
+    });
+
+    test("a legitimate __mcpRequestDeadlineMs is honored and reattached", async () => {
+      const { client } = fixture.getContext();
+      const result = await client.callTool({
+        name: TOOL,
+        arguments: { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 98_765 },
+      });
+
+      expect(getStructuredField(result, "receivedDeadlineMs")).toBe(98_765);
     });
   });
 });

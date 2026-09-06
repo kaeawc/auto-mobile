@@ -33,6 +33,7 @@ import {
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_VERSION,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "./constants";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
@@ -4149,10 +4150,18 @@ export class UnixSocketServer {
     socketSessionId: string,
     timeoutMs: number,
   ): unknown {
+    // Anchor the absolute deadline to THIS instant -- immediately before the
+    // loopback `mcpClient.callTool` -- rather than letting the receiving
+    // process re-derive it from `startTime + remainingMs` after its own HTTP
+    // dispatch and admission/tool-selection repo reads have already consumed
+    // part of `timeoutMs` (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1). See
+    // `INTERNAL_MCP_REQUEST_DEADLINE_PARAM` for the full rationale.
+    const deadlineMs = this.timer.now() + timeoutMs;
     if (args === null || args === undefined) {
       return {
         __mcpSessionId: socketSessionId,
         [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
+        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadlineMs,
       };
     }
 
@@ -4177,6 +4186,7 @@ export class UnixSocketServer {
       ...forwardedArgs,
       __mcpSessionId: socketSessionId,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadlineMs,
     };
   }
 

@@ -39,6 +39,28 @@ export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 /**
+ * ABSOLUTE wall-clock deadline (on the same `defaultTimer` clock used
+ * throughout `src/server/` and `src/features/`), computed at the instant the
+ * daemon captured {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} in
+ * `UnixSocketServer.withSocketSessionAutolockKey`, immediately before the
+ * loopback `mcpClient.callTool` -- NOT re-derived from
+ * `startTime + remainingMs` on the receiving side (issue #6222 review,
+ * PRRT_kwDOP-GF5M6fuyts P1). `startTime` (see
+ * {@link INTERNAL_EXECUTION_START_TIME_PARAM}) is recorded only AFTER HTTP
+ * dispatch and this process's own admission/tool-selection repo reads
+ * complete, so `startTime + remainingMs` silently RE-GRANTS whatever time
+ * that dispatch/admission gap consumed: if it exceeds the daemon's response
+ * margin, the recomputed deadline lands LATER than the daemon's actual outer
+ * abort, and `SetUIState` can return a would-be-partial result too late for
+ * anything to still be listening. Carrying the deadline as an absolute
+ * timestamp anchored at capture time removes that gap entirely -- a handler
+ * that finds this param present should prefer it outright over recomputing
+ * from `startTime + remainingMs`, which remains only as a fallback for a
+ * caller that predates this param.
+ */
+export const INTERNAL_MCP_REQUEST_DEADLINE_PARAM = "__mcpRequestDeadlineMs";
+
+/**
  * Key into the in-process {@link module:daemon/liveDeadlineRegistry} for the
  * LIVE (possibly progress-extended) `ProgressExtendableDeadline` backing the
  * current daemon-forwarded request, when one exists (issue #6222 P1 reopen).

@@ -1894,17 +1894,23 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     );
 
     // Flush microtasks until the field's own admission/tap path has run and
-    // the race's timeout is armed against `fakeTimer` -- `advanceTime()`
-    // before that point would have nothing due to fire.
-    for (let i = 0; i < 10 && fakeTimer.getPendingTimeoutCount() === 0; i++) {
+    // its race's timeout is armed against `fakeTimer` -- `advanceTime()`
+    // before that point would have nothing due to fire. Waiting on `tapCalls`
+    // rather than merely "a pending timeout exists" matters now that the
+    // initial observation is ALSO raced (issue #6222 P1, fujun): that race
+    // arms (and quickly clears) its own timeout first, so a bare
+    // `pendingTimeoutCount() > 0` check could observe that earlier timer
+    // instead of the field's.
+    for (let i = 0; i < 50 && tapCalls === 0; i++) {
       await Promise.resolve();
     }
-    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
     expect(tapCalls).toBe(1);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
 
-    // Advance past the field's entire budget (the full transport deadline,
-    // per issue #6222 review -- headroom only bounds admission of the NEXT
-    // field, not this one's own hard deadline).
+    // Advance past the field's entire budget (the full transport deadline
+    // minus RESPONSE_HEADROOM_MS, per issue #6222 P1 -- headroom only bounds
+    // admission of the NEXT field, not this one's own hard deadline, but the
+    // race must still finish strictly before the outer transport abort).
     fakeTimer.advanceTime(60_000);
     const result = await resultPromise;
 
@@ -1917,6 +1923,203 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     // The structured result comes back with time to spare before the
     // transport's own deadline -- never at or past it -- even though the
     // stalled tap call is still pending in the background.
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+
+  test("a stalled field's race is armed to end at liveDeadline - RESPONSE_HEADROOM_MS, strictly before the daemon's outer abort (issue #6222 P1, fujug)", async () => {
+    // The daemon's own outer abort (`controller.abort()` in
+    // `handleIdeRequest`, `src/daemon/socketServer.ts`) fires EXACTLY at the
+    // live deadline, with no headroom of its own. If this field's race were
+    // armed for the SAME instant, the two timers would be a coin flip
+    // against response serialization instead of a guarantee that the
+    // structured partial result wins. Assert the armed duration directly,
+    // rather than only the final (forced-to-target) fake-clock reading a
+    // single big `advanceTime()` call would otherwise leave observable.
+    const RESPONSE_HEADROOM_MS = 3_000; // mirrors SetUIState's internal constant
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 60_000;
+
+    let tapCalls = 0;
+    const stallingDependencies = {
+      tapOnElement: {
+        execute: async () => {
+          tapCalls++;
+          // Never resolves.
+          return new Promise<{ success: boolean }>(() => {});
+        },
+      },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+    };
+
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const setUIState = new SetUIState(device, null, {
+      ...stallingDependencies,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && tapCalls === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(tapCalls).toBe(1);
+
+    // Exactly one pending timeout at this point -- the initial observation's
+    // own race already resolved and cleared its timer. Its duration must be
+    // the deadline minus the response headroom, not the full transport
+    // deadline.
+    const pending = fakeTimer.getPendingTimeouts();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toBe(transportDeadlineMs - RESPONSE_HEADROOM_MS - fakeTimer.now());
+
+    fakeTimer.advanceTime(60_000);
+    const result = await resultPromise;
+
+    expect(result.fields[0].timedOut).toBe(true);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+
+  test("a mid-field progress notification that extends the live deadline re-arms THAT field's own race, not just fields admitted afterward (issue #6222 P1, fujuk)", async () => {
+    // Models a field whose total device cost (50s) exceeds the ORIGINAL 30s
+    // transport deadline's own cutoff (27s, after RESPONSE_HEADROOM_MS), but
+    // whose own tap step reports progress partway through -- the trigger
+    // that extends a real `ProgressExtendableDeadline` on the daemon side.
+    // Without re-arming against the LIVE deadline on that tick, this field
+    // would incorrectly time out at the stale 27s snapshot despite the
+    // transport itself remaining valid far longer.
+    const callStartMs = fakeTimer.now();
+    const frozenTransportDeadlineMs = callStartMs + 30_000;
+    let liveDeadlineMs = frozenTransportDeadlineMs;
+
+    const stallingDependencies = {
+      tapOnElement: {
+        execute: async (
+          _opts: unknown,
+          progress?: (p: number, t?: number, m?: string) => Promise<void>,
+        ) => {
+          fakeTimer.advanceTime(10_000);
+          await progress?.(1, 2, "tap done");
+          return { success: true };
+        },
+      },
+      clearText: {
+        execute: async () => {
+          fakeTimer.advanceTime(20_000);
+          return { success: true };
+        },
+      },
+      inputText: {
+        execute: async (text: string) => {
+          fakeTimer.advanceTime(20_000);
+          return { success: true, text };
+        },
+      },
+    };
+
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const setUIState = new SetUIState(device, null, {
+      ...stallingDependencies,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const result = await setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      // Stands in for the daemon's onprogress handler: extends the shared
+      // `ProgressExtendableDeadline` SYNCHRONOUSLY as part of handling this
+      // call's own progress notification, exactly as `extendOnProgress`
+      // (`src/daemon/socketServer.ts`) does before the notification's own
+      // round trip completes -- not merely sometime after.
+      async () => {
+        liveDeadlineMs = callStartMs + 120_000;
+      },
+      undefined,
+      frozenTransportDeadlineMs,
+      () => liveDeadlineMs,
+    );
+
+    // The field ran for 50s total -- well past the ORIGINAL 30s deadline's
+    // own cutoff -- and still succeeded, because the mid-field progress
+    // extension re-armed its race against the NEW, larger live deadline
+    // instead of leaving it bound by the stale snapshot captured at
+    // admission.
+    expect(result.success).toBe(true);
+    expect(result.fields[0].success).toBe(true);
+    expect(result.fields[0].timedOut).toBeFalsy();
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(30_000);
+    expect(fakeTimer.now()).toBeLessThan(liveDeadlineMs);
+  });
+
+  test("a stalled initial observation with a tight post-queue budget returns bounded all-notAttempted results, never awaited unbounded (issue #6222 P1, fujun)", async () => {
+    // Queueing leaves just over the 20s admission headroom (21s), so the
+    // coarse pre-check passes -- but the initial observation itself then
+    // stalls indefinitely. Only racing the observation itself (not merely
+    // preceding it with the pre-check) keeps this bounded.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 21_000;
+
+    const stallingObserve = {
+      execute: () => new Promise<never>(() => {}),
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: fakeSwipe,
+      observeScreen: stallingObserve as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && fakeTimer.getPendingTimeoutCount() === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(21_000);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.totalAttempts).toBe(0);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBe(true);
+    expect(result.error).toContain("initial observation");
+
+    // Returned strictly before the outer transport deadline, never at or
+    // past it.
     expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
   });
 });

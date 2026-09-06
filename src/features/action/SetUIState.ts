@@ -147,6 +147,25 @@ const RESULT_DEADLINE_BUDGET_MS = 45_000;
 const PER_FIELD_ADMISSION_HEADROOM_MS = 20_000;
 
 /**
+ * Single source of truth for "how much headroom must remain before the live
+ * deadline for a device-I/O await to be raced against it" (issue #6222 P1,
+ * unifying the fujug/fujuk/fujun review round). The daemon's own outer abort
+ * (the `controller` armed in `handleIdeRequest`, `src/daemon/socketServer.ts`
+ * -- see `armAbort(timeoutMs)` / `armAbort(deadline.value - now)`) fires
+ * EXACTLY at the live `ProgressExtendableDeadline`'s current value, with no
+ * headroom of its own. A field or observe race that only stops "at" that
+ * same instant is a coin flip against response serialization, not a
+ * guarantee -- if the outer abort wins, the transport discards the whole
+ * call before this file's structured (partial or complete) result can ever
+ * be returned (fujug). Every cutoff this file races an await against is
+ * therefore `liveDeadlineMs() - RESPONSE_HEADROOM_MS`, strictly BEFORE the
+ * outer abort, so building and returning the result always has time to
+ * finish first. Kept well above zero (the outer abort's own margin) so this
+ * headroom is the thing that actually buys the safety margin.
+ */
+const RESPONSE_HEADROOM_MS = 3_000;
+
+/**
  * SetUIState - Declarative form field population tool
  *
  * Populates form fields by specifying desired end-state rather than procedural steps.
@@ -250,18 +269,25 @@ export class SetUIState extends BaseVisualChange {
         ? liveTransportDeadlineMs - PER_FIELD_ADMISSION_HEADROOM_MS
         : internalResultDeadlineMs;
     };
-    // The bound that governs how long an ALREADY-ADMITTED field is allowed to
-    // keep running before `execute()` gives up on it and returns the
-    // accumulated partial result (issue #6222 review, coderabbit fuTtO). This
-    // is deliberately the FULL transport deadline (no headroom subtracted):
-    // headroom exists to protect the NEXT field's admission, not to shrink
-    // the CURRENT field's own budget -- an admitted field that finishes
-    // within the real transport deadline must not be treated as a stall just
-    // because it ran past the smaller admission-only bound above. Falls back
-    // to the same fixed internal budget as `admissionDeadlineMs` when no
-    // transport deadline is known at all.
-    const fieldHardDeadlineMs = (): number =>
-      currentTransportDeadlineMs() ?? internalResultDeadlineMs;
+    // Single source of truth for the live deadline: the CURRENT (possibly
+    // progress-extended) transport deadline when known, else the fixed
+    // internal fallback. Read fresh on every call -- never cached -- so a
+    // `ProgressExtendableDeadline` extension that lands between two checks is
+    // always visible (issue #6222 P1, fujuk).
+    const liveDeadlineMs = (): number => currentTransportDeadlineMs() ?? internalResultDeadlineMs;
+    // The cutoff EVERY device-I/O await in this file (the initial
+    // observation and each admitted field) is raced against -- deliberately
+    // `RESPONSE_HEADROOM_MS` BEFORE the live deadline, not AT it, so the
+    // structured result this file builds always has time to be returned
+    // ahead of the daemon's own outer abort, which fires exactly at the live
+    // deadline with no headroom of its own (issue #6222 P1, fujug). This is
+    // intentionally a SEPARATE, much smaller margin than
+    // `PER_FIELD_ADMISSION_HEADROOM_MS` above: that headroom decides whether
+    // it is worth STARTING another field at all; this one decides when an
+    // ALREADY-STARTED await must be treated as stalled. An admitted field
+    // that finishes within this cutoff must not be treated as a stall just
+    // because it ran past the smaller admission-only bound above.
+    const cutoffMs = (): number => liveDeadlineMs() - RESPONSE_HEADROOM_MS;
     // Only used to phrase "why we stopped" messages below -- the actual bound
     // applied is whichever of the internal/transport-derived deadlines is
     // tighter at the moment of the check, which may be smaller OR larger than
@@ -344,14 +370,31 @@ export class SetUIState extends BaseVisualChange {
       };
     }
 
-    // Get initial observation
-    let lastObservation = await this.getObserveScreen().execute(
-      undefined,
-      undefined,
-      false,
-      0,
-      signal,
+    // Get initial observation -- RACED against `cutoffMs()`, not merely
+    // preceded by the admission check above (issue #6222 P1, fujun). Queueing
+    // can leave slightly more than `PER_FIELD_ADMISSION_HEADROOM_MS` of
+    // budget, passing the check above, and a cold or stalled observation can
+    // still overrun the transport deadline if simply awaited unbounded. This
+    // is a safety net, not real cancellation: `ObserveScreen` cannot
+    // currently be cancelled, so a timed-out observe is left running in the
+    // background (see `raceAgainstDeadline`) and this call returns the same
+    // structured all-`notAttempted` shape used by the admission check above.
+    const initialObservationRaced = await this.raceAgainstDeadline(
+      () => this.getObserveScreen().execute(undefined, undefined, false, 0, signal),
+      () => cutoffMs(),
+      "initial observation",
     );
+    if (initialObservationRaced === "timed-out") {
+      const missing = options.fields.map((f) => this.describeSelector(f.selector));
+      const notAttemptedReason = `Not attempted: setUIState's initial observation did not settle within setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s)`;
+      return {
+        success: false,
+        fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
+        totalAttempts: 0,
+        error: `setUIState's initial observation did not settle within the result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s); not attempted: ${missing.join(", ")}`,
+      };
+    }
+    let lastObservation = initialObservationRaced;
 
     let scrollsWithoutProgress = 0;
     let currentDirection: "up" | "down" = scrollDirection;
@@ -388,13 +431,30 @@ export class SetUIState extends BaseVisualChange {
         // so we re-find visible fields from a fresh observation each iteration.
         const { fieldSpec, fieldIndex, element } = visibleFields[0];
         // This field's slice starts at processed.size * 100, before it is
-        // added to `processed` below.
-        const fieldBudgetMs = fieldHardDeadlineMs() - this.timer.now();
-        const raced = await this.raceFieldAgainstDeadline(
-          () => this.processField(fieldSpec, element, fieldProgress(processed.size), signal),
-          fieldSpec,
-          fieldBudgetMs,
-        );
+        // added to `processed` below. `fieldBudgetMs` here is only a snapshot
+        // for the timeout message below -- the race itself re-reads
+        // `cutoffMs()` live, both at admission and again on every progress
+        // tick via `onTick` (issue #6222 P1, fujuk): a mid-field progress
+        // notification that extends the live transport deadline re-arms this
+        // SAME field's own timeout against the new, larger budget instead of
+        // timing out against the stale value captured here.
+        const fieldBudgetMs = cutoffMs() - this.timer.now();
+        const raced = await this.raceAgainstDeadline<InternalFieldResult>(
+          (onTick) =>
+            this.processField(
+              fieldSpec,
+              element,
+              this.withRearmOnTick(fieldProgress(processed.size), onTick),
+              signal,
+            ),
+          () => cutoffMs(),
+          this.describeSelector(fieldSpec.selector),
+        ).catch((error: unknown): InternalFieldResult => ({
+          selector: fieldSpec.selector,
+          success: false,
+          attempts: 0,
+          error: errorMessage(error),
+        }));
 
         processed.add(fieldIndex);
 
@@ -653,113 +713,173 @@ export class SetUIState extends BaseVisualChange {
   }
 
   /**
-   * Race an already-admitted field's `processField()` call against its own
-   * remaining share of the transport deadline (issue #6222 review, coderabbit
-   * fuTtO). `processField` delegates into `ClearTextLike.execute` and
-   * `InputTextLike.execute`, neither of which can currently be cancelled --
-   * without this, a field that stalls (e.g. after a UI mutation) can run past
-   * the transport deadline and reproduce the exact silent-discard this whole
-   * feature exists to prevent, even though it was correctly admitted under
-   * budget at the time.
+   * Wraps a field's progress callback so every tick that reaches it also
+   * calls `onTick` -- the hook `raceAgainstDeadline` uses to re-arm an
+   * in-flight race's timeout against the LIVE cutoff (issue #6222 P1,
+   * fujuk). A progress notification is the only thing that can move a
+   * `ProgressExtendableDeadline` forward (`extendOnProgress`,
+   * `src/daemon/socketServer.ts`), so re-checking exactly when one is
+   * forwarded -- rather than only once at field admission -- is what lets a
+   * mid-field extension apply to THIS SAME field's own remaining budget
+   * instead of only to fields admitted afterward. A no-op (returns
+   * `undefined`) when there is no inner callback to wrap, matching
+   * `fieldProgress`'s own contract.
+   */
+  private withRearmOnTick(
+    inner: ProgressCallback | undefined,
+    onTick: () => void,
+  ): ProgressCallback | undefined {
+    if (!inner) {
+      return undefined;
+    }
+    return async (childProgress, childTotal, message) => {
+      await inner(childProgress, childTotal, message);
+      onTick();
+    };
+  }
+
+  /**
+   * Race a unit of device I/O against a live-read cutoff (issue #6222 P1,
+   * unifying fujug/fujuk/fujun). Used for both the initial observation and
+   * each admitted field's `processField()` call. Neither can currently be
+   * cancelled -- without this, either can run past the transport deadline
+   * and reproduce the exact silent-discard this whole feature exists to
+   * prevent, even though it was correctly started under budget at the time.
    *
    * This is a SAFETY NET, not real cancellation: the started call is left
    * running in the background when the timeout wins the race -- its eventual
-   * settlement is swallowed (any rejection is only logged) rather than
-   * aborted. Real per-field cancellation into `ClearText`/`InputText` via an
-   * `AbortSignal` is a larger, separate change; tracked as a follow-up rather
-   * than attempted here.
+   * settlement is swallowed (only logged) rather than aborted. Real
+   * cancellation via an `AbortSignal` into `ClearText`/`InputText`/
+   * `ObserveScreen` is a larger, separate change; tracked as a follow-up
+   * rather than attempted here.
    *
-   * Takes a THUNK, not an already-started promise: `startField()` must not be
-   * called until AFTER the timeout is armed. `processField()`'s own
-   * dependencies can run synchronously far enough to matter (fakes in tests
-   * advance a shared clock synchronously; real device I/O at least burns real
-   * wall-clock time before its first genuine suspension) -- starting it as
-   * part of evaluating this method's arguments, before its body runs, would
-   * arm the timeout against a clock that already moved, silently shrinking
-   * the field's actual budget.
+   * Takes a THUNK, not an already-started promise: `startWork()` must not be
+   * called until AFTER the timeout is armed. Its own dependencies can run
+   * synchronously far enough to matter (fakes in tests advance a shared
+   * clock synchronously; real device I/O at least burns real wall-clock time
+   * before its first genuine suspension) -- starting it as part of
+   * evaluating this method's arguments, before its body runs, would arm the
+   * timeout against a clock that already moved, silently shrinking the
+   * work's actual budget.
    *
-   * @param startField - Starts the field's `processField()` call. Invoked
-   *   exactly once, after the timeout below is armed.
-   * @param fieldSpec - Only used to describe the field in a debug log if the
-   *   background promise eventually settles after the race already timed out.
-   * @param budgetMs - This field's remaining share of the hard deadline, in
-   *   milliseconds. A non-positive value still starts the field (so its
-   *   background settlement can be traced) but times out immediately without
-   *   arming a timer.
-   * @returns The field's real result if it settles in time, or the literal
+   * `getCutoffMs` is read fresh both when the timeout is (re-)armed here and
+   * again every time `startWork`'s own `onTick` hook fires (see
+   * `withRearmOnTick`) -- so a live-extended deadline applies to an
+   * ALREADY-RUNNING race, not just to work started afterward (fujuk). A
+   * cutoff at or before now re-arms as an IMMEDIATE timeout rather than a
+   * no-op, so an extension that shrinks the effective remaining time (e.g.
+   * the live deadline did not move) still resolves promptly.
+   *
+   * @param startWork - Starts the work. Invoked exactly once, after the
+   *   timeout below is first armed. Receives `onTick`, to be invoked
+   *   whenever the caller learns the live cutoff may have moved.
+   * @param getCutoffMs - Returns the CURRENT absolute cutoff (already
+   *   headroom-adjusted, e.g. `cutoffMs()`) this race must finish before.
+   *   Read fresh on every (re-)arm, never cached.
+   * @param describeWork - Only used to identify the work in a debug log if
+   *   its promise eventually settles after the race already timed out.
+   * @returns The work's real result if it settles in time, or the literal
    *   string `"timed-out"` if the timeout wins the race.
    */
-  private async raceFieldAgainstDeadline(
-    startField: () => Promise<InternalFieldResult>,
-    fieldSpec: FieldSpec,
-    budgetMs: number,
-  ): Promise<InternalFieldResult | "timed-out"> {
+  private async raceAgainstDeadline<T>(
+    startWork: (onTick: () => void) => Promise<T>,
+    getCutoffMs: () => number,
+    describeWork: string,
+  ): Promise<T | "timed-out"> {
     // A background settlement after abandonment has no observer left to
-    // report to beyond this debug trace -- expected once the field's own
+    // report to beyond this debug trace -- expected once the work's own
     // budget has already been spent.
-    const logBackgroundSettlement = (fieldPromise: Promise<InternalFieldResult>): void => {
-      fieldPromise
+    const logBackgroundSettlement = (workPromise: Promise<T>): void => {
+      workPromise
         .then(() => {
-          logger.debug(
-            `[SetUIState] Background field settled after timeout for ${this.describeSelector(fieldSpec.selector)}`,
-          );
+          logger.debug(`[SetUIState] Background work settled after timeout for ${describeWork}`);
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           logger.debug(
-            `[SetUIState] Background field rejected after timeout for ${this.describeSelector(fieldSpec.selector)}: ${errorMessage(error)}`,
+            `[SetUIState] Background work rejected after timeout for ${describeWork}: ${errorMessage(error)}`,
           );
         });
     };
 
-    if (budgetMs <= 0) {
-      logBackgroundSettlement(startField());
-      return "timed-out";
-    }
-
-    return new Promise<InternalFieldResult | "timed-out">((resolve) => {
+    return new Promise<T | "timed-out">((resolve, reject) => {
       let settled = false;
-      // Declared (not yet assigned) BEFORE arming the timeout: on a
-      // FakeTimer-driven test, `startField()`'s own synchronous prefix can
-      // advance the clock far enough to fire this SAME timeout re-entrantly,
-      // synchronously, before `startField()` even returns -- at which point
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      // Declared (not yet assigned) BEFORE the first arm: on a
+      // FakeTimer-driven test, `startWork()`'s own synchronous prefix can
+      // advance the clock far enough to fire the timeout re-entrantly,
+      // synchronously, before `startWork()` even returns -- at which point
       // this closure has not yet been assigned. `let` (rather than `const`)
       // avoids a TDZ crash in that case: a bare `let x;` initializes its
       // binding to `undefined` immediately at THIS line, so the timeout
       // closure below can safely read it even if it fires before the
-      // assignment further down ever runs; a `const` declared only at the
-      // assignment site would still be in its TDZ at that point instead. The
-      // guard below skips tracing when it is still `undefined`, and the
-      // post-`startField()` check a few lines down handles that case instead.
+      // assignment further down ever runs. The guard below skips tracing
+      // when it is still `undefined`, and the post-`startWork()` check a few
+      // lines down handles that case instead.
       // oxlint-disable-next-line prefer-const -- see comment above: `let` is required for TDZ safety, not a style preference.
-      let fieldPromise: Promise<InternalFieldResult> | undefined;
-      const timeoutHandle = this.timer.setTimeout(() => {
+      let workPromise: Promise<T> | undefined;
+
+      const finishTimedOut = (): void => {
         if (settled) {
           return;
         }
         settled = true;
-        if (fieldPromise) {
-          logBackgroundSettlement(fieldPromise);
+        if (timeoutHandle !== undefined) {
+          this.timer.clearTimeout(timeoutHandle);
+          timeoutHandle = undefined;
+        }
+        if (workPromise) {
+          logBackgroundSettlement(workPromise);
         }
         resolve("timed-out");
-      }, budgetMs);
+      };
 
-      // Armed above; only now does the field's real work actually start.
-      fieldPromise = startField();
-      const startedFieldPromise = fieldPromise;
+      // (Re-)arms the timeout against a FRESHLY read cutoff. A non-positive
+      // remaining budget still resolves "timed-out" immediately rather than
+      // arming a timer for it.
+      const armTimeout = (): void => {
+        if (settled) {
+          return;
+        }
+        if (timeoutHandle !== undefined) {
+          this.timer.clearTimeout(timeoutHandle);
+          timeoutHandle = undefined;
+        }
+        const budgetMs = getCutoffMs() - this.timer.now();
+        if (budgetMs <= 0) {
+          finishTimedOut();
+          return;
+        }
+        timeoutHandle = this.timer.setTimeout(finishTimedOut, budgetMs);
+      };
+
+      // Passed to `startWork` as `onTick`: re-arms against the live cutoff
+      // whenever the caller learns it may have moved (issue #6222 P1,
+      // fujuk). A no-op once already settled.
+      const onTick = (): void => {
+        armTimeout();
+      };
+
+      armTimeout();
+      // Armed above; only now does the work actually start.
+      workPromise = startWork(onTick);
+      const startedWorkPromise = workPromise;
       if (settled) {
-        // The timeout above already fired re-entrantly while `startField()`
-        // was still running synchronously -- it could not see `fieldPromise`
-        // yet, so trace its eventual settlement here instead.
-        logBackgroundSettlement(startedFieldPromise);
+        // The timeout above already fired (synchronously, budget<=0, or
+        // re-entrantly while `startWork()` was still running synchronously)
+        // before this closure could observe it via `workPromise` -- trace
+        // its eventual settlement here instead.
+        logBackgroundSettlement(startedWorkPromise);
         return;
       }
-      startedFieldPromise.then(
+      startedWorkPromise.then(
         (result) => {
           if (settled) {
             return;
           }
           settled = true;
-          this.timer.clearTimeout(timeoutHandle);
+          if (timeoutHandle !== undefined) {
+            this.timer.clearTimeout(timeoutHandle);
+          }
           resolve(result);
         },
         (error: unknown) => {
@@ -767,17 +887,15 @@ export class SetUIState extends BaseVisualChange {
             return;
           }
           settled = true;
-          this.timer.clearTimeout(timeoutHandle);
-          // processField() catches its own internal errors per-attempt and
-          // only resolves (never rejects) in practice -- this branch is a
-          // defensive fallback for something truly unexpected, surfaced as a
-          // failed field rather than rejecting the whole call.
-          resolve({
-            selector: fieldSpec.selector,
-            success: false,
-            attempts: 0,
-            error: errorMessage(error),
-          });
+          if (timeoutHandle !== undefined) {
+            this.timer.clearTimeout(timeoutHandle);
+          }
+          // The known callers (`processField`, `ObserveScreen.execute`)
+          // resolve rather than reject in practice -- this is a defensive
+          // fallback for something truly unexpected. Propagated to the
+          // caller rather than swallowed here, since only the caller knows
+          // how to shape a failure specific to what it was racing.
+          reject(error);
         },
       );
     });

@@ -244,4 +244,46 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
     expect(postTap.effect?.screenChanged).toBe(true);
     expect(postTap.effect?.basis).toBe("viewHierarchy changed");
   });
+
+  test("does not settle on two consecutive null hierarchy hashes; keeps polling to the destination (PR6266 P2)", async () => {
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("baseline"),
+    });
+    const transientFlip = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("baseline-focused-flip"),
+    });
+    // Two consecutive polls with NO viewHierarchy at all — both hash to
+    // `null`. A naive `hash === hash` comparison would treat `null === null`
+    // as "stable" and settle here, returning a hierarchy-less observation
+    // before the real destination ever arrives.
+    const noHierarchy1 = makeObservation({ activeWindow, viewHierarchy: undefined });
+    const noHierarchy2 = makeObservation({ activeWindow, viewHierarchy: undefined });
+    const destination = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("time-picker-dialog"),
+    });
+
+    const waitForCondition = makeSequencedWaitForCondition([
+      noHierarchy1,
+      noHierarchy2,
+      destination,
+    ]);
+    const { tap } = createTapOnElement(waitForCondition);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(
+      previous,
+      transientFlip,
+    );
+
+    // Must NOT have stopped at the second (null-hash) poll.
+    expect(postTap.observation).not.toEqual(noHierarchy2);
+    // Must have continued through to the destination capture.
+    expect(postTap.observation).toEqual(destination);
+    expect(postTap.effect).toEqual({
+      screenChanged: true,
+      basis: "viewHierarchy changed",
+    });
+  });
 });

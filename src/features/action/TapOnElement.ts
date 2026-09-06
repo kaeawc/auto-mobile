@@ -704,9 +704,14 @@ export class TapOnElement extends BaseVisualChange {
       (observation) => {
         const activeWindowChanged =
           this.compareActiveWindow(previousObservation, observation)?.screenChanged === true;
+        const currentHash = this.hashViewHierarchy(observation.viewHierarchy ?? null);
+        const priorHash = this.hashViewHierarchy(lastObservation.viewHierarchy ?? null);
+        // Require two non-null hashes before trusting equality as "settled" —
+        // otherwise two consecutive hierarchy-less polls (both hash to null)
+        // would look identical and stop settling before a later, real
+        // destination capture ever arrives.
         const hierarchyStableSincePriorPoll =
-          this.hashViewHierarchy(observation.viewHierarchy ?? null) ===
-          this.hashViewHierarchy(lastObservation.viewHierarchy ?? null);
+          currentHash !== null && priorHash !== null && currentHash === priorHash;
         lastObservation = observation;
         return { matched: activeWindowChanged || hierarchyStableSincePriorPoll };
       },

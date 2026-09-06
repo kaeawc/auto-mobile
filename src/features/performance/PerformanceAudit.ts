@@ -87,6 +87,15 @@ interface CollectMetricsOptions {
    * (issue #6167).
    */
   windowBounds?: ElementBounds;
+  /**
+   * A specific in-window coordinate known not to overlap an interactive
+   * element (e.g. from `PerformanceAuditor`'s hierarchy scan), used in place
+   * of `windowBounds`' plain center. Takes precedence over `windowBounds`
+   * when both are given - moving the tap into the app window must not let it
+   * land on a real control and activate it during a read-only audit
+   * (issue #6167).
+   */
+  touchPoint?: { x: number; y: number };
 }
 
 /**
@@ -134,6 +143,7 @@ export class PerformanceAudit {
       screenSize,
       perf,
       opts.windowBounds,
+      opts.touchPoint,
     );
 
     // Optional TTFF/TTI measurement (these are heavier operations)
@@ -325,6 +335,7 @@ export class PerformanceAudit {
     screenSize: ScreenSize | undefined,
     perf: PerformanceTracker,
     windowBounds?: ElementBounds,
+    touchPoint?: { x: number; y: number },
   ): Promise<number | null> {
     // Only measure touch latency when UI performance mode is enabled
     if (!serverConfig.isUiPerfModeEnabled()) {
@@ -352,6 +363,7 @@ export class PerformanceAudit {
             sampleCount: 3,
             maxWaitMs: 200,
             windowBounds,
+            touchPoint,
           },
           perf,
         ),
@@ -757,6 +769,7 @@ export class PerformanceAudit {
     screenSize?: ScreenSize,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     windowBounds?: ElementBounds,
+    touchPoint?: { x: number; y: number },
   ): Promise<PerformanceAuditResult> {
     logger.info(`[PerformanceAudit] Running audit for ${packageName}`);
 
@@ -764,7 +777,10 @@ export class PerformanceAudit {
     const deviceCapabilities = await this.capabilitiesDetector.getCapabilities();
 
     // Collect metrics
-    const metrics = await this.collectMetrics(packageName, screenSize, perf, { windowBounds });
+    const metrics = await this.collectMetrics(packageName, screenSize, perf, {
+      windowBounds,
+      touchPoint,
+    });
 
     // Validate against thresholds
     const violations = this.validateMetrics(metrics, thresholds);

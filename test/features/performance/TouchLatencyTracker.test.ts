@@ -884,6 +884,49 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.animating).toBe(true);
     });
 
+    test("does not report animating when a run fails for mixed reasons (one animating, one genuine timeout)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let sampleIndex = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          sampleIndex++;
+          return { stdout: "", stderr: "" };
+        }
+
+        if (sampleIndex === 1) {
+          // Sample 1: animating - frames already present at the baseline read.
+          return { stdout: `Total frames rendered: 4`, stderr: "" };
+        }
+        // Sample 2: a genuinely frozen app - flat at zero baseline and
+        // after the tap, no frame activity ever, times out.
+        return { stdout: `Total frames rendered: 0`, stderr: "" };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 2, maxWaitMs: 50 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // Zero valid measurements, and not every failure was animating - must
+      // not blanket-label the run "animating" and mask the genuine timeout.
+      expect(result.success).toBe(false);
+      expect(result.sampleCount).toBe(0);
+      expect(result.animating).toBeFalsy();
+      expect(result.error).toContain("No successful measurements");
+      expect(result.error).not.toContain("animating");
+    });
+
     test("derives the synthetic tap from the app's actual window bounds (split-screen lower half, #6167)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
 

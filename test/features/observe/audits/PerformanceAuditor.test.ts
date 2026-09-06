@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   findAppWindowBounds,
+  findInertTouchPoint,
   PerformanceAuditor,
 } from "../../../../src/features/observe/audits/PerformanceAuditor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
@@ -11,7 +12,12 @@ import {
   setDebugPerfEnabled,
 } from "../../../../src/utils/PerformanceTracker";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
-import type { BootedDevice, ObserveResult, ViewHierarchyWindowInfo } from "../../../../src/models";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyWindowInfo,
+} from "../../../../src/models";
 
 function makeResult(overrides: Partial<ObserveResult> = {}): ObserveResult {
   return {
@@ -294,5 +300,84 @@ describe("findAppWindowBounds (#6167)", () => {
     });
 
     expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
+  });
+});
+
+describe("findInertTouchPoint (#6167)", () => {
+  const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
+
+  function button(bounds: { left: number; top: number; right: number; bottom: number }): Element {
+    return { bounds, clickable: true } as Element;
+  }
+
+  test("avoids a button at the window center, landing on inert space instead", () => {
+    // A button covering the exact center point the naive fixed-fraction
+    // default used to tap.
+    const centerButton = button({ left: 440, top: 900, right: 640, bottom: 1020 });
+
+    const result = findInertTouchPoint(appWindow, [centerButton]);
+
+    expect(result.inert).toBe(true);
+    const { x, y } = result.point;
+    const insideButton =
+      x >= centerButton.bounds.left &&
+      x < centerButton.bounds.right &&
+      y >= centerButton.bounds.top &&
+      y < centerButton.bounds.bottom;
+    expect(insideButton).toBe(false);
+    // Still inside the app window.
+    expect(x).toBeGreaterThanOrEqual(appWindow.left);
+    expect(x).toBeLessThan(appWindow.right);
+    expect(y).toBeGreaterThanOrEqual(appWindow.top);
+    expect(y).toBeLessThan(appWindow.bottom);
+  });
+
+  test("picks the plain window center when nothing overlaps it", () => {
+    const result = findInertTouchPoint(appWindow, []);
+    expect(result.inert).toBe(true);
+    expect(result.point).toEqual({ x: 540, y: 960 });
+  });
+
+  test("ignores non-interactive elements (plain text) when scanning for obstacles", () => {
+    const label: Element = { bounds: appWindow, clickable: false } as Element;
+    const result = findInertTouchPoint(appWindow, [label]);
+    expect(result.inert).toBe(true);
+    expect(result.point).toEqual({ x: 540, y: 960 });
+  });
+
+  test("falls back to a defined safe point and reports inert:false when every candidate is a control", () => {
+    // A hierarchy that is a control everywhere: one giant clickable element
+    // covering the entire app window, so no scanned candidate can avoid it.
+    const fullScreenButton = button(appWindow);
+
+    const result = findInertTouchPoint(appWindow, [fullScreenButton]);
+
+    // Does not silently report a clean, verified-inert point.
+    expect(result.inert).toBe(false);
+    // Still returns a defined, in-window point rather than throwing or
+    // omitting a coordinate.
+    expect(result.point.x).toBeGreaterThanOrEqual(appWindow.left);
+    expect(result.point.x).toBeLessThan(appWindow.right);
+    expect(result.point.y).toBeGreaterThanOrEqual(appWindow.top);
+    expect(result.point.y).toBeLessThan(appWindow.bottom);
+  });
+
+  test("treats a focusable (non-clickable) element as an obstacle too", () => {
+    const focusableField = {
+      bounds: { left: 440, top: 900, right: 640, bottom: 1020 },
+      clickable: false,
+      focusable: true,
+    } as Element;
+
+    const result = findInertTouchPoint(appWindow, [focusableField]);
+
+    expect(result.inert).toBe(true);
+    const { x, y } = result.point;
+    const insideField =
+      x >= focusableField.bounds.left &&
+      x < focusableField.bounds.right &&
+      y >= focusableField.bounds.top &&
+      y < focusableField.bounds.bottom;
+    expect(insideField).toBe(false);
   });
 });

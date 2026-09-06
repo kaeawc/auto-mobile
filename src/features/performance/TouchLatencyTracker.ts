@@ -252,23 +252,30 @@ export class TouchLatencyTracker {
   /**
    * Reduce the per-sample results of a `measureLatency` run into the final
    * result: a median latency on success, or a failure carrying the
-   * animating disposition when every sample was discounted for it.
+   * animating disposition only when animating explains *every* discounted
+   * sample. A run that mixes an animating sample with a sample that failed
+   * for some other reason (a genuine timeout, an adb error) is not safe to
+   * blanket-label "animating" - that would mask the other failure (#6167).
    */
   private buildResult(
     touchLocation: { x: number; y: number },
     measurements: number[],
-    animatingDetected: boolean,
+    animatingCount: number,
+    otherFailureCount: number,
   ): TouchLatencyResult {
+    const anySampleAnimating = animatingCount > 0;
+
     if (measurements.length === 0) {
+      const allFailuresAnimating = anySampleAnimating && otherFailureCount === 0;
       return {
         latencyMs: 0,
         touchCoordinates: touchLocation,
         success: false,
-        error: animatingDetected
+        error: allFailuresAnimating
           ? "App renders continuously (animating); touch latency cannot be isolated"
           : "No successful measurements - UI may be frozen or gfxinfo unavailable",
         sampleCount: 0,
-        animating: animatingDetected,
+        animating: allFailuresAnimating,
       };
     }
 
@@ -284,7 +291,7 @@ export class TouchLatencyTracker {
       touchCoordinates: touchLocation,
       success: true,
       sampleCount: measurements.length,
-      ...(animatingDetected ? { animating: true } : {}),
+      ...(anySampleAnimating ? { animating: true } : {}),
     };
   }
 
@@ -322,7 +329,8 @@ export class TouchLatencyTracker {
       options.windowBounds,
     );
     const measurements: number[] = [];
-    let animatingDetected = false;
+    let animatingCount = 0;
+    let otherFailureCount = 0;
 
     try {
       for (let i = 0; i < sampleCount; i++) {
@@ -331,11 +339,12 @@ export class TouchLatencyTracker {
         const sampleResult = await this.takeSample(packageName, touchLocation, maxWaitMs, perf, i);
 
         if (sampleResult.animating) {
-          animatingDetected = true;
+          animatingCount++;
         } else if (sampleResult.latencyMs !== null) {
           measurements.push(sampleResult.latencyMs);
           logger.debug(`[TouchLatency] Sample ${i + 1}: ${sampleResult.latencyMs}ms`);
         } else {
+          otherFailureCount++;
           logger.warn(`[TouchLatency] Sample ${i + 1} timeout - no response within ${maxWaitMs}ms`);
         }
 
@@ -345,7 +354,7 @@ export class TouchLatencyTracker {
         }
       }
 
-      return this.buildResult(touchLocation, measurements, animatingDetected);
+      return this.buildResult(touchLocation, measurements, animatingCount, otherFailureCount);
     } catch (error) {
       logger.error(`[TouchLatency] Failed to measure touch latency: ${error}`);
       return {

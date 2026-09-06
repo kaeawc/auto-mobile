@@ -6,6 +6,7 @@ import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
 import type {
   BootedDevice,
   ElementBounds,
+  Element,
   ObserveResult,
   ViewHierarchyWindowInfo,
 } from "../../../models";
@@ -14,6 +15,7 @@ import {
   type AdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
 
 /**
  * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1): the
@@ -68,6 +70,98 @@ export function findAppWindowBounds(
   const candidates = windows.filter((w) => isCandidateAppWindow(w, appId));
   const focused = candidates.find((w) => w.isFocused);
   return (focused ?? candidates[0])?.bounds;
+}
+
+/**
+ * Candidate tap points as fractions of the app window's width/height,
+ * ordered by preference: window center first (most representative of "the
+ * app"), then the four quadrant centers, then a point near each edge.
+ * Deliberately avoids corners closest to a typical top app bar's
+ * overflow-menu icon.
+ */
+const INERT_POINT_CANDIDATE_FRACTIONS: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 0.5, y: 0.5 }, // center
+  { x: 0.25, y: 0.25 },
+  { x: 0.75, y: 0.25 },
+  { x: 0.25, y: 0.75 },
+  { x: 0.75, y: 0.75 },
+  { x: 0.5, y: 0.08 }, // near top edge
+  { x: 0.5, y: 0.92 }, // near bottom edge
+  { x: 0.08, y: 0.5 }, // near left edge
+  { x: 0.92, y: 0.5 }, // near right edge
+];
+
+/**
+ * Least-interactive default when every scanned candidate overlapped an
+ * interactive element: near the bottom edge, away from a typical top app
+ * bar. Not guaranteed inert (a hierarchy that is a control everywhere has no
+ * inert point to offer) - callers must check `inert` on the result rather
+ * than treat this point as safe by construction.
+ */
+const FALLBACK_TOUCH_POINT_FRACTION = { x: 0.5, y: 0.95 };
+
+function isInteractiveElement(element: Element): boolean {
+  return (
+    isTruthyFlag(element.clickable) ||
+    isTruthyFlag(element.focusable) ||
+    isTruthyFlag(element["long-clickable"]) ||
+    hasAccessibilityAction(element.actions, "click") ||
+    hasAccessibilityAction(element.actions, "long_click")
+  );
+}
+
+function isPointInsideBounds(x: number, y: number, bounds: ElementBounds): boolean {
+  return x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom;
+}
+
+export interface InertTouchPointResult {
+  point: { x: number; y: number };
+  /**
+   * False when no scanned candidate avoided every interactive element - the
+   * returned point is the documented fallback default, not a verified-inert
+   * one (issue #6167).
+   */
+  inert: boolean;
+}
+
+/**
+ * Find a synthetic-touch point inside `windowBounds` that does not overlap
+ * any clickable/focusable/long-clickable element, so a touch-latency probe
+ * cannot activate a real control (tap a button, open a list item, follow a
+ * link) during what is meant to be a read-only performance audit
+ * (issue #6167). Scans a small set of candidate points (window center, then
+ * quadrant centers, then edge midpoints) and returns the first that hits no
+ * interactive element's bounds. Falls back to a documented default point
+ * when every candidate is obstructed, with `inert: false` so the caller
+ * knows the tap may still land on a control.
+ */
+export function findInertTouchPoint(
+  windowBounds: ElementBounds,
+  interactiveElements: readonly Element[],
+): InertTouchPointResult {
+  const obstacles = interactiveElements.filter((el) => el.bounds && isInteractiveElement(el));
+  const width = windowBounds.right - windowBounds.left;
+  const height = windowBounds.bottom - windowBounds.top;
+
+  const pointFor = (fraction: { x: number; y: number }): { x: number; y: number } => ({
+    x: Math.floor(windowBounds.left + width * fraction.x),
+    y: Math.floor(windowBounds.top + height * fraction.y),
+  });
+
+  for (const fraction of INERT_POINT_CANDIDATE_FRACTIONS) {
+    const point = pointFor(fraction);
+    const obstructed = obstacles.some((el) => isPointInsideBounds(point.x, point.y, el.bounds));
+    if (!obstructed) {
+      return { point, inert: true };
+    }
+  }
+
+  logger.warn(
+    "[PerformanceAudit] Could not find a fully inert touch point inside the app window " +
+      "(every scanned candidate overlapped an interactive element) - falling back to a " +
+      "default point that may still activate a control",
+  );
+  return { point: pointFor(FALLBACK_TOUCH_POINT_FRACTION), inert: false };
 }
 
 export interface PerformanceAuditorOptions {
@@ -137,13 +231,22 @@ export class PerformanceAuditor {
           capabilities,
         );
 
+        // Derive a touch point inside the app's own window that avoids
+        // activating a real control - a read-only performance audit must
+        // not tap a button, list item, or link as a side effect (#6167).
+        const windowBounds = findAppWindowBounds(result, result.activeWindow!.appId);
+        const touchPoint = windowBounds
+          ? findInertTouchPoint(windowBounds, result.elements?.clickable ?? []).point
+          : undefined;
+
         // Run the audit
         const auditResult = await performanceAudit.runAudit(
           result.activeWindow!.appId,
           thresholds,
           result.screenSize,
           perf,
-          findAppWindowBounds(result, result.activeWindow!.appId),
+          windowBounds,
+          touchPoint,
         );
 
         // Attach audit result to observe result

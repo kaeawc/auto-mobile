@@ -45,6 +45,40 @@ describe("filterAppsByQuery type default (#6155)", () => {
   });
 });
 
+describe("filterAppsByQuery search normalization (#6216 review)", () => {
+  const cameraApp: AppsQueryAppInfo = {
+    packageName: "com.example.camera",
+    type: "user",
+    foreground: false,
+    recent: false,
+    displayName: "Camera",
+  };
+  const otherApp: AppsQueryAppInfo = {
+    packageName: "com.example.other",
+    type: "user",
+    foreground: false,
+    recent: false,
+    displayName: "Other",
+  };
+  const searchApps = [cameraApp, otherApp];
+
+  test("a search term with surrounding whitespace and different case still matches (' Camera ')", () => {
+    expect(filterAppsByQuery(searchApps, { type: "all", search: " Camera " })).toEqual([cameraApp]);
+  });
+
+  test("an all-whitespace search term is treated as no filter", () => {
+    expect(filterAppsByQuery(searchApps, { type: "all", search: "   " })).toEqual(searchApps);
+  });
+
+  test("a non-matching search term still excludes apps", () => {
+    expect(filterAppsByQuery(searchApps, { type: "all", search: " zzz " })).toEqual([]);
+  });
+
+  test("case/whitespace-insensitive matching also works against the package name", () => {
+    expect(filterAppsByQuery(searchApps, { type: "all", search: " CAMERA " })).toEqual([cameraApp]);
+  });
+});
+
 describe("parseAppsQueryParams type default (#6155)", () => {
   test("omitted type parses to the documented default of user", () => {
     const options = parseAppsQueryParams({ deviceId: "emulator-5554" });

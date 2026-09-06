@@ -174,6 +174,37 @@ describe("listApps tool", () => {
   });
 });
 
+test("listApps only requires booted-device readiness, not full CtrlProxy automation setup (#6216 review)", () => {
+  // Mirrors the interception pattern in videoRecordingReadiness.test.ts: capture
+  // the options object passed to registerDeviceAware without driving the real
+  // resolveExecutionTarget/DeviceSessionManager pipeline.
+  ToolRegistry.clearTools();
+  const registry = ToolRegistry as any;
+  const originalRegister = registry.registerDeviceAware;
+  let capturedReadiness: unknown;
+
+  registry.registerDeviceAware = (
+    name: string,
+    _description: string,
+    _schema: unknown,
+    _handler: unknown,
+    options: any,
+  ) => {
+    if (name === "listApps") {
+      capturedReadiness = options?.deviceReadiness;
+    }
+  };
+
+  try {
+    registerAppTools();
+  } finally {
+    registry.registerDeviceAware = originalRegister;
+    ToolRegistry.clearTools();
+  }
+
+  expect(capturedReadiness).toBe("booted");
+});
+
 describe("terminateApp tool", () => {
   const device: BootedDevice = {
     deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",

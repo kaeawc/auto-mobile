@@ -619,7 +619,11 @@ export function filterAppsByQuery(
   apps: AppsQueryAppInfo[],
   options: AppsQueryOptions,
 ): AppsQueryAppInfo[] {
-  const searchTerm = options.search?.toLowerCase();
+  // Trim + lowercase so callers get case-insensitive, whitespace-tolerant
+  // search (" Camera " matches "Camera") whether search arrives from the
+  // listApps tool schema (unnormalized) or the apps resource's query string
+  // (#6216 review).
+  const searchTerm = options.search?.trim().toLowerCase() || undefined;
   // Documented default is "user" (#6155) — an omitted type must not fall through
   // to "no filter" and return system apps too.
   const effectiveType = options.type ?? "user";

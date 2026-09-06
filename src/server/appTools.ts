@@ -804,6 +804,12 @@ export function registerAppTools() {
     "List installed apps on a device. Filters by type (default: user), search, and profile.",
     listAppsSchema,
     listAppsHandler,
-    { defaultEnabled: true },
+    {
+      defaultEnabled: true,
+      // Listing installed apps only needs adb/simctl/devicectl — never CtrlProxy
+      // automation — so it should not pay for (or trigger) automation-readiness
+      // setup on the target device (#6216 review).
+      deviceReadiness: "booted",
+    },
   );
 }

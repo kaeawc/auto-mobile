@@ -134,12 +134,14 @@ describe("proxy server session ownership errors", () => {
         "heartbeat-timeout",
       );
 
-      await expect(client.listTools()).rejects.toThrow(ownershipLoss);
-      await expect(client.listResources()).rejects.toThrow(ownershipLoss);
-      await expect(client.listResourceTemplates()).rejects.toThrow(ownershipLoss);
-      await expect(client.readResource({ uri: "automobile:devices/booted" })).rejects.toThrow(
-        ownershipLoss,
-      );
+      await Promise.all([
+        expect(client.listTools()).rejects.toThrow(ownershipLoss),
+        expect(client.listResources()).rejects.toThrow(ownershipLoss),
+        expect(client.listResourceTemplates()).rejects.toThrow(ownershipLoss),
+        expect(client.readResource({ uri: "automobile:devices/booted" })).rejects.toThrow(
+          ownershipLoss,
+        ),
+      ]);
     } finally {
       await client.close();
       await server.close();

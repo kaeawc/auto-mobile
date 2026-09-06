@@ -476,12 +476,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
   private async dismissWithCloseButton(modal: ModalState, platform: string): Promise<boolean> {
     try {
-      if (await this.tapCloseButton(platform)) {
-        await this.sleep(200);
-        if (await this.isModalDismissed(modal, platform)) {
-          logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with close button`);
-          return true;
-        }
+      if (await this.tapCloseButton(modal, platform)) {
+        logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with close button`);
+        return true;
       }
     } catch (error) {
       logger.debug(`[UI_STATE_SETUP] Close button tap failed: ${error}`);
@@ -516,8 +513,19 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
   /**
    * Try to tap a close/cancel button in the current view.
+   *
+   * Each candidate text is tried in turn, and a candidate only counts as
+   * success when it BOTH (a) resolved to a real element that the internal
+   * `tapOn` call actually tapped, and (b) genuinely dismissed `modal` (verified
+   * by re-observing and checking the modal is no longer present). Neither
+   * check alone is sufficient: `callInternal` resolves (does not throw) even
+   * when `tapOn` reports `{success: false}` for a missing element (#6123), and
+   * a tap that hits a real but wrong element (e.g. a non-dismissing "Close"
+   * label elsewhere on screen) would otherwise be mistaken for success. A
+   * failed or ineffective candidate falls through to the next text instead of
+   * short-circuiting the loop.
    */
-  private async tapCloseButton(platform: string): Promise<boolean> {
+  private async tapCloseButton(modal: ModalState, platform: string): Promise<boolean> {
     const tapTool = ToolRegistry.getTool("tapOn");
     if (!tapTool) {
       return false;
@@ -530,17 +538,26 @@ export class DefaultUIStateSetup implements UIStateSetup {
       try {
         // Internal close-button tap (#3087) via the callInternal seam (#3108):
         // no diff/strip, no baseline advance.
-        await ToolRegistry.callInternal(tapTool, {
+        const response = await ToolRegistry.callInternal(tapTool, {
           selector: { text },
           action: "tap",
           platform,
           deviceId: this.device.deviceId,
           ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         });
-        logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
-        return true;
+        throwIfInternalToolFailed(response, "tapOn", platform);
+
+        await this.sleep(200);
+        if (await this.isModalDismissed(modal, platform)) {
+          logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
+          return true;
+        }
+        logger.debug(
+          `[UI_STATE_SETUP] Tapped "${text}" but ${modal.type} is still present, trying next candidate`,
+        );
       } catch (error) {
-        // Button not found, try next
+        // Button not found, or the tap failed outright — try the next candidate.
+        logger.debug(`[UI_STATE_SETUP] Close button candidate "${text}" failed: ${error}`);
         continue;
       }
     }

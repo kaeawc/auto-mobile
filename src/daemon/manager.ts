@@ -1117,6 +1117,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.host) {
       args.push("--host", options.host);
     }
+    if (options.strictPort) {
+      args.push("--strict-port");
+    }
     if (options.debug) {
       args.push("--debug");
     }
@@ -1746,7 +1749,18 @@ export class DaemonManager implements DaemonManagerLike {
     const requestedOptions = Object.fromEntries(
       Object.entries(options).filter(([, value]) => value !== undefined),
     ) as DaemonOptions;
-    const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
+    // Force the authoritative bind-or-fail guard (issue #6260, PRRT ft82d):
+    // the preflight check in assertNoSurvivingDaemonBeforeRestart below is
+    // fast feedback only — it releases its probe socket before this sleep and
+    // before the child actually binds, so a competitor can still win the
+    // canonical port in that window. strictPort makes the child's own
+    // listen() call the atomic guard, failing loudly instead of silently
+    // falling back to port + 1..3 and recreating the split-brain.
+    const restartOptions: DaemonOptions = {
+      ...runningOptions,
+      ...requestedOptions,
+      strictPort: true,
+    };
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
     // budget. Run the PID-recorded daemon and every cross-namespace candidate
     // concurrently so the launcher timeout remains bounded by one cleanup window.
@@ -2490,6 +2504,8 @@ export function parseDaemonArgs(
         options.host = host;
         i++;
       }
+    } else if (args[i] === "--strict-port") {
+      options.strictPort = true;
     } else if (args[i] === "--debug") {
       options.debug = true;
     } else if (args[i] === "--debug-perf" || args[i] === "--ui-perf-debug") {

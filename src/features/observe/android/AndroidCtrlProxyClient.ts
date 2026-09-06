@@ -23,6 +23,7 @@ import {
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger, type Logger } from "../../../utils/logger";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
+import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
   BootedDevice,
   ImeAction,
@@ -3268,11 +3269,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // cause — a stale/orphaned AutoMobile process still holding forwarding
       // for this device, most commonly left behind by a `--daemon restart`
       // that could not confirm the previous daemon stopped.
-      throw new Error(
-        describeCtrlProxyForwardingLeaseConflict(
-          this.device.deviceId,
-          this.ctrlProxyForwardLease.getLastOwnerPid(),
-        ),
+      const ownerPid = this.ctrlProxyForwardLease.getLastOwnerPid();
+      throw new CtrlProxyForwardingLeaseConflictError(
+        describeCtrlProxyForwardingLeaseConflict(this.device.deviceId, ownerPid),
+        ownerPid,
       );
     }
     // Verify port forwarding is still active even if we think it's set up

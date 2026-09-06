@@ -1,4 +1,5 @@
 import { createServer as createHttpServer, Server as HttpServer } from "node:http";
+import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
@@ -252,6 +253,7 @@ export class Daemon {
   private acceptingHttpSessions = false;
   private port: number;
   private host: string;
+  private readonly strictPort: boolean;
   private debug: boolean;
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
@@ -306,6 +308,7 @@ export class Daemon {
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
     this.host = options.host || "127.0.0.1";
+    this.strictPort = options.strictPort ?? false;
     this.debug = options.debug || false;
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
@@ -511,8 +514,17 @@ export class Daemon {
       }),
     );
 
-    // Find an available port
-    this.port = await this.findAvailablePort(this.port);
+    // Find an available port. In strict-port mode (issue #6260, restart's
+    // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
+    // release preflight and its port+1..3 fallback: that preflight releases
+    // its probe socket before this process actually binds, leaving a window
+    // for a competitor to claim the canonical port and for the fallback to
+    // paper over it with a "successful" restart on the wrong port. Leaving
+    // `this.port` as the requested port makes the real `listen()` call below
+    // (in startHttpServer) the single atomic bind-or-fail attempt.
+    if (!this.strictPort) {
+      this.port = await this.findAvailablePort(this.port);
+    }
 
     // Start HTTP MCP server
     startupBenchmark.startPhase("httpServerStart");
@@ -955,7 +967,23 @@ export class Daemon {
         resolve();
       });
 
-      this.httpServer!.on("error", (error) => {
+      this.httpServer!.on("error", (error: NodeJS.ErrnoException) => {
+        if (this.strictPort && error.code === "EADDRINUSE") {
+          // The authoritative guard (issue #6260): this listen() call is the
+          // one atomic bind attempt in strict-port mode, so a genuine
+          // EADDRINUSE here means another process holds the canonical port
+          // RIGHT NOW — not a stale probe result. Fail loudly instead of the
+          // caller (start()) ever falling back to a different port.
+          reject(
+            new ActionableError(
+              `Port ${this.port} on ${this.host} is required for this daemon start but is ` +
+                `already in use by another process. Refusing to fall back to a different port ` +
+                `and risk a split-brain daemon (issue #6260) — find and stop whatever holds ` +
+                `port ${this.port} and retry.`,
+            ),
+          );
+          return;
+        }
         logger.error(`HTTP server error: ${error}`);
         reject(error);
       });

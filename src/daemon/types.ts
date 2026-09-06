@@ -217,6 +217,15 @@ export interface DaemonOptions {
   port?: number;
   /** Host for internal MCP server */
   host?: string;
+  /**
+   * Require the daemon's HTTP bind to succeed on exactly `port` (or the
+   * default port) and fail loudly instead of silently falling back to
+   * `port + 1..3` via `findAvailablePort()`. Set by `DaemonManager.restart()`
+   * so the child's own atomic `listen()` call — not a preflight probe that
+   * releases its socket before the child actually binds — is the
+   * authoritative guard against the #6260 TOCTOU split-brain.
+   */
+  strictPort?: boolean;
   /** Enable debug mode */
   debug?: boolean;
   /** Enable debug performance tracking */

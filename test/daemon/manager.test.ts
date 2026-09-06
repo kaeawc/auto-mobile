@@ -128,7 +128,11 @@ describe("DaemonManager restart", () => {
 
     expect(statusSpy).toHaveBeenCalledTimes(1);
     expect(stopSpy).toHaveBeenCalledTimes(1);
-    expect(startSpy).toHaveBeenCalledWith(recordedOptions);
+    // strictPort:true is always forced onto a restart (issue #6260 PRRT
+    // ft82d) so the child's own listen() call — not a preflight probe that
+    // releases its socket before the child binds — is the authoritative
+    // bind-or-fail guard against the port-fallback split-brain.
+    expect(startSpy).toHaveBeenCalledWith({ ...recordedOptions, strictPort: true });
   });
 });
 
@@ -2019,7 +2023,7 @@ describe("Daemon manager process detection", () => {
       await manager.restart();
 
       expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
-      expect(startSpy).toHaveBeenCalledWith({});
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
       statusSpy.mockRestore();
@@ -2075,7 +2079,7 @@ describe("Daemon manager process detection", () => {
         { pid: 452, signal: "SIGTERM" },
         { pid: 453, signal: "SIGTERM" },
       ]);
-      expect(startSpy).toHaveBeenCalledWith({});
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
       statusSpy.mockRestore();
@@ -2134,7 +2138,7 @@ describe("Daemon manager process detection", () => {
 
       expect(stopSpy).toHaveBeenCalledTimes(1);
       expect(signaler.signals).toEqual([{ pid: crossNamespacePid, signal: "SIGTERM" }]);
-      expect(startSpy).toHaveBeenCalledWith({});
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
       stopSpy.mockRestore();
@@ -2207,7 +2211,7 @@ describe("Daemon manager process detection", () => {
         { pid: crossNamespacePid, signal: "SIGKILL" },
       ]);
       expect(fakeTimer.now()).toBe(12_000);
-      expect(startSpy).toHaveBeenCalledWith({});
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       killSpy.mockRestore();
       startSpy.mockRestore();
@@ -2404,7 +2408,7 @@ describe("Daemon manager process detection", () => {
       await manager.restart();
 
       expect(signaler.signals).toEqual([]);
-      expect(startSpy).toHaveBeenCalledWith({});
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
       statusSpy.mockRestore();
@@ -2557,7 +2561,7 @@ describe("Daemon manager process detection", () => {
 
       expect(stopSpy).toHaveBeenCalledTimes(1);
       expect(portChecker.checkedPorts).toEqual([3000]);
-      expect(startSpy).toHaveBeenCalledWith({});
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
       stopSpy.mockRestore();

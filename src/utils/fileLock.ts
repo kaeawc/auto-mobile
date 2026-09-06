@@ -124,8 +124,17 @@ export function formatLockContent(pid: number, ownerToken?: string, metadata?: s
  */
 export function parseLockContent(content: string): LockContent {
   const [pidLine, tokenLine, metadataLine] = content.split("\n", 3);
+  const rawPid = Number.parseInt(pidLine, 10);
+  // A PID <= 0 is never a real single-process owner: `process.kill(0, 0)`
+  // signals the current process group and `process.kill(-1, 0)` signals
+  // every process this user can signal, so both "succeed" as a liveness
+  // check without naming a real process. Treat a corrupt/stale lock
+  // containing one the same as an unreadable PID (NaN) rather than ever
+  // reporting it as a live owner or surfacing it in a `kill` suggestion
+  // (issue #6260).
+  const pid = Number.isInteger(rawPid) && rawPid > 0 ? rawPid : NaN;
   const parsed: LockContent = {
-    pid: Number.parseInt(pidLine, 10),
+    pid,
     token: tokenLine || undefined,
   };
   if (metadataLine) {

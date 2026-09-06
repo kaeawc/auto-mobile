@@ -32,6 +32,7 @@ class FakeReadinessClient implements ReadinessClient {
   tapCoordinates: Array<{ x: number; y: number }> = [];
   onTap?: () => Promise<void> | void;
   getLastConnectionFailureMessage?: () => string | undefined;
+  isLastConnectionFailureForwardingLeaseConflict?: () => boolean;
 
   isConnected(): boolean {
     return this.connected;
@@ -1058,6 +1059,7 @@ describe("RunnerReadinessService", () => {
       "Another AutoMobile process (PID 71579) owns CtrlProxy forwarding for emulator-5554. " +
       "This is usually a stale/orphaned AutoMobile daemon left behind by an incomplete " +
       "`--daemon restart` — stop it (`kill 71579`) and retry.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
     const { service } = createService({
       androidClient: client,
       // A diagnostic is available, but the known connect-failure cause must win —
@@ -1085,6 +1087,43 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.not.toThrow(/runner did not become responsive/);
+  });
+
+  test("preserves the Android diagnostic for an ordinary connect failure that is not a forwarding-lease conflict (issue #6260 PRRT ft82e)", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    // A stored connect failure exists (e.g. ECONNREFUSED), but it is NOT the
+    // CtrlProxy forwarding-lease conflict — the existing Android diagnostics
+    // (primaryUserStartState/deviceLock) must be preserved, not replaced by
+    // this raw transport text.
+    client.getLastConnectionFailureMessage = () => "connect ECONNREFUSED 127.0.0.1:5037";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => false;
+    const { service } = createService({
+      androidClient: client,
+      getAndroidRunnerConnectDiagnostic: async () => ({
+        deviceLock: { locked: true, keyguardShowing: true, secure: true },
+        primaryUserStartState: "RUNNING_LOCKED",
+      }),
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/phase=runner-connect.*RUNNING_LOCKED/);
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.not.toThrow(/ECONNREFUSED/);
   });
 
   test("diagnoses a locked primary user when runner connection times out", async () => {

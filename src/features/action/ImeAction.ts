@@ -2,6 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
+  ActionableError,
   BootedDevice,
   ImeAction as ImeActionType,
   ImeActionResult,
@@ -52,42 +53,114 @@ export class ImeAction extends BaseVisualChange {
       };
     }
 
-    return this.observedInteraction(
-      async (observeResult: ObserveResult) => {
-        try {
-          // Platform-specific IME action execution
-          switch (this.device.platform) {
-            case "android":
-              return await perf.track("androidImeAction", () =>
-                this.executeAndroidImeAction(action, observeResult),
-              );
-            case "ios":
-              return await perf.track("iOSImeAction", () =>
-                this.executeiOSImeAction(action, observeResult),
-              );
-            default:
-              perf.end();
-              throw new Error(`Unsupported platform: ${this.device.platform}`);
-          }
-        } catch (error) {
-          perf.end();
-          const errorMsg = errorMessage(error);
-          return {
-            success: false,
-            action,
-            error: `Failed to execute IME action: ${errorMsg}`,
-          };
+    // iOS gets its own abort signal + outer deadline (#6249 follow-up): the
+    // pre-action observation performed by `observedInteraction` below runs
+    // through the same unbounded `ensureConnected()` path as the IME request
+    // itself, so it must be covered by the deadline too — not just the
+    // request. See `boundIosInteractionToDeadline`.
+    const isIos = this.device.platform === "ios";
+    const iosAbortController = isIos ? new AbortController() : undefined;
+
+    const block = async (observeResult: ObserveResult): Promise<ImeActionResult> => {
+      try {
+        // Platform-specific IME action execution
+        switch (this.device.platform) {
+          case "android":
+            return await perf.track("androidImeAction", () =>
+              this.executeAndroidImeAction(action, observeResult),
+            );
+          case "ios":
+            return await perf.track("iOSImeAction", () =>
+              this.executeiOSImeAction(action, observeResult, iosAbortController?.signal),
+            );
+          default:
+            perf.end();
+            throw new Error(`Unsupported platform: ${this.device.platform}`);
         }
-      },
-      {
-        changeExpected: true,
-        tolerancePercent: 0.0,
-        timeoutMs: 3000, // IME actions should be quick
-        progress,
-        perf,
-        skipUiStability: true, // Skip UI stability wait - a11y service already waits for quiescence
-      },
-    );
+      } catch (error) {
+        perf.end();
+        const errorMsg = errorMessage(error);
+        return {
+          success: false,
+          action,
+          error: `Failed to execute IME action: ${errorMsg}`,
+        };
+      }
+    };
+
+    const options: Parameters<BaseVisualChange["observedInteraction"]>[1] = {
+      changeExpected: true,
+      tolerancePercent: 0.0,
+      timeoutMs: 3000, // IME actions should be quick
+      progress,
+      perf,
+      skipUiStability: true, // Skip UI stability wait - a11y service already waits for quiescence
+      signal: iosAbortController?.signal,
+    };
+
+    if (!iosAbortController) {
+      return this.observedInteraction(block, options);
+    }
+
+    return this.boundIosInteractionToDeadline(block, options, action, iosAbortController);
+  }
+
+  /**
+   * Bound the ENTIRE iOS `observedInteraction` call — pre-action observation
+   * AND the IME request itself — to `IOS_IME_ACTION_TIMEOUT_MS` (#6249
+   * follow-up).
+   *
+   * The pre-action observation fetched by `observedInteraction` (a cache miss
+   * falls through to `observeScreen.execute()`) goes through the same
+   * unbounded iOS `ensureConnected()` path as the IME request. Racing only
+   * the request (as `raceIosImeActionDeadline` does) leaves this earlier step
+   * free to hang indefinitely when there is no usable cached hierarchy and
+   * the runner is unhealthy. Wrapping the whole call here means `execute()`
+   * always returns within the deadline regardless of which stage stalls.
+   *
+   * As with the request-level race, the abandoned `observedInteraction`
+   * promise is left to settle in the background (logged, never thrown) so
+   * the underlying client's own reconnect/health-check state can recover
+   * normally for the next call instead of being torn down mid-flight.
+   */
+  private async boundIosInteractionToDeadline(
+    block: (observeResult: ObserveResult) => Promise<ImeActionResult>,
+    options: Parameters<BaseVisualChange["observedInteraction"]>[1],
+    action: ImeActionType,
+    controller: AbortController,
+  ): Promise<ImeActionResult> {
+    const timeoutMs = ImeAction.IOS_IME_ACTION_TIMEOUT_MS;
+    let deadlineHandle: ReturnType<Timer["setTimeout"]> | undefined;
+    const deadline = new Promise<"deadline">((resolve) => {
+      deadlineHandle = this.imeTimer.setTimeout(() => resolve("deadline"), timeoutMs);
+    });
+
+    const interaction = this.observedInteraction(block, options);
+
+    try {
+      const outcome = await Promise.race([interaction, deadline]);
+      if (outcome === "deadline") {
+        controller.abort();
+        void interaction.catch((error) => {
+          // The interaction's own outcome no longer matters to this call —
+          // only trace it so a slow/failing runner is still diagnosable.
+          logger.debug(
+            `[ImeAction] iOS execute() pipeline for action '${action}' settled after the local ${timeoutMs}ms deadline: ${errorMessage(error)}`,
+          );
+        });
+        logger.warn(
+          `[ImeAction] iOS IME action '${action}' exceeded its ${timeoutMs}ms deadline before the pre-action observation or request settled; failing without waiting further`,
+        );
+        throw new ActionableError(
+          `IME action '${action}' timed out after ${timeoutMs}ms waiting on the iOS device connection`,
+        );
+      }
+      return outcome as ImeActionResult;
+    } finally {
+      if (deadlineHandle !== undefined) {
+        this.imeTimer.clearTimeout(deadlineHandle);
+      }
+    }
   }
 
   /**
@@ -179,12 +252,25 @@ export class ImeAction extends BaseVisualChange {
   private async executeiOSImeAction(
     action: ImeActionType,
     _observeResult: ObserveResult,
+    outerSignal?: AbortSignal,
   ): Promise<ImeActionResult> {
     const timeoutMs = ImeAction.IOS_IME_ACTION_TIMEOUT_MS;
+    // Own the abort signal actually threaded into the wire request so a
+    // request that outlives the deadline is cancelled rather than dispatched
+    // (#6249 follow-up). Also honor an outer deadline (e.g.
+    // `boundIosInteractionToDeadline`) that may fire first.
+    const controller = new AbortController();
+    const onOuterAbort = () => controller.abort();
+    if (outerSignal?.aborted) {
+      controller.abort();
+    } else {
+      outerSignal?.addEventListener("abort", onOuterAbort);
+    }
+
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const request = client.requestImeAction(action, timeoutMs);
-      const result = await this.raceIosImeActionDeadline(request, timeoutMs, action);
+      const request = client.requestImeAction(action, timeoutMs, undefined, controller.signal);
+      const result = await this.raceIosImeActionDeadline(request, timeoutMs, action, controller);
 
       if (result === null) {
         return {
@@ -204,6 +290,8 @@ export class ImeAction extends BaseVisualChange {
     } catch (error) {
       logger.error(`[ImeAction] CtrlProxy iOS exception: ${error}`);
       return { success: false, action, error: String(error) };
+    } finally {
+      outerSignal?.removeEventListener("abort", onOuterAbort);
     }
   }
 
@@ -222,16 +310,22 @@ export class ImeAction extends BaseVisualChange {
    * Racing an independently-scheduled deadline here means this call always
    * returns to the caller within `timeoutMs`, regardless of what the
    * connection layer is doing. The underlying request is left to settle on
-   * its own — its eventual result is irrelevant once we've timed out, so it
-   * is only logged (never thrown) to avoid an unhandled rejection; letting it
-   * run to completion in the background is also what allows the client's own
-   * reconnect/health-check state to recover normally for the *next* call
-   * instead of being aborted mid-flight.
+   * its own in the background — but before that, firing the deadline also
+   * aborts `controller`, which is wired all the way into `sendCommand`
+   * (`DeviceServiceUtils.ts`): if `ensureConnected()` was still resolving
+   * when the deadline hit, `sendCommand` sees the abort right after
+   * `ensureConnected()` returns and skips registering/sending
+   * `request_ime_action` entirely — no phantom dispatch after the caller has
+   * already given up (#6249 follow-up). The request's eventual settlement is
+   * only logged (never thrown) to avoid an unhandled rejection; letting the
+   * client's own connection state settle normally (rather than being torn
+   * down mid-flight) is what keeps the *next* call unaffected.
    */
   private async raceIosImeActionDeadline(
     request: Promise<CtrlProxyImeActionResult>,
     timeoutMs: number,
     action: ImeActionType,
+    controller: AbortController,
   ): Promise<CtrlProxyImeActionResult | null> {
     let timeoutHandle: ReturnType<Timer["setTimeout"]> | undefined;
     const deadline = new Promise<null>((resolve) => {
@@ -241,6 +335,7 @@ export class ImeAction extends BaseVisualChange {
     try {
       const outcome = await Promise.race([request, deadline]);
       if (outcome === null) {
+        controller.abort();
         void request.catch((error) => {
           // The request's own outcome no longer matters to this call — only
           // trace it so a slow/failing runner is still diagnosable.

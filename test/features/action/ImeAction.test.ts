@@ -586,6 +586,89 @@ describe("ImeAction", () => {
       expect(fakeTimer.getCurrentTime()).toBe(5000);
     });
 
+    test("full execute() succeeds promptly on the fast path (#6249 follow-up)", async () => {
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => ({ success: true, action, totalTimeMs: 5 }),
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      (ios as any).observeScreen = fakeObserveScreen;
+      (ios as any).window = fakeWindow;
+      (ios as any).awaitIdle = fakeAwaitIdle;
+
+      const result = await ios.execute("done");
+
+      expect(result.success).toBe(true);
+      expect(result.action).toBe("done");
+      // Neither the request-level nor the outer execute()-level deadline had
+      // to fire on the fast path.
+      expect(fakeTimer.getCurrentTime()).toBe(0);
+    });
+
+    test("bounds a stalled pre-action observation to the deadline and fails with an ActionableError instead of hanging (#6249 follow-up)", async () => {
+      // Simulates entering `BaseVisualChange.observedInteraction` with no
+      // usable cached hierarchy: the pre-action observe falls through to
+      // `observeScreen.execute()`, which goes through the same unbounded iOS
+      // `ensureConnected()` path as the IME request itself. Here it simply
+      // never resolves.
+      const stallingObserveScreen = new FakeObserveScreen();
+      (stallingObserveScreen as any).getMostRecentCachedObserveResult = () =>
+        new Promise(() => {
+          /* never settles */
+        });
+      (stallingObserveScreen as any).execute = () =>
+        new Promise(() => {
+          /* never settles */
+        });
+
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => ({ success: true, action, totalTimeMs: 5 }),
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      (ios as any).observeScreen = stallingObserveScreen;
+      (ios as any).window = fakeWindow;
+      (ios as any).awaitIdle = fakeAwaitIdle;
+
+      await expect(ios.execute("done")).rejects.toThrow(/timed out after 5000ms/);
+      // Bounded by the deadline, not a hang.
+      expect(fakeTimer.getCurrentTime()).toBe(5000);
+    });
+
+    test("a stalled pre-action observation does not corrupt a subsequent call (#6249 follow-up)", async () => {
+      const stallingObserveScreen = new FakeObserveScreen();
+      (stallingObserveScreen as any).getMostRecentCachedObserveResult = () =>
+        new Promise(() => {
+          /* never settles */
+        });
+      (stallingObserveScreen as any).execute = () =>
+        new Promise(() => {
+          /* never settles */
+        });
+
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => ({ success: true, action, totalTimeMs: 5 }),
+      } as any);
+
+      const first = new ImeAction(iosDevice, null, null, fakeTimer);
+      (first as any).observeScreen = stallingObserveScreen;
+      (first as any).window = fakeWindow;
+      (first as any).awaitIdle = fakeAwaitIdle;
+
+      await expect(first.execute("done")).rejects.toThrow(/timed out after 5000ms/);
+
+      // A fresh call (e.g. after recovery) against a healthy pipeline must
+      // not be affected by the first call's still-pending (abandoned) observe.
+      const second = new ImeAction(iosDevice, null, null, fakeTimer);
+      (second as any).observeScreen = fakeObserveScreen;
+      (second as any).window = fakeWindow;
+      (second as any).awaitIdle = fakeAwaitIdle;
+
+      const result = await second.execute("next");
+      expect(result.success).toBe(true);
+      expect(result.action).toBe("next");
+    });
+
     test("a stalled iOS imeAction request does not corrupt a subsequent call against the same client (#6249)", async () => {
       // First call: the CtrlProxy request stalls forever (wedged runner).
       const stalledRequest = new Promise(() => {

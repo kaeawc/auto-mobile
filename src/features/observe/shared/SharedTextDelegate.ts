@@ -53,6 +53,7 @@ export class SharedTextDelegate {
     action: ImeAction,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
   ): Promise<ActionTimingResult> {
     return sendCommand<ActionTimingResult>(this.context, {
       idPrefix: "imeAction",
@@ -61,6 +62,7 @@ export class SharedTextDelegate {
       params: { action },
       timeoutMs,
       perf,
+      abortSignal,
       notConnectedError: () => ({ success: false, action, totalTimeMs: 0, error: "Not connected" }),
       unsupportedCommandError: (_messageType, error) => ({
         success: false,

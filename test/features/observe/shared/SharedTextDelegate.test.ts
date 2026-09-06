@@ -186,4 +186,47 @@ describe("SharedTextDelegate", () => {
       expect(result.error).toContain("timed out");
     });
   });
+
+  describe("abort signal (#6249 follow-up)", () => {
+    it("does not dispatch request_ime_action when the caller's deadline fired before ensureConnected() resolved", async () => {
+      const controller = new AbortController();
+      let resolveConnected: (v: boolean) => void = () => {};
+      const connected = new Promise<boolean>((resolve) => {
+        resolveConnected = resolve;
+      });
+      const { context, sent } = createFakeContext({ ensureConnected: () => connected });
+      const delegate = new SharedTextDelegate(context);
+
+      const promise = delegate.requestImeAction("done", 5000, undefined, controller.signal);
+
+      // Mirrors the real #6249 repro: the caller's own deadline (Promise.race
+      // in ImeAction) already fired and gave up, but the underlying
+      // ensureConnected()/reconnect machinery only settles afterwards.
+      controller.abort();
+      resolveConnected(true);
+
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      expect(result.action).toBe("done");
+      // The key assertion: no phantom dispatch after the deadline expired.
+      expect(sent.length).toBe(0);
+    });
+
+    it("dispatches normally when the signal never aborts", async () => {
+      const controller = new AbortController();
+      const { context, sent } = createFakeContext();
+      const delegate = new SharedTextDelegate(context);
+
+      const { sentMsg } = await callAndResolve(
+        sent,
+        context.requestManager,
+        () => delegate.requestImeAction("next", 5000, undefined, controller.signal),
+        { success: true, action: "next", totalTimeMs: 1 },
+      );
+
+      expect(sentMsg.type).toBe("request_ime_action");
+      expect(sent.length).toBe(1);
+    });
+  });
 });

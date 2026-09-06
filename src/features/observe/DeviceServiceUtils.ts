@@ -244,6 +244,16 @@ interface SendCommandBaseOptions {
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
   errorLabel?: string;
+  /**
+   * Aborted by a caller-owned deadline that started before `ensureConnected()`
+   * was awaited (#6249 follow-up). `ensureConnected()` itself is not
+   * cancellable, so this cannot interrupt an in-flight reconnect/auto-setup —
+   * but it IS checked right after that await resolves and before the request
+   * is registered/sent, so a request whose deadline already expired while
+   * `ensureConnected()` was running is never dispatched to the device (no
+   * phantom action after the caller has already given up and returned).
+   */
+  abortSignal?: AbortSignal;
 }
 
 export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
@@ -282,6 +292,23 @@ export async function sendCommand<T>(
       success: false,
       totalTimeMs: 0,
       error,
+    } as T;
+  }
+
+  if (options.abortSignal?.aborted) {
+    // The caller's own deadline already fired while ensureConnected() was
+    // resolving (#6249) — do not register or dispatch a request the caller
+    // has already given up on.
+    logger.debug(
+      `[sendCommand] ${options.messageType} aborted before dispatch (deadline expired while connecting)`,
+    );
+    if (options.notConnectedError) {
+      return options.notConnectedError();
+    }
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error: options.notConnectedMessage ?? "Request aborted before dispatch",
     } as T;
   }
 

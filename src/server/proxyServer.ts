@@ -37,7 +37,9 @@ function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
   return {
     error: {
       code: "session_ownership_lost",
-      message: `Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
+      message:
+        `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
+        "Call getAndroid, getApple, or startDevice to acquire a new device session.",
       sessionUuid: error.sessionUuid,
       reason: error.reason,
       ...(error.release ? { release: error.release } : {}),

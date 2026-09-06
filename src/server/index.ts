@@ -815,7 +815,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         const sessionOwnershipLost = {
           error: {
             code: "session_ownership_lost",
-            message: `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}`,
+            message:
+              `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}. ` +
+              "Call getAndroid, getApple, or startDevice to acquire a new device session.",
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
             release: error.release,

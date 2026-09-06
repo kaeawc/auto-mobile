@@ -59,8 +59,10 @@ export async function assertToolEnabledForSession(
   ) {
     return;
   }
+  const target = sessionUuid ?? "(not yet bound)";
   throw new ActionableError(
-    `Tool ${toolName} is disabled for device session ${sessionUuid ?? "(not yet bound)"}.`,
+    `Tool ${toolName} is disabled for device session ${target}. ` +
+      `Enable it with setToolEnabled { toolName: "${toolName}", enabled: true, sessionUuid: "${target}" }.`,
   );
 }
 
@@ -154,5 +156,8 @@ export async function assertToolEnabledForAnySession(
   const target =
     Array.from(new Set(sessionUuids.filter((uuid): uuid is string => Boolean(uuid)))).join(" / ") ||
     "(not yet bound)";
-  throw new ActionableError(`Tool ${toolName} is disabled for device session ${target}.`);
+  throw new ActionableError(
+    `Tool ${toolName} is disabled for device session ${target}. ` +
+      `Enable it with setToolEnabled { toolName: "${toolName}", enabled: true, sessionUuid: "${target}" }.`,
+  );
 }

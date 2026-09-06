@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SessionToolSelectionService } from "../../../src/features/toolSelection/SessionToolSelectionService";
 import {
   assertToolEnabledForAnySession,
+  assertToolEnabledForSession,
   isToolEnabledForAnyRoute,
   isToolEnabledForAnySession,
 } from "../../../src/features/toolSelection/toolSelectionPolicy";
@@ -167,5 +168,27 @@ describe("exact-tool selection union policy", () => {
     await expect(
       assertToolEnabledForAnySession("selectAllText", false, ["session-1"], disabled),
     ).rejects.toThrow("Tool selectAllText is disabled");
+  });
+
+  test("names the setToolEnabled call with the interpolated tool and session (issue #6259)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    await expect(
+      assertToolEnabledForAnySession("systemTray", false, ["session-abc"], disabled),
+    ).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "session-abc" }.',
+    );
+  });
+
+  test("assertToolEnabledForSession also names the setToolEnabled remediation (issue #6259)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    await expect(
+      assertToolEnabledForSession("systemTray", false, "session-abc", disabled),
+    ).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "session-abc" }.',
+    );
   });
 });

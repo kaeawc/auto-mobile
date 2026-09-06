@@ -372,4 +372,144 @@ describe("DefaultUIStateSetup", () => {
       expect(fakeAdb.wasCommandExecuted("shell input tap 50 50")).toBe(true);
     });
   });
+
+  // Regression for issue #6123: `tapCloseButton` returned `true` after the
+  // FIRST candidate resolved without throwing, regardless of whether the tap
+  // actually dismissed anything. `callInternal` resolves (does not throw) even
+  // when `tapOn` reports `{success: false}` for a missing element, so the
+  // remaining candidates ("Cancel"/"Dismiss"/"×"/"✕") were dead code. The fix
+  // must both surface a failed internal tap (`throwIfInternalToolFailed`, as
+  // `tapOnElement` already does) AND verify the tap genuinely closed the modal
+  // before declaring success, falling through to the next candidate otherwise.
+  describe("tapCloseButton candidate outcome verification (#6123)", () => {
+    afterEach(() => {
+      ToolRegistry.clearTools();
+    });
+
+    const dialog: ModalState = { type: "dialog", layer: 1, windowId: 7 };
+
+    function tapCloseButtonOf(setup: DefaultUIStateSetup) {
+      return (
+        setup as unknown as {
+          tapCloseButton: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).tapCloseButton;
+    }
+
+    test("first candidate succeeds (tapped and verified closed) → returns true, later candidates not tried", async () => {
+      const tappedTexts: string[] = [];
+      let dismissedAfterTap = false;
+
+      const setup = makeSetup(() => ({
+        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+      }));
+      // getCurrentUIState drives isModalDismissed: report the modal gone as
+      // soon as any candidate has been tapped.
+      (
+        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
+      ).getCurrentUIState = async () => ({
+        modalStack: dismissedAfterTap ? [] : [dialog],
+      });
+
+      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+        tappedTexts.push(args.selector.text);
+        dismissedAfterTap = true;
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const result = await tapCloseButtonOf(setup).call(setup, dialog, "android");
+
+      expect(result).toBe(true);
+      expect(tappedTexts).toEqual(["Close"]);
+    });
+
+    test("first candidate taps but does NOT close (no state change) → proceeds to next candidate, which closes → true", async () => {
+      const tappedTexts: string[] = [];
+      let dismissed = false;
+
+      const setup = makeSetup(() => ({
+        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+      }));
+      (
+        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
+      ).getCurrentUIState = async () => ({
+        modalStack: dismissed ? [] : [dialog],
+      });
+
+      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+        const text = args.selector.text;
+        tappedTexts.push(text);
+        // "Close" taps successfully (tool-wise) but never actually dismisses
+        // the modal; "Cancel" is the one that genuinely closes it.
+        if (text === "Cancel") {
+          dismissed = true;
+        }
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const result = await tapCloseButtonOf(setup).call(setup, dialog, "android");
+
+      expect(result).toBe(true);
+      expect(tappedTexts).toEqual(["Close", "Cancel"]);
+    });
+
+    test("no candidate closes the modal → returns false after trying all candidates", async () => {
+      const tappedTexts: string[] = [];
+
+      const setup = makeSetup(() => ({
+        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+      }));
+      // Modal never leaves the stack, regardless of what was tapped.
+      (
+        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
+      ).getCurrentUIState = async () => ({ modalStack: [dialog] });
+
+      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+        tappedTexts.push(args.selector.text);
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const result = await tapCloseButtonOf(setup).call(setup, dialog, "android");
+
+      expect(result).toBe(false);
+      expect(tappedTexts).toEqual(["Close", "Cancel", "Dismiss", "×", "✕"]);
+    });
+
+    test("a failed internal tap (element not found) does not short-circuit — later candidates are still attempted", async () => {
+      const tappedTexts: string[] = [];
+      let dismissed = false;
+
+      const setup = makeSetup(() => ({
+        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+      }));
+      (
+        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
+      ).getCurrentUIState = async () => ({
+        modalStack: dismissed ? [] : [dialog],
+      });
+
+      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+        const text = args.selector.text;
+        tappedTexts.push(text);
+        if (text === "Close") {
+          // Element not found: tapOn's own handler reports failure without
+          // throwing (the #6123 bug — callInternal used to swallow this).
+          return createStructuredToolResponse({ success: false, error: "Element not found" });
+        }
+        if (text === "Cancel" || text === "Dismiss" || text === "×") {
+          // These candidates don't exist on screen either — same as "Close".
+          return createStructuredToolResponse({ success: false, error: "Element not found" });
+        }
+        // "✕" is the only genuine close affordance in this dialog.
+        dismissed = true;
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const result = await tapCloseButtonOf(setup).call(setup, dialog, "android");
+
+      expect(result).toBe(true);
+      // All prior candidates were attempted before the one that worked.
+      expect(tappedTexts).toEqual(["Close", "Cancel", "Dismiss", "×", "✕"]);
+    });
+  });
 });

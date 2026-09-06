@@ -214,6 +214,48 @@ describe("ObserveElementsBuilder", () => {
     ]);
   });
 
+  test("collects a checkable-but-not-clickable switch (issue #6257: Settings preference-row switch)", () => {
+    // Mirrors the AOSP `TwoStatePreference` layout: the row is clickable and
+    // toggles the switch, but the `Switch` widget itself carries
+    // `clickable="false"` — only `checkable`/`checked` reflect its state. Without
+    // this node reaching `elements.clickable`, the skeleton never sees a `toggle`
+    // affordance or `checked` value for it.
+    const preferenceRow = node({
+      bounds: { left: 0, top: 0, right: 200, bottom: 60 },
+      class: "android.widget.LinearLayout",
+      clickable: "true",
+      "resource-id": "wifi_row",
+    });
+    const switchWidget = node({
+      bounds: { left: 160, top: 10, right: 200, bottom: 50 },
+      class: "android.widget.Switch",
+      clickable: "false",
+      checkable: "true",
+      checked: "true",
+      "resource-id": "wifi_switch",
+    });
+    const viewHierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: node({ bounds: { left: 0, top: 0, right: 200, bottom: 300 }, class: "root" }, [
+          preferenceRow,
+          switchWidget,
+        ]),
+      },
+    };
+
+    const parser = new TraversalCountingParser();
+    const builder = new ObserveElementsBuilder(
+      new DefaultObserveElementCollector(parser, new IdentifyMediaViews(parser)),
+    );
+
+    const elements = builder.build(viewHierarchy, "android");
+
+    expect(elements.clickable).toEqual([
+      { ...preferenceRow.$, bounds: preferenceRow.bounds },
+      { ...switchWidget.$, bounds: switchWidget.bounds },
+    ]);
+  });
+
   test("collects iOS text and media from the shared traversal without adding accessibility-label text", () => {
     const labelOnlyImage = node({
       bounds: { left: 0, top: 0, right: 50, bottom: 50 },

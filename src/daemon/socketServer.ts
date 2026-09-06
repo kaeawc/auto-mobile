@@ -3996,70 +3996,94 @@ export class UnixSocketServer {
       }
       case "tools/call": {
         const progressToken = request.progressToken;
-        return await mcpClient.callTool(
-          {
-            name: request.params.name,
-            arguments: this.withSocketSessionAutolockKey(
-              request.params.arguments,
-              socketSessionId,
-              timeoutMs,
-            ),
-          },
-          undefined,
-          {
+        // Cleanup for the abort-timer path below; a no-op for the
+        // no-progress path (nothing was ever armed).
+        let cleanup: () => void = () => {};
+
+        let callOptions: Record<string, unknown> = requestOptions;
+        if (progressToken !== undefined) {
+          // A progress-emitting tool (e.g. a multi-field setUIState) needs
+          // an ASYMMETRIC deadline that the SDK's own `timeout`/
+          // `resetTimeoutOnProgress` cannot express: its `_resetTimeout`
+          // reuses the exact SAME `timeout` value passed at setup for every
+          // later reset, so there is no way through its public options to
+          // have "the remaining, queue-adjusted budget before the first
+          // tick, then the FULL original window after" -- setting `timeout`
+          // to the full window up front would hand a request that waited
+          // most of its budget in the per-session queue a fresh full window
+          // BEFORE any progress exists, while the outer DaemonClient still
+          // expires on its own (much smaller) remaining budget -- a
+          // split-brain where the caller can time out while the daemon has
+          // barely started (#6222 review, reconciliation). Conversely,
+          // keeping `timeout` at the queue-adjusted remainder and relying
+          // on `resetTimeoutOnProgress` would reset EVERY tick to that same
+          // tiny remainder instead of the full window (#6222 review, P1).
+          //
+          // So this drives its own abort-based deadline instead, sharing
+          // the SAME `deadline` object `requireRemainingMcpForwardBudget`
+          // reads:
+          //   - before any progress: aborts at `timeoutMs` (remaining
+          //     budget), matching the outer client's own remaining budget.
+          //   - on each REAL progress tick: `deadline.extendOnProgress`
+          //     pushes the shared deadline forward by the FULL original
+          //     window (`originalTimeoutMs`), bounded by its ceiling, and
+          //     the abort is rearmed against the new remaining time.
+          // The SDK's own `timeout`/`maxTotalTimeout` are set generously
+          // (to the ceiling) purely as a backstop that should never fire
+          // first in practice -- this controller is the actual authority.
+          const controller = new AbortController();
+          const armAbort = (delayMs: number): NodeJS.Timeout =>
+            this.timer.setTimeout(
+              () => controller.abort(`Request timed out after ${Math.max(delayMs, 0)}ms`),
+              Math.max(delayMs, 0),
+            );
+          let abortTimer = armAbort(timeoutMs);
+          const backstopMs = Math.max(deadline.ceiling - this.timer.now(), timeoutMs);
+          cleanup = () => this.timer.clearTimeout(abortTimer);
+
+          callOptions = {
             ...requestOptions,
-            // A progress-emitting tool (e.g. a multi-field setUIState) can
-            // legitimately take longer than its normal deadline once it has
-            // already started applying work; leaving that work stranded by a
-            // fixed timeout is exactly the unsafe-to-retry shape issue #6222
-            // exists to close. `resetTimeoutOnProgress` makes the SDK's OWN
-            // internal timeout for this call reset on each progress tick
-            // instead of firing once at `timeout` -- but the SDK reuses the
-            // SAME `timeout` value on every reset (see its `_resetTimeout`),
-            // so this overrides `timeout` itself to the FULL original
-            // window (`originalTimeoutMs`), not the queue-depleted
-            // `timeoutMs` above (#6222 review, P1). `maxTotalTimeout` still
-            // caps the whole thing at this request's own bounded ceiling --
-            // a tool that stops progressing is still killed there. Only set
-            // for a request that actually asked for progress
-            // (`progressToken !== undefined`, same gate as `onprogress`
-            // below): a tool with no progress relay keeps its exact
-            // original, non-extendable, queue-adjusted `timeout` untouched.
-            ...(progressToken !== undefined
-              ? {
-                  timeout: originalTimeoutMs,
-                  resetTimeoutOnProgress: true,
-                  maxTotalTimeout: Math.max(deadline.ceiling - this.timer.now(), originalTimeoutMs),
-                }
-              : {}),
+            signal: controller.signal,
+            timeout: backstopMs,
+            maxTotalTimeout: backstopMs,
             // Relay progress ticks back to the ORIGINATING socket session,
-            // tagged with the client's own token — never a daemon-fabricated
-            // one, and never sent when the client asked for none (#6205).
-            // Also extends the DAEMON's OWN request deadline (the one
-            // `requireRemainingMcpForwardBudget` checks before a retry) by
-            // the FULL original window, same reasoning as `timeout` above
-            // (#6222 review, P1) -- bounded by the same ceiling as the
-            // SDK-side `maxTotalTimeout`.
-            ...(progressToken !== undefined
-              ? {
-                  onprogress: (notification: {
-                    progress: number;
-                    total?: number;
-                    message?: string;
-                  }) => {
-                    deadline.extendOnProgress(this.timer.now(), originalTimeoutMs);
-                    this.pushProgressNotification(
-                      socketSessionId,
-                      progressToken,
-                      notification.progress,
-                      notification.total,
-                      notification.message,
-                    );
-                  },
-                }
-              : {}),
-          },
-        );
+            // tagged with the client's own token — never a
+            // daemon-fabricated one (#6205). Also extends the DAEMON's OWN
+            // request deadline (the one `requireRemainingMcpForwardBudget`
+            // checks before a retry) and this call's own abort timer, both
+            // by the FULL original window, bounded by `deadline`'s ceiling
+            // (#6222 review, reconciliation).
+            onprogress: (notification: { progress: number; total?: number; message?: string }) => {
+              this.timer.clearTimeout(abortTimer);
+              deadline.extendOnProgress(this.timer.now(), originalTimeoutMs);
+              abortTimer = armAbort(deadline.value - this.timer.now());
+              this.pushProgressNotification(
+                socketSessionId,
+                progressToken,
+                notification.progress,
+                notification.total,
+                notification.message,
+              );
+            },
+          };
+        }
+
+        try {
+          return await mcpClient.callTool(
+            {
+              name: request.params.name,
+              arguments: this.withSocketSessionAutolockKey(
+                request.params.arguments,
+                socketSessionId,
+                timeoutMs,
+              ),
+            },
+            undefined,
+            callOptions,
+          );
+        } finally {
+          cleanup();
+        }
       }
       case "resources/list": {
         return await mcpClient.listResources();

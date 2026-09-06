@@ -53,6 +53,7 @@ interface CapturedCallToolOptions {
   timeout?: number;
   resetTimeoutOnProgress?: boolean;
   maxTotalTimeout?: number;
+  signal?: AbortSignal;
   onprogress?: (notification: { progress: number; total?: number; message?: string }) => void;
 }
 
@@ -80,7 +81,7 @@ function callHandleIdeRequest(
 }
 
 describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6222)", () => {
-  test("a progress-emitting tools/call gets resetTimeoutOnProgress + a bounded maxTotalTimeout", async () => {
+  test("a progress-emitting tools/call is given an abort signal and a bounded backstop timeout", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);
     const initialTimeoutMs = 30_000;
@@ -116,10 +117,15 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     );
 
     expect(result).toEqual({ content: [] });
-    expect(capturedOptions?.resetTimeoutOnProgress).toBe(true);
+    // Progress-driven extension is now driven by this daemon's own abort
+    // controller (the SDK's `resetTimeoutOnProgress` cannot express an
+    // asymmetric initial-vs-reset window -- see the reconciliation note in
+    // `handleIdeRequest`), not the SDK's built-in reset mechanism.
+    expect(capturedOptions?.resetTimeoutOnProgress).toBeUndefined();
+    expect(capturedOptions?.signal).toBeInstanceOf(AbortSignal);
+    // The SDK-side timeout/maxTotalTimeout are only a generous backstop
+    // pinned to the ceiling -- never the authority for the actual schedule.
     expect(typeof capturedOptions?.maxTotalTimeout).toBe("number");
-    // The ceiling is measured from when the request was first received (now,
-    // since no time has passed), not from this individual forward attempt.
     expect(capturedOptions?.maxTotalTimeout).toBeGreaterThanOrEqual(
       MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS - 1,
     );
@@ -217,14 +223,53 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     expect(deadline.value).toBe(originalDeadlineValue);
   });
 
+  /**
+   * A fake `Client` that behaves like the real MCP SDK with respect to
+   * `signal`: it registers an abort listener and rejects exactly as
+   * `Protocol.request`'s `cancel()` does, so these tests exercise the REAL
+   * race between "does the abort timer fire before the next progress tick"
+   * -- not just which options were passed.
+   */
+  function createAbortAwareFakeMcpClient(
+    work: (options: CapturedCallToolOptions) => void | Promise<void>,
+  ): {
+    callTool: (...args: unknown[]) => Promise<unknown>;
+    captured: () => CapturedCallToolOptions;
+  } {
+    let captured: CapturedCallToolOptions | undefined;
+    return {
+      callTool: async (
+        _params: unknown,
+        _resultSchema: unknown,
+        options: CapturedCallToolOptions,
+      ) => {
+        captured = options;
+        return await new Promise((resolve, reject) => {
+          if (options.signal?.aborted) {
+            reject(new Error(String(options.signal.reason)));
+            return;
+          }
+          options.signal?.addEventListener("abort", () => {
+            reject(new Error(String(options.signal?.reason)));
+          });
+          Promise.resolve(work(options))
+            .then(() => resolve({ content: [] }))
+            .catch(reject);
+        });
+      },
+      captured: () => captured!,
+    };
+  }
+
   test("a queued-start request still gets FULL-WINDOW extensions per tick, not the queue-depleted remainder (#6222 review, P1)", async () => {
     // A 30s setUIState that waited 29s behind another request in the
     // per-session queue arrives at handleIdeRequest with only ~1s of
     // REMAINING budget (`timeoutMs`) -- but its ORIGINAL per-request window
     // (`originalTimeoutMs`, unaffected by queue wait) is still the full 30s.
-    // Every progress-driven extension must use the full 30s, not the
-    // depleted ~1s remnant, or ordinary device work between ticks would
-    // still time out despite "surviving" past the initial deadline.
+    // A quick first tick lands within that ~1s window (ordinary setup work),
+    // and every extension AFTER it must use the full 30s, not the depleted
+    // ~1s remnant, or ordinary device work between later ticks would still
+    // time out despite "surviving" the first one.
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);
     const originalTimeoutMs = 30_000;
@@ -235,23 +280,18 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     // attempt starts, exactly like `handleRequest` would have.
     fakeTimer.advanceTime(queueWaitMs);
 
-    let capturedOptions: CapturedCallToolOptions | undefined;
-    const fakeMcpClient = {
-      callTool: async (
-        _params: unknown,
-        _resultSchema: unknown,
-        options: CapturedCallToolOptions,
-      ) => {
-        capturedOptions = options;
-        // Ordinary device work: 20s between ticks, comfortably within a
-        // FULL 30s window but far beyond the queue-depleted ~1s remainder.
-        for (let i = 0; i < 4; i++) {
-          fakeTimer.advanceTime(20_000);
-          options.onprogress?.({ progress: i + 1, total: 4 });
-        }
-        return { content: [] };
-      },
-    };
+    const fakeMcpClient = createAbortAwareFakeMcpClient(async (options) => {
+      // First tick arrives quickly -- well within the ~1s remaining budget.
+      fakeTimer.advanceTime(500);
+      options.onprogress?.({ progress: 1, total: 5 });
+      // Ordinary device work from here on: 20s between ticks, comfortably
+      // within a FULL 30s window but far beyond the queue-depleted ~1s
+      // remainder that was in effect before the first tick.
+      for (let i = 2; i <= 5; i++) {
+        fakeTimer.advanceTime(20_000);
+        options.onprogress?.({ progress: i, total: 5 });
+      }
+    });
 
     const request: DaemonRequest = {
       id: "4",
@@ -273,15 +313,56 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     );
 
     expect(result).toEqual({ content: [] });
-    // The SDK's own reset window (reused verbatim on every progress-driven
-    // reset) must be the FULL 30s window, not the ~1s queue-depleted one.
-    expect(capturedOptions?.timeout).toBe(originalTimeoutMs);
-    expect(capturedOptions?.timeout).not.toBe(remainingTimeoutMs);
-    // 80s of simulated device work elapsed here -- far more than either the
-    // queue-depleted ~1s OR even a single full 30s window -- and the shared
-    // deadline was pushed out by each FULL-WINDOW tick to reflect it.
-    expect(fakeTimer.now() - beforeMs).toBe(80_000);
+    // 80.5s of simulated device work elapsed here -- far more than either
+    // the queue-depleted ~1s OR even a single full 30s window -- and the
+    // shared deadline was pushed out by each FULL-WINDOW tick to reflect it.
+    expect(fakeTimer.now() - beforeMs).toBe(80_500);
     expect(deadline.value).toBeGreaterThan(fakeTimer.now());
+  });
+
+  test("a queued-start request that emits NO progress before the first tick times out on the REMAINING budget, not a fresh full window (#6222 reconciliation)", async () => {
+    // Same queued-start setup as above (~1s remaining out of a 30s original
+    // window) -- but this time NO progress tick arrives before ordinary
+    // device work already exceeds that ~1s remainder. It must time out on
+    // the remaining budget exactly like a non-progressing call would, NOT
+    // survive because a fresh full 30s window was granted up front.
+    const fakeTimer = new FakeTimer();
+    const server = createServer(fakeTimer);
+    const originalTimeoutMs = 30_000;
+    const queueWaitMs = 29_000;
+    const remainingTimeoutMs = originalTimeoutMs - queueWaitMs; // 1_000ms left
+    const deadline = new ProgressExtendableDeadline(fakeTimer.now(), originalTimeoutMs);
+    fakeTimer.advanceTime(queueWaitMs);
+
+    const fakeMcpClient = createAbortAwareFakeMcpClient(async () => {
+      // 5s of work with NO progress tick at all -- more than 4x the ~1s
+      // remaining budget, comfortably within the 30s full window this
+      // request would get AFTER a real tick, which never arrives.
+      fakeTimer.advanceTime(5_000);
+    });
+
+    const request: DaemonRequest = {
+      id: "5",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "setUIState", arguments: {} },
+      progressToken: "tok-no-initial-progress",
+    };
+
+    await expect(
+      callHandleIdeRequest(
+        server,
+        fakeMcpClient,
+        request,
+        remainingTimeoutMs,
+        "socket-1",
+        deadline,
+        originalTimeoutMs,
+      ),
+      // Confirms this is genuinely our abort timer firing at the ~1s
+      // remaining budget, not some unrelated failure -- the message embeds
+      // the exact delay it was armed for.
+    ).rejects.toThrow(`Request timed out after ${remainingTimeoutMs}ms`);
   });
 });
 

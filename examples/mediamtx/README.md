@@ -8,7 +8,7 @@ forwarding, keyframe recovery, and reconnect, so AutoMobile only has to publish.
 The checked-in `mediamtx.yml` is a ready-to-run config for a local try-out; point
 `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` at a per-stream WHIP URL it serves (see
 [`mediamtx.yml`](./mediamtx.yml) for the URL scheme and the
-[CI worker guide](../../docs/webrtc-streaming-ci-worker.md) for a full walkthrough).
+[CI worker guide](../../docs/webrtc-streaming.md) for a full walkthrough).
 
 ## Watch a stream in a browser
 

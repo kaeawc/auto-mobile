@@ -6,157 +6,147 @@ in CI.
 
 ## 1. Install a test runner
 
-<details open markdown>
-<summary>Android</summary>
+=== "Android"
 
-### Android / Gradle
+    **Gradle**
 
-Add the JUnit runner to the module that owns the tests:
+    Add the JUnit runner to the module that owns the tests:
 
-```kotlin
-// app/build.gradle.kts
-dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.68")
-}
-```
+    ```kotlin
+    // app/build.gradle.kts
+    dependencies {
+        testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.68")
+    }
+    ```
 
-The runner executes as a normal JVM test, so no test APK or
-`connectedAndroidTest` task is required. Ensure `adb` is on `PATH` and an
-Android device or emulator is available.
+    The runner executes as a normal JVM test, so no test APK or
+    `connectedAndroidTest` task is required. Ensure `adb` is on `PATH` and an
+    Android device or emulator is available.
 
-</details>
+=== "iOS"
 
-<details markdown>
-<summary>iOS</summary>
+    **Swift Package Manager**
 
-### iOS / Swift Package Manager
+    Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), then add the `XCTestRunner` product to the test target.
 
-Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), then add the `XCTestRunner` product to the test target.
+    For a Swift package manifest, use the released package:
 
-For a Swift package manifest, use the released package:
+    ```swift
+    .package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.68")
+    ```
 
-```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.68")
-```
-
-`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
-
-</details>
+    `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
 
 ## 2. Create a plan
 
-<details open markdown>
-<summary>Android</summary>
+=== "Android"
 
-Put the plan in `src/test/resources/test-plans/`:
+    Put the plan in `src/test/resources/test-plans/`. This is AutoMobile's own
+    [`launch-clock-app.yaml`](https://github.com/kaeawc/auto-mobile/blob/main/android/junit-runner/src/test/resources/test-plans/launch-clock-app.yaml),
+    which launches the system Clock app and waits for its UI:
 
-```yaml
-name: launch-app
-description: Launch the app and verify the home screen
-platform: android
-steps:
-  - tool: launchApp
-    appId: com.example.app
-    clearAppData: true
+    ```yaml
+    name: launch-clock-app
+    description: Very simple test to launch Clock app
+    steps:
+      - tool: launchApp
+        appId: com.google.android.deskclock
+        clearAppData: true
+        label: Launch Clock application with clean state
 
-  - tool: observe
-    waitFor:
-      text: "Welcome"
-      timeout: 10000
+      - tool: observe
+        waitFor:
+          elementId: "com.google.android.deskclock:id/tab_menu_alarm"
+          timeout: 20000
+        label: Wait for Clock UI to be ready
 
-  - tool: terminateApp
-    appId: com.example.app
-```
+      - tool: terminateApp
+        appId: com.google.android.deskclock
+    ```
 
-</details>
+=== "iOS"
 
-<details markdown>
-<summary>iOS</summary>
+    Put the plan in the iOS test bundle's `test-plans/` directory. This is
+    AutoMobile's own
+    [`launch-reminders-app.yaml`](https://github.com/kaeawc/auto-mobile/blob/main/ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Plans/launch-reminders-app.yaml),
+    which launches the system Reminders app and waits for it to foreground:
 
-Put the plan in the iOS test bundle's `test-plans/` directory:
+    ```yaml
+    name: launch-reminders-app
+    description: Launch the iOS Reminders app and wait for it to reach the foreground
+    platform: ios
+    steps:
+      - tool: launchApp
+        appId: com.apple.reminders
+        label: Launch Reminders
 
-```yaml
-name: launch-app
-description: Launch the app and verify the home screen
-platform: ios
-steps:
-  - tool: launchApp
-    appId: com.example.app
-    clearAppData: true
+      - tool: observe
+        waitFor:
+          activeWindow:
+            appId: com.apple.reminders
+          timeout: 30000
+        label: Wait for Reminders to be foregrounded
 
-  - tool: observe
-    waitFor:
-      text: "Welcome"
-      timeout: 10000
-
-  - tool: terminateApp
-    appId: com.example.app
-```
-
-</details>
+      - tool: terminateApp
+        appId: com.apple.reminders
+        label: Close Reminders
+    ```
 
 ## 3. Consume the plan
 
-<details open markdown>
-<summary>Android</summary>
+=== "Android"
 
-Place this test under `app/src/test/`:
+    Place this test under `src/test/`. AutoMobile runs the same plan from
+    [`ClockAppAutoMobileTest.kt`](https://github.com/kaeawc/auto-mobile/blob/main/android/junit-runner/src/test/kotlin/dev/jasonpearson/automobile/junit/ClockAppAutoMobileTest.kt):
 
-```kotlin
-import dev.jasonpearson.automobile.junit.AutoMobilePlan
-import dev.jasonpearson.automobile.junit.AutoMobileRunner
-import org.junit.Test
-import org.junit.runner.RunWith
-import kotlin.test.assertTrue
+    ```kotlin
+    import dev.jasonpearson.automobile.junit.AutoMobilePlan
+    import dev.jasonpearson.automobile.junit.AutoMobileRunner
+    import org.junit.Test
+    import org.junit.runner.RunWith
+    import kotlin.test.assertTrue
 
-@RunWith(AutoMobileRunner::class)
-class LaunchTest {
-    @Test
-    fun appLaunches() {
-        val result = AutoMobilePlan("test-plans/launch-app.yaml").execute()
-        assertTrue(result.success, result.output)
+    @RunWith(AutoMobileRunner::class)
+    class ClockAppTest {
+        @Test
+        fun launchesClock() {
+            val result = AutoMobilePlan("test-plans/launch-clock-app.yaml").execute()
+            assertTrue(result.success, result.output)
+        }
     }
-}
-```
+    ```
 
-Run it with:
+    Run it with:
 
-```bash
-./gradlew :app:testDebugUnitTest --tests LaunchTest
-```
+    ```bash
+    ./gradlew :app:testDebugUnitTest --tests ClockAppTest
+    ```
 
-</details>
+=== "iOS"
 
-<details markdown>
-<summary>iOS</summary>
+    Add the plan to the iOS test bundle and create an `AutoMobileTestCase`.
+    AutoMobile runs the same plan from
+    [`RemindersIntegrationTests.swift`](https://github.com/kaeawc/auto-mobile/blob/main/ios/XCTestRunner/Sources/XCTestRunnerTests/RemindersIntegrationTests.swift):
 
-Add the plan to the iOS test bundle and create an `AutoMobileTestCase`:
+    ```swift
+    import XCTest
+    import XCTestRunner
 
-```swift
-import XCTest
-import XCTestRunner
+    final class RemindersTests: AutoMobileTestCase {
+        override var planPath: String {
+            "test-plans/launch-reminders-app.yaml"
+        }
 
-final class LaunchTests: AutoMobileTestCase {
-    override var planPath: String {
-        "test-plans/launch-app.yaml"
+        func testLaunchReminders() throws {
+            let result = try executePlan()
+            XCTAssertTrue(result.success, result.error ?? "AutoMobile plan failed")
+        }
     }
+    ```
 
-    override var cleanupOptions: AutoMobilePlanExecutor.CleanupOptions? {
-        .init(appId: "com.example.app", clearAppData: true)
-    }
-
-    func testAppLaunches() throws {
-        let result = try executePlan()
-        XCTAssertTrue(result.success, result.error ?? "AutoMobile plan failed")
-    }
-}
-```
-
-Run the test target from Xcode or with `xcodebuild test` against a booted iOS
-Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
-checkpoints so failures explain which state was missing.
-
-</details>
+    Run the test target from Xcode or with `xcodebuild test` against a booted iOS
+    Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
+    checkpoints so failures explain which state was missing.
 
 ### Redacting sensitive parameters
 

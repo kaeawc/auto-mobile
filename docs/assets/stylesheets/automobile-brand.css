@@ -84,3 +84,101 @@
   min-width: 12rem;
   white-space: nowrap;
 }
+
+/* Live prompt search bar (see assets/javascripts/prompt-form.js). */
+.md-typeset .prompt-search {
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.4rem;
+  color: var(--md-default-fg-color);
+  display: block;
+  font-size: 0.95rem;
+  margin: 1.25rem 0 1.75rem;
+  max-width: 24rem;
+  padding: 0.5rem 0.75rem;
+  width: 100%;
+}
+
+.md-typeset .prompt-search:focus {
+  border-color: var(--md-accent-fg-color);
+  outline: none;
+}
+
+.md-typeset code.prompt-var {
+  color: var(--md-accent-fg-color);
+}
+
+.md-typeset code.prompt-var--edit {
+  border-bottom: 1px dashed var(--md-default-fg-color--lighter);
+  color: inherit;
+  cursor: text;
+}
+
+.md-typeset code.prompt-var--edit:focus {
+  border-bottom-color: var(--md-accent-fg-color);
+  outline: none;
+}
+
+/* One-click copy on example prompts (see assets/javascripts/prompt-form.js). */
+.copyable-prompt {
+  position: relative;
+}
+
+.md-typeset .copyable-prompt > blockquote {
+  padding-right: 3rem;
+}
+
+.copy-prompt {
+  align-items: center;
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.35rem;
+  color: var(--md-default-fg-color--light);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  opacity: 0;
+  padding: 0.25rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 0.5rem;
+  transition:
+    opacity 125ms,
+    color 125ms,
+    border-color 125ms;
+}
+
+.copyable-prompt:hover .copy-prompt,
+.copy-prompt:focus-visible,
+.copy-prompt--done {
+  opacity: 1;
+}
+
+.copy-prompt:hover {
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}
+
+.copy-prompt--done {
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}
+
+/* Demo gifs inside example-prompt tabs. */
+.md-typeset img.example-demo {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  display: block;
+  margin: 1rem auto 0.25rem;
+  max-height: 30rem;
+  width: auto;
+}
+
+/* Nested platform tabs (Android/iOS inside each example). content.tabs.link
+   re-selects the active platform when a previously-hidden example becomes
+   visible; with Material's animated underline this looked like the indicator
+   sliding from Android to iOS on every example switch. Make the nested
+   indicator jump instantly. The outer example tabs keep their animation. */
+.md-typeset .tabbed-content .tabbed-set > .tabbed-labels::before {
+  transition: none;
+}

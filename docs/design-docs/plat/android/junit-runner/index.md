@@ -1,59 +1,47 @@
-# Android JUnit runner
+# Test runners
 
-The Android JUnit runner lets a normal JVM test execute an AutoMobile YAML plan against a connected device. The Kotlin test owns pass/fail assertions; the plan keeps device actions easy to review.
+AutoMobile plans run from a normal platform test: the test owns pass/fail
+assertions while the YAML plan keeps device actions easy to review. See
+[UI tests](../../../../using/ui-tests.md) for setup and copy-paste code.
 
-```mermaid
-sequenceDiagram
-  participant Gradle as Gradle testDebugUnitTest
-  participant Runner as AutoMobileRunner (JVM)
-  participant Daemon as AutoMobile Daemon
-  participant Device as Android device (ADB)
+=== "Android"
 
-  Gradle->>Runner: run test class
-  Runner->>Daemon: connect
-  Runner->>Daemon: execute YAML plan
-  Daemon->>Device: launch, observe, interact
-  Device-->>Daemon: UI state and screenshots
-  Daemon-->>Runner: success or failed step
-  Runner-->>Gradle: pass or fail
-```
+    The JUnit runner lets a normal JVM test execute a plan against a connected
+    Android device.
 
-<details open markdown>
-<summary>Kotlin JUnit test</summary>
+    ```mermaid
+    sequenceDiagram
+      participant Gradle as Gradle testDebugUnitTest
+      participant Runner as AutoMobileRunner (JVM)
+      participant Daemon as AutoMobile Daemon
+      participant Device as Android device (ADB)
 
-```kotlin
-import dev.jasonpearson.automobile.junit.AutoMobilePlan
-import dev.jasonpearson.automobile.junit.AutoMobileRunner
-import org.junit.Test
-import org.junit.runner.RunWith
-import kotlin.test.assertTrue
+      Gradle->>Runner: run test class
+      Runner->>Daemon: connect
+      Runner->>Daemon: execute YAML plan
+      Daemon->>Device: launch, observe, interact
+      Device-->>Daemon: UI state and screenshots
+      Daemon-->>Runner: success or failed step
+      Runner-->>Gradle: pass or fail
+    ```
 
-@RunWith(AutoMobileRunner::class)
-class LaunchTest {
-  @Test
-  fun appLaunches() {
-    val result = AutoMobilePlan("test-plans/launch-app.yaml").execute()
-    assertTrue(result.success, result.output)
-  }
-}
-```
+=== "iOS"
 
-</details>
+    The XCTestRunner lets an `AutoMobileTestCase` execute a plan against a booted
+    iOS Simulator.
 
-<details markdown>
-<summary>AutoMobile YAML plan</summary>
+    ```mermaid
+    sequenceDiagram
+      participant Xcode as xcodebuild test
+      participant Runner as AutoMobileTestCase (XCTest)
+      participant Daemon as AutoMobile Daemon
+      participant Sim as iOS Simulator
 
-```yaml
-name: launch-app
-platform: android
-steps:
-  - tool: launchApp
-    appId: com.example.app
-    clearAppData: true
-  - tool: observe
-    waitFor:
-      text: Welcome
-      timeout: 10000
-```
-
-</details>
+      Xcode->>Runner: run test case
+      Runner->>Daemon: connect
+      Runner->>Daemon: execute YAML plan
+      Daemon->>Sim: launch, observe, interact
+      Sim-->>Daemon: UI state and screenshots
+      Daemon-->>Runner: success or failed step
+      Runner-->>Xcode: pass or fail
+    ```

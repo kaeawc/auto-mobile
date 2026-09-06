@@ -425,6 +425,40 @@ describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up
     expect(deriveTouchLatencyPoint(undefined, result)).toEqual({ skipTouchLatency: true });
   });
 
+  // Regression: Android can transiently report zero-area window bounds
+  // (e.g. a window mid-transition). A naive center calculation on
+  // {left:100,top:100,right:100,bottom:100} still produces a defined-looking
+  // point (100, 100) that isn't actually inside any real content - it must
+  // not be reported inert and tapped.
+  test("deriveTouchLatencyPoint skips on zero-area window bounds", () => {
+    const zeroArea = { left: 100, top: 100, right: 100, bottom: 100 };
+    const result = makeResult();
+
+    const decision = deriveTouchLatencyPoint(zeroArea, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
+  // Regression: inverted bounds (right < left, or bottom < top) must also be
+  // rejected rather than producing a negative-width/height "center".
+  test("deriveTouchLatencyPoint skips on inverted window bounds", () => {
+    const inverted = { left: 500, top: 900, right: 100, bottom: 200 };
+    const result = makeResult();
+
+    const decision = deriveTouchLatencyPoint(inverted, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
+  test("deriveTouchLatencyPoint skips on non-finite window bounds", () => {
+    const nonFinite = { left: 0, top: 0, right: Number.NaN, bottom: 1920 };
+    const result = makeResult();
+
+    const decision = deriveTouchLatencyPoint(nonFinite, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
   // P1: when every scanned candidate overlaps a control (a full-screen
   // button, WebView, or map), the caller must skip the touch-latency
   // measurement entirely rather than tap the known-unsafe fallback point.

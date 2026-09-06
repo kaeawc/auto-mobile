@@ -116,6 +116,27 @@ function isPointInsideBounds(x: number, y: number, bounds: ElementBounds): boole
   return x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom;
 }
 
+/**
+ * True only for finite bounds with strictly positive width and height.
+ * Android can transiently report zero-area or inverted window bounds (e.g.
+ * mid-transition, or a window in the process of being torn down) - a naive
+ * center calculation on those still produces a defined-looking point (e.g.
+ * `{left:100, top:100, right:100, bottom:100}` -> `(100, 100)`), which is
+ * not actually inside any real content. Rejecting malformed bounds here,
+ * before a point is derived, keeps a transient bad reading from producing a
+ * touch point that gets reported inert and tapped (issue #6167 follow-up).
+ */
+function isValidWindowBounds(bounds: ElementBounds): boolean {
+  return (
+    Number.isFinite(bounds.left) &&
+    Number.isFinite(bounds.top) &&
+    Number.isFinite(bounds.right) &&
+    Number.isFinite(bounds.bottom) &&
+    bounds.right - bounds.left > 0 &&
+    bounds.bottom - bounds.top > 0
+  );
+}
+
 export interface InertTouchPointResult {
   point: { x: number; y: number };
   /**
@@ -219,6 +240,14 @@ export function deriveTouchLatencyPoint(
   elementParser: ElementParser = new DefaultElementParser(),
 ): TouchLatencyPointDecision {
   if (!windowBounds) {
+    return { skipTouchLatency: true };
+  }
+
+  if (!isValidWindowBounds(windowBounds)) {
+    logger.warn(
+      "[PerformanceAudit] Skipping touch-latency measurement: window bounds are malformed " +
+        `(zero-area, inverted, or non-finite): ${JSON.stringify(windowBounds)}`,
+    );
     return { skipTouchLatency: true };
   }
 

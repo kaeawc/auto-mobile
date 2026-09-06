@@ -572,6 +572,20 @@ export class DefaultElementFinder implements ElementFinder {
    * id to carry capture-origin provenance (which generation/session it was
    * observed in), a design change spanning the observe layer and this finder
    * - out of scope for the current-capture-only check implemented here.
+   *
+   * KNOWN LIMITATION (issue #6230, review thread PRRT_kwDOP-GF5M6fo-Pb): a
+   * synthetic id is a Merkle hash over a node's OWN content fields plus every
+   * DESCENDANT's content hash (`StableNodeIdentity.ts`), so a still-present,
+   * otherwise-unchanged ancestor's id changes whenever any descendant's
+   * `text`/`content-desc` changes between captures - e.g. a live timer child
+   * ticking "1 second" → "2 seconds" changes its row's id from one capture to
+   * the next. The exact-match lookup below then finds nothing for the id a
+   * caller observed a moment earlier, even though the intended control is
+   * still on screen (a miss, not a mis-tap). This is the counterpart of the
+   * #6229 removal case - both are inherent to a pure content hash, which is
+   * stable only while content is stable - and needs the same class of fix:
+   * structural/positional identity or capture-origin provenance, not a
+   * change to the current-capture-only matching done here.
    */
   private assertStableViewIdSelectorNotAmbiguous(
     searchRoots: ViewHierarchyNode[],

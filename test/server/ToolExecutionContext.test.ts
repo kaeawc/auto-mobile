@@ -316,6 +316,53 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
   });
 
+  // #6227 P1 follow-up: a concurrency window where a `booted` request
+  // publishes the recovered session into `SessionManager`'s in-memory map
+  // (`this.sessions.set(...)`) and then pauses in `ensureKeepScreenAwake`
+  // *before* recording its readiness. A concurrent `automationReady` request
+  // that resolves the same sessionUuid in that window must NOT treat the
+  // still-undefined recorded readiness as satisfied and skip setup.
+  test("runs setup for a concurrent automationReady call that observes a published-but-unrecorded session (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // Simulate the race directly: a session already published into the
+    // SessionManager's in-memory map (as `createSession` does), but with its
+    // deviceReadiness NOT YET recorded — exactly the state a concurrent
+    // `booted` request's session is in after publish but before
+    // `runDeviceReadinessSetup` records the level.
+    await sessionManager.createSession("session-race-window", "device-1", "android");
+    expect(sessionManager.getDeviceReadiness("session-race-window")).toBeUndefined();
+
+    // A concurrent automationReady request resolves this same session as
+    // "existing" and must run setup rather than trusting the unrecorded
+    // readiness.
+    const context = await createToolExecutionContext(
+      "session-race-window",
+      sessionManager,
+      devicePool,
+      {
+        ...sessionOptions,
+        deviceReadiness: "automationReady",
+      },
+    );
+
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-race-window")).toBe("automationReady");
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>
@@ -328,6 +375,13 @@ describe("ToolExecutionContext", () => {
       }) as any;
 
     await sessionManager.createSession("session-1", "device-1", "android");
+    // #6227 P1 follow-up: `undefined` recorded readiness is no longer treated
+    // as satisfied on the existingSession path (a session whose readiness was
+    // never recorded must not be assumed ready — see isReadinessSatisfied).
+    // A direct `SessionManager.createSession` call bypasses this module's own
+    // setup entirely, so record the readiness explicitly, exactly as a real
+    // setup pass would have by the time a session is genuinely "existing".
+    sessionManager.setDeviceReadiness("session-1", "automationReady");
     const context = await createToolExecutionContext(
       "session-1",
       sessionManager,
@@ -520,6 +574,11 @@ describe("ToolExecutionContext", () => {
 
   test("rechecks admission after setup releases its session", async () => {
     const session = await sessionManager.createSession("session-releasing", "device-1", "android");
+    // #6227 P1 follow-up: `undefined` readiness is no longer treated as
+    // satisfied on the existingSession path, so record it explicitly here —
+    // this test exercises the post-setup admission recheck, not accessibility
+    // setup, and must not make a real CtrlProxy/adb call.
+    sessionManager.setDeviceReadiness("session-releasing", "automationReady");
     const trackSetup = spyOn(sessionManager, "trackSessionSetup").mockImplementation(
       async (trackedSession, setup) => {
         await setup();

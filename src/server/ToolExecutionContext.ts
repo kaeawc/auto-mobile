@@ -141,13 +141,27 @@ function isReadinessSatisfied(
   achieved: DeviceReadinessLevel | undefined,
   required: DeviceReadinessLevel,
 ): boolean {
-  // `undefined` means this session was never routed through this module's own
-  // setup — e.g. a test (or another internal caller) that tracks a session
-  // directly via `SessionManager.createSession`. Trust the existing-session
-  // fast path exactly as it behaved before #6227 rather than forcing setup
-  // on a session this code has no record of ever needing it.
+  // #6227 P1 follow-up: `undefined` must NOT be treated as satisfied here.
+  // A recovered/newly-published session becomes visible to a concurrent
+  // `getSessionForNewExecution` lookup (`this.sessions.set(...)` in
+  // `persistAndPublishSession`) *before* this module's own setup path gets a
+  // chance to call `setDeviceReadiness` (setup runs later, inside
+  // `setupSession` -> `runDeviceReadinessSetup`, after `getOrCreateSession`
+  // has already returned). A concurrent call that lands in that window would
+  // see the session as "existing" with `achieved === undefined` and — if we
+  // treated that as satisfied — skip CtrlProxy/accessibility-service setup
+  // entirely, running automation against an unprepared device.
+  //
+  // Treating `undefined` as NOT satisfied closes that hole: the
+  // `existingSession` branch below always runs `runDeviceReadinessSetup` for
+  // a session whose readiness has never been recorded, which is safe because
+  // that setup is idempotent (redundant concurrent runs are harmless, merely
+  // wasteful). Callers that track a session directly (e.g.
+  // `SessionManager.createSession` in tests) and want to skip this module's
+  // setup must record an explicit readiness level via `setDeviceReadiness`
+  // rather than relying on `undefined` meaning "already satisfied".
   if (achieved === undefined) {
-    return true;
+    return false;
   }
   // `booted` is satisfied by either recorded level; `automationReady` needs
   // the higher level to have actually been achieved.

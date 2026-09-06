@@ -256,10 +256,14 @@ jobs:
       MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' }}
     strategy:
       fail-fast: false
+      # Swift-package floor is Xcode 26.5 (Swift 6.3). The root, XCTestRunner, and
+      # screen-capture manifests declare swift-tools-version 6.3 for strict
+      # concurrency; Swift 5.10 (Xcode 15.4) and Swift 6.2 (Xcode 26.0) cannot even
+      # parse a 6.3 manifest, so those legs are pruned here (PR #6014 established the
+      # 26.5 floor for the root build). The Xcode-project sweep below still covers
+      # 15.4 for the packages that support it.
       matrix:
         config:
-          - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
           - { name: "Xcode 26.6", runner: "macos-26", xcode: "26.6" }
     steps:

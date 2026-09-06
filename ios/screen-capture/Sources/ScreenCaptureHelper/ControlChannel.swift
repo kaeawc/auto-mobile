@@ -9,7 +9,11 @@ import ScreenCaptureCore
 ///
 /// Only started in `--encode h264` mode, so the default raw path never touches
 /// STDIN and its output stays byte-for-byte unchanged.
-final class ControlChannel {
+///
+/// `@unchecked Sendable`: `buffer` is mutated only on the serial `queue` (via
+/// `ingest`); `handle` and `onCommand` are `let`. This lets the `@Sendable`
+/// readability handler capture `self`.
+final class ControlChannel: @unchecked Sendable {
     private let handle: FileHandle
     private let onCommand: (EncoderControlCommand) -> Void
     private let queue = DispatchQueue(label: "automobile.screen-capture.control")
@@ -32,7 +36,11 @@ final class ControlChannel {
                 handle.readabilityHandler = nil
                 return
             }
-            self?.queue.async { self?.ingest(chunk) }
+            // Bind `self` strongly once so the serial-queue hop captures a value,
+            // not the weak optional `var self` (a data race under Swift-6 strict
+            // concurrency).
+            guard let self else { return }
+            self.queue.async { self.ingest(chunk) }
         }
     }
 

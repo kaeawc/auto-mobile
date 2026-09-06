@@ -377,12 +377,15 @@ case .capture(let deviceID, let encode):
 // A reference box so the Task closure mutates a captured class instead of a
 // `var`. Swift 5.9 (Xcode 15) rejects `var` capture in `Task { … }` even when
 // the semaphore enforces a happens-before relationship; class capture is fine.
-private final class Box<T> {
+// `@unchecked Sendable`: the `Task` writes `value` before `semaphore.signal()` and
+// `runBlocking` reads it only after `semaphore.wait()`, so the semaphore is the
+// happens-before edge that serializes the single write and single read.
+private final class Box<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }
 }
 
-func runBlocking<T>(_ body: @escaping () async throws -> T) -> Result<T, Error> {
+func runBlocking<T>(_ body: @escaping @Sendable () async throws -> T) -> Result<T, Error> {
     let semaphore = DispatchSemaphore(value: 0)
     let box = Box<Result<T, Error>>(.failure(CancellationError()))
     Task {
@@ -397,7 +400,7 @@ func runBlocking<T>(_ body: @escaping () async throws -> T) -> Result<T, Error> 
     return box.value
 }
 
-func runBlocking<T>(_ body: @escaping () async -> T) -> T {
+func runBlocking<T>(_ body: @escaping @Sendable () async -> T) -> T {
     let semaphore = DispatchSemaphore(value: 0)
     let box = Box<T?>(nil)
     Task {
@@ -412,8 +415,12 @@ func runBlocking<T>(_ body: @escaping () async -> T) -> T {
 // MARK: - Signal handling
 
 // Retain signal sources beyond `installShutdownHandlers` to keep them alive
-// for the duration of the run loop.
-private var retainedSignalSources: [DispatchSourceSignal] = []
+// for the duration of the run loop. `nonisolated(unsafe)`: written exactly once by
+// `installShutdownHandlers` on the main thread before `RunLoop.main.run()`, and
+// never read afterward (it only holds the sources alive), so there is no cross-thread
+// access to race — the annotation opts this write-once global out of the top-level
+// `@MainActor` inference so the nonisolated helper can assign it.
+nonisolated(unsafe) private var retainedSignalSources: [DispatchSourceSignal] = []
 
 func installShutdownHandlers(_ handler: @escaping () -> Void) {
     let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)

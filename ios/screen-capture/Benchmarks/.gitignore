@@ -1,0 +1,8 @@
+# SwiftPM build products and resolved graph (machine-specific; the repo does not
+# commit Package.resolved for its Swift packages).
+.build/
+Package.resolved
+
+# package-benchmark stores saved baselines here; they are machine-specific run data,
+# not source.
+.benchmarkBaselines/

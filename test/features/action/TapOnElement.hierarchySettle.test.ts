@@ -286,4 +286,56 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       basis: "viewHierarchy changed",
     });
   });
+
+  test("does not settle on two consecutive STALE-equal hashes; keeps polling to the fresh destination (PR6266 P2 follow-up)", async () => {
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("baseline"),
+    });
+    const transientFlip = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("baseline-focused-flip"),
+    });
+    // Two consecutive polls returning the SAME non-null hash, but both
+    // explicitly marked stale (freshness.isFresh === false, e.g. Android's
+    // freshness retries exhausted). Equal-but-stale hashes must NOT be
+    // trusted as settle evidence — the plateau could just be the same stale
+    // snapshot served twice while a real, fresh destination is still coming.
+    const staleEqual1 = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("stale-plateau"),
+      freshness: { isFresh: false } as any,
+    });
+    const staleEqual2 = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("stale-plateau"),
+      freshness: { isFresh: false } as any,
+    });
+    const freshDestination = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("time-picker-dialog"),
+      freshness: { isFresh: true } as any,
+    });
+
+    const waitForCondition = makeSequencedWaitForCondition([
+      staleEqual1,
+      staleEqual2,
+      freshDestination,
+    ]);
+    const { tap } = createTapOnElement(waitForCondition);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(
+      previous,
+      transientFlip,
+    );
+
+    // Must NOT have stopped at the stale-equal pair.
+    expect(postTap.observation).not.toEqual(staleEqual2);
+    // Must have continued through to the fresh destination capture.
+    expect(postTap.observation).toEqual(freshDestination);
+    expect(postTap.effect).toEqual({
+      screenChanged: true,
+      basis: "viewHierarchy changed",
+    });
+  });
 });

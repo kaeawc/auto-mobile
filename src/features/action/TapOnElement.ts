@@ -710,8 +710,17 @@ export class TapOnElement extends BaseVisualChange {
         // otherwise two consecutive hierarchy-less polls (both hash to null)
         // would look identical and stop settling before a later, real
         // destination capture ever arrives.
+        //
+        // Issue #6266 (review): equal hashes are only trustworthy as settle
+        // evidence when BOTH compared observations are fresh. If either side
+        // is explicitly stale (freshness.isFresh === false, e.g. Android's
+        // freshness retries exhausted), an equal hash pair may just be the
+        // same stale snapshot returned twice — settling on it would erase a
+        // later FRESH destination that never gets polled for.
+        const bothFresh =
+          observation.freshness?.isFresh !== false && lastObservation.freshness?.isFresh !== false;
         const hierarchyStableSincePriorPoll =
-          currentHash !== null && priorHash !== null && currentHash === priorHash;
+          currentHash !== null && priorHash !== null && currentHash === priorHash && bothFresh;
         lastObservation = observation;
         return { matched: activeWindowChanged || hierarchyStableSincePriorPoll };
       },

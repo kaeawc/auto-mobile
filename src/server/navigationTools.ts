@@ -69,54 +69,78 @@ function getNavigationManager(sessionUuid?: string): NavigationGraphManager {
     : NavigationGraphManager.getInstance();
 }
 
+// Injection seam for the navigateTo handler (mirrors the tapAny factory seam
+// in interactionTools.ts). Lets a unit test exercise the registered handler
+// wiring with a fake NavigateTo whose execute() returns a chosen
+// success/failure result, instead of spying on the class prototype (#6251
+// review — a prototype spy is a process-global patch that can leak into
+// unrelated tests running in the same process).
+export type NavigateToLike = Pick<NavigateTo, "execute">;
+
+function createDefaultNavigateTo(device: BootedDevice, args: NavigateToArgs): NavigateToLike {
+  const navigationManager = getNavigationManager(args.sessionUuid);
+  return new NavigateTo(
+    device,
+    undefined,
+    null,
+    null,
+    navigationManager,
+    undefined,
+    new DefaultPathOptimizer(navigationManager),
+    args.sessionUuid,
+  );
+}
+
+let navigateToFactory: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike =
+  createDefaultNavigateTo;
+
+export function setNavigateToFactory(
+  factory: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike,
+): void {
+  navigateToFactory = factory;
+}
+
+export function resetNavigateToFactory(): void {
+  navigateToFactory = createDefaultNavigateTo;
+}
+
+export const navigateToHandler = async (
+  device: BootedDevice,
+  args: NavigateToArgs,
+  progress?: ProgressCallback,
+) => {
+  try {
+    const navigateTo = navigateToFactory(device, args);
+    const options: NavigateToOptions = {
+      targetScreen: args.targetScreen,
+      platform: args.platform || "android",
+      sessionUuid: args.sessionUuid,
+    };
+    const result = await navigateTo.execute(options, progress);
+
+    if (result.success) {
+      return createJSONToolResponse({
+        message: result.message || `Navigated to ${args.targetScreen}`,
+        ...result,
+      });
+    } else {
+      // A failed navigation must not read as a completed one: mark the MCP
+      // envelope `isError`, exactly as tapOn/inputText do (#6200, #6251).
+      return {
+        ...createJSONToolResponse({
+          error: result.error || "Navigation failed",
+          ...result,
+        }),
+        isError: true as const,
+      };
+    }
+  } catch (error) {
+    throw new ActionableError(`Failed to navigate: ${error}`);
+  }
+};
+
 // Register navigation tools
 export function registerNavigationTools() {
-  // NavigateTo handler
-  const navigateToHandler = async (
-    device: BootedDevice,
-    args: NavigateToArgs,
-    progress?: ProgressCallback,
-  ) => {
-    try {
-      const navigationManager = getNavigationManager(args.sessionUuid);
-      const navigateTo = new NavigateTo(
-        device,
-        undefined,
-        null,
-        null,
-        navigationManager,
-        undefined,
-        new DefaultPathOptimizer(navigationManager),
-        args.sessionUuid,
-      );
-      const options: NavigateToOptions = {
-        targetScreen: args.targetScreen,
-        platform: args.platform || "android",
-        sessionUuid: args.sessionUuid,
-      };
-      const result = await navigateTo.execute(options, progress);
-
-      if (result.success) {
-        return createJSONToolResponse({
-          message: result.message || `Navigated to ${args.targetScreen}`,
-          ...result,
-        });
-      } else {
-        // A failed navigation must not read as a completed one: mark the MCP
-        // envelope `isError`, exactly as tapOn/inputText do (#6200, #6251).
-        return {
-          ...createJSONToolResponse({
-            error: result.error || "Navigation failed",
-            ...result,
-          }),
-          isError: true as const,
-        };
-      }
-    } catch (error) {
-      throw new ActionableError(`Failed to navigate: ${error}`);
-    }
-  };
-
   // Get navigation graph handler (for debugging)
   const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
     try {

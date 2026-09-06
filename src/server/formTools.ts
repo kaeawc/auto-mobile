@@ -65,6 +65,77 @@ const setUIStateResultSchema = z.object({
   error: z.string().optional().describe("Error message"),
 });
 
+export type SetUIStateArgs = z.infer<typeof setUIStateSchema>;
+
+// Injection seam for the setUIState handler (mirrors the tapAny factory seam
+// in interactionTools.ts). Lets a unit test exercise the registered handler
+// wiring with a fake SetUIState whose execute() returns a chosen
+// success/partial/failure result, instead of spying on the class prototype
+// (#6251 review — a prototype spy is a process-global patch that can leak
+// into unrelated tests running in the same process).
+export type SetUIStateLike = Pick<SetUIState, "execute">;
+
+function createDefaultSetUIState(device: BootedDevice): SetUIStateLike {
+  const adb = device.platform === "android" ? defaultAdbClientFactory.create(device) : null;
+  return new SetUIState(device, adb);
+}
+
+let setUIStateFactory: (device: BootedDevice) => SetUIStateLike = createDefaultSetUIState;
+
+export function setSetUIStateFactory(factory: (device: BootedDevice) => SetUIStateLike): void {
+  setUIStateFactory = factory;
+}
+
+export function resetSetUIStateFactory(): void {
+  setUIStateFactory = createDefaultSetUIState;
+}
+
+export const setUIStateHandler = async (
+  device: BootedDevice,
+  args: SetUIStateArgs,
+  progress?: ProgressCallback,
+  signal?: AbortSignal,
+) => {
+  const setUIState = setUIStateFactory(device);
+
+  const result = await setUIState.execute(
+    {
+      fields: args.fields.map((f) => ({
+        selector: {
+          text: f.selector.text,
+          elementId: f.selector.elementId,
+        },
+        value: f.value,
+        selected: f.selected,
+      })),
+      scrollDirection: args.scrollDirection,
+    },
+    progress,
+    signal,
+  );
+
+  const response = createStructuredToolResponse({
+    success: result.success,
+    fields: result.fields.map((f) => ({
+      selector: f.selector,
+      success: f.success,
+      attempts: f.attempts,
+      verified: f.verified,
+      error: f.error,
+      fieldType: f.fieldType,
+      skipped: f.skipped,
+    })),
+    totalAttempts: result.totalAttempts,
+    error: result.error,
+  });
+  // Genuine partial success (some fields set, others failed) keeps
+  // isError:false — the per-field `fields` array is the actionable status
+  // (#6237). But when EVERY field failed, the primary operation did not
+  // succeed at all and must be reported as such (#6200, #6251).
+  const allFieldsFailed = result.fields.length > 0 && result.fields.every((f) => !f.success);
+  return allFieldsFailed ? { ...response, isError: true as const } : response;
+};
+
 /**
  * Register form-related tools with the tool registry
  */
@@ -74,52 +145,7 @@ export function registerFormTools(): void {
     "setUIState",
     "Set multiple form fields by desired state.",
     addDeviceTargetingToSchema(setUIStateSchema),
-    async (
-      device: BootedDevice,
-      args: z.infer<typeof setUIStateSchema>,
-      progress?: ProgressCallback,
-      signal?: AbortSignal,
-    ) => {
-      const adb = device.platform === "android" ? defaultAdbClientFactory.create(device) : null;
-      const setUIState = new SetUIState(device, adb);
-
-      const result = await setUIState.execute(
-        {
-          fields: args.fields.map((f) => ({
-            selector: {
-              text: f.selector.text,
-              elementId: f.selector.elementId,
-            },
-            value: f.value,
-            selected: f.selected,
-          })),
-          scrollDirection: args.scrollDirection,
-        },
-        progress,
-        signal,
-      );
-
-      const response = createStructuredToolResponse({
-        success: result.success,
-        fields: result.fields.map((f) => ({
-          selector: f.selector,
-          success: f.success,
-          attempts: f.attempts,
-          verified: f.verified,
-          error: f.error,
-          fieldType: f.fieldType,
-          skipped: f.skipped,
-        })),
-        totalAttempts: result.totalAttempts,
-        error: result.error,
-      });
-      // Genuine partial success (some fields set, others failed) keeps
-      // isError:false — the per-field `fields` array is the actionable status
-      // (#6237). But when EVERY field failed, the primary operation did not
-      // succeed at all and must be reported as such (#6200, #6251).
-      const allFieldsFailed = result.fields.length > 0 && result.fields.every((f) => !f.success);
-      return allFieldsFailed ? { ...response, isError: true as const } : response;
-    },
+    setUIStateHandler,
     {
       defaultEnabled: true,
       supportsProgress: true,

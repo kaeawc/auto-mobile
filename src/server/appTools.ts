@@ -577,6 +577,56 @@ export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
 
 export type ResetKeychainArgs = z.infer<typeof resetKeychainSchema>;
 
+// Injection seam for the setAppPermissions handler (mirrors the tapAny
+// factory seam in interactionTools.ts). Lets a unit test exercise the
+// registered handler wiring with a fake AppPermissions whose setPermissions()
+// returns a chosen success/partial/failure result, instead of spying on the
+// class prototype (#6251 review — a prototype spy is a process-global patch
+// that can leak into unrelated tests running in the same process).
+export type AppPermissionsLike = Pick<AppPermissions, "setPermissions">;
+
+let appPermissionsFactory: (device: BootedDevice) => AppPermissionsLike = (device) =>
+  new AppPermissions(device);
+
+export function setAppPermissionsFactory(
+  factory: (device: BootedDevice) => AppPermissionsLike,
+): void {
+  appPermissionsFactory = factory;
+}
+
+export function resetAppPermissionsFactory(): void {
+  appPermissionsFactory = (device) => new AppPermissions(device);
+}
+
+export const setAppPermissionsHandler = async (
+  device: BootedDevice,
+  args: SetAppPermissionsArgs,
+) => {
+  const permissions = appPermissionsFactory(device);
+  const result = await permissions.setPermissions(args.appId, {
+    action: args.action,
+    permissions: args.permissions,
+    userId: args.userId,
+    notificationsEnabled: args.notificationsEnabled,
+    notificationPolicyAccess: args.notificationPolicyAccess,
+    scheduleExactAlarm: args.scheduleExactAlarm,
+  });
+
+  const response = createJSONToolResponse({
+    message: result.success
+      ? `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
+      : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
+    ...result,
+  });
+  // `result.success` requires every requested change to have applied, so a
+  // partial success (some permissions changed, others didn't) already
+  // reports per-operation status via `operations`/`changedCount` and may
+  // stay isError:false. But when NOTHING applied, the primary operation did
+  // not succeed and must be reported as such (#6200, #6251).
+  const wholeOperationFailed = !result.success && result.changedCount === 0;
+  return wholeOperationFailed ? { ...response, isError: true as const } : response;
+};
+
 // Register tools
 export function registerAppTools() {
   const listAppsHandler = async (device: BootedDevice, args: ListAppsArgs) => {
@@ -786,32 +836,6 @@ export function registerAppTools() {
         logger.warn(`[AppTools] Failed to refresh app resources after uninstall: ${error}`);
       }
     }
-  };
-
-  const setAppPermissionsHandler = async (device: BootedDevice, args: SetAppPermissionsArgs) => {
-    const permissions = new AppPermissions(device);
-    const result = await permissions.setPermissions(args.appId, {
-      action: args.action,
-      permissions: args.permissions,
-      userId: args.userId,
-      notificationsEnabled: args.notificationsEnabled,
-      notificationPolicyAccess: args.notificationPolicyAccess,
-      scheduleExactAlarm: args.scheduleExactAlarm,
-    });
-
-    const response = createJSONToolResponse({
-      message: result.success
-        ? `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
-        : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
-      ...result,
-    });
-    // `result.success` requires every requested change to have applied, so a
-    // partial success (some permissions changed, others didn't) already
-    // reports per-operation status via `operations`/`changedCount` and may
-    // stay isError:false. But when NOTHING applied, the primary operation did
-    // not succeed and must be reported as such (#6200, #6251).
-    const wholeOperationFailed = !result.success && result.changedCount === 0;
-    return wholeOperationFailed ? { ...response, isError: true as const } : response;
   };
 
   const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {

@@ -5,34 +5,36 @@
  * setUIState is the one partial-result exception: it may stay
  * `isError: false` for a genuine partial success (some fields set, others
  * not, #6237), but must flip to `isError: true` when every field fails.
+ *
+ * Each suite below exercises the exported handler directly through its
+ * injected factory seam (mirrors interactionTools.ts's tapAny/dragAndDrop/etc
+ * factories) rather than spying on the underlying class's prototype — a
+ * process-global prototype spy can leak a mocked result into any other test
+ * in the same process that happens to construct the same class (#6251
+ * review).
  */
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { Mock } from "bun:test";
-import { registerNotificationTools } from "../../src/server/notificationTools";
-import { PostNotification } from "../../src/features/utility/PostNotification";
-import { registerAppTools } from "../../src/server/appTools";
-import { AppPermissions } from "../../src/features/action/AppPermissions";
-import { registerNavigationTools } from "../../src/server/navigationTools";
-import { NavigateTo } from "../../src/features/navigation/NavigateTo";
-import { registerFormTools } from "../../src/server/formTools";
-import { SetUIState } from "../../src/features/action/SetUIState";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  postNotificationHandler,
+  resetPostNotificationFactory,
+  setPostNotificationFactory,
+} from "../../src/server/notificationTools";
+import {
+  resetAppPermissionsFactory,
+  setAppPermissionsFactory,
+  setAppPermissionsHandler,
+} from "../../src/server/appTools";
+import {
+  navigateToHandler,
+  resetNavigateToFactory,
+  setNavigateToFactory,
+} from "../../src/server/navigationTools";
+import {
+  resetSetUIStateFactory,
+  setSetUIStateFactory,
+  setUIStateHandler,
+} from "../../src/server/formTools";
 import type { BootedDevice } from "../../src/models";
-
-type DeviceAwareHandler = (device: BootedDevice, args: any) => Promise<any>;
-
-function getHandler(toolName: string): DeviceAwareHandler {
-  const tools = (
-    ToolRegistry as unknown as {
-      tools: Map<string, { deviceAwareHandler?: DeviceAwareHandler }>;
-    }
-  ).tools;
-  const handler = tools.get(toolName)?.deviceAwareHandler;
-  if (!handler) {
-    throw new Error(`${toolName} was not registered as device-aware`);
-  }
-  return handler;
-}
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -41,33 +43,21 @@ const androidDevice: BootedDevice = {
 };
 
 describe("isError consistency (#6251)", () => {
-  afterEach(() => {
-    ToolRegistry.clearTools();
-  });
-
   describe("postNotification", () => {
-    let executeSpy: Mock<typeof PostNotification.prototype.execute>;
-
-    beforeEach(() => {
-      ToolRegistry.clearTools();
-      registerNotificationTools();
-      executeSpy = spyOn(PostNotification.prototype, "execute") as unknown as Mock<
-        typeof PostNotification.prototype.execute
-      >;
-    });
-
     afterEach(() => {
-      executeSpy.mockRestore();
+      resetPostNotificationFactory();
     });
 
     test("receiver-reported failure sets isError: true", async () => {
-      executeSpy.mockResolvedValue({
-        success: false,
-        supported: true,
-        error: "SDK notification receiver reported a failure",
-      });
+      setPostNotificationFactory(() => ({
+        execute: async () => ({
+          success: false,
+          supported: true,
+          error: "SDK notification receiver reported a failure",
+        }),
+      }));
 
-      const response = await getHandler("postNotification")(androidDevice, {
+      const response = await postNotificationHandler(androidDevice, {
         title: "T",
         body: "B",
         platform: "android",
@@ -79,13 +69,15 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("delivered notification stays isError: false", async () => {
-      executeSpy.mockResolvedValue({
-        success: true,
-        supported: true,
-        method: "sdk",
-      });
+      setPostNotificationFactory(() => ({
+        execute: async () => ({
+          success: true,
+          supported: true,
+          method: "sdk",
+        }),
+      }));
 
-      const response = await getHandler("postNotification")(androidDevice, {
+      const response = await postNotificationHandler(androidDevice, {
         title: "T",
         body: "B",
         platform: "android",
@@ -98,42 +90,34 @@ describe("isError consistency (#6251)", () => {
   });
 
   describe("setAppPermissions", () => {
-    let setPermissionsSpy: Mock<typeof AppPermissions.prototype.setPermissions>;
-
-    beforeEach(() => {
-      ToolRegistry.clearTools();
-      registerAppTools();
-      setPermissionsSpy = spyOn(AppPermissions.prototype, "setPermissions") as unknown as Mock<
-        typeof AppPermissions.prototype.setPermissions
-      >;
-    });
-
     afterEach(() => {
-      setPermissionsSpy.mockRestore();
+      resetAppPermissionsFactory();
     });
 
     test("whole-operation failure (nothing applied) sets isError: true", async () => {
-      setPermissionsSpy.mockResolvedValue({
-        success: false,
-        appId: "com.example.app",
-        deviceId: androidDevice.deviceId,
-        platform: "android",
-        action: "grant",
-        changedCount: 0,
-        failedCount: 1,
-        operations: [
-          {
-            operationId: "android_runtime_permissions:grant",
-            success: false,
-            changedCount: 0,
-            failedCount: 1,
-            error: "Failed step(s)",
-          },
-        ],
-        error: "Failed step(s)",
-      });
+      setAppPermissionsFactory(() => ({
+        setPermissions: async () => ({
+          success: false,
+          appId: "com.example.app",
+          deviceId: androidDevice.deviceId,
+          platform: "android",
+          action: "grant",
+          changedCount: 0,
+          failedCount: 1,
+          operations: [
+            {
+              operationId: "android_runtime_permissions:grant",
+              success: false,
+              changedCount: 0,
+              failedCount: 1,
+              error: "Failed step(s)",
+            },
+          ],
+          error: "Failed step(s)",
+        }),
+      }));
 
-      const response = await getHandler("setAppPermissions")(androidDevice, {
+      const response = await setAppPermissionsHandler(androidDevice, {
         appId: "com.example.app",
         action: "grant",
         permissions: ["android.permission.CAMERA"],
@@ -143,33 +127,35 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("genuine partial success (some permissions applied) stays isError: false", async () => {
-      setPermissionsSpy.mockResolvedValue({
-        success: false,
-        appId: "com.example.app",
-        deviceId: androidDevice.deviceId,
-        platform: "android",
-        action: "grant",
-        changedCount: 1,
-        failedCount: 1,
-        operations: [
-          {
-            operationId: "android_runtime_permissions:grant",
-            success: true,
-            changedCount: 1,
-            failedCount: 0,
-          },
-          {
-            operationId: "android_notifications_enabled",
-            success: false,
-            changedCount: 0,
-            failedCount: 1,
-            error: "Failed to set notifications enabled",
-          },
-        ],
-        error: "Failed to set notifications enabled",
-      });
+      setAppPermissionsFactory(() => ({
+        setPermissions: async () => ({
+          success: false,
+          appId: "com.example.app",
+          deviceId: androidDevice.deviceId,
+          platform: "android",
+          action: "grant",
+          changedCount: 1,
+          failedCount: 1,
+          operations: [
+            {
+              operationId: "android_runtime_permissions:grant",
+              success: true,
+              changedCount: 1,
+              failedCount: 0,
+            },
+            {
+              operationId: "android_notifications_enabled",
+              success: false,
+              changedCount: 0,
+              failedCount: 1,
+              error: "Failed to set notifications enabled",
+            },
+          ],
+          error: "Failed to set notifications enabled",
+        }),
+      }));
 
-      const response = await getHandler("setAppPermissions")(androidDevice, {
+      const response = await setAppPermissionsHandler(androidDevice, {
         appId: "com.example.app",
         action: "grant",
         permissions: ["android.permission.CAMERA"],
@@ -182,25 +168,27 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("full success stays isError: false", async () => {
-      setPermissionsSpy.mockResolvedValue({
-        success: true,
-        appId: "com.example.app",
-        deviceId: androidDevice.deviceId,
-        platform: "android",
-        action: "grant",
-        changedCount: 1,
-        failedCount: 0,
-        operations: [
-          {
-            operationId: "android_runtime_permissions:grant",
-            success: true,
-            changedCount: 1,
-            failedCount: 0,
-          },
-        ],
-      });
+      setAppPermissionsFactory(() => ({
+        setPermissions: async () => ({
+          success: true,
+          appId: "com.example.app",
+          deviceId: androidDevice.deviceId,
+          platform: "android",
+          action: "grant",
+          changedCount: 1,
+          failedCount: 0,
+          operations: [
+            {
+              operationId: "android_runtime_permissions:grant",
+              success: true,
+              changedCount: 1,
+              failedCount: 0,
+            },
+          ],
+        }),
+      }));
 
-      const response = await getHandler("setAppPermissions")(androidDevice, {
+      const response = await setAppPermissionsHandler(androidDevice, {
         appId: "com.example.app",
         action: "grant",
         permissions: ["android.permission.CAMERA"],
@@ -211,30 +199,22 @@ describe("isError consistency (#6251)", () => {
   });
 
   describe("navigateTo", () => {
-    let executeSpy: Mock<typeof NavigateTo.prototype.execute>;
-
-    beforeEach(() => {
-      ToolRegistry.clearTools();
-      registerNavigationTools();
-      executeSpy = spyOn(NavigateTo.prototype, "execute") as unknown as Mock<
-        typeof NavigateTo.prototype.execute
-      >;
-    });
-
     afterEach(() => {
-      executeSpy.mockRestore();
+      resetNavigateToFactory();
     });
 
     test("failed navigation sets isError: true", async () => {
-      executeSpy.mockResolvedValue({
-        success: false,
-        error: "No path to target screen",
-        currentScreen: "Home",
-        targetScreen: "Settings",
-        stepsExecuted: 0,
-      });
+      setNavigateToFactory(() => ({
+        execute: async () => ({
+          success: false,
+          error: "No path to target screen",
+          currentScreen: "Home",
+          targetScreen: "Settings",
+          stepsExecuted: 0,
+        }),
+      }));
 
-      const response = await getHandler("navigateTo")(androidDevice, {
+      const response = await navigateToHandler(androidDevice, {
         targetScreen: "Settings",
         platform: "android",
       });
@@ -245,15 +225,17 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("successful navigation stays isError: false", async () => {
-      executeSpy.mockResolvedValue({
-        success: true,
-        message: "Navigated to Settings",
-        currentScreen: "Settings",
-        targetScreen: "Settings",
-        stepsExecuted: 2,
-      });
+      setNavigateToFactory(() => ({
+        execute: async () => ({
+          success: true,
+          message: "Navigated to Settings",
+          currentScreen: "Settings",
+          targetScreen: "Settings",
+          stepsExecuted: 2,
+        }),
+      }));
 
-      const response = await getHandler("navigateTo")(androidDevice, {
+      const response = await navigateToHandler(androidDevice, {
         targetScreen: "Settings",
         platform: "android",
       });
@@ -263,42 +245,34 @@ describe("isError consistency (#6251)", () => {
   });
 
   describe("setUIState", () => {
-    let executeSpy: Mock<typeof SetUIState.prototype.execute>;
-
-    beforeEach(() => {
-      ToolRegistry.clearTools();
-      registerFormTools();
-      executeSpy = spyOn(SetUIState.prototype, "execute") as unknown as Mock<
-        typeof SetUIState.prototype.execute
-      >;
-    });
-
     afterEach(() => {
-      executeSpy.mockRestore();
+      resetSetUIStateFactory();
     });
 
     test("all fields failing sets isError: true", async () => {
-      executeSpy.mockResolvedValue({
-        success: false,
-        fields: [
-          {
-            selector: { text: "Username" },
-            success: false,
-            attempts: 3,
-            error: "Element not found",
-          },
-          {
-            selector: { text: "Password" },
-            success: false,
-            attempts: 3,
-            error: "Element not found",
-          },
-        ],
-        totalAttempts: 6,
-        error: "Some fields could not be set",
-      });
+      setSetUIStateFactory(() => ({
+        execute: async () => ({
+          success: false,
+          fields: [
+            {
+              selector: { text: "Username" },
+              success: false,
+              attempts: 3,
+              error: "Element not found",
+            },
+            {
+              selector: { text: "Password" },
+              success: false,
+              attempts: 3,
+              error: "Element not found",
+            },
+          ],
+          totalAttempts: 6,
+          error: "Some fields could not be set",
+        }),
+      }));
 
-      const response = await getHandler("setUIState")(androidDevice, {
+      const response = await setUIStateHandler(androidDevice, {
         fields: [
           { selector: { text: "Username" }, value: "alice" },
           { selector: { text: "Password" }, value: "secret" },
@@ -309,27 +283,29 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("genuine partial success (some fields ok) stays isError: false with per-field status", async () => {
-      executeSpy.mockResolvedValue({
-        success: false,
-        fields: [
-          {
-            selector: { text: "Username" },
-            success: true,
-            attempts: 1,
-            verified: true,
-          },
-          {
-            selector: { text: "Password" },
-            success: false,
-            attempts: 3,
-            error: "Element not found",
-          },
-        ],
-        totalAttempts: 4,
-        error: "Some fields could not be set",
-      });
+      setSetUIStateFactory(() => ({
+        execute: async () => ({
+          success: false,
+          fields: [
+            {
+              selector: { text: "Username" },
+              success: true,
+              attempts: 1,
+              verified: true,
+            },
+            {
+              selector: { text: "Password" },
+              success: false,
+              attempts: 3,
+              error: "Element not found",
+            },
+          ],
+          totalAttempts: 4,
+          error: "Some fields could not be set",
+        }),
+      }));
 
-      const response = await getHandler("setUIState")(androidDevice, {
+      const response = await setUIStateHandler(androidDevice, {
         fields: [
           { selector: { text: "Username" }, value: "alice" },
           { selector: { text: "Password" }, value: "secret" },
@@ -345,20 +321,22 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("full success stays isError: false", async () => {
-      executeSpy.mockResolvedValue({
-        success: true,
-        fields: [
-          {
-            selector: { text: "Username" },
-            success: true,
-            attempts: 1,
-            verified: true,
-          },
-        ],
-        totalAttempts: 1,
-      });
+      setSetUIStateFactory(() => ({
+        execute: async () => ({
+          success: true,
+          fields: [
+            {
+              selector: { text: "Username" },
+              success: true,
+              attempts: 1,
+              verified: true,
+            },
+          ],
+          totalAttempts: 1,
+        }),
+      }));
 
-      const response = await getHandler("setUIState")(androidDevice, {
+      const response = await setUIStateHandler(androidDevice, {
         fields: [{ selector: { text: "Username" }, value: "alice" }],
       });
 

@@ -95,6 +95,15 @@ export interface ReadinessClient {
   isConnected(): boolean;
   waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean>;
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
+  /**
+   * The most recent connect-attempt failure message, when the client tracks
+   * one (issue #6260) — e.g. "Another AutoMobile process (PID N) owns
+   * CtrlProxy forwarding...". Used to replace a generic "runner did not
+   * become responsive" failure with the real, actionable cause when one is
+   * known, instead of leaving it stuck at WARN in the daemon log where the
+   * caller never sees it.
+   */
+  getLastConnectionFailureMessage?(): string | undefined;
   getAccessibilityHierarchy?(
     queryOptions?: undefined,
     perf?: undefined,
@@ -765,6 +774,16 @@ export class RunnerReadinessService {
       if (remaining > 0) {
         await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
       }
+    }
+    // A known connect-attempt failure (e.g. a stale/orphaned AutoMobile process
+    // still owning CtrlProxy forwarding for this device) is the actual, actionable
+    // cause of a runner-connect failure — surface IT instead of the generic
+    // device-blaming message below, which points a caller at rebooting a device
+    // that was never the problem (issue #6260).
+    const lastConnectionFailure =
+      phase === "runner-connect" ? client.getLastConnectionFailureMessage?.() : undefined;
+    if (lastConnectionFailure) {
+      this.fail(context, phase, attempts, lastConnectionFailure);
     }
     const diagnostic = await this.runnerConnectFailureDiagnostic(context, phase);
     this.fail(

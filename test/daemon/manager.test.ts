@@ -24,6 +24,7 @@ import type {
   DaemonProcessSignaler,
   DaemonProcessSpawner,
   DaemonProcessRecord,
+  DaemonPortAvailabilityChecker,
   ExtractionCleaner,
 } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
@@ -101,6 +102,14 @@ describe("DaemonManager restart", () => {
         findDaemonProcesses: () => [],
         isProcessRunning: () => false,
       },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const recordedOptions: DaemonOptions = {
       debug: true,
@@ -630,6 +639,23 @@ class FakeDaemonProcessSignaler implements DaemonProcessSignaler {
   signal(pid: number, signal: NodeJS.Signals): void {
     this.signals.push({ pid, signal });
     this.onSignal?.(pid, signal);
+  }
+}
+
+/**
+ * Deterministic stand-in for the real net-based port probe (issue #6260) so
+ * restart tests never touch a real socket. Defaults to reporting every port
+ * free, matching a healthy stop; pass `free: false` to simulate a canonical
+ * port that stayed bound after cleanup.
+ */
+class FakeDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
+  public readonly checkedPorts: number[] = [];
+
+  constructor(private readonly free: boolean = true) {}
+
+  isPortFree(port: number): Promise<boolean> {
+    this.checkedPorts.push(port);
+    return Promise.resolve(this.free);
   }
 }
 
@@ -1981,6 +2007,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -2030,6 +2060,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -2081,6 +2115,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
@@ -2138,6 +2176,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
@@ -2201,6 +2243,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
@@ -2274,6 +2320,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -2342,6 +2392,10 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -2353,6 +2407,160 @@ describe("Daemon manager process detection", () => {
       expect(startSpy).toHaveBeenCalledWith({});
     } finally {
       startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart refuses to start a second daemon when a survivor is still on the process table (issue #6260)", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    // Simulates the exact #6260 split-brain: the recorded/status() read finds
+    // nothing to stop, and the cross-namespace sweep's own candidate list is
+    // ALSO empty at that instant (a process-table scan miss) even though the
+    // old daemon (PID 71579-alike) is still alive — cleanup reports success
+    // without ever having found it. The post-cleanup survivor re-check must
+    // still catch it before start() is ever called.
+    const orphanPid = 71579;
+    let scanCount = 0;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => {
+        scanCount++;
+        // The cleanup-phase scan (call 1) misses the orphan; the post-cleanup
+        // confirmation (call 2) finds it, exactly like the real ps scan would
+        // once its transient miss condition (whatever caused it) clears.
+        return scanCount === 1
+          ? []
+          : [{ pid: orphanPid, ppid: 1, command: "bun /checkout/dist/src/index.js --daemon-mode" }];
+      },
+      isProcessRunning: (pid) => pid === orphanPid,
+    };
+    const signaler = new FakeDaemonProcessSignaler();
+    const portChecker = new FakeDaemonPortAvailabilityChecker();
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart()).rejects.toThrow(`PID(s) ${orphanPid} still running`);
+      expect(startSpy).not.toHaveBeenCalled();
+      // The port must never even be consulted once a live survivor is found —
+      // failing on the named PID is strictly more actionable.
+      expect(portChecker.checkedPorts).toEqual([]);
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart refuses to start a second daemon on a fallback port when the canonical port stays bound (issue #6260)", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: () => false,
+    };
+    // Cleanup found nothing to stop, and no live daemon process remains on the
+    // table — but the canonical port is still held by something (a process
+    // this scan could not identify as an AutoMobile daemon, or one it missed
+    // entirely). Restart must fail rather than let start() silently take the
+    // next port in range.
+    const portChecker = new FakeDaemonPortAvailabilityChecker(false);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart()).rejects.toThrow("port 3000");
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(portChecker.checkedPorts).toEqual([3000]);
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart starts a single daemon on the canonical port once the previous daemon is confirmed stopped (issue #6260)", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const recordedPid = 71579;
+    const livePids = new Set([recordedPid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () =>
+        [...livePids].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /checkout/dist/src/index.js --daemon-mode",
+        })),
+      isProcessRunning: (pid) => livePids.has(pid),
+    };
+    const portChecker = new FakeDaemonPortAvailabilityChecker();
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid: recordedPid,
+    });
+    const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
+      livePids.delete(recordedPid);
+    });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart();
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(portChecker.checkedPorts).toEqual([3000]);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      startSpy.mockRestore();
+      stopSpy.mockRestore();
       statusSpy.mockRestore();
     }
   });

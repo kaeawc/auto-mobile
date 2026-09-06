@@ -119,7 +119,11 @@ import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
+import {
+  readLockOwnerPid,
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+} from "../../../utils/fileLock";
 import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 
 // Import delegates
@@ -1053,12 +1057,20 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 interface CtrlProxyForwardLease {
   tryAcquire(): boolean;
   release(): void;
+  /**
+   * PID of the process currently holding the lease, when a preceding
+   * {@link tryAcquire} call returned `false` (issue #6260). Lets the caller
+   * name the orphan in its actionable error instead of a bare "another
+   * process owns this" message the client cannot act on.
+   */
+  getLastOwnerPid(): number | undefined;
 }
 
 class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private lockPath: string | null = null;
   private readonly ownerToken = defaultIdGenerator.next();
   private acquired = false;
+  private lastOwnerPid: number | undefined;
 
   public constructor(private readonly deviceId: string) {}
 
@@ -1084,6 +1096,7 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     this.acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
       ownerToken: this.ownerToken,
     });
+    this.lastOwnerPid = this.acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
     return this.acquired;
   }
 
@@ -1094,6 +1107,32 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
     this.acquired = false;
   }
+
+  public getLastOwnerPid(): number | undefined {
+    return this.lastOwnerPid;
+  }
+}
+
+/**
+ * Actionable message for a CtrlProxy forwarding-lease conflict (issue #6260).
+ * Named the owning PID when known, so a client is pointed at the orphan
+ * process rather than left to guess or, worse, blame the device.
+ */
+function describeCtrlProxyForwardingLeaseConflict(
+  deviceId: string,
+  ownerPid: number | undefined,
+): string {
+  if (ownerPid !== undefined) {
+    return (
+      `Another AutoMobile process (PID ${ownerPid}) owns CtrlProxy forwarding for ${deviceId}. ` +
+      `This is usually a stale/orphaned AutoMobile daemon left behind by an incomplete ` +
+      `\`--daemon restart\` — stop it (\`kill ${ownerPid}\`) and retry.`
+    );
+  }
+  return (
+    `Another AutoMobile process owns CtrlProxy forwarding for ${deviceId}. This is usually a ` +
+    `stale/orphaned AutoMobile daemon — run \`--daemon restart\` or find and stop it directly.`
+  );
 }
 
 class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
@@ -1102,6 +1141,10 @@ class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
   }
 
   public release(): void {}
+
+  public getLastOwnerPid(): undefined {
+    return undefined;
+  }
 }
 
 /**
@@ -3219,8 +3262,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return;
     }
     if (!this.ctrlProxyForwardLease.tryAcquire()) {
+      // Named explicitly (issue #6260): this exact string is matched by
+      // RunnerReadinessService to replace a generic, device-blaming
+      // "runner did not become responsive" failure with the real, actionable
+      // cause — a stale/orphaned AutoMobile process still holding forwarding
+      // for this device, most commonly left behind by a `--daemon restart`
+      // that could not confirm the previous daemon stopped.
       throw new Error(
-        `Another AutoMobile process owns CtrlProxy forwarding for ${this.device.deviceId}`,
+        describeCtrlProxyForwardingLeaseConflict(
+          this.device.deviceId,
+          this.ctrlProxyForwardLease.getLastOwnerPid(),
+        ),
       );
     }
     // Verify port forwarding is still active even if we think it's set up

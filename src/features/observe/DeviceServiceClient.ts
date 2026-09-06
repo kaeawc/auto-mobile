@@ -15,6 +15,7 @@
  */
 
 import WebSocket from "ws";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -76,6 +77,13 @@ export abstract class DeviceServiceClient {
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
+  // The most recent connect-attempt failure message (issue #6260), e.g. a
+  // platform-setup error such as "Another AutoMobile process owns CtrlProxy
+  // forwarding...". `waitForConnection` only reports a boolean, so a caller
+  // that needs the actual cause of a connect failure (RunnerReadinessService,
+  // to surface it instead of a generic "runner did not become responsive")
+  // reads this instead of re-deriving it. Cleared on a successful connect.
+  private lastConnectionFailureMessage: string | undefined;
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
@@ -516,6 +524,7 @@ export abstract class DeviceServiceClient {
               this.protectRegisteredRequestSends(ws);
               this.isConnecting = false;
               this.connectionAttempts = 0; // Reset on successful connection
+              this.lastConnectionFailureMessage = undefined;
 
               // Start health check monitoring
               this.startHealthCheck();
@@ -568,9 +577,19 @@ export abstract class DeviceServiceClient {
     } catch (error) {
       this.isConnecting = false;
       this.lastConnectionAttempt = this.timer.now();
+      this.lastConnectionFailureMessage = errorMessage(error);
       logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
       return false;
     }
+  }
+
+  /**
+   * The most recent connect-attempt failure message, or `undefined` when the
+   * client has never failed to connect (or has connected successfully since).
+   * See {@link lastConnectionFailureMessage}.
+   */
+  public getLastConnectionFailureMessage(): string | undefined {
+    return this.lastConnectionFailureMessage;
   }
 
   private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {

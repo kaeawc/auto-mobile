@@ -57,7 +57,10 @@ describe("AndroidCtrlProxyClient", function () {
     public acquireAttempts = 0;
     public releases = 0;
 
-    public constructor(private readonly canAcquire: boolean = true) {}
+    public constructor(
+      private readonly canAcquire: boolean = true,
+      private readonly ownerPid?: number,
+    ) {}
 
     public tryAcquire(): boolean {
       this.acquireAttempts++;
@@ -66,6 +69,10 @@ describe("AndroidCtrlProxyClient", function () {
 
     public release(): void {
       this.releases++;
+    }
+
+    public getLastOwnerPid(): number | undefined {
+      return this.canAcquire ? undefined : this.ownerPid;
     }
   }
 
@@ -1246,6 +1253,36 @@ describe("AndroidCtrlProxyClient", function () {
     }
   });
 
+  test("names the orphan PID when another process owns the device lease (issue #6260)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
+    const lease = new FakeCtrlProxyForwardLease(false, 71579);
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        /Another AutoMobile process \(PID 71579\) owns CtrlProxy forwarding.*stale\/orphaned AutoMobile daemon.*--daemon restart.*kill 71579/s,
+      );
+    } finally {
+      await client.close();
+    }
+  });
+
   test("does not reclaim a live file lease from a synchronously evicted same-process client", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
@@ -1275,6 +1312,9 @@ describe("AndroidCtrlProxyClient", function () {
         fakeTimer,
       );
       expect((replacement as any).ctrlProxyForwardLease.tryAcquire()).toBe(false);
+      // The real file lease (issue #6260) must resolve the owner PID from the
+      // lock file it just lost the race for, not merely report the boolean.
+      expect((replacement as any).ctrlProxyForwardLease.getLastOwnerPid()).toBe(process.pid);
     } finally {
       await replacement?.close();
       await original.close();

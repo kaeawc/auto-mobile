@@ -225,6 +225,32 @@ export function tryAcquireExclusiveLock(
 }
 
 /**
+ * Read the PID recorded in an exclusive lock file without attempting to
+ * acquire or reclaim it (issue #6260). Used by callers that need to name the
+ * process currently holding a lease in an actionable error — e.g. "another
+ * AutoMobile process (PID N) owns this resource" — rather than a bare
+ * boolean. Returns `undefined` when the file is missing, unreadable, or
+ * names a process that is not (or no longer) running.
+ */
+export function readLockOwnerPid(
+  lockFilePath: string,
+  isProcessRunning: (pid: number) => boolean = defaultIsProcessRunning,
+): number | undefined {
+  let content: string;
+  try {
+    content = readFileSync(lockFilePath, "utf-8").trim();
+  } catch (error) {
+    logger.debug(`src/utils/fileLock.ts readLockOwnerPid: lock unreadable: ${error}`, error);
+    return undefined;
+  }
+  const { pid } = parseLockContent(content);
+  if (Number.isNaN(pid) || !isProcessRunning(pid)) {
+    return undefined;
+  }
+  return pid;
+}
+
+/**
  * Release a lock owned by `pid`. Compare-and-delete: the file is removed only if
  * it still holds `pid`, so a reclaim race can't delete a lock that a *different*
  * opener now owns (mirrors `shouldCleanupForExpectedPid` in `daemonFiles.ts`).

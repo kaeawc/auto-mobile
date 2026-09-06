@@ -31,6 +31,7 @@ class FakeReadinessClient implements ReadinessClient {
   tapResult = { success: true };
   tapCoordinates: Array<{ x: number; y: number }> = [];
   onTap?: () => Promise<void> | void;
+  getLastConnectionFailureMessage?: () => string | undefined;
 
   isConnected(): boolean {
     return this.connected;
@@ -1047,6 +1048,43 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow(
       /platform=android.*requested=\[platform=android name=Pixel_9_Pro\].*resolved=\[Pixel_9_Pro \(emulator-5554\)\].*phase=runner-connect.*attempts=[1-9].*remainingBudgetMs=0/,
     );
+  });
+
+  test("surfaces a known connect-attempt failure instead of the generic unresponsive message (issue #6260)", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 71579) owns CtrlProxy forwarding for emulator-5554. " +
+      "This is usually a stale/orphaned AutoMobile daemon left behind by an incomplete " +
+      "`--daemon restart` — stop it (`kill 71579`) and retry.";
+    const { service } = createService({
+      androidClient: client,
+      // A diagnostic is available, but the known connect-failure cause must win —
+      // a client should be pointed at the orphan process, not the device.
+      getAndroidRunnerConnectDiagnostic: async () => ({
+        deviceLock: { locked: false, keyguardShowing: false, secure: false },
+        primaryUserStartState: "RUNNING_UNLOCKED",
+      }),
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/Another AutoMobile process \(PID 71579\) owns CtrlProxy forwarding/);
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.not.toThrow(/runner did not become responsive/);
   });
 
   test("diagnoses a locked primary user when runner connection times out", async () => {

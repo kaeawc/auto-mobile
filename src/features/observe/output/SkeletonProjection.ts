@@ -141,13 +141,6 @@ interface SkeletonAccumulator {
   provenance?: ElementProvenance;
   /** Disambiguator assigned by {@link assignDuplicateIndexes} (issue #6221 item 2). */
   index?: number;
-  /**
-   * Source `Element.package`, when present (issue #6221 item 1). Used only to
-   * detect the recurring `com.android.systemui` status-bar block for
-   * {@link collapseSystemUiBlock} — never emitted on the skeleton/context row
-   * itself.
-   */
-  packageName?: string;
 }
 
 /** NUL-joined identity so `(elementId, label, bounds)` triples dedup without straddling. */
@@ -215,9 +208,6 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
     }
     if (acc.semanticLinks === undefined && el["semantic-links"]?.length) {
       acc.semanticLinks = el["semantic-links"];
-    }
-    if (acc.packageName === undefined) {
-      acc.packageName = nonEmptyString(el.package);
     }
   }
   return [...byIdentity.values()];
@@ -526,23 +516,29 @@ function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
 }
 
 /**
- * Resource-id prefix identifying the Android status-bar block
- * (`com.android.systemui:id/clock`, `:id/wifi_signal`, `:id/battery`, …). This
- * block is re-emitted on EVERY observation of EVERY screen (issue #6221 item
- * 1) and carries no affordances, so {@link collapseSystemUiBlock} folds every
+ * Resource-id ALLOWLIST for the actual Android status-bar chrome — the clock,
+ * signal/battery icons, and their containers (`com.android.systemui:id/clock`,
+ * `:id/wifi_signal`, `:id/battery`, `:id/status_bar_container`, …). This block
+ * is re-emitted on EVERY observation of EVERY screen (issue #6221 item 1) and
+ * carries no affordances, so {@link collapseSystemUiBlock} folds every
  * matching zero-affordance row into one summarized `context` entry instead of
  * emitting each one separately.
+ *
+ * Deliberately an ALLOWLIST, not a `com.android.systemui:id/` prefix match
+ * (PR #6242 review PRRT_kwDOP-GF5M6fq3iH): the notification SHADE lives under
+ * the same `com.android.systemui` namespace (e.g. `:id/notification_row_1`,
+ * `:id/notification_stack_scroller` — see `test/server/systemTray.test.ts`),
+ * and those rows are ACTIONABLE and must stay individually selectable, never
+ * folded into this summary. Only genuine status-bar chrome collapses; a new
+ * systemui id that isn't on this list simply stays its own `context` entry
+ * (still correct, just not collapsed) rather than risking a false positive.
  */
-const SYSTEMUI_ID_PREFIX = "com.android.systemui:id/";
+const SYSTEMUI_STATUS_BAR_ID_PATTERN =
+  /^com\.android\.systemui:id\/(status_bar[a-zA-Z_]*|clock|battery[a-zA-Z_]*|wifi_[a-zA-Z_]*|system_icons|statusIcons|notification_icon_area|notificationIcons)$/;
 
-/** The Android systemui package, matched on `Element.package` as a fallback to the id prefix. */
-const SYSTEMUI_PACKAGE = "com.android.systemui";
-
-/** Whether `acc` belongs to the recurring systemui status-bar block. */
+/** Whether `acc` is genuine status-bar chrome (never the notification shade — see the pattern's doc). */
 function isSystemUiEntry(acc: SkeletonAccumulator): boolean {
-  return (
-    acc.elementId?.startsWith(SYSTEMUI_ID_PREFIX) === true || acc.packageName === SYSTEMUI_PACKAGE
-  );
+  return acc.elementId !== undefined && SYSTEMUI_STATUS_BAR_ID_PATTERN.test(acc.elementId);
 }
 
 /** The smallest bounds tuple enclosing every entry's bounds. */

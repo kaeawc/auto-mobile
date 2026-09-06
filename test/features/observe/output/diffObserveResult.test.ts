@@ -180,6 +180,88 @@ describe("diffObserveResult", () => {
     expect(diff.changed[0].selector).toEqual({ elementId: "toggle", label: "Airplane mode" });
   });
 
+  test("a changed entry whose elementId AND label repeat elsewhere in `next` gets a disambiguating `index` (PR #6242 review PRRT_kwDOP-GF5M6fq3iI)", () => {
+    // Two identical toggle rows sharing both resource-id and label — without an
+    // occurrence index, both `changed` entries would emit the SAME selector, so
+    // tapOn would always hit the first match rather than the one that actually
+    // changed (#6238 already solved this exact ambiguity for `skeleton` rows).
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Airplane mode",
+        },
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+          text: "Airplane mode",
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Airplane mode",
+        },
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+          text: "Airplane mode",
+          checked: "true",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+
+    expect(diff.changed).toHaveLength(1);
+    // The SECOND occurrence (index 1) is the one that actually changed.
+    expect(diff.changed[0].selector).toEqual({
+      elementId: "toggle",
+      label: "Airplane mode",
+      index: 1,
+    });
+  });
+
+  test("a changed entry whose elementId is unique in `next` never carries a spurious `index`", () => {
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Wi-Fi",
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "toggle",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          text: "Wi-Fi",
+          checked: "true",
+        },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toEqual({ elementId: "toggle", label: "Wi-Fi" });
+    expect(diff.changed[0].selector?.index).toBeUndefined();
+  });
+
   test("a changed entry with neither resource-id/view-id nor text/content-desc omits `selector`", () => {
     const baseline = obs({
       "resource-id": "root",

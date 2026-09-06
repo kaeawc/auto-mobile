@@ -907,6 +907,49 @@ describe("finalizeToolResponse", () => {
       expect(parsed.observation.skeleton.length).toBe(obsSc.skeleton.length);
     });
 
+    test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {
+      const { store } = makeStore();
+      const withSkeletonElements = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        elements: {
+          clickable: [
+            {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "com.example:id/btn",
+              text: "Submit",
+              clickable: "true",
+            } as any,
+          ],
+          scrollable: [],
+          text: [],
+          media: [],
+        },
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withSkeletonElements()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withSkeletonElements();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      // `project: "full"` — servedObservation itself carries NO skeleton in this
+      // mode (it is the raw sanitized tree), so the diff must re-project one
+      // independently rather than emitting `skeleton: []`.
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.viewHierarchy).toBeUndefined();
+      expect(Array.isArray(obsSc.skeleton)).toBe(true);
+      expect(obsSc.skeleton.length).toBeGreaterThan(0);
+      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
+    });
+
     test("returns a full observation when a reported screen change would emit an empty diff", () => {
       const { store } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {

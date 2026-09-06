@@ -976,6 +976,54 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(title?.elementId).toBe("com.google.android.deskclock:id/action_bar_title");
     });
 
+    test("notification-shade rows under the same com.android.systemui namespace are NEVER folded into the status-bar summary (PR #6242 review PRRT_kwDOP-GF5M6fq3iH)", () => {
+      // The notification shade lives under the same `com.android.systemui`
+      // namespace as the status bar (see test/server/systemTray.test.ts's
+      // `notification_row_1` fixture), but its rows are ACTIONABLE and must stay
+      // individually tappable — never collapsed into the synthetic status-bar
+      // summary just because the id shares a package prefix.
+      const clock: Element = {
+        bounds: bounds(30, 10, 120, 60),
+        "resource-id": "com.android.systemui:id/clock",
+        text: "7:09",
+      };
+      const notificationRow: Element = {
+        bounds: bounds(0, 200, 1080, 300),
+        "resource-id": "com.android.systemui:id/notification_row_1",
+        text: "New message from Alex",
+        clickable: "true",
+      };
+      // A zero-affordance systemui node that is NOT status-bar chrome (e.g. a
+      // notification title/summary line inside the shade) must also survive as
+      // its own context row rather than being swept into the status-bar summary.
+      const notificationTitle: Element = {
+        bounds: bounds(0, 300, 1080, 340),
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        text: "1 new notification",
+      };
+
+      const { skeleton, context } = projectSkeleton(
+        makeElements({ clickable: [notificationRow], text: [clock, notificationTitle] }),
+      );
+
+      // The notification row is actionable and keeps its own id/bounds intact.
+      expect(skeleton).toHaveLength(1);
+      expect(skeleton[0].elementId).toBe("com.android.systemui:id/notification_row_1");
+      expect(skeleton[0].label).toBe("New message from Alex");
+      expect(skeleton[0].bounds).toEqual([0, 200, 1080, 300]);
+
+      // Only the clock collapses into the status-bar summary; the shade's own
+      // zero-affordance node stays a separate, uncollapsed context entry.
+      expect(context).toHaveLength(2);
+      const summary = context.find(
+        (entry) => entry.elementId === "com.android.systemui:status-bar-summary",
+      );
+      expect(summary?.label).toBe("Status bar: 7:09");
+      const shadeText = context.find((entry) => entry.label === "1 new notification");
+      expect(shadeText).toBeDefined();
+      expect(shadeText?.elementId).toBe("com.android.systemui:id/notification_stack_scroller");
+    });
+
     test("actionable entries with duplicate ids keep their #6238 index/label in the filtered actionable set", () => {
       // Four alarm rows sharing one resource-id, mixed in with a zero-affordance
       // systemui block — the duplicate-index disambiguator (issue #6221 item 2)

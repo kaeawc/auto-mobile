@@ -9881,6 +9881,12 @@
                           },
                           "label": {
                             "type": "string"
+                          },
+                          "index": {
+                            "description": "Disambiguator present only when elementId repeats elsewhere among the next observation's nodes (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — same hierarchy-order semantics as the skeleton's #6238 `index`. Pass verbatim as tapOn({ selector, index }) to hit this exact occurrence.",
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "additionalProperties": false
@@ -9925,6 +9931,10 @@
             {
               "type": "object",
               "properties": {
+                "isDiff": {
+                  "type": "boolean",
+                  "const": false
+                },
                 "selectedElements": {
                   "type": "array",
                   "items": {

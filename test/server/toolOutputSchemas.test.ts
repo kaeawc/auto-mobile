@@ -4,6 +4,7 @@ import {
   elementBoundsSchema,
   elementSchema,
   observationOutputSchema,
+  observationSummarySchema,
   observeDiffSchema,
   observeResultSchema,
   tapOnResultSchema,
@@ -226,6 +227,28 @@ describe("observationOutputSchema: discriminated union of full observation vs di
   test("rejects a diff with no `skeleton` at all (item 4.1: it must ALWAYS be present)", () => {
     const diffMissingSkeleton = { isDiff: true, added: [], removed: [], changed: [] };
     expect(() => observeDiffSchema.parse(diffMissingSkeleton)).toThrow();
+  });
+
+  test("the FULL union rejects a malformed diff — it cannot silently fall through to the permissive full-observation arm (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)", () => {
+    // Before the fix, this object failed `observeDiffSchema` (missing the
+    // mandatory `skeleton`) but then matched `observationSummarySchema` anyway,
+    // since every field there was optional and `.passthrough()` let `isDiff`
+    // and the rest ride through unchecked.
+    const malformedDiff = { isDiff: true, added: [], removed: [], changed: [] };
+    expect(() => observationOutputSchema.parse(malformedDiff)).toThrow();
+  });
+
+  test("observationSummarySchema itself rejects `isDiff: true` — it is a genuinely-typed member, not just permissively passed through", () => {
+    expect(() =>
+      observationSummarySchema.parse({ isDiff: true, activeWindow: { appId: "com.example" } }),
+    ).toThrow();
+    // `isDiff` absent, or explicitly `false`, both still validate.
+    expect(() =>
+      observationSummarySchema.parse({ activeWindow: { appId: "com.example" } }),
+    ).not.toThrow();
+    expect(() =>
+      observationSummarySchema.parse({ isDiff: false, activeWindow: { appId: "com.example" } }),
+    ).not.toThrow();
   });
 
   test("a diff's added/removed nodes carry their real selector fields directly in `attributes` (no redundant `selector`)", () => {

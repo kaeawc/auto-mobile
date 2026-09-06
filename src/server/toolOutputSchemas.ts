@@ -153,8 +153,21 @@ const screenIdentitySchema = z
 // FULL-object arm, identified by the ABSENCE of `isDiff` (the diff arm,
 // `observeDiffSchema`, always carries `isDiff: true`). A consumer branches on
 // `"isDiff" in observation && observation.isDiff === true`.
+//
+// `isDiff: z.literal(false).optional()` (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)
+// makes this arm GENUINELY reject a diff-shaped object rather than silently
+// accepting it via `.passthrough()`: every OTHER field here is optional, so
+// without this an invalid diff (e.g. `{isDiff: true, added: [], removed: [],
+// changed: []}` missing the mandatory `skeleton`) would fail `observeDiffSchema`
+// and then fall through to match this permissive arm anyway. `isDiff` is a
+// genuinely-typed member of this schema, so a real `isDiff: true` payload now
+// fails HERE too — the union as a whole rejects the malformed diff instead of
+// silently accepting it under the wrong arm. The server itself never emits
+// `isDiff: false` explicitly (absence is the real-world full-observation
+// shape); the literal exists purely to close this validation gap.
 export const observationSummarySchema = z
   .object({
+    isDiff: z.literal(false).optional(),
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
     accessibilityFocusedElement: elementSchema.optional(),
@@ -585,6 +598,17 @@ export const observeDiffSelectorSchema = z
   .object({
     elementId: z.string().optional(),
     label: z.string().optional(),
+    index: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "Disambiguator present only when elementId repeats elsewhere among the " +
+          "next observation's nodes (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — same " +
+          "hierarchy-order semantics as the skeleton's #6238 `index`. Pass verbatim " +
+          "as tapOn({ selector, index }) to hit this exact occurrence.",
+      ),
   })
   .describe(
     "Real, tapOn-usable selector for this diff entry, when one could be derived " +
@@ -676,7 +700,10 @@ export const observeDiffSchema = z
  * discriminated union of a full `ObserveResult` summary ({@link
  * observationSummarySchema}) and a compact diff ({@link observeDiffSchema}).
  * The discriminator is `isDiff`: present and `true` on the diff arm, absent on
- * the full arm. A client should branch on
+ * the full arm — and REJECTED as `true` on the full arm (issue #6221 item 4,
+ * PR #6242 review PRRT_kwDOP-GF5M6fq3iN), so a malformed diff (missing its
+ * mandatory `skeleton`) cannot silently fall through and validate against the
+ * full arm's `.passthrough()` instead. A client should branch on
  * `"isDiff" in observation && observation.isDiff === true` and, in EITHER
  * branch, can read `observation.skeleton` for a usable selector surface — the
  * diff arm always carries one (item 4.1).

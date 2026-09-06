@@ -80,9 +80,12 @@ describe("filterAppsByQuery search normalization (#6216 review)", () => {
 });
 
 describe("parseAppsQueryParams type default (#6155)", () => {
-  test("omitted type parses to the documented default of user", () => {
+  test("omitted type is left undefined (filterAppsByQuery applies the 'user' default, not this parser)", () => {
+    // Left undefined so queryInstalledApps can tell "no filter requested" apart
+    // from an explicit type=user, which matters for the physical-iOS
+    // unreliable-classification rejection (#6216 review, round 5).
     const options = parseAppsQueryParams({ deviceId: "emulator-5554" });
-    expect(options.type).toBe("user");
+    expect(options.type).toBeUndefined();
   });
 
   test("explicit type=all is accepted and preserved", () => {

@@ -62,3 +62,110 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     expect(content.totalCount).toBe(0);
   });
 });
+
+describe("queryInstalledApps rejects an unsupported type filter on a physical iOS device (#6216 review, round 5)", () => {
+  // A physical-device UDID (8 hex + '-' + 16 hex) so isIosPhysicalUdid routes
+  // through the devicectl path, which reports no ApplicationType-equivalent
+  // field — see isIosApplicationTypeUnclassified.
+  const physicalIosDevice: BootedDevice = {
+    deviceId: "00008130-001C2D3E1234567A",
+    name: "Jason's iPhone",
+    platform: "ios",
+  };
+
+  beforeEach(() => {
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setBootedDevices("ios", [physicalIosDevice]);
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.myapp", name: "My App" },
+          { bundleIdentifier: "com.apple.mobilesafari", name: "Safari" },
+        ],
+        successful: true,
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    setListInstalledAppsFactoryForTests(null);
+    PlatformDeviceManagerFactory.setInstance(null);
+    invalidateInstalledAppsCache(physicalIosDevice.deviceId);
+  });
+
+  test("an explicit type=system is rejected rather than silently returning an empty result", async () => {
+    await expect(
+      queryInstalledApps({ deviceId: physicalIosDevice.deviceId, type: "system" }),
+    ).rejects.toThrow(/classification is not available on this transport/);
+  });
+
+  test("an explicit type=user is also rejected (classification, not just 'system', is unreliable)", async () => {
+    await expect(
+      queryInstalledApps({ deviceId: physicalIosDevice.deviceId, type: "user" }),
+    ).rejects.toThrow(/classification is not available on this transport/);
+  });
+
+  test("type=all still returns every app (no rejection)", async () => {
+    const content = await queryInstalledApps({
+      deviceId: physicalIosDevice.deviceId,
+      type: "all",
+    });
+    expect(content.totalCount).toBe(2);
+  });
+
+  test("an omitted type filter also still returns every app (no rejection)", async () => {
+    // Every unclassified physical-device app already defaults to "user"
+    // (round 4), so the documented "user" default is a no-op filter here —
+    // over-inclusive, not misleadingly empty — and must not be rejected.
+    const content = await queryInstalledApps({ deviceId: physicalIosDevice.deviceId });
+    expect(content.totalCount).toBe(2);
+  });
+});
+
+describe("queryInstalledApps still honors type filters on the iOS simulator (#6216 review, round 5)", () => {
+  // A simulator UDID (standard 8-4-4-4-12 UUID) so isIosPhysicalUdid is false
+  // and simctl's ApplicationType classification is trusted normally.
+  const simulatorDevice: BootedDevice = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "iPhone 15 Simulator",
+    platform: "ios",
+  };
+
+  beforeEach(() => {
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setBootedDevices("ios", [simulatorDevice]);
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.myapp", ApplicationType: "User" },
+          { bundleIdentifier: "com.apple.mobilesafari", ApplicationType: "System" },
+        ],
+        successful: true,
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    setListInstalledAppsFactoryForTests(null);
+    PlatformDeviceManagerFactory.setInstance(null);
+    invalidateInstalledAppsCache(simulatorDevice.deviceId);
+  });
+
+  test("an explicit type=system is honored, not rejected, when classification is reliable", async () => {
+    const content = await queryInstalledApps({
+      deviceId: simulatorDevice.deviceId,
+      type: "system",
+    });
+    expect(content.totalCount).toBe(1);
+  });
+});

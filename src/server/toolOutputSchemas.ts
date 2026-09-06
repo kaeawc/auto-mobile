@@ -696,6 +696,24 @@ export const observeDiffSchema = z
           "alongside `skeleton` so a diff-mode response never silently drops the " +
           "readout a client needs to tell a failed input from a successful one.",
       ),
+    activeWindow: activeWindowSchema
+      .optional()
+      .describe(
+        "Same name/shape as a full observation's `activeWindow` (issue #6258): a " +
+          "diff-mode response otherwise carries no `activeWindow` at all, leaving a " +
+          "client no single accessor for 'what screen am I on' across full and diff " +
+          "modes. Populated from the post-transition observation, not by " +
+          "`diffObserveResult` itself.",
+      ),
+    freshness: freshnessSchema
+      .optional()
+      .describe(
+        "Same name/shape as a full observation's `freshness` (issue #6258): a " +
+          "diff-mode response otherwise carries no `freshness` at all, leaving a " +
+          "client no single accessor for 'is this capture fresh' across full and " +
+          "diff modes. Populated from the post-transition observation, not by " +
+          "`diffObserveResult` itself.",
+      ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),
     changed: z.array(observeDiffNodeChangeSchema),

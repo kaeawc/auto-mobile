@@ -4,6 +4,7 @@ import {
   diffObserveResult,
   isSameObservationScreen,
   type SanitizeObserveConfig,
+  type ObserveDiff,
 } from "../features/observe/output/ObserveResultOutput";
 import {
   applyObserveScopeExperiments,
@@ -215,6 +216,27 @@ function resolveDiffContext(
     return servedObservation.context;
   }
   return sanitizeObserveResult(rawObservation, { ...cfg, project: "skeleton" }).context;
+}
+
+/**
+ * The `activeWindow` and `freshness` to attach to a diff response (issue
+ * #6258), resolved the same way {@link resolveDiffSkeleton} resolves
+ * `skeleton`: `diffObserveResult` never sees either field (both are top-level
+ * on the post-transition observation, not part of the hierarchy it diffs), so
+ * without this a diff-mode `observation` would carry no `activeWindow`/no
+ * `freshness` at all — while a full-mode `observation` carries both — leaving
+ * a client unable to write one accessor for "what screen am I on / is this
+ * fresh" across modes. Sourced from `rawObservation` (the pre-sanitize
+ * observation) rather than `servedObservation` so it is populated
+ * unconditionally, regardless of projection.
+ */
+function resolveDiffScreenState(
+  rawObservation: ObserveResult,
+): Pick<ObserveDiff, "activeWindow" | "freshness"> {
+  return {
+    activeWindow: rawObservation.activeWindow,
+    freshness: rawObservation.freshness,
+  };
 }
 
 /**
@@ -522,6 +544,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             payload.observation as ObserveResult,
             cfg,
           );
+          // Issue #6258: a diff must not silently drop `activeWindow`/`freshness`
+          // either — see resolveDiffScreenState. Both fields come through as
+          // `undefined` when the underlying observation lacks them, which drops
+          // out of the serialized diff the same way an absent key would.
+          Object.assign(diff, resolveDiffScreenState(payload.observation as ObserveResult));
           const screenChangedWithEmptyDiff =
             hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;

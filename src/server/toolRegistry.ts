@@ -530,6 +530,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         {
           keepScreenAwake,
           platform: platform === "android" || platform === "ios" ? platform : undefined,
+          // #6227: the persisted/daemon-session path must honor a tool's declared
+          // deviceReadiness the same way the legacy/no-session path below does
+          // (ensureDeviceReady's `readiness` option), so a `booted`-only tool
+          // (e.g. listApps, videoRecordingTools) doesn't pay for (or fail on)
+          // full CtrlProxy accessibility-service setup.
+          deviceReadiness:
+            typeof options.deviceReadiness === "function"
+              ? options.deviceReadiness(args)
+              : options.deviceReadiness,
         },
         execution,
         admittedSession,

@@ -65,6 +65,16 @@ interface ToolExecutionContext {
 export interface SessionOptions {
   keepScreenAwake?: boolean;
   platform?: Platform;
+  /**
+   * `booted` skips automation-only setup (accessibility-service / CtrlProxy
+   * preparation) for a tool that only needs the device connected and booted.
+   * `automationReady` (the default when omitted) performs full setup, matching
+   * the historical unconditional behavior. Mirrors
+   * {@link import("../utils/DeviceSessionManager").DeviceReadinessLevel} so both
+   * the fresh-session (legacy) and persisted daemon-session paths honor a
+   * tool's declared `deviceReadiness` (#6227).
+   */
+  deviceReadiness?: "booted" | "automationReady";
 }
 
 /**
@@ -138,7 +148,7 @@ async function setupSession(
   }
 
   ensureSessionIsCurrent(session, sessionManager);
-  if (session.platform === "android") {
+  if (session.platform === "android" && sessionOptions.deviceReadiness !== "booted") {
     await ensureAccessibilityServiceReady(
       session.assignedDevice,
       session.sessionId,

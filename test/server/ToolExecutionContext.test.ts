@@ -143,6 +143,92 @@ describe("ToolExecutionContext", () => {
     ).toBeUndefined();
   });
 
+  // #6227: the persisted daemon-session path (ToolRegistry passing sessionUuid
+  // into createToolExecutionContext) must honor a tool's declared
+  // deviceReadiness the same way the legacy/no-session path already does via
+  // DeviceSessionManager.ensureDeviceReady's `readiness` option.
+  test("skips accessibility setup for a new session when deviceReadiness is booted (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+
+    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
+      ...sessionOptions,
+      deviceReadiness: "booted",
+    });
+
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(0);
+  });
+
+  test("still runs accessibility setup for a new session when deviceReadiness is automationReady (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
+      ...sessionOptions,
+      deviceReadiness: "automationReady",
+    });
+
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+  });
+
+  test("a tool not requiring readiness (deviceReadiness omitted) is unaffected on the persisted path (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // No deviceReadiness set — behaves exactly as before this fix (default
+    // automationReady semantics), for both a new session...
+    const freshContext = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    expect(freshContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+
+    // ...and an already-established session (existingSession short-circuit,
+    // unrelated to deviceReadiness).
+    const existingContext = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    expect(existingContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

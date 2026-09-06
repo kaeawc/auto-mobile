@@ -195,4 +195,114 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     expect(result.freshness?.verified).toBe(true);
     expect(result.freshness?.isFresh).toBe(true);
   });
+
+  // Regression (P2 review finding on #6239): a hierarchy that carries a valid
+  // `foregroundActivity` but lacks `packageName` AND screen dimensions used to
+  // be reported as having no foreground window at all. `collectAllData` only
+  // derives `activeWindow` from `foregroundActivity` inside the
+  // dimensions-present branch, so without dimensions `activeWindow` is never
+  // set; the legacy Window fallback then returns its empty-appId sentinel, and
+  // (before this fix) the missing-foreground predicate ignored the remaining
+  // `foregroundActivity` signal entirely. A capture that names a real activity
+  // must stay verified/fresh regardless of whether `activeWindow` got derived.
+  test("a hierarchy with a valid foregroundActivity but no packageName/dimensions stays verified/isFresh:true", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      // No screenWidth/screenHeight: the dimensions-present branch that would
+      // derive `activeWindow` from `foregroundActivity` is skipped entirely.
+      // No packageName either, so the package-attribution fallback cannot fire.
+      foregroundActivity: "com.google.android.deskclock/.DeskClock",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.deskclock", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        // The legacy Window query's normal failure sentinel: a TRUTHY object
+        // with an empty appId, not `undefined`/`null`.
+        window: noOpWindow(""),
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBeFalsy();
+    expect(result.viewHierarchy?.packageName).toBeFalsy();
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
+  });
+
+  // The genuine no-identity case (#6220 itself) must remain caught: no
+  // packageName, no usable foregroundActivity, no activeWindow appId at all.
+  test("keeps the genuine no-identity systemui-only case unverified", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          node: [
+            {
+              "resource-id": "com.android.systemui:id/clock",
+              text: "8:33",
+              bounds: { left: 21, top: 0, right: 107, bottom: 63 },
+            },
+          ],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: noOpWindow(""),
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("no foreground application window");
+  });
 });

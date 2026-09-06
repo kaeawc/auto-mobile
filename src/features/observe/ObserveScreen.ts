@@ -229,21 +229,39 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
  * `unavailable` freshness path instead — this is only about a hierarchy that
  * WAS captured but carries no window identity.
  */
+/**
+ * Whether the observation carries ANY signal identifying a real foreground
+ * application: a usable `activeWindow.appId`, `viewHierarchy.packageName`, or
+ * a valid `foregroundActivity` (the raw accessibility signal, checked
+ * directly rather than only through `activeWindow`). The third signal matters
+ * on its own: deriving `activeWindow` from `foregroundActivity` in
+ * `collectAllData` is gated on screen dimensions being present, so a
+ * hierarchy that lacks `packageName`/dimensions but DOES carry a valid
+ * `foregroundActivity` never gets an `activeWindow` at all — it must still
+ * not be treated as identity-less (issue #6220 follow-up false-positive).
+ * Single source of truth for "does this capture name an app", so a future
+ * signal is added once here rather than risking one call site missing it.
+ */
+function hasForegroundAppIdentity(result: ObserveResult): boolean {
+  return Boolean(
+    result.activeWindow?.appId ||
+    result.viewHierarchy?.packageName ||
+    hierarchyCarriesActivitySignal(result.viewHierarchy),
+  );
+}
+
 function resolveMissingForegroundWindow(
   result: ObserveResult,
 ): { reason: "status_bar_only" | "empty_active_window" } | undefined {
-  // `viewHierarchy.packageName` is checked directly (not only via
+  // `hasForegroundAppIdentity` is checked directly (not only via
   // `activeWindow.appId`, which the package-attribution fallback above should
-  // already have backfilled from it): later stages (e.g.
-  // `reconcileActiveWindowAttribution`, the SystemUI-overlay mirroring) can
-  // still re-derive `activeWindow` after this point, and a package-attributed
-  // capture must never be reported as having no foreground window regardless
-  // of what runs afterward (issue #6220 false-positive).
-  if (
-    result.activeWindow?.appId ||
-    result.viewHierarchy?.packageName ||
-    !result.viewHierarchy?.hierarchy?.node
-  ) {
+  // already have backfilled from `viewHierarchy.packageName`): later stages
+  // (e.g. `reconcileActiveWindowAttribution`, the SystemUI-overlay mirroring)
+  // can still re-derive `activeWindow` after this point, and a
+  // package/activity-attributed capture must never be reported as having no
+  // foreground window regardless of what runs afterward (issue #6220
+  // false-positive).
+  if (hasForegroundAppIdentity(result) || !result.viewHierarchy?.hierarchy?.node) {
     return undefined;
   }
   return { reason: isStatusBarOnlyHierarchy(result) ? "status_bar_only" : "empty_active_window" };

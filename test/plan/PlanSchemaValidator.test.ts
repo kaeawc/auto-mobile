@@ -7,6 +7,14 @@ describe("PlanSchemaValidator", () => {
   beforeAll(async () => {
     validator = new PlanSchemaValidator();
     await validator.loadSchema();
+    // `validateYaml` compiles the ajv schema (walking every $ref) on its
+    // first call and caches the result. Warm that compile here, in setup,
+    // rather than letting it land inside whichever `it()` happens to run
+    // first — the 100ms/test CI budget
+    // (`scripts/validate-bun-test-timings.sh`) measures per-test time, and a
+    // cold compile inside a test body was clocked at 106.32ms in CI (#6244
+    // related run).
+    validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
   });
 
   describe("Valid YAML", () => {

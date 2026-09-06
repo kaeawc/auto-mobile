@@ -27,11 +27,24 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { NodeCryptoService } from "../../utils/crypto";
+import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
+import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 
 interface TapAnyElementDependencies {
   timer?: Timer;
   elementSelector?: ElementSelector;
+  iosVoiceOverDetector?: IosVoiceOverDetector;
+  featureFlags?: FeatureFlagService;
 }
+
+/**
+ * Headroom added to a long-press duration when sizing the CtrlProxy request
+ * timeout: CtrlProxy blocks its reply until the on-device press completes, so
+ * a timeout shorter than (or barely covering) the press duration times out
+ * before the gesture even finishes. Matches Shake's `duration + 2000` pattern.
+ */
+const LONG_PRESS_TIMEOUT_HEADROOM_MS = 2000;
 
 export class TapAnyElement extends BaseVisualChange {
   private geometry: ElementGeometry;
@@ -39,6 +52,8 @@ export class TapAnyElement extends BaseVisualChange {
   private finder: ElementFinder;
   private accessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
+  private iosVoiceOverDetector: IosVoiceOverDetector;
+  private featureFlags: FeatureFlagService;
 
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
@@ -56,6 +71,8 @@ export class TapAnyElement extends BaseVisualChange {
     this.finder = new DefaultElementFinder();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
+    this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
+    this.featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
   }
 
   private createErrorResult(action: string, error: string): TapOnElementResult {
@@ -225,35 +242,113 @@ export class TapAnyElement extends BaseVisualChange {
    *
    * `IOSCtrlProxyClient` has no `tap`/`doubleTap`/`longPress` methods; the real
    * gesture API is `requestTapCoordinates`, which `TapOnElement.executeiOSTapWithCoordinates`
-   * also uses. doubleTap is implemented as two taps with a short pause, matching that
-   * same pattern.
+   * also uses. When VoiceOver is enabled, mirror `TapOnElement.executeiOSTap`: a bare
+   * coordinate press only *focuses* an element under VoiceOver rather than activating
+   * it, so route through `requestVoiceOverActivate` instead (same detector/seam as
+   * `TapOnElement`), falling back to the coordinate path if no label is resolvable or
+   * the VoiceOver action itself fails.
    */
   private async executeIosTap(
     action: string,
     x: number,
     y: number,
     longPressDuration: number,
+    element?: Element,
   ): Promise<void> {
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
+    const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverEnabled(
+      this.device.deviceId,
+      xcTestClient,
+      this.featureFlags,
+    );
+
+    if (isVoiceOverEnabled && element) {
+      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, longPressDuration);
+      return;
+    }
+
+    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
+  }
+
+  /**
+   * Execute iOS tap using coordinate-based input (standard mode).
+   *
+   * CtrlProxy blocks its reply until the on-device press actually completes, so a
+   * long press must size the request timeout from the press duration —
+   * `requestTapCoordinates`'s default 5s timeout would otherwise fire (and report
+   * failure) before a longer on-device press finishes.
+   */
+  private async executeIosTapWithCoordinates(
+    xcTestClient: IOSCtrlProxyClient,
+    action: string,
+    x: number,
+    y: number,
+    longPressDuration: number,
+  ): Promise<void> {
     // Short duration (50ms) for tap/doubleTap, full duration for longPress.
     const tapDuration = action === "longPress" ? longPressDuration : 50;
+    const timeoutMs =
+      action === "longPress" ? tapDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS : undefined;
 
     if (action === "doubleTap") {
-      const firstResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration);
+      const firstResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
       if (!firstResult.success) {
         throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
       }
       await this.timer.sleep(200);
-      const secondResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration);
+      const secondResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
       if (!secondResult.success) {
         throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
       }
       return;
     }
 
-    const result = await xcTestClient.requestTapCoordinates(x, y, tapDuration);
+    const result = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
     if (!result.success) {
       throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
+    }
+  }
+
+  /**
+   * Execute iOS tap using VoiceOver accessibility actions.
+   * Falls back to coordinate-based tap if no label is resolvable or if the action fails.
+   * Mirrors `TapOnElement.executeIOSTapWithVoiceOver`.
+   */
+  private async executeIosTapWithVoiceOver(
+    xcTestClient: IOSCtrlProxyClient,
+    action: string,
+    element: Element,
+    x: number,
+    y: number,
+    longPressDuration: number,
+  ): Promise<void> {
+    // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
+    const label =
+      (element["ios-accessibility-label"] as string | undefined) ??
+      (typeof element["content-desc"] === "string" && element["content-desc"]
+        ? element["content-desc"]
+        : undefined) ??
+      (typeof element.text === "string" && element.text ? element.text : undefined);
+
+    if (!label) {
+      logger.info("[TapAnyElement] VoiceOver: no label available, falling back to coordinate tap");
+      await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
+      return;
+    }
+
+    const voiceOverAction: "activate" | "long_press" =
+      action === "longPress" ? "long_press" : "activate";
+    const timeoutMs =
+      action === "longPress" ? longPressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS : undefined;
+
+    const result = await xcTestClient.requestVoiceOverActivate(label, voiceOverAction, timeoutMs);
+
+    if (!result.success) {
+      logger.warn(
+        `[TapAnyElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
+          `falling back to coordinate tap at (${x}, ${y})`,
+      );
+      await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
     }
   }
 
@@ -371,7 +466,7 @@ export class TapAnyElement extends BaseVisualChange {
               }
               break;
             case "ios":
-              await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration);
+              await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration, element);
               break;
             default:
               throw new ActionableError(`Unsupported platform: ${this.device.platform}`);

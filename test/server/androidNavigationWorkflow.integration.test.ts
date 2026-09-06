@@ -58,11 +58,17 @@ describe("Android navigation graph workflow (#4459)", () => {
     await client.connect(clientTransport);
 
     try {
+      // Bound this real request-response round trip explicitly (issue #6236):
+      // the MCP SDK's own request timeout defaults to 60s, which is close
+      // enough to the per-test backstop below that a genuinely stuck server
+      // response would still eat most of the CI wall-timeout budget before
+      // surfacing a diagnostic. Fail fast instead.
       const result = await client.request(
         { method: "tools/list", params: {} },
         z.object({
           tools: z.array(z.object({ name: z.string() }).passthrough()),
         }),
+        { timeout: 10_000 },
       );
       const toolNames = result.tools.map((tool) => tool.name);
 
@@ -70,9 +76,15 @@ describe("Android navigation graph workflow (#4459)", () => {
         expect.arrayContaining(["explore", "getNavigationGraph", "navigateTo"]),
       );
     } finally {
+      // Close BOTH ends of the transport. Closing only the client left the
+      // server-side transport, its request-timeout timers, and the
+      // ToolRegistry/SessionReleaseBroadcaster subscriptions registered in
+      // createMcpServer() alive for the rest of the process — a plausible
+      // contributor to the intermittent whole-lane hang (issue #6236).
       await client.close();
+      await server.close();
     }
-  });
+  }, 15_000);
 
   test("discovers, inspects, and replays a learned Android path within one session", async () => {
     const sessionUuid = "android-navigation-session";
@@ -160,11 +172,22 @@ describe("Android navigation graph workflow (#4459)", () => {
       });
       return true;
     };
-    const exploration = await explore.execute({
-      maxInteractions: 1,
-      timeoutMs: 5000,
-      packageName: appId,
-    });
+    // Bound the exploration loop with a REAL wall-clock abort signal, separate
+    // from `timeoutMs` (which is measured against the injected FakeTimer and
+    // never elapses on its own outside of `advanceTime`/auto-advance). Explore
+    // checks `signal?.aborted` once per loop iteration and stops cleanly rather
+    // than looping until `maxInteractions`/`timeoutMs` are satisfied, so a
+    // regression that stops making progress fails fast with a diagnostic
+    // instead of consuming the CI lane's wall-timeout budget (issue #6236).
+    const exploration = await explore.execute(
+      {
+        maxInteractions: 1,
+        timeoutMs: 5000,
+        packageName: appId,
+      },
+      undefined,
+      AbortSignal.timeout(10_000),
+    );
     expect(exploration).toMatchObject({
       success: true,
       interactionsPerformed: 1,
@@ -240,5 +263,5 @@ describe("Android navigation graph workflow (#4459)", () => {
       stepsExecuted: 1,
     });
     expect(replayedArgs).toMatchObject({ text: "Settings", action: "tap", platform: "android" });
-  });
+  }, 20_000);
 });

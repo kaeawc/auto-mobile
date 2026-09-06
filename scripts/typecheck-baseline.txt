@@ -256,7 +256,7 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
-# swap-fp: 7,11,13,55,56 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
+# swap-fp: 7,13,55,56,63 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 # swap-fp: 7,7,7,7,9,9,9,9 :: src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 # swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.

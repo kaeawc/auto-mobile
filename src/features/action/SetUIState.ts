@@ -556,21 +556,37 @@ export class SetUIState extends BaseVisualChange {
         // fields that need to be processed first in screen order. The scroll is in
         // service of the next not-yet-processed field, so it reports into that
         // field's own progress slice (#6222 review).
-        await this.getSwipeOn().execute(
-          { direction: currentDirection },
-          fieldProgress(processed.size),
+        //
+        // Both the swipe and the follow-up re-observe are UNBOUNDED device
+        // I/O -- if either stalls, the daemon's outer abort fires first and
+        // discards the accumulated structured result built up so far,
+        // exactly the failure mode this whole feature exists to prevent.
+        // Race the whole iteration against the same live cutoff every other
+        // device call in this method already respects (issue #6222 review,
+        // PRRT_kwDOP-GF5M6fuyts): a stall here stops the search and returns
+        // what has already been applied instead of letting the outer abort
+        // discard it.
+        const searchRaced = await this.raceAgainstDeadline<ObserveResult | undefined>(
+          async (onTick) => {
+            await this.getSwipeOn().execute(
+              { direction: currentDirection },
+              this.withRearmOnTick(fieldProgress(processed.size), onTick),
+            );
+
+            // Re-observe after scroll
+            return this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+          },
+          () => cutoffMs(),
+          "off-screen search (swipe + re-observe)",
         );
 
-        // Re-observe after scroll
-        const freshObs = await this.getObserveScreen().execute(
-          undefined,
-          undefined,
-          false,
-          0,
-          signal,
-        );
-        if (freshObs) {
-          lastObservation = freshObs;
+        if (searchRaced === "timed-out") {
+          resultBudgetSpent = true;
+          break;
+        }
+
+        if (searchRaced) {
+          lastObservation = searchRaced;
         }
       }
     }

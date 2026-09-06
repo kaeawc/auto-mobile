@@ -2123,3 +2123,141 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
   });
 });
+
+describe("SetUIState off-screen search device I/O is bounded by the result deadline (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  /** The requested field is absent from every observation -- the search loop runs. */
+  const emptyHierarchy: ViewHierarchyResult = {
+    hierarchy: { node: [] },
+  } as unknown as ViewHierarchyResult;
+
+  beforeEach(() => {
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  test("a stalled SwipeOn.execute during off-screen search returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // When a requested field is absent from the current hierarchy, the last
+    // deadline check runs BEFORE the unbounded swipe + re-observe pair. If
+    // the swipe stalls, that award must still be bounded by the same live
+    // cutoff every other device call in this method already respects.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 30_000;
+
+    let swipeCalls = 0;
+    const stallingSwipe = {
+      execute: async () => {
+        swipeCalls++;
+        // Never resolves.
+        return new Promise<{ success: boolean }>(() => {});
+      },
+    };
+
+    const observeScreen = {
+      execute: async () => ({
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: emptyHierarchy,
+      }),
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: stallingSwipe as unknown as FakeSwipeOn,
+      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && swipeCalls === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(swipeCalls).toBe(1);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(30_000);
+    const result = await resultPromise;
+
+    // A real, structured result -- never a hang past the deadline -- with the
+    // never-found field marked not-attempted rather than silently discarded.
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBe(true);
+    expect(result.error).toContain("result deadline");
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+
+  test("a stalled follow-up ObserveScreen.execute during off-screen search returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // Same hazard as above, but the swipe itself completes and it is the
+    // follow-up re-observe (the second call into ObserveScreen -- the first
+    // is the initial observation) that stalls.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 30_000;
+
+    const swipeOn = {
+      execute: async () => ({ success: true }),
+    };
+
+    let observeCalls = 0;
+    const observeScreen = {
+      execute: async () => {
+        observeCalls++;
+        if (observeCalls === 1) {
+          return {
+            updatedAt: fakeTimer.now(),
+            screenSize: { width: 1080, height: 1920 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: emptyHierarchy,
+          };
+        }
+        // The follow-up re-observe after the swipe -- never resolves.
+        return new Promise<never>(() => {});
+      },
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: swipeOn as unknown as FakeSwipeOn,
+      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && observeCalls < 2; i++) {
+      await Promise.resolve();
+    }
+    expect(observeCalls).toBe(2);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(30_000);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBe(true);
+    expect(result.error).toContain("result deadline");
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+});

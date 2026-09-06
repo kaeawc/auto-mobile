@@ -156,16 +156,15 @@ export class SetUIState extends BaseVisualChange {
     // their own local 0..100 range via the SAME callback (e.g. tap emits
     // 0,10 and then clear ALSO emits 0,10), which would otherwise collide or
     // reset mid-field or between fields. Give every field a fixed 100-wide
-    // slice of one overall range, and force every emission strictly above the
-    // last one actually sent (bumping by 1 when the mapped value would tie or
-    // fall behind) so nested resets can never read as a non-increase (#6222
-    // review). A field's slice has ample headroom for these +1 bumps -- a
-    // field's own child steps and retries emit only a handful of ticks well
-    // under 100 -- and the per-field boundary tick (top of the slice) is
-    // always emitted last for that field, so it remains the largest value in
-    // the slice regardless of how many bumps preceded it.
-    const overallProgressTotal = options.fields.length * 100;
+    // slice of one overall range (#6222 review).
+    const FIELD_SLICE_WIDTH = 100;
+    const overallProgressTotal = options.fields.length * FIELD_SLICE_WIDTH;
     let maxProgressReported = 0;
+    // Emits the per-field boundary tick -- always the top of that field's
+    // slice. This is always reachable: child-forwarded progress is capped
+    // strictly below the slice endpoint (see fieldProgress below), so the
+    // boundary value is guaranteed to exceed anything already emitted for
+    // this field. The bump is a defensive floor, not the normal path.
     const emitProgress = async (raw: number, message?: string): Promise<void> => {
       if (!progress) {
         return;
@@ -176,15 +175,32 @@ export class SetUIState extends BaseVisualChange {
     };
     // Projects a child step's own 0..N progress into the 100-wide slice for
     // the field currently being worked on (identified by how many fields are
-    // already fully processed, i.e. its position in processing order).
+    // already fully processed, i.e. its position in processing order). The
+    // slice's own top value (fieldStart + 100) is RESERVED for the
+    // field-boundary tick that follows -- a child reporting its own 100%
+    // (e.g. childProgress===childTotal) is capped one below that endpoint, so
+    // it can never tie or collide with the boundary tick. A child tick that
+    // cannot land strictly above what has already been emitted is suppressed
+    // outright rather than bumped: bumping here could push the value up to,
+    // or past, the reserved endpoint -- or even into the next field's slice.
     const fieldProgress = (fieldSequence: number): ProgressCallback | undefined => {
       if (!progress) {
         return undefined;
       }
+      const fieldStart = fieldSequence * FIELD_SLICE_WIDTH;
+      const fieldSliceMax = fieldStart + FIELD_SLICE_WIDTH - 1;
       return async (childProgress, childTotal, message) => {
         const pct =
           childTotal && childTotal > 0 ? (childProgress / childTotal) * 100 : childProgress;
-        await emitProgress(fieldSequence * 100 + pct, message);
+        const candidate = Math.min(fieldStart + pct, fieldSliceMax);
+        if (candidate <= maxProgressReported) {
+          // Cannot strictly increase without crossing into the boundary
+          // tick's reserved endpoint or the next field's slice -- drop this
+          // tick rather than violate either bound.
+          return;
+        }
+        maxProgressReported = candidate;
+        await progress(candidate, overallProgressTotal, message);
       };
     };
 

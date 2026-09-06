@@ -1141,9 +1141,12 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     );
 
     expect(result.success).toBe(true);
-    // Each field's tap AND clear child steps report their own local 0,10 --
-    // two ticks apiece -- plus one field-boundary tick: at least 9 total.
-    expect(progressCalls.length).toBeGreaterThanOrEqual(9);
+    // Each field's tap AND clear child steps report the same local 0,10
+    // pattern. Ties are suppressed rather than bumped (so a repeat can never
+    // be pushed into the reserved boundary endpoint or the next field's
+    // slice) -- so only the first genuinely-advancing child tick per field
+    // (tap's "10") survives, plus that field's boundary tick: 2 per field.
+    expect(progressCalls.length).toBe(6);
     // Every notification shares ONE consistent total across the whole call
     // (fieldCount * 100) -- not the per-field child steps' own local total,
     // and not a bare field-count total that would collide with those.
@@ -1163,6 +1166,125 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
       expect.arrayContaining([100, 200, 300]) as unknown as number[],
     );
     expect(progressCalls[progressCalls.length - 1].message).toContain("3/3");
+  });
+
+  test("reserves the field-slice endpoint for the boundary tick when a child reports its own 100%", async () => {
+    // A child step can legitimately report (100, 100) -- its own completion.
+    // That must be capped strictly below this field's slice endpoint (not
+    // mapped onto it), so it can never tie or collide with the boundary tick
+    // that follows, and never gets bumped across into the next field's slice.
+    const twoCheckboxes: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "first",
+              class: "android.widget.CheckBox",
+              checkable: "true" as any,
+              checked: "false" as any,
+            },
+          },
+          {
+            $: {
+              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+              "resource-id": "second",
+              class: "android.widget.CheckBox",
+              checkable: "true" as any,
+              checked: "false" as any,
+            },
+          },
+        ],
+      },
+    };
+    fakeObserve.setResult(createObserveResultFor(twoCheckboxes));
+    fakeFieldTypeDetector.setFieldType("first", "checkbox");
+    fakeFieldTypeDetector.setFieldType("second", "checkbox");
+    fakeFieldTypeDetector.setSkipVerification("first", true);
+    fakeFieldTypeDetector.setSkipVerification("second", true);
+
+    // A tap fake whose "first" field reports its own 100% completion; its
+    // "second" field uses the ordinary 0,10 pattern real tools use.
+    const tapReportingFullCompletion = {
+      calls: [] as Array<{ elementId?: string }>,
+      async execute(
+        options: { elementId?: string },
+        childProgress?: (p: number, t?: number, m?: string) => Promise<void>,
+      ) {
+        this.calls.push({ elementId: options.elementId });
+        if (options.elementId === "first") {
+          await childProgress?.(0, 100, "start");
+          await childProgress?.(100, 100, "done");
+        } else {
+          await childProgress?.(0, 100, "Preparing to execute action...");
+          await childProgress?.(10, 100, "Getting previous view hierarchy...");
+        }
+        return {
+          success: true,
+          action: "tap",
+          element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
+        };
+      },
+    };
+
+    const progressCalls: Array<{ progress: number; message?: string }> = [];
+    const progress = async (progressValue: number, _total?: number, message?: string) => {
+      progressCalls.push({ progress: progressValue, message });
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: tapReportingFullCompletion as any,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const result = await setUIState.execute(
+      {
+        fields: [
+          { selector: { elementId: "first" }, selected: true },
+          { selector: { elementId: "second" }, selected: true },
+        ],
+      },
+      progress,
+    );
+
+    expect(result.success).toBe(true);
+    // Strictly increasing throughout, including across the field boundary.
+    for (let i = 1; i < progressCalls.length; i++) {
+      expect(progressCalls[i].progress).toBeGreaterThan(progressCalls[i - 1].progress);
+    }
+    // Identify the two field-boundary ticks by their message (only
+    // execute()'s own per-field boundary emission uses this wording; the
+    // child fake's messages are "start"/"done"/"Preparing..."/"Getting...").
+    // The boundary ticks must land EXACTLY at each field's slice endpoint --
+    // not endpoint+1, which is what a bump-on-tie (instead of reservation)
+    // would produce here, since field 1's own child already reports 100%.
+    const boundaryIndices = progressCalls
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.message?.includes("Set field"))
+      .map(({ i }) => i);
+    expect(boundaryIndices.length).toBe(2);
+    expect(progressCalls[boundaryIndices[0]].progress).toBe(100);
+    expect(progressCalls[boundaryIndices[1]].progress).toBe(200);
+    // Field 1's child ticks (everything before its boundary tick) all stay
+    // STRICTLY below 100 -- the (100, 100) report must not have been mapped
+    // onto the reserved endpoint.
+    const field1ChildTicks = progressCalls.slice(0, boundaryIndices[0]);
+    expect(field1ChildTicks.length).toBeGreaterThan(0);
+    expect(field1ChildTicks.every((c) => c.progress < 100)).toBe(true);
+    // Field 2's child ticks (between the two boundary ticks) stay within its
+    // own [100, 200) band.
+    const field2ChildTicks = progressCalls.slice(boundaryIndices[0] + 1, boundaryIndices[1]);
+    expect(field2ChildTicks.every((c) => c.progress > 100 && c.progress < 200)).toBe(true);
+    // No two emissions share the same value (no duplicate at the endpoint).
+    const values = progressCalls.map((c) => c.progress);
+    expect(new Set(values).size).toBe(values.length);
+    // Never exceeds the declared total (fieldCount * 100 = 200).
+    expect(progressCalls.every((c) => c.progress <= 200)).toBe(true);
   });
 
   test("reports progress up to the point of a mid-loop failure, not silence", async () => {

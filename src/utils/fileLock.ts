@@ -124,8 +124,17 @@ export function formatLockContent(pid: number, ownerToken?: string, metadata?: s
  */
 export function parseLockContent(content: string): LockContent {
   const [pidLine, tokenLine, metadataLine] = content.split("\n", 3);
+  const rawPid = Number.parseInt(pidLine, 10);
+  // A PID <= 0 is never a real single-process owner: `process.kill(0, 0)`
+  // signals the current process group and `process.kill(-1, 0)` signals
+  // every process this user can signal, so both "succeed" as a liveness
+  // check without naming a real process. Treat a corrupt/stale lock
+  // containing one the same as an unreadable PID (NaN) rather than ever
+  // reporting it as a live owner or surfacing it in a `kill` suggestion
+  // (issue #6260).
+  const pid = Number.isInteger(rawPid) && rawPid > 0 ? rawPid : NaN;
   const parsed: LockContent = {
-    pid: Number.parseInt(pidLine, 10),
+    pid,
     token: tokenLine || undefined,
   };
   if (metadataLine) {
@@ -222,6 +231,32 @@ export function tryAcquireExclusiveLock(
     // Best-effort: the consumed stale marker is ours to remove.
   }
   return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
+}
+
+/**
+ * Read the PID recorded in an exclusive lock file without attempting to
+ * acquire or reclaim it (issue #6260). Used by callers that need to name the
+ * process currently holding a lease in an actionable error — e.g. "another
+ * AutoMobile process (PID N) owns this resource" — rather than a bare
+ * boolean. Returns `undefined` when the file is missing, unreadable, or
+ * names a process that is not (or no longer) running.
+ */
+export function readLockOwnerPid(
+  lockFilePath: string,
+  isProcessRunning: (pid: number) => boolean = defaultIsProcessRunning,
+): number | undefined {
+  let content: string;
+  try {
+    content = readFileSync(lockFilePath, "utf-8").trim();
+  } catch (error) {
+    logger.debug(`src/utils/fileLock.ts readLockOwnerPid: lock unreadable: ${error}`, error);
+    return undefined;
+  }
+  const { pid } = parseLockContent(content);
+  if (Number.isNaN(pid) || !isProcessRunning(pid)) {
+    return undefined;
+  }
+  return pid;
 }
 
 /**

@@ -23,6 +23,7 @@ import {
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger, type Logger } from "../../../utils/logger";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
+import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
   BootedDevice,
   ImeAction,
@@ -119,7 +120,11 @@ import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
+import {
+  readLockOwnerPid,
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+} from "../../../utils/fileLock";
 import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 
 // Import delegates
@@ -1053,12 +1058,20 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 interface CtrlProxyForwardLease {
   tryAcquire(): boolean;
   release(): void;
+  /**
+   * PID of the process currently holding the lease, when a preceding
+   * {@link tryAcquire} call returned `false` (issue #6260). Lets the caller
+   * name the orphan in its actionable error instead of a bare "another
+   * process owns this" message the client cannot act on.
+   */
+  getLastOwnerPid(): number | undefined;
 }
 
 class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private lockPath: string | null = null;
   private readonly ownerToken = defaultIdGenerator.next();
   private acquired = false;
+  private lastOwnerPid: number | undefined;
 
   public constructor(private readonly deviceId: string) {}
 
@@ -1084,6 +1097,7 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     this.acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
       ownerToken: this.ownerToken,
     });
+    this.lastOwnerPid = this.acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
     return this.acquired;
   }
 
@@ -1094,6 +1108,66 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
     this.acquired = false;
   }
+
+  public getLastOwnerPid(): number | undefined {
+    return this.lastOwnerPid;
+  }
+}
+
+/**
+ * Actionable message for a CtrlProxy forwarding-lease conflict (issue #6260).
+ * Named the owning PID when known, so a client is pointed at the orphan
+ * process rather than left to guess or, worse, blame the device.
+ */
+function describeCtrlProxyForwardingLeaseConflict(
+  deviceId: string,
+  ownerPid: number | undefined,
+): string {
+  if (ownerPid !== undefined) {
+    return (
+      `Another AutoMobile process (PID ${ownerPid}) owns CtrlProxy forwarding for ${deviceId}. ` +
+      `This is usually a stale/orphaned AutoMobile daemon left behind by an incomplete ` +
+      `\`--daemon restart\` — stop it (\`kill ${ownerPid}\`) and retry.`
+    );
+  }
+  return (
+    `Another AutoMobile process owns CtrlProxy forwarding for ${deviceId}. This is usually a ` +
+    `stale/orphaned AutoMobile daemon — run \`--daemon restart\` or find and stop it directly.`
+  );
+}
+
+/**
+ * Raise the appropriate error for a failed {@link CtrlProxyForwardLease.tryAcquire}
+ * (issue #6260 / PRRT_kwDOP-GF5M6fuKn9). Split out of `setupPortForwarding` to keep
+ * that method's branching complexity down; always throws.
+ */
+function throwCtrlProxyForwardingLeaseConflict(
+  deviceId: string,
+  ownerPid: number | undefined,
+): never {
+  if (ownerPid === process.pid) {
+    // Same-process transient, NOT an orphan: shutdown recovery can evict a
+    // singleton while its in-flight setup still holds the lease, so a
+    // REPLACEMENT client constructed in THIS SAME process can observe its own
+    // PID as the current owner. Naming and suggesting `kill` on that PID would
+    // tell the caller to kill itself. This case must keep waiting for the live
+    // in-process lease to release rather than reclaim it (see
+    // `FileCtrlProxyForwardLease.tryAcquire` — reclaiming mid-setup would let
+    // two instances race the same port forward), so throw the same plain,
+    // non-actionable-kill error this path threw before this diagnostic existed
+    // and let the caller's existing retry path recover once the lease frees.
+    throw new Error(describeCtrlProxyForwardingLeaseConflict(deviceId, undefined));
+  }
+  // Named explicitly (issue #6260): this exact string is matched by
+  // RunnerReadinessService to replace a generic, device-blaming
+  // "runner did not become responsive" failure with the real, actionable
+  // cause — a stale/orphaned AutoMobile process still holding forwarding
+  // for this device, most commonly left behind by a `--daemon restart`
+  // that could not confirm the previous daemon stopped.
+  throw new CtrlProxyForwardingLeaseConflictError(
+    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid),
+    ownerPid,
+  );
 }
 
 class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
@@ -1102,6 +1176,10 @@ class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
   }
 
   public release(): void {}
+
+  public getLastOwnerPid(): undefined {
+    return undefined;
+  }
 }
 
 /**
@@ -3219,8 +3297,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return;
     }
     if (!this.ctrlProxyForwardLease.tryAcquire()) {
-      throw new Error(
-        `Another AutoMobile process owns CtrlProxy forwarding for ${this.device.deviceId}`,
+      throwCtrlProxyForwardingLeaseConflict(
+        this.device.deviceId,
+        this.ctrlProxyForwardLease.getLastOwnerPid(),
       );
     }
     // Verify port forwarding is still active even if we think it's set up

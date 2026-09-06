@@ -194,6 +194,7 @@ async function main() {
       initialSessionUuid,
       debugPerf,
       debug,
+      strictPort,
       uiPerfMode,
       memPerfAuditMode,
       a11yAuditMode,
@@ -458,6 +459,7 @@ async function main() {
       await startDaemon({
         port: daemonPort,
         ...(daemonHost !== undefined ? { host: daemonHost } : {}),
+        strictPort,
         debug,
         debugPerf,
         planExecutionLockScope,

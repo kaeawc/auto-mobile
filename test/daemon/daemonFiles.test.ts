@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { cleanupDaemonFiles, cleanupDaemonFilesSync } from "../../src/daemon/daemonFiles";
+import {
+  cleanupDaemonFiles,
+  cleanupDaemonFilesSync,
+  isProcessRunning,
+} from "../../src/daemon/daemonFiles";
 import type { PidFileData } from "../../src/daemon/types";
 
 describe("daemon file cleanup", () => {
@@ -59,6 +63,24 @@ describe("daemon file cleanup", () => {
 
     expect(existsSync(socketPath)).toBe(true);
     expect(existsSync(pidFilePath)).toBe(true);
+  });
+});
+
+describe("isProcessRunning", () => {
+  // Issue #6260 (PRRT ft82g): `process.kill(pid, 0)` treats non-positive PIDs
+  // specially — 0 signals the current process GROUP, -1 signals EVERY process
+  // this user can signal — so both "succeed" without naming a real process. A
+  // corrupt/stale lock recording one of these must never be reported as a
+  // live owner (which would surface a `kill 0` / `kill -1` suggestion).
+  test.each([0, -1, -100, 1.5, NaN])(
+    "reports a non-positive/non-integer PID (%p) as not running without signaling it",
+    (pid) => {
+      expect(isProcessRunning(pid)).toBe(false);
+    },
+  );
+
+  test("reports the current process as running (sanity check for a real positive PID)", () => {
+    expect(isProcessRunning(process.pid)).toBe(true);
   });
 });
 

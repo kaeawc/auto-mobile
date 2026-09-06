@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
+import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
@@ -57,7 +58,10 @@ describe("AndroidCtrlProxyClient", function () {
     public acquireAttempts = 0;
     public releases = 0;
 
-    public constructor(private readonly canAcquire: boolean = true) {}
+    public constructor(
+      private readonly canAcquire: boolean = true,
+      private readonly ownerPid?: number,
+    ) {}
 
     public tryAcquire(): boolean {
       this.acquireAttempts++;
@@ -66,6 +70,10 @@ describe("AndroidCtrlProxyClient", function () {
 
     public release(): void {
       this.releases++;
+    }
+
+    public getLastOwnerPid(): number | undefined {
+      return this.canAcquire ? undefined : this.ownerPid;
     }
   }
 
@@ -1246,6 +1254,78 @@ describe("AndroidCtrlProxyClient", function () {
     }
   });
 
+  test("names the orphan PID when another process owns the device lease (issue #6260)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
+    const lease = new FakeCtrlProxyForwardLease(false, 71579);
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        /Another AutoMobile process \(PID 71579\) owns CtrlProxy forwarding.*stale\/orphaned AutoMobile daemon.*--daemon restart.*kill 71579/s,
+      );
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("does not suggest killing self when the lease owner is this same process (PRRT_kwDOP-GF5M6fuKn9)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
+    // Shutdown recovery can evict a singleton while its in-flight setup still
+    // holds the lease, so a replacement client in THIS SAME process can observe
+    // its own PID as the current owner. That must never surface the orphan-kill
+    // diagnostic, since the PID it would name is the caller's own.
+    const lease = new FakeCtrlProxyForwardLease(false, process.pid);
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      let caught: unknown;
+      try {
+        await (client as any).setupPortForwarding();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+      const message = (caught as Error).message;
+      expect(message).toContain("Another AutoMobile process owns CtrlProxy forwarding");
+      expect(message).not.toMatch(/kill/i);
+    } finally {
+      await client.close();
+    }
+  });
+
   test("does not reclaim a live file lease from a synchronously evicted same-process client", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
@@ -1275,6 +1355,9 @@ describe("AndroidCtrlProxyClient", function () {
         fakeTimer,
       );
       expect((replacement as any).ctrlProxyForwardLease.tryAcquire()).toBe(false);
+      // The real file lease (issue #6260) must resolve the owner PID from the
+      // lock file it just lost the race for, not merely report the boolean.
+      expect((replacement as any).ctrlProxyForwardLease.getLastOwnerPid()).toBe(process.pid);
     } finally {
       await replacement?.close();
       await original.close();

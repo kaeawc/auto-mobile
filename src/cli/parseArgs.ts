@@ -47,6 +47,7 @@ const booleanOptions = Object.fromEntries(
     "no-report-view-ids",
     "no-retrieve-interactive-windows",
     "no-occlusion",
+    "strict-port",
   ].map((name) => [name, { type: "boolean" as const }]),
 );
 
@@ -139,6 +140,7 @@ export function parseArgs(
   const debugPerf =
     hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
   const debug = hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1";
+  const strictPort = hasFlag("strict-port");
   const uiPerfMode = !hasFlag("no-ui-perf-mode");
   const memPerfAuditMode = hasFlag("mem-perf-audit");
   const a11yAuditMode = hasFlag("accessibility-audit");
@@ -354,6 +356,7 @@ export function parseArgs(
     initialSessionUuid,
     debugPerf,
     debug,
+    strictPort,
     uiPerfMode,
     memPerfAuditMode,
     a11yAuditMode,

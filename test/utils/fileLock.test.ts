@@ -268,6 +268,15 @@ describe("fileLock primitive", () => {
     test("parseLockContent reports NaN for an unreadable PID line", () => {
       expect(parseLockContent("not-a-pid").pid).toBeNaN();
     });
+
+    // Issue #6260 (PRRT ft82g): PID 0 signals the current process GROUP and
+    // PID -1 signals EVERY process a user can signal to `process.kill`, so
+    // both "succeed" as a liveness probe without naming a real process. A
+    // corrupt/stale lock containing one must never be treated as a live
+    // owner, or a caller could surface a `kill 0` / `kill -1` suggestion.
+    test.each([0, -1, -100])("parseLockContent reports NaN for a non-positive PID (%d)", (pid) => {
+      expect(parseLockContent(formatLockContent(pid)).pid).toBeNaN();
+    });
   });
 
   describe("releaseExclusiveLock (compare-and-delete)", () => {

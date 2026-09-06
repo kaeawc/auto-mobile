@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { execSync, type ChildProcess } from "node:child_process";
+import { createServer as createNetServer } from "node:net";
 import { open, readFile, rm } from "node:fs/promises";
 import { existsSync, openSync, closeSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
@@ -30,6 +31,7 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
+  DEFAULT_DAEMON_PORT,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -363,6 +365,44 @@ export interface ExtractionCleaner {
   removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
 }
 
+/**
+ * Confirms whether a TCP port is free to bind, from the MANAGER side (issue
+ * #6260) — independent of process-table detection. `restart()` uses this as a
+ * last line of defense right before `start()`: even when process discovery
+ * believes every prior AutoMobile daemon was stopped, a still-bound canonical
+ * port is definitive proof one was not, and `start()`'s own `findAvailablePort`
+ * would otherwise silently fall back to the next port in range and report
+ * unqualified success — precisely the split-brain #6260 describes.
+ */
+export interface DaemonPortAvailabilityChecker {
+  isPortFree(port: number, host: string): Promise<boolean>;
+}
+
+const PORT_AVAILABILITY_PROBE_TIMEOUT_MS = 1000;
+
+class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
+  isPortFree(port: number, host: string): Promise<boolean> {
+    return new Promise((resolvePromise) => {
+      const probeServer = createNetServer();
+      let settled = false;
+      const finish = (result: boolean): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        defaultTimer.clearTimeout(timeoutHandle);
+        probeServer.close(() => resolvePromise(result));
+      };
+      const timeoutHandle = defaultTimer.setTimeout(
+        () => finish(false),
+        PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
+      );
+      probeServer.once("error", () => finish(false));
+      probeServer.listen(port, host, () => finish(true));
+    });
+  }
+}
+
 function resolveExtractionRootForEntryScript(entryScript: string): string | null {
   const resolved = resolve(entryScript);
   const parts = resolved.split(sep);
@@ -563,6 +603,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly processFinder: DaemonProcessFinder;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
   private readonly processSignaler: DaemonProcessSignaler;
+  private readonly portAvailabilityChecker: DaemonPortAvailabilityChecker;
   private readonly extractionCleaner: ExtractionCleaner;
   private readonly launcher: DaemonLauncher;
   private readonly fallbackLauncher: DaemonLauncher;
@@ -612,8 +653,10 @@ export class DaemonManager implements DaemonManagerLike {
     idGenerator: IdGenerator = defaultIdGenerator,
     peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
     platformOverride: NodeJS.Platform = process.platform,
+    portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
   ) {
     this.platform = platformOverride;
+    this.portAvailabilityChecker = portAvailabilityChecker;
     this.startupLockOwnerToken = idGenerator.next();
     // Construct the reachability probe here (not in a field initializer) so its connect
     // timeout is bound to the injected timer — a field initializer would capture the
@@ -1073,6 +1116,9 @@ export class DaemonManager implements DaemonManagerLike {
     }
     if (options.host) {
       args.push("--host", options.host);
+    }
+    if (options.strictPort) {
+      args.push("--strict-port");
     }
     if (options.debug) {
       args.push("--debug");
@@ -1703,7 +1749,18 @@ export class DaemonManager implements DaemonManagerLike {
     const requestedOptions = Object.fromEntries(
       Object.entries(options).filter(([, value]) => value !== undefined),
     ) as DaemonOptions;
-    const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
+    // Force the authoritative bind-or-fail guard (issue #6260, PRRT ft82d):
+    // the preflight check in assertNoSurvivingDaemonBeforeRestart below is
+    // fast feedback only — it releases its probe socket before this sleep and
+    // before the child actually binds, so a competitor can still win the
+    // canonical port in that window. strictPort makes the child's own
+    // listen() call the atomic guard, failing loudly instead of silently
+    // falling back to port + 1..3 and recreating the split-brain.
+    const restartOptions: DaemonOptions = {
+      ...runningOptions,
+      ...requestedOptions,
+      strictPort: true,
+    };
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
     // budget. Run the PID-recorded daemon and every cross-namespace candidate
     // concurrently so the launcher timeout remains bounded by one cleanup window.
@@ -1711,9 +1768,60 @@ export class DaemonManager implements DaemonManagerLike {
       () => (status.running ? this.stop() : undefined),
       () => this.stopUnrecordedDaemonsForExplicitRestart(status.pid),
     ]);
+    // Confirm the previous daemon(s) are actually gone before starting a
+    // replacement (issue #6260). `awaitRestartCleanup` above only rejects when a
+    // DISCOVERED candidate refused to stop; it cannot catch a candidate that
+    // process-table discovery never found in the first place — the exact split-
+    // brain #6260 reports, where `--daemon restart` printed no stop line at all,
+    // then silently started a second daemon on a fallback port and reported
+    // unqualified success while the old one kept CtrlProxy forwarding ownership.
+    // Failing loudly here, naming the orphan, is strictly better than that.
+    await this.assertNoSurvivingDaemonBeforeRestart(restartOptions);
     // Wait a bit before starting
     await this.timer.sleep(1000);
     await this.start(restartOptions);
+  }
+
+  /**
+   * Last line of defense before an explicit restart starts a replacement daemon
+   * (issue #6260). Two independent confirmations, either of which fails loudly
+   * rather than letting `start()` silently fall back to a different port:
+   *
+   * 1. Re-scan the process table: if any AutoMobile daemon process is still
+   *    alive, name it rather than starting a second one beside it.
+   * 2. Probe the canonical port directly: process-table detection can miss a
+   *    live daemon (a stale/mismatched PID record, a process-table scan that
+   *    raced the kill) even when the port it holds is unmistakably still bound.
+   *    A definitive "the port is still taken" is worth failing on even without a
+   *    named PID.
+   */
+  private async assertNoSurvivingDaemonBeforeRestart(options: DaemonOptions): Promise<void> {
+    const survivors = this.findLiveDaemonProcesses();
+    if (survivors.length > 0) {
+      throw new ActionableError(
+        `Restart could not confirm the previous AutoMobile daemon process(es) stopped: ` +
+          `PID(s) ${survivors.join(", ")} still running an AutoMobile daemon (matched by ` +
+          `\`--daemon-mode\` on its command line). Refusing to start a second daemon on a ` +
+          `fallback port and split ownership of the device pool. A PID can be recycled to an ` +
+          `unrelated process between this scan and when you act on it, so re-verify identity ` +
+          `before stopping anything — e.g. \`ps -p ${survivors.join(",")} -o pid=,command= | ` +
+          `grep -- --daemon-mode\` — and kill only the PID(s) that still match, then run ` +
+          `\`--daemon restart\` again.`,
+      );
+    }
+
+    const port = options.port ?? DEFAULT_DAEMON_PORT;
+    const host = options.host ?? "127.0.0.1";
+    if (await this.portAvailabilityChecker.isPortFree(port, host)) {
+      return;
+    }
+    throw new ActionableError(
+      `Restart stopped every AutoMobile daemon process it could find, but port ${port} on ${host} ` +
+        `is still in use. Refusing to silently start the replacement daemon on a fallback port — ` +
+        `that is how an orphaned process ends up owning device forwarding while a second daemon ` +
+        `reports success. Find and stop whatever still holds port ${port} (it may not be an ` +
+        `AutoMobile process this scan could name) and run \`--daemon restart\` again.`,
+    );
   }
 
   /**
@@ -2400,6 +2508,8 @@ export function parseDaemonArgs(
         options.host = host;
         i++;
       }
+    } else if (args[i] === "--strict-port") {
+      options.strictPort = true;
     } else if (args[i] === "--debug") {
       options.debug = true;
     } else if (args[i] === "--debug-perf" || args[i] === "--ui-perf-debug") {

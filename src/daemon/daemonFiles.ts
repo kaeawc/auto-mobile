@@ -183,6 +183,15 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
 }
 
 export function isProcessRunning(pid: number): boolean {
+  // `process.kill(pid, 0)` treats non-positive PIDs specially rather than
+  // naming a single process: pid 0 signals the CURRENT process group and
+  // pid -1 signals EVERY process this user can signal — both "succeed" even
+  // though no single real process named `0`/`-1` exists. A corrupt or stale
+  // lock containing such a PID must never be reported as a live owner (issue
+  // #6260) — that footgun would surface a `kill 0` / `kill -1` suggestion.
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
   try {
     process.kill(pid, 0);
     return true;

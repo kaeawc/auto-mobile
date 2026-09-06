@@ -95,6 +95,26 @@ export interface ReadinessClient {
   isConnected(): boolean;
   waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean>;
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
+  /**
+   * The most recent connect-attempt failure message, when the client tracks
+   * one (issue #6260) — e.g. "Another AutoMobile process (PID N) owns
+   * CtrlProxy forwarding...". Used to replace a generic "runner did not
+   * become responsive" failure with the real, actionable cause when one is
+   * known, instead of leaving it stuck at WARN in the daemon log where the
+   * caller never sees it.
+   */
+  getLastConnectionFailureMessage?(): string | undefined;
+  /**
+   * Whether {@link getLastConnectionFailureMessage}'s message describes the
+   * CtrlProxy forwarding-lease conflict specifically (issue #6260 PRRT
+   * ft82e) — another AutoMobile process (typically a stale/orphaned daemon)
+   * already owns forwarding for this device. Every OTHER connect failure
+   * (ECONNREFUSED, a timeout, ...) must fall through to the existing
+   * device diagnostics below instead of this generic transport text, so a
+   * runner unavailable because its user is locked or still booting keeps
+   * surfacing `primaryUserStartState`/`deviceLock`, not raw transport text.
+   */
+  isLastConnectionFailureForwardingLeaseConflict?(): boolean;
   getAccessibilityHierarchy?(
     queryOptions?: undefined,
     perf?: undefined,
@@ -764,6 +784,36 @@ export class RunnerReadinessService {
       const remaining = this.remainingForPhase(context, "runner-health");
       if (remaining > 0) {
         await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
+      }
+    }
+    await this.failUnresponsiveClient(context, client, phase, attempts);
+  }
+
+  /**
+   * Report why `waitForResponsiveClient` gave up. A known connect-attempt
+   * failure that is SPECIFICALLY the CtrlProxy forwarding-lease conflict (a
+   * stale/orphaned AutoMobile process still owning forwarding for this
+   * device) is the actual, actionable cause — surface IT instead of the
+   * generic device-blaming message below, which points a caller at rebooting
+   * a device that was never the problem (issue #6260). Every OTHER stored
+   * connect failure (ECONNREFUSED, a timeout, ...) must NOT take this
+   * branch: it would replace the existing Android diagnostics
+   * (primaryUserStartState, deviceLock) with raw transport text for a runner
+   * that is merely locked or still booting (PRRT ft82e).
+   */
+  private async failUnresponsiveClient(
+    context: ReadinessAttemptContext,
+    client: ReadinessClient,
+    phase: RunnerReadinessPhase,
+    attempts: number,
+  ): Promise<never> {
+    const isForwardingLeaseConflict =
+      phase === "runner-connect" &&
+      (client.isLastConnectionFailureForwardingLeaseConflict?.() ?? false);
+    if (isForwardingLeaseConflict) {
+      const lastConnectionFailure = client.getLastConnectionFailureMessage?.();
+      if (lastConnectionFailure) {
+        this.fail(context, phase, attempts, lastConnectionFailure);
       }
     }
     const diagnostic = await this.runnerConnectFailureDiagnostic(context, phase);

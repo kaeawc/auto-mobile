@@ -15,6 +15,7 @@
  */
 
 import WebSocket from "ws";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -23,6 +24,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
+import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
 import type { DelegateContext } from "./shared/types";
 
 /**
@@ -76,6 +78,20 @@ export abstract class DeviceServiceClient {
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
+  // The most recent connect-attempt failure message (issue #6260), e.g. a
+  // platform-setup error such as "Another AutoMobile process owns CtrlProxy
+  // forwarding...". `waitForConnection` only reports a boolean, so a caller
+  // that needs the actual cause of a connect failure (RunnerReadinessService,
+  // to surface it instead of a generic "runner did not become responsive")
+  // reads this instead of re-deriving it. Cleared on a successful connect.
+  private lastConnectionFailureMessage: string | undefined;
+  // Whether lastConnectionFailureMessage is specifically the CtrlProxy
+  // forwarding-lease conflict (issue #6260 PRRT ft82e), rather than an
+  // ordinary connect failure (ECONNREFUSED, a timeout, ...). Detected via
+  // `instanceof` on the caught error so RunnerReadinessService can scope its
+  // orphan-naming diagnostic to this exact condition instead of any stored
+  // error.
+  private lastConnectionFailureIsForwardingLeaseConflict: boolean = false;
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
@@ -516,6 +532,8 @@ export abstract class DeviceServiceClient {
               this.protectRegisteredRequestSends(ws);
               this.isConnecting = false;
               this.connectionAttempts = 0; // Reset on successful connection
+              this.lastConnectionFailureMessage = undefined;
+              this.lastConnectionFailureIsForwardingLeaseConflict = false;
 
               // Start health check monitoring
               this.startHealthCheck();
@@ -568,9 +586,31 @@ export abstract class DeviceServiceClient {
     } catch (error) {
       this.isConnecting = false;
       this.lastConnectionAttempt = this.timer.now();
+      this.lastConnectionFailureMessage = errorMessage(error);
+      this.lastConnectionFailureIsForwardingLeaseConflict =
+        error instanceof CtrlProxyForwardingLeaseConflictError;
       logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
       return false;
     }
+  }
+
+  /**
+   * The most recent connect-attempt failure message, or `undefined` when the
+   * client has never failed to connect (or has connected successfully since).
+   * See {@link lastConnectionFailureMessage}.
+   */
+  public getLastConnectionFailureMessage(): string | undefined {
+    return this.lastConnectionFailureMessage;
+  }
+
+  /**
+   * Whether {@link getLastConnectionFailureMessage} describes the CtrlProxy
+   * forwarding-lease conflict specifically (issue #6260 PRRT ft82e), as
+   * opposed to an ordinary connect failure. See
+   * {@link lastConnectionFailureIsForwardingLeaseConflict}.
+   */
+  public isLastConnectionFailureForwardingLeaseConflict(): boolean {
+    return this.lastConnectionFailureIsForwardingLeaseConflict;
   }
 
   private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {

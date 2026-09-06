@@ -105,16 +105,18 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     }
   });
 
-  test("content-identical duplicate nodes get distinct ordinal-suffixed ids, but the ordinal-suffixed id is rejected as capture-local rather than silently resolved", () => {
+  test("content-identical duplicate nodes get distinct ids, but BOTH the bare first-occurrence id and its ordinal-suffixed peer are rejected as capture-local", () => {
     // Two nodes with completely identical stable content (same class, no
     // text/content-desc/resource-id) — `assignStableViewIds` disambiguates them
-    // with a `-2` ordinal suffix rather than colliding on one hash. That
-    // ordinal is assigned by document order AT CAPTURE TIME (see
-    // `StableNodeIdentity.ts`), so it is capture-local: an insert or reorder
-    // before a later capture can shift which node the k-th occurrence lands
-    // on. Resolving `s-<hash>-2` here would therefore risk silently acting on
-    // the wrong element - worse than a clear failure (issue #6218 review
-    // thread PRRT_kwDOP-GF5M6foer0).
+    // with a `-2` ordinal suffix rather than colliding on one hash. The FIRST
+    // occurrence gets the bare `s-<hash>` id (implicitly ordinal 1) - that
+    // bare/ordinal split is assigned by document order AT CAPTURE TIME (see
+    // `StableNodeIdentity.ts`), so BOTH forms are capture-local whenever a
+    // duplicate exists: an insert or reorder before a later capture can hand
+    // the bare id to a different node entirely. Resolving either form here
+    // would therefore risk silently acting on the wrong element - worse than
+    // a clear failure (issue #6218 review threads PRRT_kwDOP-GF5M6foer0 and
+    // follow-up PRRT_kwDOP-GF5M6fomf-).
     const nodeA = {
       class: "android.view.View",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
@@ -140,15 +142,70 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(idA.startsWith("s-")).toBe(true);
     expect(idB).toBe(`${idA}-2`);
 
-    // The unsuffixed base id is the common case and still resolves normally -
-    // it is the only node with that EXACT (un-suffixed) view-id string.
-    const resultA = selector.selectByResourceId(viewHierarchy, idA);
-    expect(resultA.element).not.toBeNull();
-    expect(resultA.totalMatches).toBe(1);
-    expect(resultA.element!.bounds).toEqual({ left: 0, top: 0, right: 40, bottom: 40 });
-
-    // The ordinal-suffixed duplicate id is rejected outright, not resolved.
+    // Both the bare first-occurrence id and its ordinal-suffixed peer are
+    // rejected outright, not resolved - neither is safe to trust across a
+    // capture boundary while a content-identical duplicate exists.
+    expect(() => selector.selectByResourceId(viewHierarchy, idA)).toThrow(/ambiguous/i);
     expect(() => selector.selectByResourceId(viewHierarchy, idB)).toThrow(/ambiguous/i);
+  });
+
+  test("a bare s-<hash> id with no content-identical peer still resolves normally", () => {
+    // The common case (P1 follow-up): a UNIQUE base hash must keep resolving
+    // even though the bare form is now also subject to the ambiguity check.
+    const rawRoot = {
+      node: [
+        {
+          class: "android.widget.ImageButton",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          "content-desc": "solo-row",
+          clickable: "true",
+          "view-id": generatedViewId("solo"),
+        },
+      ],
+    };
+    assignStableViewIds(rawRoot);
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const id = (rawRoot.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(id).toMatch(/^s-[0-9a-f]{16}$/);
+
+    const result = selector.selectByResourceId(viewHierarchy, id);
+    expect(result.element).not.toBeNull();
+    expect(result.totalMatches).toBe(1);
+    expect(result.element!["content-desc"]).toBe("solo-row");
+  });
+
+  test("a real bare Compose resource-id shaped like a synthetic id (s-a / s-a-2) is never misclassified as ambiguous", () => {
+    // Review thread PRRT_kwDOP-GF5M6fomgA: `SYNTHETIC_STABLE_VIEW_ID_PATTERN`
+    // must require the producer's EXACT hash width, not merely the `s-`
+    // prefix, or a real short Compose testTag colliding with that prefix
+    // would be wrongly rejected as an ambiguous synthetic ordinal.
+    const rawRoot = {
+      node: [
+        {
+          class: "androidx.compose.ui.platform.ComposeView",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          "resource-id": "s-a",
+          clickable: "true",
+        },
+        {
+          class: "androidx.compose.ui.platform.ComposeView",
+          bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+          "resource-id": "s-a-2",
+          clickable: "true",
+        },
+      ],
+    };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    const result = selector.selectByResourceId(viewHierarchy, "s-a-2");
+    expect(result.element).not.toBeNull();
+    expect(result.totalMatches).toBe(1);
+    expect(result.element!.bounds).toEqual({ left: 0, top: 60, right: 100, bottom: 110 });
+
+    const resultBase = selector.selectByResourceId(viewHierarchy, "s-a");
+    expect(resultBase.element).not.toBeNull();
+    expect(resultBase.totalMatches).toBe(1);
+    expect(resultBase.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
   });
 
   test("an ordinal id from an earlier capture does not silently resolve to the wrong node after an insert shifts the ordinals", () => {

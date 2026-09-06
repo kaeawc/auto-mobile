@@ -55,6 +55,15 @@ export const GENERATED_VIEW_ID_PATTERN =
 export const STABLE_VIEW_ID_PREFIX = "s-";
 
 /**
+ * Fixed hex-character width of the content hash this module emits (see the
+ * `.slice(0, ...)` in `assign` below). Exported so consumers that need to
+ * recognize the producer's exact id shape - e.g. `ElementFinder`'s
+ * synthetic-vs-real-resource-id disambiguation (issue #6218 review) - read it
+ * from here rather than guessing/duplicating the width.
+ */
+export const STABLE_VIEW_ID_HASH_LENGTH = 16;
+
+/**
  * Node fields that participate in the content hash: the stable, position-free
  * description of what the node *is*. Everything else is deliberately excluded:
  * `bounds` and sibling order shift on scroll; `focused` / `checked` /
@@ -113,7 +122,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       ...CONTENT_FIELDS.map((field) => node[field] ?? ""),
       childHashes,
     ]);
-    const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+    const hash = createHash("sha256")
+      .update(canonical)
+      .digest("hex")
+      .slice(0, STABLE_VIEW_ID_HASH_LENGTH);
     contentHash.set(node, hash);
     return hash;
   };

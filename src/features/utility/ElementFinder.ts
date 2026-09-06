@@ -7,7 +7,10 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
 import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
-import { STABLE_VIEW_ID_PREFIX } from "../observe/android/StableNodeIdentity";
+import {
+  STABLE_VIEW_ID_HASH_LENGTH,
+  STABLE_VIEW_ID_PREFIX,
+} from "../observe/android/StableNodeIdentity";
 import { ActionableError } from "../../models/ActionableError";
 
 /**
@@ -26,26 +29,40 @@ function isStableViewId(id: string): boolean {
 /**
  * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
  * ordinal `-<k>` suffix (`s-<hash>-2`, `s-<hash>-3`, ...) assigned by document
- * order AT CAPTURE TIME (`StableNodeIdentity.ts`). That ordinal is therefore
- * capture-local: an insert or reorder between the capture an `s-<hash>-<k>` id
- * was observed from and the fresh capture a later `tapOn`/`inputText` resolves
- * it against can shift which node the k-th occurrence now lands on - silently
- * resolving to the WRONG node rather than the one the caller meant (issue
- * #6218 review thread PRRT_kwDOP-GF5M6foer0). This pattern detects that shape
- * so it can be checked against the CURRENT capture's duplicate count before
- * being trusted.
+ * order AT CAPTURE TIME (`StableNodeIdentity.ts`) - the FIRST occurrence gets
+ * the bare, un-suffixed `s-<hash>` (implicitly ordinal 1). Both forms are
+ * therefore capture-local whenever a duplicate exists: an insert or reorder
+ * between the capture an id was observed from and the fresh capture a later
+ * `tapOn`/`inputText` resolves it against can hand the bare id to a DIFFERENT
+ * node (the new first occurrence) and push the original to `-2`, or shift
+ * which node an existing `-<k>` lands on - silently resolving to the WRONG
+ * node rather than the one the caller meant (issue #6218 review thread
+ * PRRT_kwDOP-GF5M6foer0, follow-up PRRT_kwDOP-GF5M6fomf-).
+ *
+ * This pattern requires the producer's EXACT shape - the `s-` prefix plus
+ * exactly `STABLE_VIEW_ID_HASH_LENGTH` hex characters, with an optional
+ * `-<k>` ordinal - so a real, resource-id-backed `view-id` that merely starts
+ * with `s-` (e.g. a bare Compose testTag like `s-a` / `s-a-2`) is never
+ * misclassified as synthetic (review thread PRRT_kwDOP-GF5M6fomgA).
  */
-const ORDINAL_STABLE_VIEW_ID_PATTERN = /^(s-[0-9a-f]+)-\d+$/;
+const SYNTHETIC_STABLE_VIEW_ID_PATTERN = new RegExp(
+  `^(${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}})(?:-\\d+)?$`,
+);
 
-/** The un-suffixed base id an ordinal-suffixed stable id was derived from, or null. */
-function stableViewIdOrdinalBase(id: string): string | null {
-  const match = ORDINAL_STABLE_VIEW_ID_PATTERN.exec(id);
+/**
+ * The base id (`s-<hash>`, un-suffixed) for a synthetic stable id, whether
+ * `id` itself is the bare first-occurrence form or an ordinal-suffixed
+ * duplicate. Returns null when `id` does not match the producer's exact
+ * shape - including a real `view-id` that only superficially resembles one.
+ */
+function syntheticStableViewIdBase(id: string): string | null {
+  const match = SYNTHETIC_STABLE_VIEW_ID_PATTERN.exec(id);
   return match ? match[1] : null;
 }
 
-/** True when `viewId` is exactly `base`, or an ordinal-suffixed duplicate of it. */
+/** True when `viewId` is a synthetic id (bare or ordinal-suffixed) sharing `base`. */
 function sharesStableViewIdBase(viewId: string, base: string): boolean {
-  return viewId === base || stableViewIdOrdinalBase(viewId) === base;
+  return syntheticStableViewIdBase(viewId) === base;
 }
 
 function matchesResourceIdOrStableViewId(
@@ -434,31 +451,75 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Reject an ordinal-suffixed stable-view-id selector (`s-<hash>-<k>`) when
-   * MORE THAN ONE node in the current capture shares its base content hash —
-   * i.e. the ordinal is load-bearing / capture-local rather than moot. A
-   * plain (unsuffixed) selector, or one whose base hash is unique in this
-   * capture, is left alone (issue #6218 review thread
-   * PRRT_kwDOP-GF5M6foer0). Rejecting is correct here: a wrong tap is worse
-   * than a clear failure telling the caller to use a more specific selector.
+   * True when some node anywhere in the current capture (main hierarchy plus
+   * every window) carries `id` as its REAL `resource-id` field (not merely a
+   * `view-id` that happens to look synthetic-shaped). A real resource-id is
+   * never subject to `assignStableViewIds`' ordinal semantics, so it must win
+   * over a synthetic-ordinal interpretation of the same string (review thread
+   * PRRT_kwDOP-GF5M6fomgA) even in the astronomically unlikely case a real id
+   * collides with the producer's exact `s-<16 hex>(-<k>)?` shape.
+   */
+  private hasExactResourceIdFieldMatch(viewHierarchy: ViewHierarchyResult, id: string): boolean {
+    let found = false;
+    const checkRoots = (roots: ViewHierarchyNode[]): void => {
+      for (const root of roots) {
+        if (found) {
+          return;
+        }
+        this.parser.traverseNode(root, (node: any) => {
+          if (found) {
+            return;
+          }
+          const resourceId = this.parser.extractNodeProperties(node)["resource-id"];
+          if (typeof resourceId === "string" && resourceId === id) {
+            found = true;
+          }
+        });
+      }
+    };
+
+    checkRoots(this.parser.extractRootNodes(viewHierarchy));
+    if (!found) {
+      const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+      for (const windowRoots of windowRootGroups) {
+        checkRoots(windowRoots);
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Reject a synthetic stable-view-id selector (`s-<hash>` bare OR
+   * `s-<hash>-<k>` ordinal-suffixed) when MORE THAN ONE node in the current
+   * capture shares its base content hash — i.e. it has content-identical
+   * peers, so which node holds the bare id vs. which ordinal is load-bearing
+   * / capture-local rather than moot. A selector whose base hash is unique in
+   * this capture is left alone, and so is a real `resource-id`-backed id that
+   * merely resembles the synthetic shape (issue #6218 review threads
+   * PRRT_kwDOP-GF5M6foer0, PRRT_kwDOP-GF5M6fomf-, PRRT_kwDOP-GF5M6fomgA).
+   * Rejecting is correct here: a wrong tap is worse than a clear failure
+   * telling the caller to use a more specific selector.
    */
   private assertStableViewIdSelectorNotAmbiguous(
     viewHierarchy: ViewHierarchyResult,
     id: string,
   ): void {
-    const base = stableViewIdOrdinalBase(id);
+    const base = syntheticStableViewIdBase(id);
     if (!base) {
+      return;
+    }
+    if (this.hasExactResourceIdFieldMatch(viewHierarchy, id)) {
       return;
     }
     const duplicateCount = this.countNodesSharingStableViewIdBase(viewHierarchy, base);
     if (duplicateCount > 1) {
       throw new ActionableError(
         `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
-          `content-identical elements share stable id "${base}", and its "-N" ordinal suffix is ` +
-          "assigned by document order at capture time. An element insert or reorder since this id " +
-          "was observed can shift which element the ordinal now points to, so resolving it here " +
-          "could silently act on the wrong element. Use a more specific selector (text, " +
-          "content-desc, or bounds) instead.",
+          `content-identical elements share stable id "${base}", and which of them holds the ` +
+          'bare id vs. an "-N" ordinal suffix is assigned by document order at capture time. An ' +
+          "element insert or reorder since this id was observed can shift which element it now " +
+          "points to, so resolving it here could silently act on the wrong element. Use a more " +
+          "specific selector (text, content-desc, or bounds) instead.",
       );
     }
   }

@@ -732,6 +732,47 @@ describe("WcagAudit", function () {
 
       expect(recorder.lastScreenId).toBe("com.test:unknown:");
     });
+
+    it("derives the screen id from flat attributes (CtrlProxy accessibility shape)", async function () {
+      // CtrlProxyHierarchy.convertAccessibilityNode never creates `$` — it
+      // writes `class`/`resource-id` directly on the node. A rootNode.$?.class-only
+      // read (the fix's initial, over-corrected form) leaves this always
+      // undefined on the accessibility path, re-collapsing every screen to
+      // "unknown:" — the very bug #6252 was fixing, now on the other source.
+      const hierarchy = {
+        $: {},
+        class: "com.example.MainActivity",
+        "resource-id": "root-container",
+      } as unknown as ViewHierarchyNode;
+      const recorder = new RecordingBaselineManager();
+      const withRecorder = new WcagAudit(new FakeTimer(), recorder);
+
+      await withRecorder.audit([], hierarchy, undefined, "com.test", {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: true,
+      });
+
+      expect(recorder.lastScreenId).toBe("com.test:com.example.MainActivity:root-container");
+    });
+
+    it("prefers `$` attributes over flat ones when both are present", async function () {
+      const hierarchy = {
+        $: { class: "com.example.XmlActivity", "resource-id": "xml-root" },
+        class: "com.example.FlatActivity",
+        "resource-id": "flat-root",
+      } as unknown as ViewHierarchyNode;
+      const recorder = new RecordingBaselineManager();
+      const withRecorder = new WcagAudit(new FakeTimer(), recorder);
+
+      await withRecorder.audit([], hierarchy, undefined, "com.test", {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: true,
+      });
+
+      expect(recorder.lastScreenId).toBe("com.test:com.example.XmlActivity:xml-root");
+    });
   });
 
   describe("Baseline Suppression", function () {

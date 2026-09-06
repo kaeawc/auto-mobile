@@ -122,43 +122,68 @@ export type GetNotificationPolicyArgs = z.infer<typeof getNotificationPolicySche
 
 export type SetNotificationPolicyArgs = z.infer<typeof setNotificationPolicySchema>;
 
+// Injection seam for the postNotification handler (mirrors the tapAny factory
+// seam in interactionTools.ts). Lets a unit test exercise the registered
+// handler wiring with a fake PostNotification whose execute() returns a
+// chosen success/failure result, instead of spying on the class prototype
+// (#6251 review — a prototype spy is a process-global patch that can leak
+// into unrelated tests running in the same process).
+export type PostNotificationLike = Pick<PostNotification, "execute">;
+
+let postNotificationFactory: (device: BootedDevice) => PostNotificationLike = (device) =>
+  new PostNotification(device);
+
+export function setPostNotificationFactory(
+  factory: (device: BootedDevice) => PostNotificationLike,
+): void {
+  postNotificationFactory = factory;
+}
+
+export function resetPostNotificationFactory(): void {
+  postNotificationFactory = (device) => new PostNotification(device);
+}
+
+export const postNotificationHandler = async (device: BootedDevice, args: PostNotificationArgs) => {
+  // #6154 follow-up: `platform` is optional on the wire, so the schema's
+  // per-platform appId checks (raw request platform) are skipped entirely
+  // when the caller omitted it. Re-validate against the resolved
+  // `device.platform`, before the try/catch below so the actionable message
+  // isn't re-wrapped as a generic execution failure.
+  const violation = checkPostNotificationPlatformConstraints(device.platform, args);
+  if (violation) {
+    throw new ActionableError(violation.message);
+  }
+
+  try {
+    const postNotification = postNotificationFactory(device);
+    const result = await postNotification.execute({
+      title: args.title,
+      body: args.body,
+      imageType: args.imageType,
+      imagePath: args.imagePath,
+      actions: args.actions,
+      channelId: args.channelId,
+      appId: args.appId,
+    });
+
+    const message = result.success
+      ? `Posted notification${result.method ? ` via ${result.method}` : ""}`
+      : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
+
+    const response = createJSONToolResponse({
+      message,
+      ...result,
+    });
+    // A receiver-reported failure means the notification was never delivered
+    // — the primary operation did not succeed, so the MCP envelope must say
+    // so too, exactly as tapOn/inputText do (#6200, #6251).
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to post notification: ${error}`);
+  }
+};
+
 export function registerNotificationTools() {
-  const postNotificationHandler = async (device: BootedDevice, args: PostNotificationArgs) => {
-    // #6154 follow-up: `platform` is optional on the wire, so the schema's
-    // per-platform appId checks (raw request platform) are skipped entirely
-    // when the caller omitted it. Re-validate against the resolved
-    // `device.platform`, before the try/catch below so the actionable message
-    // isn't re-wrapped as a generic execution failure.
-    const violation = checkPostNotificationPlatformConstraints(device.platform, args);
-    if (violation) {
-      throw new ActionableError(violation.message);
-    }
-
-    try {
-      const postNotification = new PostNotification(device);
-      const result = await postNotification.execute({
-        title: args.title,
-        body: args.body,
-        imageType: args.imageType,
-        imagePath: args.imagePath,
-        actions: args.actions,
-        channelId: args.channelId,
-        appId: args.appId,
-      });
-
-      const message = result.success
-        ? `Posted notification${result.method ? ` via ${result.method}` : ""}`
-        : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
-
-      return createJSONToolResponse({
-        message,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to post notification: ${error}`);
-    }
-  };
-
   const getNotificationPolicyHandler = async (
     device: BootedDevice,
     args: GetNotificationPolicyArgs,

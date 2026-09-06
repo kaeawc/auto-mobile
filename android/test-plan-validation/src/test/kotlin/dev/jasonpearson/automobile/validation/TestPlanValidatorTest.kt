@@ -841,6 +841,128 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects two structurally-different device definitions sharing a label`() {
+    // JSON Schema's uniqueItems only compares whole entries, so an Android
+    // "A" and an iOS "A" definition pass it -- but they collapse to the
+    // same label, and the daemon's validateDevicesField rejects the
+    // duplicate regardless of the definitions' other fields (#6215 review).
+    val yaml =
+      """
+      name: duplicate-label-across-definitions
+      devices:
+        - label: A
+          platform: android
+        - label: A
+          platform: ios
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Two structurally-different device definitions sharing a label should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects a non-coordination step's params device when it is not a string`() {
+    // For a tool with no tool-specific params schema (e.g. tapOn), an
+    // invalid inline device is skipped once params declares device (params
+    // wins at normalization), but nothing previously validated params.device
+    // itself -- a plan with params.device: 456 would normalize to an
+    // invalid device and only fail at the daemon (#6215 review).
+    val yaml =
+      """
+      name: tapon-invalid-params-device-number
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            device: 456
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A non-string params.device should be invalid")
+  }
+
+  @Test
+  fun `rejects a non-coordination step's params device when it is whitespace-only`() {
+    val yaml =
+      """
+      name: tapon-blank-params-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          params:
+            device: " "
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A whitespace-only params.device should be invalid")
+  }
+
+  @Test
+  fun `accepts a valid params device overriding an invalid inline device`() {
+    val yaml =
+      """
+      name: tapon-valid-params-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A valid params.device overriding an invalid inline device should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects a barrier step's params device when it is whitespace-only`() {
+    val yaml =
+      """
+      name: barrier-blank-params-device
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: " "
+            lock: sync1
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync1
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A whitespace-only barrier params.device should be invalid")
+  }
+
+  @Test
   fun `rejects a barrier with an inline malformed platform value`() {
     // The inline form must be constrained the same as the nested-params
     // form, or PlanNormalizer moving it into params later would make the

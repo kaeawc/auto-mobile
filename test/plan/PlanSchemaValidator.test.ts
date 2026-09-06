@@ -620,6 +620,85 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should reject a non-coordination step's params.device when it is not a string", () => {
+      // For a tool with no tool-specific params schema (e.g. tapOn), an
+      // invalid inline device is skipped once params declares device (params
+      // wins at normalization), but nothing previously validated params.device
+      // itself -- a plan with params.device: 456 would normalize to an
+      // invalid device and only fail at the daemon (#6215 review).
+      const yaml = `
+name: tapon-invalid-params-device-number
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: 123
+    params:
+      device: 456
+      text: hi
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a non-coordination step's params.device when it is whitespace-only", () => {
+      const yaml = `
+name: tapon-blank-params-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    params:
+      device: " "
+      text: hi
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a valid params.device overriding an invalid inline device", () => {
+      const yaml = `
+name: tapon-valid-params-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: 123
+    params:
+      device: A
+      text: hi
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step's params.device when it is whitespace-only", () => {
+      // Dovetails with fp0eM: params.device: " " passed the
+      // criticalSectionParams/barrierParams schema (just type: string)
+      // before the generic non-blank constraint was added; it becomes
+      // step.device = " " after normalization, which validateDeviceLabelsPresent
+      // rejects at runtime (#6215 review).
+      const yaml = `
+name: barrier-blank-params-device
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: " "
+      lock: sync1
+      deviceCount: 2
+  - tool: barrier
+    params:
+      device: B
+      lock: sync1
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should provide line numbers for field errors when possible", () => {
       const yaml = `
 name: test-plan

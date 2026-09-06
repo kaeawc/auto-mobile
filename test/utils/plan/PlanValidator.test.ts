@@ -788,6 +788,24 @@ describe("PlanValidator", () => {
       };
       expect(() => PlanValidator.validate(plan)).not.toThrow();
     });
+
+    test("throws when two structurally-different device definitions share a label", () => {
+      // JSON Schema's uniqueItems only compares whole entries, so an
+      // Android "A" and an iOS "A" definition pass it -- but they collapse
+      // to the same label, and the daemon's validateDevicesField rejects
+      // the duplicate regardless of the definitions' other fields (#6215
+      // review).
+      const plan: Plan = {
+        name: "Duplicate label across different definitions",
+        devices: [
+          { label: "A", platform: "android" },
+          { label: "A", platform: "ios" },
+        ],
+        steps: [{ tool: "tapOn", params: { text: "hi", device: "A" } }],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow("duplicate labels");
+    });
   });
 
   describe("params-wins precedence for split inline/params coordination fields", () => {

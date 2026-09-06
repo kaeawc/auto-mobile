@@ -201,18 +201,32 @@
       "description": "A step can have tool-specific parameters either in a 'params' object or as top-level properties (e.g., 'id', 'text', 'appId', 'direction', etc.)",
       "allOf": [
         {
-          "$comment": "Generic (all tools): params.device (when present) overrides inline device at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, params precedence), so the inline sibling is discarded and must NOT be type-checked in that case -- e.g. a nested criticalSection/barrier sub-step with an invalid inline device but a valid params.device must not be false-rejected (#6215 review).",
+          "$comment": "Generic (all tools): params.device (when present) overrides inline device at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, params precedence), so the inline sibling is discarded and must NOT be type-checked in that case -- e.g. a nested criticalSection/barrier sub-step with an invalid inline device but a valid params.device must not be false-rejected. Conversely, when params DOES declare device, its own value must still be validated (non-blank string) -- most tools have no tool-specific params schema to catch an invalid params.device otherwise, so a plan with e.g. params.device: 456 would normalize to an invalid device and only fail at the daemon (#6215 review).",
           "if": {
             "required": ["params"],
             "properties": { "params": { "type": "object", "required": ["device"] } }
           },
-          "then": true,
+          "then": {
+            "properties": {
+              "params": {
+                "properties": {
+                  "device": {
+                    "type": "string",
+                    "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              }
+            }
+          },
           "else": {
             "properties": {
               "device": {
                 "type": "string",
                 "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
-                "minLength": 1
+                "minLength": 1,
+                "pattern": "\\S"
               }
             }
           }

@@ -304,6 +304,12 @@ object TestPlanValidator {
 
     var hasLabelEntries = false
     var hasDefinitionEntries = false
+    // Raw label occurrences (NOT deduped) so a duplicate is caught even when the two entries are
+    // structurally different definitions (e.g. Android "A" + iOS "A") -- JSON Schema's
+    // uniqueItems only compares whole entries, so two different definitions sharing a label pass
+    // it, and declaredDeviceLabels()'s Set collapses them before any membership/feasibility check
+    // ever sees the duplicate (#6215 review).
+    val rawLabels = mutableListOf<String>()
 
     for (entry in devices) {
       val label =
@@ -318,6 +324,7 @@ object TestPlanValidator {
           }
           else -> null
         } ?: continue
+      rawLabels.add(label)
       if (label.trim().isEmpty()) {
         errors.add(
           ValidationError(
@@ -335,6 +342,18 @@ object TestPlanValidator {
           field = "devices",
           message =
             "Plan 'devices' must be a list of labels or a list of objects with label/platform (do not mix formats).",
+          severity = ValidationSeverity.ERROR,
+        )
+      )
+    }
+
+    val duplicates = rawLabels.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
+    if (duplicates.isNotEmpty()) {
+      errors.add(
+        ValidationError(
+          field = "devices",
+          message =
+            "Plan 'devices' array contains duplicate labels: [${rawLabels.joinToString(", ")}]",
           severity = ValidationSeverity.ERROR,
         )
       )

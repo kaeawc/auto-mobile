@@ -32,6 +32,16 @@ interface ConvertedNode {
 const GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Default per-request timeout for fetching the iOS accessibility hierarchy —
+ * XCUITest hierarchy extraction is slow (increased from an earlier 2000ms).
+ * Exported so callers that must budget the WORST CASE of a hierarchy fetch
+ * (e.g. the daemon's `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` in
+ * `src/daemon/mcpRequestTimeout.ts`) derive it from the real constant instead
+ * of duplicating the magic number (issue #6248 review, P2).
+ */
+export const IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000;
+
+/**
  * Delegate class for handling hierarchy operations.
  */
 export class CtrlProxyHierarchy {
@@ -79,7 +89,7 @@ export class CtrlProxyHierarchy {
   ): Promise<ViewHierarchyResult | null> {
     const response = await this.getLatestHierarchy(
       !skipWaitForFresh,
-      15000, // Increased from 2000ms - XCUITest hierarchy extraction is slow
+      IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
       perf,
       skipWaitForFresh,
       minTimestamp,
@@ -107,7 +117,7 @@ export class CtrlProxyHierarchy {
    */
   async getLatestHierarchy(
     waitForFresh: boolean = false,
-    timeout: number = 15000,
+    timeout: number = IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,

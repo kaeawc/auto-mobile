@@ -32,6 +32,22 @@ export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
 }
 
+/**
+ * Backoff delays (ms) between `takeObservation`'s post-action retries below.
+ * Exported so callers that must budget the WORST CASE of this retry loop
+ * (e.g. the daemon's `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` in
+ * `src/daemon/mcpRequestTimeout.ts`) derive it from the real constant instead
+ * of guessing at a duplicated magic number (issue #6248 review, P2).
+ */
+export const FINAL_OBSERVATION_RETRY_BACKOFF_MS: readonly number[] = [50, 100, 200, 400];
+
+/**
+ * Max retry attempts `takeObservation` performs after its initial observation
+ * (5 observation attempts total). Exported for the same reason as
+ * `FINAL_OBSERVATION_RETRY_BACKOFF_MS` above.
+ */
+export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
+
 interface ObservedChangeOptions {
   changeExpected: boolean;
   timeoutMs?: number;
@@ -379,8 +395,8 @@ export class BaseVisualChange {
     // Use actionStartTime as minTimestamp to ensure we get data captured after the action
     // This prevents returning stale cached data from before the action was executed
     const minTimestamp = options.actionStartTime ?? 0;
-    const retryBackoff = sequenceBackoff([50, 100, 200, 400]);
-    const maxRetryAttempts = 4;
+    const retryBackoff = sequenceBackoff(FINAL_OBSERVATION_RETRY_BACKOFF_MS);
+    const maxRetryAttempts = FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
     const previousHash = this.hashViewHierarchy(previousObserveResult?.viewHierarchy);
 
     perf.serial("finalObserve");

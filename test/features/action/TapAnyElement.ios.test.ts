@@ -195,6 +195,34 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(tapSpy).toHaveBeenCalledWith(42, 84, 6000, 8000);
   });
 
+  // Thread PRRT_kwDOP-GF5M6fuSDC: the outer MCP deadline was clamped to
+  // MAX_SETTIMEOUT_DELAY_MS (2^31-1) in an earlier round, but the INNER
+  // CtrlProxy request timeout computed here (duration + headroom) was not --
+  // a duration near the 2^31 ceiling overflows `setTimeout`, which Bun/Node
+  // silently normalize to 1ms instead of honoring it. Both the inner and
+  // outer timeouts must be clamped to the same ceiling.
+  test("longPress with a duration near the setTimeout ceiling clamps the inner CtrlProxy timeout", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+    const duration = 2_147_481_648; // duration + 2000 headroom overflows 2^31-1 by 1
+
+    const result = await tapAny.execute({ action: "longPress", duration });
+
+    expect(result.success).toBe(true);
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, duration, 2_147_483_647);
+  });
+
+  test("VoiceOver longPress with a duration near the setTimeout ceiling clamps the inner activate timeout", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");
+    const duration = 2_147_481_648;
+
+    const result = await tapAny.execute({ action: "longPress", duration });
+
+    expect(result.success).toBe(true);
+    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 2_147_483_647);
+  });
+
   test("VoiceOver longPress over 5s sizes the requestVoiceOverActivate timeout from the duration", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(true);
     const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");

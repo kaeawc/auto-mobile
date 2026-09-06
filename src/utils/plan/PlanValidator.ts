@@ -1,6 +1,7 @@
 import { Plan, PlanStep } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
+import { MAX_SETTIMEOUT_DELAY_MS } from "../SystemTimer";
 
 /**
  * Aggregated usage of a single barrier lock name across a plan, used by the
@@ -281,14 +282,6 @@ export class PlanValidator {
   }
 
   /**
-   * setTimeout's real usable range: Bun/Node clamp any delay >= 2^31
-   * (2147483648) to 1ms with a `TimeoutOverflowWarning` instead of honoring
-   * it, so a coordination timeout at or above that value times out almost
-   * immediately rather than waiting as requested.
-   */
-  private static readonly MAX_SETTIMEOUT_DELAY_MS = 2147483647;
-
-  /**
    * Validates that an optional `timeout` on a criticalSection or barrier
    * step, when declared, is a positive integer that does not exceed
    * `MAX_SETTIMEOUT_DELAY_MS` (2^31 - 1, ~24.8 days). Both tools' runtime
@@ -316,10 +309,10 @@ export class PlanValidator {
         typeof timeout !== "number" ||
         !Number.isInteger(timeout) ||
         timeout < 1 ||
-        timeout > this.MAX_SETTIMEOUT_DELAY_MS
+        timeout > MAX_SETTIMEOUT_DELAY_MS
       ) {
         errors.push(
-          `${step.tool} step ${i} declares 'timeout' of ${JSON.stringify(timeout)}, which must be a positive integer no greater than setTimeout's usable range (${this.MAX_SETTIMEOUT_DELAY_MS}ms, ~24.8 days) -- Node/Bun clamp larger delays to 1ms instead of honoring them.`,
+          `${step.tool} step ${i} declares 'timeout' of ${JSON.stringify(timeout)}, which must be a positive integer no greater than setTimeout's usable range (${MAX_SETTIMEOUT_DELAY_MS}ms, ~24.8 days) -- Node/Bun clamp larger delays to 1ms instead of honoring them.`,
         );
       }
     }

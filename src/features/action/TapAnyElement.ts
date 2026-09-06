@@ -19,7 +19,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import type { Timer } from "../../utils/SystemTimer";
+import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
@@ -47,6 +47,22 @@ interface TapAnyElementDependencies {
 const LONG_PRESS_TIMEOUT_HEADROOM_MS = 2000;
 
 /**
+ * Build the INNER CtrlProxy request timeout for a long-press gesture,
+ * clamped to `MAX_SETTIMEOUT_DELAY_MS`. `setTimeout` (Node/Bun) silently
+ * normalizes any delay >= 2^31 to 1ms rather than honoring it, so an
+ * unclamped `pressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS` computed from a
+ * caller-supplied `duration` near/over that ceiling (e.g.
+ * `tapAny({action:"longPress", duration:2147481648})`) would time the
+ * CtrlProxy request out almost immediately instead of covering the intended
+ * press (issue #6248 review, P2). The daemon's OUTER MCP deadline
+ * (`resolveTapAnyLongPressBudgetMs` in `src/daemon/mcpRequestTimeout.ts`)
+ * applies the same ceiling to the outer request -- both must be clamped.
+ */
+function resolveLongPressCtrlProxyTimeoutMs(pressDurationMs: number): number {
+  return Math.min(pressDurationMs + LONG_PRESS_TIMEOUT_HEADROOM_MS, MAX_SETTIMEOUT_DELAY_MS);
+}
+
+/**
  * Default `searchUntil.duration` (ms) applied when a `tapAny` call omits it
  * (`getSearchUntilDuration` below). Exported so the daemon's outer MCP
  * timeout budgeting (`resolveTapAnyLongPressBudgetMs` in
@@ -57,6 +73,24 @@ const LONG_PRESS_TIMEOUT_HEADROOM_MS = 2000;
  * starts.
  */
 export const TAP_ANY_SEARCH_UNTIL_DEFAULT_MS = 1500;
+
+/**
+ * Default longPress `duration` (ms) `getLongPressDuration` substitutes on iOS
+ * when a `tapAny` longPress call omits `duration` (or passes a non-positive
+ * value). Exported so the daemon's outer MCP timeout budgeting
+ * (`resolveTapAnyLongPressBudgetMs` in `src/daemon/mcpRequestTimeout.ts`)
+ * shares the same value instead of assuming an omitted `duration` costs zero
+ * press time (issue #6248 review, P2) -- `tapAny({action:"longPress"})` with
+ * no `duration` still performs a real on-device press of this length.
+ */
+export const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS = 1500;
+
+/**
+ * Android counterpart of `TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS`.
+ * Exported for the same reason; the daemon's outer budgeting uses the larger
+ * of the two defaults since it does not know the target platform.
+ */
+export const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID = 1000;
 
 export class TapAnyElement extends BaseVisualChange {
   private geometry: ElementGeometry;
@@ -257,7 +291,9 @@ export class TapAnyElement extends BaseVisualChange {
       // any positive `duration` stays a genuine long press.
       return Math.max(1, Math.round(options.duration));
     }
-    return this.device.platform === "ios" ? 1500 : 1000;
+    return this.device.platform === "ios"
+      ? TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS
+      : TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID;
   }
 
   /**
@@ -311,7 +347,7 @@ export class TapAnyElement extends BaseVisualChange {
     // Short duration (50ms) for tap/doubleTap, full duration for longPress.
     const tapDuration = action === "longPress" ? longPressDuration : 50;
     const timeoutMs =
-      action === "longPress" ? tapDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS : undefined;
+      action === "longPress" ? resolveLongPressCtrlProxyTimeoutMs(tapDuration) : undefined;
 
     if (action === "doubleTap") {
       const firstResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
@@ -411,7 +447,7 @@ export class TapAnyElement extends BaseVisualChange {
     const voiceOverAction: "activate" | "long_press" =
       action === "longPress" ? "long_press" : "activate";
     const timeoutMs =
-      action === "longPress" ? longPressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS : undefined;
+      action === "longPress" ? resolveLongPressCtrlProxyTimeoutMs(longPressDuration) : undefined;
 
     if (!label) {
       await this.activateIosByResourceId(

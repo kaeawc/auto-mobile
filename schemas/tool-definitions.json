@@ -8648,6 +8648,9 @@
               },
               "notAttempted": {
                 "type": "boolean"
+              },
+              "timedOut": {
+                "type": "boolean"
               }
             },
             "required": ["selector", "success", "attempts"],

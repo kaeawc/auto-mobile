@@ -188,7 +188,19 @@ export class SetUIState extends BaseVisualChange {
    *   `RESULT_DEADLINE_BUDGET_MS` clock, so a call never keeps admitting
    *   fields past the point the transport itself would discard the result
    *   (issue #6222 P1). Undefined on a direct/non-daemon call, where the
-   *   internal budget alone is the only bound available.
+   *   internal budget alone is the only bound available. Superseded, on every
+   *   check, by `getLiveTransportDeadlineMs()` when that is provided.
+   * @param getLiveTransportDeadlineMs - Optional getter for the CURRENT value
+   *   of the transport deadline, read fresh at every admission check instead
+   *   of relying on the `transportDeadlineMs` snapshot above. A
+   *   daemon-forwarded, progress-capable call's real deadline can be pushed
+   *   FORWARD after `execute()` started (`ProgressExtendableDeadline`,
+   *   extended as THIS call's own progress notifications reach the daemon) --
+   *   `transportDeadlineMs` alone can never reflect that, since it is
+   *   captured once before `execute()` is even invoked. When this getter
+   *   returns `undefined` (e.g. the daemon-side entry was never registered,
+   *   or the call is not daemon-forwarded), `transportDeadlineMs` is used
+   *   as-is (issue #6222 P1 reopen, fuQ88 review).
    * @returns Result of the operation
    */
   async execute(
@@ -196,6 +208,7 @@ export class SetUIState extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
     transportDeadlineMs?: number,
+    getLiveTransportDeadlineMs?: () => number | undefined,
   ): Promise<SetUIStateResult> {
     const scrollDirection = options.scrollDirection ?? DEFAULT_SCROLL_DIRECTION;
 
@@ -203,19 +216,22 @@ export class SetUIState extends BaseVisualChange {
     const processed = new Set<number>();
     let totalAttempts = 0;
     // See RESULT_DEADLINE_BUDGET_MS -- this is the whole-call safety net,
-    // independent of (and in addition to) the search budget below. When the
-    // caller knows the ACTUAL transport deadline, bound admission by that
-    // instead (minus per-field headroom) -- it can be tighter OR looser than
-    // the fixed internal budget, but it is always the one that actually
-    // matters (issue #6222 P1). Falls back to the internal-only budget when
-    // no transport deadline is known.
+    // independent of (and in addition to) the search budget below.
     const callStartMs = this.timer.now();
     const internalResultDeadlineMs = callStartMs + RESULT_DEADLINE_BUDGET_MS;
-    const transportBoundDeadlineMs =
-      transportDeadlineMs !== undefined
-        ? transportDeadlineMs - PER_FIELD_ADMISSION_HEADROOM_MS
-        : undefined;
-    // When the caller knows the ACTUAL transport deadline, that is always the
+
+    // Read fresh on every call, never cached: `getLiveTransportDeadlineMs`
+    // (when provided) always wins over the frozen `transportDeadlineMs`
+    // snapshot, since it is the CURRENT value of the same live object the
+    // daemon itself extends on progress (issue #6222 P1 reopen, fuQ88
+    // review). Falls back to the frozen snapshot when no live getter is
+    // available, or it has nothing registered (e.g. the daemon-side entry
+    // already expired).
+    const currentTransportDeadlineMs = (): number | undefined =>
+      getLiveTransportDeadlineMs?.() ?? transportDeadlineMs;
+
+    // The bound that governs whether it is safe to ADMIT another field: when
+    // the caller knows the ACTUAL transport deadline, that is always the
     // bound that matters -- respect it even when it is LARGER than the fixed
     // internal budget (e.g. a progress-aware caller whose
     // `ProgressExtendableDeadline` has extended the transport deadline toward
@@ -224,12 +240,34 @@ export class SetUIState extends BaseVisualChange {
     // truncates `executePlan` steps that route through this same `execute()`
     // (issue #6222 P1). The fixed `RESULT_DEADLINE_BUDGET_MS` is a FALLBACK
     // for when no transport deadline is known at all (a direct, non-daemon
-    // call) -- never a ceiling imposed on top of a known one.
-    const resultDeadlineMs = transportBoundDeadlineMs ?? internalResultDeadlineMs;
-    // Only used to phrase the "why we stopped" message below -- the actual
-    // bound applied is whichever of the internal/transport-derived deadlines
-    // is tighter, which may be smaller OR larger than RESULT_DEADLINE_BUDGET_MS.
-    const resultDeadlineBudgetMsForMessage = resultDeadlineMs - callStartMs;
+    // call) -- never a ceiling imposed on top of a known one. Reserving
+    // `PER_FIELD_ADMISSION_HEADROOM_MS` here (only when a transport deadline
+    // is actually known) accounts for the worst-case runtime of whatever
+    // field is admitted next.
+    const admissionDeadlineMs = (): number => {
+      const liveTransportDeadlineMs = currentTransportDeadlineMs();
+      return liveTransportDeadlineMs !== undefined
+        ? liveTransportDeadlineMs - PER_FIELD_ADMISSION_HEADROOM_MS
+        : internalResultDeadlineMs;
+    };
+    // The bound that governs how long an ALREADY-ADMITTED field is allowed to
+    // keep running before `execute()` gives up on it and returns the
+    // accumulated partial result (issue #6222 review, coderabbit fuTtO). This
+    // is deliberately the FULL transport deadline (no headroom subtracted):
+    // headroom exists to protect the NEXT field's admission, not to shrink
+    // the CURRENT field's own budget -- an admitted field that finishes
+    // within the real transport deadline must not be treated as a stall just
+    // because it ran past the smaller admission-only bound above. Falls back
+    // to the same fixed internal budget as `admissionDeadlineMs` when no
+    // transport deadline is known at all.
+    const fieldHardDeadlineMs = (): number =>
+      currentTransportDeadlineMs() ?? internalResultDeadlineMs;
+    // Only used to phrase "why we stopped" messages below -- the actual bound
+    // applied is whichever of the internal/transport-derived deadlines is
+    // tighter at the moment of the check, which may be smaller OR larger than
+    // RESULT_DEADLINE_BUDGET_MS and can change between checks when a live
+    // getter is in play.
+    const admissionDeadlineBudgetMsForMessage = (): number => admissionDeadlineMs() - callStartMs;
     let resultBudgetSpent = false;
 
     // Progress reported to the client MUST stay on one consistent scale and
@@ -295,14 +333,14 @@ export class SetUIState extends BaseVisualChange {
     // still blow the transport deadline before any field is attempted,
     // discarding the whole call. Fail fast into the same structured
     // all-`notAttempted` shape used below instead (issue #6222 P1).
-    if (this.timer.now() >= resultDeadlineMs) {
+    if (this.timer.now() >= admissionDeadlineMs()) {
       const missing = options.fields.map((f) => this.describeSelector(f.selector));
-      const notAttemptedReason = `Not attempted: setUIState's result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) was already reached before the initial observation`;
+      const notAttemptedReason = `Not attempted: setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) was already reached before the initial observation`;
       return {
         success: false,
         fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
         totalAttempts: 0,
-        error: `setUIState result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) was already reached before the initial observation; not attempted: ${missing.join(", ")}`,
+        error: `setUIState result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) was already reached before the initial observation; not attempted: ${missing.join(", ")}`,
       };
     }
 
@@ -330,7 +368,7 @@ export class SetUIState extends BaseVisualChange {
       // field in the call, then stop and return what has already been
       // applied rather than let the transport's own deadline discard it
       // (issue #6222 reopen).
-      if (this.timer.now() >= resultDeadlineMs) {
+      if (this.timer.now() >= admissionDeadlineMs()) {
         resultBudgetSpent = true;
         break;
       }
@@ -351,14 +389,37 @@ export class SetUIState extends BaseVisualChange {
         const { fieldSpec, fieldIndex, element } = visibleFields[0];
         // This field's slice starts at processed.size * 100, before it is
         // added to `processed` below.
-        const result = await this.processField(
+        const fieldBudgetMs = fieldHardDeadlineMs() - this.timer.now();
+        const raced = await this.raceFieldAgainstDeadline(
+          () => this.processField(fieldSpec, element, fieldProgress(processed.size), signal),
           fieldSpec,
-          element,
-          fieldProgress(processed.size),
-          signal,
+          fieldBudgetMs,
         );
 
         processed.add(fieldIndex);
+
+        if (raced === "timed-out") {
+          // The field WAS admitted and started but did not settle within its
+          // remaining share of the real transport deadline -- `processField`
+          // (and the `ClearTextLike`/`InputTextLike` it delegates into)
+          // cannot currently be cancelled, so this is a safety net rather
+          // than real cancellation: the underlying call may still be running
+          // against the device, its eventual outcome no longer awaited or
+          // reported. Stop immediately and return the accumulated partial
+          // result instead of risking the SAME overrun this whole feature
+          // exists to prevent (issue #6222 review, coderabbit fuTtO).
+          fieldResults[fieldIndex] = {
+            selector: fieldSpec.selector,
+            success: false,
+            attempts: 0,
+            timedOut: true,
+            error: `Field ${this.describeSelector(fieldSpec.selector)} did not settle within its ${Math.round(Math.max(fieldBudgetMs, 0) / 1000)}s share of setUIState's result deadline; it may still be applying in the background`,
+          };
+          resultBudgetSpent = true;
+          break;
+        }
+
+        const result = raced;
         // Retain only the small, public FieldResult fields across the loop --
         // `freshObservation` (a full view hierarchy) is used immediately below
         // for reuse and then must NOT be kept alive in `fieldResults` for the
@@ -454,8 +515,12 @@ export class SetUIState extends BaseVisualChange {
       }
     }
 
-    // Check for any unprocessed fields
-    if (processed.size < options.fields.length) {
+    // Check for any unprocessed fields -- or a per-field timeout on the LAST
+    // admitted field (issue #6222 review, coderabbit fuTtO): that field IS in
+    // `processed` (it was admitted and started) but did not succeed, so
+    // `processed.size === options.fields.length` alone would otherwise fall
+    // through to the unconditional success return below despite the timeout.
+    if (processed.size < options.fields.length || resultBudgetSpent) {
       const missing = options.fields
         .filter((_, i) => !processed.has(i))
         .map((f) => this.describeSelector(f.selector));
@@ -465,7 +530,7 @@ export class SetUIState extends BaseVisualChange {
       // mark them `notAttempted` so a client can tell "safe to retry just
       // these" apart from "attempted and failed" (issue #6222 reopen).
       const notAttemptedReason = resultBudgetSpent
-        ? `Not attempted: setUIState's result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) was reached after applying ${processed.size}/${options.fields.length} field(s)`
+        ? `Not attempted: setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) was reached after applying ${processed.size}/${options.fields.length} field(s)`
         : undefined;
 
       return {
@@ -474,7 +539,9 @@ export class SetUIState extends BaseVisualChange {
         totalAttempts,
         observation: lastObservation,
         error: resultBudgetSpent
-          ? `setUIState result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) reached after applying ${processed.size}/${options.fields.length} field(s); not attempted: ${missing.join(", ")}`
+          ? missing.length > 0
+            ? `setUIState result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) reached after applying ${processed.size}/${options.fields.length} field(s); not attempted: ${missing.join(", ")}`
+            : `setUIState result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) reached while applying field(s); the last-admitted field did not settle in time`
           : budgetSpent
             ? `Fields not found within the ${Math.round(SEARCH_BUDGET_MS / 1000)}s search budget: ${missing.join(", ")}`
             : `Fields not found after scrolling: ${missing.join(", ")}`,
@@ -583,6 +650,137 @@ export class SetUIState extends BaseVisualChange {
       }
     }
     return out;
+  }
+
+  /**
+   * Race an already-admitted field's `processField()` call against its own
+   * remaining share of the transport deadline (issue #6222 review, coderabbit
+   * fuTtO). `processField` delegates into `ClearTextLike.execute` and
+   * `InputTextLike.execute`, neither of which can currently be cancelled --
+   * without this, a field that stalls (e.g. after a UI mutation) can run past
+   * the transport deadline and reproduce the exact silent-discard this whole
+   * feature exists to prevent, even though it was correctly admitted under
+   * budget at the time.
+   *
+   * This is a SAFETY NET, not real cancellation: the started call is left
+   * running in the background when the timeout wins the race -- its eventual
+   * settlement is swallowed (any rejection is only logged) rather than
+   * aborted. Real per-field cancellation into `ClearText`/`InputText` via an
+   * `AbortSignal` is a larger, separate change; tracked as a follow-up rather
+   * than attempted here.
+   *
+   * Takes a THUNK, not an already-started promise: `startField()` must not be
+   * called until AFTER the timeout is armed. `processField()`'s own
+   * dependencies can run synchronously far enough to matter (fakes in tests
+   * advance a shared clock synchronously; real device I/O at least burns real
+   * wall-clock time before its first genuine suspension) -- starting it as
+   * part of evaluating this method's arguments, before its body runs, would
+   * arm the timeout against a clock that already moved, silently shrinking
+   * the field's actual budget.
+   *
+   * @param startField - Starts the field's `processField()` call. Invoked
+   *   exactly once, after the timeout below is armed.
+   * @param fieldSpec - Only used to describe the field in a debug log if the
+   *   background promise eventually settles after the race already timed out.
+   * @param budgetMs - This field's remaining share of the hard deadline, in
+   *   milliseconds. A non-positive value still starts the field (so its
+   *   background settlement can be traced) but times out immediately without
+   *   arming a timer.
+   * @returns The field's real result if it settles in time, or the literal
+   *   string `"timed-out"` if the timeout wins the race.
+   */
+  private async raceFieldAgainstDeadline(
+    startField: () => Promise<InternalFieldResult>,
+    fieldSpec: FieldSpec,
+    budgetMs: number,
+  ): Promise<InternalFieldResult | "timed-out"> {
+    // A background settlement after abandonment has no observer left to
+    // report to beyond this debug trace -- expected once the field's own
+    // budget has already been spent.
+    const logBackgroundSettlement = (fieldPromise: Promise<InternalFieldResult>): void => {
+      fieldPromise
+        .then(() => {
+          logger.debug(
+            `[SetUIState] Background field settled after timeout for ${this.describeSelector(fieldSpec.selector)}`,
+          );
+        })
+        .catch((error) => {
+          logger.debug(
+            `[SetUIState] Background field rejected after timeout for ${this.describeSelector(fieldSpec.selector)}: ${errorMessage(error)}`,
+          );
+        });
+    };
+
+    if (budgetMs <= 0) {
+      logBackgroundSettlement(startField());
+      return "timed-out";
+    }
+
+    return new Promise<InternalFieldResult | "timed-out">((resolve) => {
+      let settled = false;
+      // Declared (not yet assigned) BEFORE arming the timeout: on a
+      // FakeTimer-driven test, `startField()`'s own synchronous prefix can
+      // advance the clock far enough to fire this SAME timeout re-entrantly,
+      // synchronously, before `startField()` even returns -- at which point
+      // this closure has not yet been assigned. `let` (rather than `const`)
+      // avoids a TDZ crash in that case: a bare `let x;` initializes its
+      // binding to `undefined` immediately at THIS line, so the timeout
+      // closure below can safely read it even if it fires before the
+      // assignment further down ever runs; a `const` declared only at the
+      // assignment site would still be in its TDZ at that point instead. The
+      // guard below skips tracing when it is still `undefined`, and the
+      // post-`startField()` check a few lines down handles that case instead.
+      // oxlint-disable-next-line prefer-const -- see comment above: `let` is required for TDZ safety, not a style preference.
+      let fieldPromise: Promise<InternalFieldResult> | undefined;
+      const timeoutHandle = this.timer.setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (fieldPromise) {
+          logBackgroundSettlement(fieldPromise);
+        }
+        resolve("timed-out");
+      }, budgetMs);
+
+      // Armed above; only now does the field's real work actually start.
+      fieldPromise = startField();
+      const startedFieldPromise = fieldPromise;
+      if (settled) {
+        // The timeout above already fired re-entrantly while `startField()`
+        // was still running synchronously -- it could not see `fieldPromise`
+        // yet, so trace its eventual settlement here instead.
+        logBackgroundSettlement(startedFieldPromise);
+        return;
+      }
+      startedFieldPromise.then(
+        (result) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          this.timer.clearTimeout(timeoutHandle);
+          resolve(result);
+        },
+        (error: unknown) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          this.timer.clearTimeout(timeoutHandle);
+          // processField() catches its own internal errors per-attempt and
+          // only resolves (never rejects) in practice -- this branch is a
+          // defensive fallback for something truly unexpected, surfaced as a
+          // failed field rather than rejecting the whole call.
+          resolve({
+            selector: fieldSpec.selector,
+            success: false,
+            attempts: 0,
+            error: errorMessage(error),
+          });
+        },
+      );
+    });
   }
 
   /**

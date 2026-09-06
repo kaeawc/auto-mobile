@@ -1556,13 +1556,20 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     });
   };
 
-  test("reproduces the reopen: realistic per-field cost applies two fields then must return a structured partial result, never nothing", async () => {
+  test("reproduces the reopen: realistic per-field cost applies one field then must return a structured partial result, never nothing", async () => {
     // ~23s per field: two fields (46s) alone exceeds the whole-call budget,
     // reproducing "applies fields, then the transport would time out and
     // discard everything" from the dogfood report on a real CtrlProxy/adb
     // round trip -- except here execute() must stop itself and hand back
     // what it already did, instead of relying on the caller's transport to
     // ever return anything at all.
+    //
+    // The second field is admitted (field 1 finished well inside the 45s
+    // budget), but its own cost (23s) does not fit in what remains of that
+    // budget (22s) -- the per-field safety net (issue #6222 review,
+    // coderabbit fuTtO) now cuts it off mid-flight at the 45s deadline
+    // instead of letting it run to completion 1s past that deadline, which is
+    // exactly the overrun this whole feature exists to prevent.
     const result = await build(23_000).execute({
       fields: [
         { selector: { elementId: "firstName" }, value: "Grace" },
@@ -1579,12 +1586,16 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     const [first, last, phone] = result.fields;
     expect(first.success).toBe(true);
     expect(first.notAttempted).toBeFalsy();
-    expect(last.success).toBe(true);
+    // Admitted, started, but cut off by the per-field safety net before it
+    // could settle -- distinct from both "not attempted" and "attempted and
+    // failed".
+    expect(last.success).toBe(false);
     expect(last.notAttempted).toBeFalsy();
+    expect(last.timedOut).toBe(true);
 
     // The third field was never reached -- marked distinctly from "attempted
     // and failed" so a client knows it is safe to retry just this one field
-    // without re-sending (and duplicating) the two that already landed.
+    // without re-sending (and duplicating) the one that already landed.
     expect(phone.success).toBe(false);
     expect(phone.notAttempted).toBe(true);
     expect(result.error).toContain("result deadline");
@@ -1792,5 +1803,120 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     // and the fake was never invoked.
     expect(fakeObserve.getCallCount()).toBe(0);
     expect(fakeTimer.now()).toBe(callStartMs);
+  });
+
+  test("reads the LIVE (progress-extended) transport deadline via getLiveTransportDeadlineMs, not the frozen snapshot (issue #6222 P1 reopen, fuQ88 review)", async () => {
+    // A daemon call with a progress token keeps pushing its REAL transport
+    // deadline forward via `ProgressExtendableDeadline` as THIS call emits
+    // its own per-field progress notifications -- but the frozen
+    // `transportDeadlineMs` snapshot captured before `execute()` even started
+    // can never reflect that extension. `getLiveTransportDeadlineMs` models
+    // the caller (`setUIStateHandler`) reading that live object's CURRENT
+    // value at every check instead.
+    const callStartMs = fakeTimer.now();
+    const frozenTransportDeadlineMs = callStartMs + 50_000;
+    const liveTransportDeadlineMs = callStartMs + 300_000;
+
+    const result = await build(44_000).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      frozenTransportDeadlineMs,
+      () => liveTransportDeadlineMs,
+    );
+
+    // All three fields admitted and completed -- the frozen 50s snapshot
+    // alone would only have admitted the first (as the dedicated "ACTUAL
+    // transport deadline" test above proves).
+    expect(result.success).toBe(true);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.success)).toBe(true);
+    expect(result.fields.every((f) => !f.notAttempted)).toBe(true);
+    expect(result.fields.every((f) => !f.timedOut)).toBe(true);
+
+    // Proof the LIVE value won, not the smaller frozen snapshot.
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(50_000);
+    expect(fakeTimer.now()).toBeLessThan(liveTransportDeadlineMs);
+  });
+
+  test("a single admitted field that stalls past its budget returns a structured partial result before the transport deadline, never a bare discard (issue #6222 review, coderabbit fuTtO)", async () => {
+    // Models a field that is correctly ADMITTED (plenty of budget at the
+    // time) but then stalls indefinitely mid-flight -- e.g. a UI mutation
+    // that never settles. `ClearTextLike`/`InputTextLike` cannot currently be
+    // cancelled, so without the per-field safety net this would block
+    // `execute()` past the transport deadline and rediscover the exact
+    // silent-discard this whole feature exists to prevent.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 60_000;
+
+    let tapCalls = 0;
+    const stallingDependencies = {
+      tapOnElement: {
+        execute: async () => {
+          tapCalls++;
+          // Never resolves -- the only way this field's own promise can ever
+          // settle from here is if the abandoned call happens to finish in
+          // the background sometime after the race has already timed out.
+          return new Promise<{ success: boolean }>(() => {});
+        },
+      },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+    };
+
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const setUIState = new SetUIState(device, null, {
+      ...stallingDependencies,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    // Flush microtasks until the field's own admission/tap path has run and
+    // the race's timeout is armed against `fakeTimer` -- `advanceTime()`
+    // before that point would have nothing due to fire.
+    for (let i = 0; i < 10 && fakeTimer.getPendingTimeoutCount() === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+    expect(tapCalls).toBe(1);
+
+    // Advance past the field's entire budget (the full transport deadline,
+    // per issue #6222 review -- headroom only bounds admission of the NEXT
+    // field, not this one's own hard deadline).
+    fakeTimer.advanceTime(60_000);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].success).toBe(false);
+    expect(result.fields[0].timedOut).toBe(true);
+    expect(result.fields[0].notAttempted).toBeFalsy();
+
+    // The structured result comes back with time to spare before the
+    // transport's own deadline -- never at or past it -- even though the
+    // stalled tap call is still pending in the background.
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
   });
 });

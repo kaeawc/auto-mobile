@@ -33,7 +33,9 @@ import {
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_VERSION,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "./constants";
+import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
   ListChangedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
@@ -3999,6 +4001,12 @@ export class UnixSocketServer {
         // Cleanup for the abort-timer path below; a no-op for the
         // no-progress path (nothing was ever armed).
         let cleanup: () => void = () => {};
+        // Set only on the progress-capable path below. Lets a handler on the
+        // OTHER side of this same call (e.g. `setUIStateHandler`) read this
+        // exact `deadline`'s CURRENT (possibly progress-extended) value via
+        // `liveDeadlineRegistry` instead of only the frozen snapshot forwarded
+        // through `INTERNAL_MCP_REQUEST_TIMEOUT_PARAM` (issue #6222 P1 reopen).
+        let liveDeadlineKey: string | undefined;
 
         let callOptions: Record<string, unknown> = requestOptions;
         if (progressToken !== undefined) {
@@ -4039,7 +4047,13 @@ export class UnixSocketServer {
             );
           let abortTimer = armAbort(timeoutMs);
           const backstopMs = Math.max(deadline.ceiling - this.timer.now(), timeoutMs);
-          cleanup = () => this.timer.clearTimeout(abortTimer);
+          liveDeadlineKey = this.idGenerator.next();
+          registerLiveDeadline(liveDeadlineKey, deadline);
+          const registeredLiveDeadlineKey = liveDeadlineKey;
+          cleanup = () => {
+            this.timer.clearTimeout(abortTimer);
+            unregisterLiveDeadline(registeredLiveDeadlineKey);
+          };
 
           callOptions = {
             ...requestOptions,
@@ -4069,14 +4083,15 @@ export class UnixSocketServer {
         }
 
         try {
+          const forwardedArguments = this.withSocketSessionAutolockKey(
+            request.params.arguments,
+            socketSessionId,
+            timeoutMs,
+          );
           return await mcpClient.callTool(
             {
               name: request.params.name,
-              arguments: this.withSocketSessionAutolockKey(
-                request.params.arguments,
-                socketSessionId,
-                timeoutMs,
-              ),
+              arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
             },
             undefined,
             callOptions,
@@ -4111,6 +4126,22 @@ export class UnixSocketServer {
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
     }
+  }
+
+  /**
+   * Merge {@link INTERNAL_LIVE_DEADLINE_KEY_PARAM} onto `args` when a live
+   * deadline was registered for this call (issue #6222 P1 reopen) -- a no-op
+   * when there is none, or `args` is not a plain forwardable object (e.g.
+   * `null`/an array), in which case it is returned unchanged.
+   */
+  private withLiveDeadlineKey(args: unknown, liveDeadlineKey: string | undefined): unknown {
+    if (liveDeadlineKey === undefined || !args || typeof args !== "object" || Array.isArray(args)) {
+      return args;
+    }
+    return {
+      ...(args as Record<string, unknown>),
+      [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveDeadlineKey,
+    };
   }
 
   private withSocketSessionAutolockKey(

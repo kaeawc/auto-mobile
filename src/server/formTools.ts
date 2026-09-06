@@ -9,7 +9,9 @@ import { elementIdTextFieldsSchema, validateElementIdTextSelector } from "./elem
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "../daemon/constants";
+import { getLiveDeadlineMs } from "../daemon/liveDeadlineRegistry";
 
 /**
  * Schema for a single field specification
@@ -58,6 +60,7 @@ const fieldResultSchema = z.object({
   fieldType: z.enum(["text", "checkbox", "toggle", "dropdown", "unknown"]).optional(),
   skipped: z.boolean().optional(),
   notAttempted: z.boolean().optional(),
+  timedOut: z.boolean().optional(),
 });
 
 /**
@@ -128,6 +131,26 @@ function resolveTransportDeadlineMs(args: unknown): number | undefined {
   return startTimeMs + remainingMs;
 }
 
+/**
+ * Resolve a getter for the LIVE (possibly progress-extended) transport
+ * deadline, when the daemon registered one for this exact request (issue
+ * #6222 P1 reopen). `__mcpLiveDeadlineKey` is only ever present on a
+ * daemon-forwarded, progress-capable call (see `INTERNAL_LIVE_DEADLINE_KEY_PARAM`
+ * and `liveDeadlineRegistry`) -- absent, this returns `undefined` and
+ * `SetUIState.execute()` falls back to the frozen `transportDeadlineMs`
+ * snapshot from {@link resolveTransportDeadlineMs}.
+ */
+function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | undefined) | undefined {
+  if (!args || typeof args !== "object") {
+    return undefined;
+  }
+  const key = (args as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
+  if (typeof key !== "string" || key.length === 0) {
+    return undefined;
+  }
+  return () => getLiveDeadlineMs(key);
+}
+
 export const setUIStateHandler = async (
   device: BootedDevice,
   args: SetUIStateArgs,
@@ -136,6 +159,7 @@ export const setUIStateHandler = async (
 ) => {
   const setUIState = setUIStateFactory(device);
   const transportDeadlineMs = resolveTransportDeadlineMs(args);
+  const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter(args);
 
   const result = await setUIState.execute(
     {
@@ -152,6 +176,7 @@ export const setUIStateHandler = async (
     progress,
     signal,
     transportDeadlineMs,
+    getLiveTransportDeadlineMs,
   );
 
   const response = createStructuredToolResponse({
@@ -165,6 +190,7 @@ export const setUIStateHandler = async (
       fieldType: f.fieldType,
       skipped: f.skipped,
       notAttempted: f.notAttempted,
+      timedOut: f.timedOut,
     })),
     totalAttempts: result.totalAttempts,
     error: result.error,

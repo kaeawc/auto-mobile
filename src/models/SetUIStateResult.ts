@@ -32,6 +32,15 @@ export interface FieldResult {
    * "attempted and failed" without parsing `error` text.
    */
   notAttempted?: boolean;
+  /**
+   * True when this field WAS admitted and started, but did not settle within
+   * its share of the remaining result-deadline budget before `execute()` had
+   * to return the accumulated partial result (issue #6222 review, coderabbit
+   * fuTtO). Distinct from `notAttempted` (never started at all): the
+   * underlying operation may still be running in the background against the
+   * device -- its eventual outcome is no longer awaited or reported.
+   */
+  timedOut?: boolean;
 }
 
 /**

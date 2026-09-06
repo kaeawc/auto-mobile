@@ -39,6 +39,26 @@ export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 /**
+ * Key into the in-process {@link module:daemon/liveDeadlineRegistry} for the
+ * LIVE (possibly progress-extended) `ProgressExtendableDeadline` backing the
+ * current daemon-forwarded request, when one exists (issue #6222 P1 reopen).
+ *
+ * {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} is a snapshot taken once, before
+ * the request is forwarded -- it never reflects a later extension made by
+ * `UnixSocketServer.handleIdeRequest`'s `onprogress` handler as the SAME call
+ * keeps emitting progress. The daemon and the MCP HTTP server it forwards to
+ * run in one Node process (`Daemon` in `daemon.ts` owns both), so rather than
+ * try to serialize a live object over the loopback HTTP transport, the daemon
+ * registers its `ProgressExtendableDeadline` under a fresh key in that
+ * shared, in-process registry and forwards only this key. A handler that
+ * recognizes it (currently only `setUIStateHandler`) can then read the
+ * deadline's CURRENT value at each of its own admission checks instead of a
+ * frozen number. Absent when the request carries no progress token (nothing
+ * to extend) or is not daemon-forwarded at all.
+ */
+export const INTERNAL_LIVE_DEADLINE_KEY_PARAM = "__mcpLiveDeadlineKey";
+
+/**
  * Port range to try if default port is unavailable
  */
 export const DAEMON_PORT_RANGE_START = 3000;

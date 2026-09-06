@@ -189,3 +189,12 @@
   max-height: 30rem;
   width: auto;
 }
+
+/* Nested platform tabs (Android/iOS inside each example). content.tabs.link
+   re-selects the active platform when a previously-hidden example becomes
+   visible; with Material's animated underline this looked like the indicator
+   sliding from Android to iOS on every example switch. Make the nested
+   indicator jump instantly. The outer example tabs keep their animation. */
+.md-typeset .tabbed-content .tabbed-set > .tabbed-labels::before {
+  transition: none;
+}

@@ -1608,6 +1608,50 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     expect(fakeTimer.now()).toBeLessThan(MIN_SET_UI_STATE_MCP_TIMEOUT_MS);
   });
 
+  test("bounds field admission by the ACTUAL transport deadline, not just the internal 45s budget (issue #6222 P1)", async () => {
+    // Models the exact overshoot the P1 review flagged: a daemon-forwarded
+    // call whose 60s transport budget already had queue time deducted by the
+    // time it reached execute() -- represented here directly as the absolute
+    // deadline `transportDeadlineMs`, since that is all `execute()` ever
+    // sees. Field 1 costs 44s, landing close to that deadline with only 6s
+    // of transport budget left -- far short of the reserved per-field
+    // headroom -- so field 2 must NOT be admitted.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 50_000;
+
+    const result = await build(44_000).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    // A real, structured result -- never a bare discard.
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(3);
+
+    const [first, last, phone] = result.fields;
+    expect(first.success).toBe(true);
+    expect(first.notAttempted).toBeFalsy();
+    // Neither remaining field was admitted -- there wasn't enough of the
+    // ACTUAL transport budget left to safely start another.
+    expect(last.notAttempted).toBe(true);
+    expect(phone.notAttempted).toBe(true);
+
+    // The structured result comes back with real time to spare before the
+    // transport's own deadline -- never at or past it.
+    expect(fakeTimer.now()).toBeLessThan(transportDeadlineMs);
+    // And it also stays comfortably inside the setUIState transport floor,
+    // measured from when this call actually started.
+    expect(fakeTimer.now() - callStartMs).toBeLessThan(MIN_SET_UI_STATE_MCP_TIMEOUT_MS);
+  });
+
   test("a fast multi-field call still returns full, unmarked results (no false positives from the new budget)", async () => {
     const result = await build(500).execute({
       fields: [

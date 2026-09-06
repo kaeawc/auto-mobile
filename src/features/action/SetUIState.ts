@@ -116,16 +116,35 @@ const SEARCH_BUDGET_MS = 20_000;
  * successfully still hits the transport's fixed deadline and gets its
  * accumulated `fields` results discarded by a bare `-32001` timeout.
  *
- * `SetUIState` cannot see or rely on the transport's actual deadline (it is
- * never threaded down through the tool handler), so it self-limits instead:
- * once this internal budget is spent, it stops starting new fields and
- * returns the accumulated per-field results as a normal (if
+ * `setUIStateHandler` (`src/server/formTools.ts`) now recovers the ACTUAL
+ * transport deadline when the call was daemon-forwarded (issue #6222 P1) and
+ * passes it into `execute()` as `transportDeadlineMs`, in which case it --
+ * minus `PER_FIELD_ADMISSION_HEADROOM_MS` -- takes over as the bound (see
+ * `resultDeadlineMs` in `execute()`) instead of this fixed clock. This budget
+ * remains the FALLBACK for a path with no known transport deadline (a direct,
+ * non-daemon call): once it is spent, `execute()` stops starting new fields
+ * and returns the accumulated per-field results as a normal (if
  * `success: false`) result -- never a silent discard -- while there is still
  * headroom before `DEFAULT_MCP_REQUEST_TIMEOUT_MS` (and the larger
- * `MIN_SET_UI_STATE_MCP_TIMEOUT_MS` floor added alongside this) can fire.
- * Deliberately smaller than both so this always wins the race.
+ * `MIN_SET_UI_STATE_MCP_TIMEOUT_MS` floor added alongside the original fix)
+ * can fire. Deliberately smaller than both so this always wins the race.
  */
 const RESULT_DEADLINE_BUDGET_MS = 45_000;
+
+/**
+ * Headroom reserved before admitting the NEXT field once the caller's
+ * `transportDeadlineMs` is known (issue #6222 P1). A field admitted with
+ * almost no budget left can still run for a while after admission --
+ * `applyFieldValue` (tap + clear + type, or open+select for a dropdown) plus
+ * `verifyFieldValue`'s post-success observe -- and the dogfood report that
+ * reopened #6222 showed a field admitted at 44s of a 60s transport deadline
+ * running roughly 20s more, overrunning the transport and losing the whole
+ * accumulated result to a bare `-32001`. Only admit another field while at
+ * least this much of the transport budget remains; otherwise stop and return
+ * the accumulated per-field results while there is still time for the
+ * transport to deliver them.
+ */
+const PER_FIELD_ADMISSION_HEADROOM_MS = 20_000;
 
 /**
  * SetUIState - Declarative form field population tool
@@ -159,12 +178,24 @@ export class SetUIState extends BaseVisualChange {
    * @param options - Configuration options
    * @param progress - Optional progress callback
    * @param signal - Optional abort signal
+   * @param transportDeadlineMs - Absolute wall-clock deadline (same clock as
+   *   `this.timer.now()`) of the CURRENT MCP request, when known. This is the
+   *   real transport deadline the caller (`setUIStateHandler`) recovered from
+   *   the daemon-forwarded request's own budget -- accounting for time
+   *   already spent queued -- NOT a fresh clock started here. When provided,
+   *   field admission is bounded by this deadline (minus
+   *   `PER_FIELD_ADMISSION_HEADROOM_MS`) instead of only the internal
+   *   `RESULT_DEADLINE_BUDGET_MS` clock, so a call never keeps admitting
+   *   fields past the point the transport itself would discard the result
+   *   (issue #6222 P1). Undefined on a direct/non-daemon call, where the
+   *   internal budget alone is the only bound available.
    * @returns Result of the operation
    */
   async execute(
     options: SetUIStateOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    transportDeadlineMs?: number,
   ): Promise<SetUIStateResult> {
     const scrollDirection = options.scrollDirection ?? DEFAULT_SCROLL_DIRECTION;
 
@@ -172,8 +203,26 @@ export class SetUIState extends BaseVisualChange {
     const processed = new Set<number>();
     let totalAttempts = 0;
     // See RESULT_DEADLINE_BUDGET_MS -- this is the whole-call safety net,
-    // independent of (and in addition to) the search budget below.
-    const resultDeadlineMs = this.timer.now() + RESULT_DEADLINE_BUDGET_MS;
+    // independent of (and in addition to) the search budget below. When the
+    // caller knows the ACTUAL transport deadline, bound admission by that
+    // instead (minus per-field headroom) -- it can be tighter OR looser than
+    // the fixed internal budget, but it is always the one that actually
+    // matters (issue #6222 P1). Falls back to the internal-only budget when
+    // no transport deadline is known.
+    const callStartMs = this.timer.now();
+    const internalResultDeadlineMs = callStartMs + RESULT_DEADLINE_BUDGET_MS;
+    const transportBoundDeadlineMs =
+      transportDeadlineMs !== undefined
+        ? transportDeadlineMs - PER_FIELD_ADMISSION_HEADROOM_MS
+        : undefined;
+    const resultDeadlineMs =
+      transportBoundDeadlineMs !== undefined
+        ? Math.min(internalResultDeadlineMs, transportBoundDeadlineMs)
+        : internalResultDeadlineMs;
+    // Only used to phrase the "why we stopped" message below -- the actual
+    // bound applied is whichever of the internal/transport-derived deadlines
+    // is tighter, which may be smaller OR larger than RESULT_DEADLINE_BUDGET_MS.
+    const resultDeadlineBudgetMsForMessage = resultDeadlineMs - callStartMs;
     let resultBudgetSpent = false;
 
     // Progress reported to the client MUST stay on one consistent scale and
@@ -390,7 +439,7 @@ export class SetUIState extends BaseVisualChange {
       // mark them `notAttempted` so a client can tell "safe to retry just
       // these" apart from "attempted and failed" (issue #6222 reopen).
       const notAttemptedReason = resultBudgetSpent
-        ? `Not attempted: setUIState's internal result deadline (${Math.round(RESULT_DEADLINE_BUDGET_MS / 1000)}s) was reached after applying ${processed.size}/${options.fields.length} field(s)`
+        ? `Not attempted: setUIState's result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) was reached after applying ${processed.size}/${options.fields.length} field(s)`
         : undefined;
 
       return {
@@ -399,7 +448,7 @@ export class SetUIState extends BaseVisualChange {
         totalAttempts,
         observation: lastObservation,
         error: resultBudgetSpent
-          ? `setUIState result deadline (${Math.round(RESULT_DEADLINE_BUDGET_MS / 1000)}s) reached after applying ${processed.size}/${options.fields.length} field(s); not attempted: ${missing.join(", ")}`
+          ? `setUIState result deadline (${Math.round(resultDeadlineBudgetMsForMessage / 1000)}s) reached after applying ${processed.size}/${options.fields.length} field(s); not attempted: ${missing.join(", ")}`
           : budgetSpent
             ? `Fields not found within the ${Math.round(SEARCH_BUDGET_MS / 1000)}s search budget: ${missing.join(", ")}`
             : `Fields not found after scrolling: ${missing.join(", ")}`,

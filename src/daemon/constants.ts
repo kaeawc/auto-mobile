@@ -27,6 +27,18 @@ export const DEFAULT_DAEMON_PORT = 3000;
 export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 
 /**
+ * This execution's own start time, on the same `defaultTimer` clock used
+ * throughout `src/server/` and `src/features/`. Combined with
+ * {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} (`startTime + remainingMs`),
+ * gives a tool handler the ABSOLUTE wall-clock deadline of the current MCP
+ * request -- exported here (rather than kept local to `server/index.ts`,
+ * where it originates) so a tool handler outside `server/` (e.g.
+ * `setUIStateHandler` in `server/formTools.ts`) can read it back without an
+ * import cycle through `server/index.ts` (issue #6222 P1).
+ */
+export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
+
+/**
  * Port range to try if default port is unavailable
  */
 export const DAEMON_PORT_RANGE_START = 3000;

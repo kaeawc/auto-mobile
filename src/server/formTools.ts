@@ -6,6 +6,10 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { elementIdTextFieldsSchema, validateElementIdTextSelector } from "./elementSelectorSchemas";
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+} from "../daemon/constants";
 
 /**
  * Schema for a single field specification
@@ -91,6 +95,39 @@ export function resetSetUIStateFactory(): void {
   setUIStateFactory = createDefaultSetUIState;
 }
 
+/**
+ * Recover the ABSOLUTE deadline of the current MCP request from the internal
+ * params the server attaches to every daemon-forwarded call (issue #6222
+ * P1). `__mcpRequestTimeoutMs` is the transport budget still remaining when
+ * the request reached this process -- time already spent in the daemon's
+ * per-session queue is already deducted (see `resolveMcpRequestTimeoutMs`
+ * and `ProgressExtendableDeadline` in `src/daemon/mcpRequestTimeout.ts`).
+ * `__executionStartTime` is this execution's own start time on the SAME
+ * `defaultTimer` clock `SetUIState` uses. Their sum is the absolute
+ * wall-clock deadline `SetUIState.execute()` must return before. Neither
+ * field is present on a direct, non-daemon call, in which case there is no
+ * transport deadline to bound against and `SetUIState` falls back to its own
+ * conservative internal budget.
+ */
+function resolveTransportDeadlineMs(args: unknown): number | undefined {
+  if (!args || typeof args !== "object") {
+    return undefined;
+  }
+  const record = args as Record<string, unknown>;
+  const remainingMs = record[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  const startTimeMs = record[INTERNAL_EXECUTION_START_TIME_PARAM];
+  if (
+    typeof remainingMs !== "number" ||
+    !Number.isFinite(remainingMs) ||
+    remainingMs <= 0 ||
+    typeof startTimeMs !== "number" ||
+    !Number.isFinite(startTimeMs)
+  ) {
+    return undefined;
+  }
+  return startTimeMs + remainingMs;
+}
+
 export const setUIStateHandler = async (
   device: BootedDevice,
   args: SetUIStateArgs,
@@ -98,6 +135,7 @@ export const setUIStateHandler = async (
   signal?: AbortSignal,
 ) => {
   const setUIState = setUIStateFactory(device);
+  const transportDeadlineMs = resolveTransportDeadlineMs(args);
 
   const result = await setUIState.execute(
     {
@@ -113,6 +151,7 @@ export const setUIStateHandler = async (
     },
     progress,
     signal,
+    transportDeadlineMs,
   );
 
   const response = createStructuredToolResponse({

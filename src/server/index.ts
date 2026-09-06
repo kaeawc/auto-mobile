@@ -14,6 +14,7 @@ import { TerminalSessionError } from "../daemon/sessionManager";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 } from "../daemon/constants";
 import {
@@ -143,7 +144,6 @@ export interface McpServerOptions {
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
 const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
-const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 async function resolveDeviceLossOutcome(
   deviceLoss: DeviceLossOutcome,
@@ -646,6 +646,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               : {}),
             [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
             [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+            // Forwarded back onto handlerParams (rather than only used locally
+            // above) so a handler that needs the ACTUAL transport deadline --
+            // not a fresh internal budget -- can recover it: this value plus
+            // `execution.startTime` is the absolute wall-clock deadline of the
+            // current request. Only present on a daemon-forwarded call (see
+            // `withSocketSessionAutolockKey` in `src/daemon/socketServer.ts`);
+            // absent on a direct/non-daemon call, which a handler must treat as
+            // "no transport deadline known" (issue #6222 P1, `setUIStateHandler`
+            // is the first consumer).
+            ...(requestTimeoutMs !== undefined
+              ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: requestTimeoutMs }
+              : {}),
           }
         : parsedParams;
 

@@ -1461,11 +1461,10 @@ export class DaemonManager implements DaemonManagerLike {
     if (!status.running) {
       // status() is deliberately observation-only (issue #6140) and no longer
       // reclaims a well-formed PID file naming an already-exited daemon.
-      // `stop()` is a deliberate, explicit user action — not a passive
-      // status/isAvailable probe a live winner could race — so it is safe to
-      // reclaim that CONFIRMED-DEAD daemon's files here, gated the same way
-      // status() used to (only if the recorded PID is re-confirmed dead).
-      await this.cleanupConfirmedDeadPidFile();
+      // `stop()` is a deliberate, explicit user action, so it is safe to
+      // remove that CONFIRMED-DEAD daemon's PID FILE here — but NOT its
+      // socket pathname (see removeConfirmedDeadPidFile for why).
+      await this.removeConfirmedDeadPidFile();
       stderrLog("Daemon is not running");
       return;
     }
@@ -1516,16 +1515,32 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * Reclaim a well-formed PID file naming an already-exited daemon, from the
+   * Remove a well-formed PID file naming an already-exited daemon, from the
    * explicit `stop()` path only (issue #6140). Independently re-reads and
    * re-confirms the recorded PID is dead (rather than trusting `status()`'s
    * now-observation-only result), so this stays gated on the same "confirmed
    * dead, expected PID" check the removed `status()` cleanup used — the
-   * difference is WHO calls it: an explicit, deliberate `--daemon stop`/
-   * `restart` action, never a passive status/isAvailable/health-diagnostic
-   * probe a live startup winner could race.
+   * difference is WHO calls it: an explicit, deliberate `--daemon stop`
+   * action, never a passive status/isAvailable/health-diagnostic probe a live
+   * startup winner could race.
+   *
+   * Deliberately removes ONLY the PID file — never the socket pathname. A
+   * daemon publishes its control socket (`daemon.ts`, `UnixSocketServer.start()`)
+   * BEFORE writing its final PID record, so a live startup winner can already
+   * own the socket while the PID file still names the just-exited loser.
+   * Unlinking the socket here (by pathname alone, with no lock held and no
+   * cheap way to establish current ownership — the lsof/inode ownership-proof
+   * machinery was deliberately removed earlier in #6140 for exactly this
+   * reason) would delete that winner's live socket: the exact brick #6140 is
+   * about. The PID file alone is safe to remove: its recorded PID is
+   * confirmed dead, so removing it cannot un-publish anything a live process
+   * depends on — a startup winner (dead-PID-record or not) always writes its
+   * own fresh PID record before it is done starting. A leftover socket file
+   * is harmless; it is unconditionally reclaimed by the next daemon start's
+   * unlink-before-`listen()`, under the O_EXCL startup lock
+   * (`UnixSocketServer.start()`).
    */
-  private async cleanupConfirmedDeadPidFile(): Promise<void> {
+  private async removeConfirmedDeadPidFile(): Promise<void> {
     if (!existsSync(this.pidFilePath)) {
       return;
     }
@@ -1537,12 +1552,12 @@ export class DaemonManager implements DaemonManagerLike {
       }
       await cleanupDaemonFiles({
         pidFilePath: this.pidFilePath,
-        socketPaths: this.cleanupSocketPaths(pidData.socketPath),
+        socketPaths: [], // NEVER the socket — see the doc comment above.
         expectedPid: pidData.pid,
       });
     } catch (error) {
       logger.warn(
-        `Failed to clean up a confirmed-dead PID file during stop(): ${errorMessage(error)}`,
+        `Failed to remove a confirmed-dead PID file during stop(): ${errorMessage(error)}`,
       );
     }
   }

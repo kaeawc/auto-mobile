@@ -270,7 +270,15 @@ describe("DaemonManager stop", () => {
   // not a passive probe a live startup winner could race, so it is safe (and
   // expected) to reclaim a CONFIRMED-DEAD recorded daemon's files here even
   // though status() itself no longer does.
-  test("cleans up the PID file and stale socket for a well-formed PID file naming an already-exited daemon", async () => {
+  // #6140 P1 reconciliation: a daemon publishes its control socket BEFORE
+  // writing its final PID record (daemon.ts), so a live startup winner can
+  // already own the socket while the PID file still names a just-exited
+  // loser. stop()'s confirmed-dead cleanup must remove ONLY the stale PID
+  // file — never the socket by pathname, which it cannot prove is still the
+  // loser's (no lock held, no cheap ownership-proof mechanism, by design). A
+  // leftover socket file is harmless: the next daemon start reclaims it under
+  // the O_EXCL lock.
+  test("removes only the stale PID file for a well-formed PID file naming an already-exited daemon; the socket is left for the next locked bind to reclaim", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-already-exited-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
@@ -292,7 +300,47 @@ describe("DaemonManager stop", () => {
       // daemon as not running, so stop() never entered the kill path.
       expect(killSpy).not.toHaveBeenCalled();
       expect(existsSync(pidFilePath)).toBe(false);
-      expect(existsSync(socketPath)).toBe(false);
+      // The socket is NOT unlinked by stop() — only the O_EXCL-locked bind may
+      // do that, at the next daemon start.
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // Regression for the exact race the reviewer described: the PID file names a
+  // dead startup loser, but a LIVE winner has already bound the same socket
+  // path (a daemon publishes its socket before its final PID record). stop()
+  // must still remove the stale PID file (safe: that PID is confirmed dead,
+  // and the winner will write its own fresh PID record before it is done
+  // starting) but must NEVER unlink the socket the winner currently owns.
+  test("removes the stale PID file but never unlinks the socket when a live winner already holds it (dead-loser-PID race)", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-live-winner-race-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const deadLoserPid = 4248;
+    // The recorded (loser) PID is confirmed dead, but a DIFFERENT, live winner
+    // process now holds the socket path — stop() has no way to know this from
+    // the PID file alone, which is exactly why it must never touch the socket.
+    const livePids = new Set<number>();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, deadLoserPid, socketPath);
+    // The winner's live socket — indistinguishable, by pathname alone, from an
+    // ordinary stale socket inode.
+    writeFileSync(socketPath, "live winner socket");
+    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(existsSync(pidFilePath)).toBe(false);
+      // The live winner's socket must survive — this is the brick #6140 exists
+      // to prevent.
+      expect(existsSync(socketPath)).toBe(true);
     } finally {
       killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });

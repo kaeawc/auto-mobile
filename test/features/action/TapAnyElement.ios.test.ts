@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
-import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import {
+  TapAnyElement,
+  TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
+} from "../../../src/features/action/TapAnyElement";
 import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -195,32 +198,57 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(tapSpy).toHaveBeenCalledWith(42, 84, 6000, 8000);
   });
 
-  // Thread PRRT_kwDOP-GF5M6fuSDC: the outer MCP deadline was clamped to
-  // MAX_SETTIMEOUT_DELAY_MS (2^31-1) in an earlier round, but the INNER
-  // CtrlProxy request timeout computed here (duration + headroom) was not --
-  // a duration near the 2^31 ceiling overflows `setTimeout`, which Bun/Node
-  // silently normalize to 1ms instead of honoring it. Both the inner and
-  // outer timeouts must be clamped to the same ceiling.
-  test("longPress with a duration near the setTimeout ceiling clamps the inner CtrlProxy timeout", async () => {
+  // Thread PRRT_kwDOP-GF5M6fuZRt (#6248 review, terminal round): an earlier
+  // round merely CLAMPED the inner/outer timers while still forwarding the
+  // full absurd `duration` to XCTest -- a clamp-vs-duration mismatch that
+  // asked the on-device press to run far longer than the request would wait.
+  // `getLongPressDuration` now REJECTS a duration whose derived request
+  // deadline would exceed `MAX_SETTIMEOUT_DELAY_MS` outright, closing the
+  // whole absurd-duration edge class at the source instead of clamping.
+  test("longPress duration just over TAP_ANY_LONG_PRESS_MAX_DURATION_MS is REJECTED, not clamped-and-sent", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
-    const duration = 2_147_481_648; // duration + 2000 headroom overflows 2^31-1 by 1
+    const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS + 1;
 
     const result = await tapAny.execute({ action: "longPress", duration });
 
-    expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, duration, 2_147_483_647);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("longPress duration too large");
+    expect(tapSpy).not.toHaveBeenCalled();
   });
 
-  test("VoiceOver longPress with a duration near the setTimeout ceiling clamps the inner activate timeout", async () => {
-    fakeVoiceOverDetector.setVoiceOverEnabled(true);
-    const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");
-    const duration = 2_147_481_648;
+  test("longPress duration at exactly TAP_ANY_LONG_PRESS_MAX_DURATION_MS is accepted", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+    const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS;
 
     const result = await tapAny.execute({ action: "longPress", duration });
 
     expect(result.success).toBe(true);
-    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 2_147_483_647);
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, duration, duration + 2000);
+  });
+
+  test("VoiceOver longPress duration just over TAP_ANY_LONG_PRESS_MAX_DURATION_MS is REJECTED, not clamped-and-sent", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");
+    const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS + 1;
+
+    const result = await tapAny.execute({ action: "longPress", duration });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("longPress duration too large");
+    expect(activateSpy).not.toHaveBeenCalled();
+  });
+
+  test("VoiceOver longPress duration at exactly TAP_ANY_LONG_PRESS_MAX_DURATION_MS is accepted", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");
+    const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS;
+
+    const result = await tapAny.execute({ action: "longPress", duration });
+
+    expect(result.success).toBe(true);
+    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", duration + 2000);
   });
 
   test("VoiceOver longPress over 5s sizes the requestVoiceOverActivate timeout from the duration", async () => {

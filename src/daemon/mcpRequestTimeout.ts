@@ -11,13 +11,10 @@ import {
   TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS,
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
+  TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+  LONG_PRESS_TIMEOUT_HEADROOM_MS,
 } from "../features/action/TapAnyElement";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import {
-  FINAL_OBSERVATION_RETRY_BACKOFF_MS,
-  FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
-} from "../features/action/BaseVisualChange";
-import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../features/observe/ios/CtrlProxyHierarchy";
 
 export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS, MAX_SETTIMEOUT_DELAY_MS };
 
@@ -99,86 +96,19 @@ export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
  * request. Without a matching floor here, the daemon's outer deadline still
  * defaults to `DEFAULT_MCP_REQUEST_TIMEOUT_MS` (30s) and can kill a
  * legitimately-running long press well before a longer inner timeout expires
- * (issue #6248 review, P2). Keep this value in sync with
- * `LONG_PRESS_TIMEOUT_HEADROOM_MS` in TapAnyElement.ts.
+ * (issue #6248 review, P2). A direct re-export of `LONG_PRESS_TIMEOUT_HEADROOM_MS`
+ * (TapAnyElement.ts's own single source of truth) rather than a duplicated
+ * literal, so the two can never drift out of sync.
  */
-export const TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS = 2000;
+export const TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS = LONG_PRESS_TIMEOUT_HEADROOM_MS;
 
-/**
- * Timeout `CtrlProxyVoiceOver.requestVoiceOverState`'s own default applies to
- * the VoiceOver-detection probe `TapAnyElement` runs before every iOS
- * longPress gesture (`src/features/observe/ios/CtrlProxyVoiceOver.ts`).
- * Duplicated here (rather than imported) so this daemon-level timeout module
- * doesn't take on a dependency on the observe/ios delegate layer just to read
- * one constant.
- */
-const TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS = 5000;
-
-/**
- * Realistic WORST CASE of the post-action final-observation phase
- * `BaseVisualChange.takeObservation` runs once a tapAny longPress gesture
- * completes: an initial observation attempt plus up to
- * `FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS` retries (5 attempts total) when the
- * observation looks stale/unchanged, each an independent
- * `CtrlProxyHierarchy` request bounded by `IOS_HIERARCHY_REQUEST_TIMEOUT_MS`,
- * separated by the `FINAL_OBSERVATION_RETRY_BACKOFF_MS` backoff delays. An
- * earlier round of this constant reserved only one attempt's worth of
- * timeout (~15s) for this phase, which undersized the outer deadline against
- * the real 5-attempt retry loop (issue #6248 review, P2) -- both retry
- * inputs are now imported from `BaseVisualChange` itself (not duplicated
- * literals) so a future change to the retry count or backoff automatically
- * grows this budget instead of silently falling behind it again.
- *
- * Worst case = (attempts * per-attempt timeout) + total backoff
- *   attempts            = 1 + FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 5
- *   per-attempt timeout = IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000ms
- *   total backoff       = sum(FINAL_OBSERVATION_RETRY_BACKOFF_MS) = 750ms
- *   => 5 * 15000 + 750 = 75750ms
- */
-const TAP_ANY_LONG_PRESS_FINAL_OBSERVE_ATTEMPTS = 1 + FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
-const TAP_ANY_LONG_PRESS_FINAL_OBSERVE_TOTAL_BACKOFF_MS = FINAL_OBSERVATION_RETRY_BACKOFF_MS.reduce(
-  (sum, delayMs) => sum + delayMs,
-  0,
-);
-const TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS =
-  TAP_ANY_LONG_PRESS_FINAL_OBSERVE_ATTEMPTS * IOS_HIERARCHY_REQUEST_TIMEOUT_MS +
-  TAP_ANY_LONG_PRESS_FINAL_OBSERVE_TOTAL_BACKOFF_MS;
-
-/**
- * Extra headroom on top of the derived worst-case arithmetic above, so a
- * further phase added later (or a small amount of scheduling jitter) can't
- * blow the budget and force yet another review round (issue #6248 review,
- * P2).
- */
-const TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS = 10_000;
-
-/**
- * Consolidated overhead for every non-press phase of a tapAny longPress:
- * the pre-gesture VoiceOver-detection probe, the post-gesture final
- * observation's realistic worst case (initial + retries + backoff), plus the
- * existing fixed CtrlProxy request headroom and extra generosity headroom.
- * One generous constant instead of itemizing each phase separately, so the
- * outer MCP deadline doesn't keep needing another review round every time a
- * new phase is added (issue #6248 review, P2) -- future phases update this
- * one constant. Covers:
- *   - VoiceOver-detection probe (`TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS`)
- *   - Final post-gesture observation retry loop's worst case
- *     (`TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS`; see its own doc for
- *     the attempts/timeout/backoff arithmetic)
- *   - Existing fixed CtrlProxy request headroom
- *     (`TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS`)
- *   - Extra generosity headroom for future phases
- *     (`TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS`)
- *
- * Deliberately does NOT fold in the pre-gesture search window -- that varies
- * per-call (`searchUntil.duration` or its default) and stays budgeted
- * explicitly in `resolveTapAnyLongPressBudgetMs` alongside this constant.
- */
-export const TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS =
-  TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS +
-  TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS +
-  TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS +
-  TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS;
+// `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` is now computed once, in
+// `TapAnyElement.ts`, alongside `TAP_ANY_LONG_PRESS_MAX_DURATION_MS` (which
+// `TapAnyElement.getLongPressDuration` uses to REJECT an absurd `duration` at
+// the source rather than merely clamping the derived timers -- issue #6248
+// review, P2, fuZRt/fuZRo). Re-exported here so existing importers of this
+// module are unaffected.
+export { TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS };
 
 /**
  * Effective press duration budgeted when a `tapAny` longPress omits

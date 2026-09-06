@@ -549,6 +549,19 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
+  /**
+   * Issue #6258: a basis that resolves to "unchanged" must not stop the chain
+   * — it must fall through to the next basis rather than being taken as final
+   * proof nothing changed. A dialog open (e.g. the Material time picker) is
+   * the known dialog-window gap (#6151): `activeWindow` never reflects the new
+   * dialog window, so it resolves "unchanged" even though the hierarchy
+   * clearly changed. The old `??` chain stopped at the first *defined* result
+   * regardless of its `screenChanged` value, so `activeWindow unchanged`
+   * masked a real `viewHierarchy changed`. Priority order (screenIdentity,
+   * then activeWindow, then viewHierarchy) is preserved for a basis that DOES
+   * report a change; when none report a change, the highest-priority
+   * available basis is returned (matching prior "all unchanged" behavior).
+   */
   private deriveTapEffect(
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult | undefined,
@@ -556,14 +569,18 @@ export class TapOnElement extends BaseVisualChange {
     if (!previousObservation || !currentObservation) {
       return undefined;
     }
-    return (
-      this.compareScreenIdentity(previousObservation, currentObservation) ??
-      this.compareActiveWindow(previousObservation, currentObservation) ??
-      this.compareViewHierarchy(previousObservation, currentObservation) ?? {
-        screenChanged: false,
-        basis: "insufficient observation data",
-      }
-    );
+    const results = [
+      this.compareScreenIdentity(previousObservation, currentObservation),
+      this.compareActiveWindow(previousObservation, currentObservation),
+      this.compareViewHierarchy(previousObservation, currentObservation),
+    ].filter((result): result is NonNullable<typeof result> => result !== undefined);
+
+    const changedResult = results.find((result) => result.screenChanged);
+    if (changedResult) {
+      return changedResult;
+    }
+
+    return results[0] ?? { screenChanged: false, basis: "insufficient observation data" };
   }
 
   private async deriveTapEffectAfterPostTapObservation(

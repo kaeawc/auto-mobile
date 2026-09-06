@@ -612,6 +612,20 @@ export interface ObserveDiff {
    * leaving a client unable to tell a failed input from a successful one.
    */
   context?: SkeletonElement[];
+  /**
+   * Same name/shape as a full observation's `activeWindow` (issue #6258).
+   * Populated by the `finalizeToolResponse` call site from the post-action
+   * observation, not by {@link diffObserveResult} — without this a client has
+   * no single accessor for "what screen am I on" across full and diff modes.
+   */
+  activeWindow?: ObserveResult["activeWindow"];
+  /**
+   * Same name/shape as a full observation's `freshness` (issue #6258).
+   * Populated by the `finalizeToolResponse` call site from the post-action
+   * observation, not by {@link diffObserveResult} — without this a client has
+   * no single accessor for "is this capture fresh" across full and diff modes.
+   */
+  freshness?: ObserveResult["freshness"];
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];

@@ -30,6 +30,7 @@ import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
+import { LsofSocketHolderProbe, type SocketHolderProbe } from "./socketHolderProbe";
 
 /**
  * Upper bound on the observation-only reachability probe consulted before a
@@ -68,6 +69,14 @@ export const STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS = 3;
  */
 const defaultStaleSocketRecoveryReachability: DaemonSocketReachabilityLike =
   new DaemonSocketReachability();
+
+/**
+ * A single lazily-constructed default authoritative socket-holder probe, shared
+ * across instances that don't inject their own (mirrors
+ * {@link defaultStaleSocketRecoveryReachability}). Constructed once so a real
+ * `LsofSocketHolderProbe` isn't allocated per connect attempt.
+ */
+const defaultSocketHolderProbe: SocketHolderProbe = new LsofSocketHolderProbe();
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -122,6 +131,19 @@ export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptio
    * real socket.
    */
   reachability?: DaemonSocketReachabilityLike;
+
+  /**
+   * AUTHORITATIVE socket-ownership probe consulted before {@link DaemonClient.connect}
+   * actually performs the stale-socket unlink (issue #6140 P1). The reachability
+   * probe above is a fast HEURISTIC — a full accept backlog or a slow accept can make
+   * every attempt fail even while a live winner owns the socket, so a fixed probe
+   * count alone is not authoritative ownership proof. This probe asks the OS directly
+   * which live processes hold the socket path open; the unlink proceeds only when it
+   * returns a CONFIRMED empty list (see {@link SocketHolderProbe}). Defaults to a real
+   * `LsofSocketHolderProbe`; injectable so tests can drive the outcome without a real
+   * socket or a real `lsof`.
+   */
+  socketHolderProbe?: SocketHolderProbe;
 }
 
 /**
@@ -304,57 +326,86 @@ export class DaemonClient {
       await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       return;
     } catch (error) {
-      // Bound the recovery probe by whatever remains of the caller's own
-      // deadline instead of always spending the full fixed cap — otherwise a
-      // stalled probe could make connect(timeoutMs) overrun its advertised
-      // timeout. Skip recovery entirely once nothing remains: there is no
-      // budget left for a retried connectOnce anyway.
-      const remainingForProbe = deadline - this.timer.now();
-      if (!signal?.aborted && remainingForProbe > 0) {
-        // Never fall through to the dead-PID unlink while something is still
-        // actually bound to this socket path (issue #6140): a startup race can
-        // leave the PID file naming the just-exited losing child while a live
-        // winner already owns the path but hasn't published its own PID record
-        // yet. This observation-only probe never itself unlinks anything — it
-        // only decides whether the existing dead-PID cleanup below is safe to run.
-        const confirmedUnreachable = await this.isStaleSocketRecoveryConfirmedUnreachable(
-          deadline,
-          signal,
-        );
-        // Recheck after the await: the caller can abort WHILE this probe is
-        // in flight, and the pre-await check above cannot see that. Proceeding
-        // to cleanup/retry on a now-aborted call would ignore the caller's
-        // cancellation, so bail out with the original failure instead.
-        if (
-          !signal?.aborted &&
-          confirmedUnreachable &&
-          DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
-        ) {
-          await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
-          return;
-        }
+      if (await this.recoverStaleSocketAndUnlink(deadline, signal)) {
+        await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
+        return;
       }
       throw error;
     }
+  }
+
+  /**
+   * Decides whether it is safe to unlink the socket path after a failed connect
+   * attempt, and does so when it is (issue #6140). Non-destructive by default:
+   * returns `true` (safe to retry `connectOnce`) only when EVERY one of these
+   * holds, otherwise `false` (never unlinks, caller rethrows the original error):
+   *
+   * 1. The caller's own `connect(timeoutMs)` deadline has budget remaining and
+   *    was not aborted — recovery must never itself overrun the advertised
+   *    timeout or ignore cancellation.
+   * 2. {@link isStaleSocketRecoveryLikelyUnreachable}, a fast HEURISTIC pre-filter
+   *    (a handful of reachability probes), reports the socket is likely dead.
+   *    This is deliberately NOT authoritative — a full accept backlog or a slow
+   *    accept can make every probe attempt fail even while a live winner
+   *    genuinely owns the socket — so it only decides whether the slower,
+   *    AUTHORITATIVE check below is worth running at all.
+   * 3. {@link socketHolderProbe}, which asks the OS directly which live processes
+   *    hold the socket path open, returns a CONFIRMED empty list. `undefined`
+   *    (ownership could not be determined — no `lsof`, an unexpected error) is
+   *    treated the same as "a live holder exists": inconclusive is never grounds
+   *    to unlink.
+   * 4. {@link cleanupStaleSocketIfDaemonDead} independently confirms the PID
+   *    file's recorded owner is dead and performs the unlink.
+   */
+  private async recoverStaleSocketAndUnlink(
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    // Bound the recovery probes by whatever remains of the caller's own deadline
+    // instead of always spending the full fixed cap — otherwise a stalled probe
+    // could make connect(timeoutMs) overrun its advertised timeout. Skip recovery
+    // entirely once nothing remains: there is no budget left for a retried
+    // connectOnce anyway.
+    if (signal?.aborted || deadline - this.timer.now() <= 0) {
+      return false;
+    }
+    const likelyUnreachable = await this.isStaleSocketRecoveryLikelyUnreachable(deadline, signal);
+    // Recheck after the await: the caller can abort WHILE this probe is in
+    // flight, and the pre-await check above cannot see that.
+    if (signal?.aborted || !likelyUnreachable) {
+      return false;
+    }
+    const holderPids = await this.socketHolderProbe().getHolderPids(this.socketPath);
+    // Recheck abort again: the holder probe is itself an awaited call.
+    if (signal?.aborted || holderPids === undefined || holderPids.length > 0) {
+      return false;
+    }
+    return DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions);
   }
 
   private staleSocketRecoveryReachability(): DaemonSocketReachabilityLike {
     return this.recoveryOptions.reachability ?? defaultStaleSocketRecoveryReachability;
   }
 
+  private socketHolderProbe(): SocketHolderProbe {
+    return this.recoveryOptions.socketHolderProbe ?? defaultSocketHolderProbe;
+  }
+
   /**
-   * Whether the stale-socket recovery unlink is safe: the socket path must fail
-   * {@link STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS} consecutive reachability
-   * probes within the caller's remaining deadline before recovery treats it as
-   * confirmed dead (issue #6140). A single negative probe is NOT authoritative —
-   * it only distinguishes "probably nothing is listening" from "definitely
-   * something is listening", and a full accept backlog or a transient refusal
-   * can produce a false negative even while a live winner owns the socket.
-   * Exhausting the remaining deadline mid-check (or an abort) is treated the
-   * same as "not confirmed" — recovery must stay non-destructive rather than
-   * act on a partial observation.
+   * Fast HEURISTIC pre-filter for the stale-socket recovery unlink (issue #6140):
+   * the socket path must fail {@link STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS}
+   * consecutive reachability probes within the caller's remaining deadline before
+   * recovery even CONSIDERS the unlink. This is deliberately NOT authoritative —
+   * a full accept backlog or a transient refusal can produce a false negative on
+   * every attempt even while a live winner owns the socket, so a fixed probe count
+   * alone is not proof of ownership. `connect()` additionally gates the actual
+   * unlink on {@link socketHolderProbe}'s authoritative OS-level check; this method
+   * only decides whether that slower, more expensive check is worth running at all.
+   * Exhausting the remaining deadline mid-check (or an abort) is treated the same
+   * as "not (yet) likely unreachable" — recovery must stay non-destructive rather
+   * than act on a partial observation.
    */
-  private async isStaleSocketRecoveryConfirmedUnreachable(
+  private async isStaleSocketRecoveryLikelyUnreachable(
     deadline: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
@@ -379,17 +430,19 @@ export class DaemonClient {
       // the FINAL attempt: a probe capped to the last remaining milliseconds can
       // itself consume the whole remainder and resolve exactly AT (or past) the
       // deadline. Without this recheck, that attempt's negative result would fall
-      // through the loop unconditionally to "confirmed unreachable" — letting
-      // `connect()` run the dead-PID unlink AFTER its own advertised timeout, which
-      // could delete a live winner's socket that a slower, still-in-flight retry
-      // would have found reachable. Budget exhaustion must never itself confirm
-      // unreachable.
+      // through the loop unconditionally to "likely unreachable" — letting the
+      // caller escalate to the authoritative holder check (and, on an empty
+      // result, the dead-PID unlink) AFTER `connect()`'s own advertised timeout,
+      // which could delete a live winner's socket that a slower, still-in-flight
+      // retry would have found reachable. Budget exhaustion must never itself
+      // count as a signal.
       if (this.timer.now() >= deadline) {
         return false;
       }
     }
     // Every attempt within budget failed, with time still remaining after the
-    // last one: treat as confirmed unreachable.
+    // last one: likely unreachable — worth escalating to the authoritative
+    // holder check below, but still not itself proof.
     return true;
   }
 

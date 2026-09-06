@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { DaemonClient, STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS } from "../../src/daemon/client";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
+import type { SocketHolderProbe } from "../../src/daemon/socketHolderProbe";
 import type { PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -289,17 +290,129 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
           return false;
         }
       }
+      // No live process holds this path — the authoritative check confirms it.
+      // Injected (rather than relying on the real `lsof`-backed default) so this
+      // stays a fast, deterministic unit test with no real subprocess dependency.
+      class NoHolder implements SocketHolderProbe {
+        async getHolderPids(): Promise<number[]> {
+          return [];
+        }
+      }
 
       const client = new DaemonClient(socketPath, 50, undefined, {
         pidFilePath,
         socketPaths: [socketPath],
         isProcessRunning: () => false,
         reachability: new NeverReachable(),
+        socketHolderProbe: new NoHolder(),
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");
       expect(existsSync(socketPath)).toBe(false);
       expect(existsSync(pidFilePath)).toBe(false);
+    },
+  );
+
+  // #6140 P1 re-raised: a fixed reachability-probe count is a HEURISTIC, not
+  // authoritative ownership proof. A full accept backlog or a slow accept can
+  // make every probe fail even while a live winner genuinely owns the socket —
+  // exactly this scenario. The unlink must additionally be gated on the
+  // AUTHORITATIVE socket-holder check; when that check finds a live PID, recovery
+  // must stay non-destructive regardless of how many probes failed.
+  (isWindows ? test.skip : test)(
+    "does not unlink when every reachability probe fails but the authoritative holder check finds a live winner (accept-backlog scenario)",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "live winner socket placeholder");
+      writePidFile(pidFilePath, socketPath);
+
+      class NeverReachable implements DaemonSocketReachabilityLike {
+        calls = 0;
+        async isReachable(): Promise<boolean> {
+          this.calls++;
+          // Every reachability probe fails — e.g. a full accept backlog — even
+          // though a live winner genuinely holds the socket.
+          return false;
+        }
+      }
+      const reachability = new NeverReachable();
+
+      class LiveHolder implements SocketHolderProbe {
+        calls = 0;
+        async getHolderPids(): Promise<number[]> {
+          this.calls++;
+          return [777777]; // the live winner's PID
+        }
+      }
+      const holderProbe = new LiveHolder();
+
+      let cleanupCalls = 0;
+      const client = new DaemonClient(socketPath, 500, undefined, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        // The recorded PID is dead — the probe-count-only guard would have
+        // unlinked here once every reachability probe failed.
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability,
+        socketHolderProbe: holderProbe,
+      });
+
+      await expect(client.connect()).rejects.toThrow();
+      expect(reachability.calls).toBe(STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS);
+      // The heuristic escalated to the authoritative check exactly once...
+      expect(holderProbe.calls).toBe(1);
+      // ...which found a live holder, so the dead-PID cleanup must never run.
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    },
+  );
+
+  // Same accept-backlog scenario, but the authoritative check itself cannot
+  // determine ownership (e.g. `lsof` missing/erroring). An inconclusive result
+  // must be treated the same as "a live holder exists" — never grounds to unlink.
+  (isWindows ? test.skip : test)(
+    "does not unlink when the authoritative holder check is inconclusive",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "socket placeholder");
+      writePidFile(pidFilePath, socketPath);
+
+      class NeverReachable implements DaemonSocketReachabilityLike {
+        async isReachable(): Promise<boolean> {
+          return false;
+        }
+      }
+
+      class InconclusiveHolder implements SocketHolderProbe {
+        calls = 0;
+        async getHolderPids(): Promise<number[] | undefined> {
+          this.calls++;
+          return undefined;
+        }
+      }
+      const holderProbe = new InconclusiveHolder();
+
+      let cleanupCalls = 0;
+      const client = new DaemonClient(socketPath, 500, undefined, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability: new NeverReachable(),
+        socketHolderProbe: holderProbe,
+      });
+
+      await expect(client.connect()).rejects.toThrow();
+      expect(holderProbe.calls).toBe(1);
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
     },
   );
 

@@ -563,6 +563,18 @@ export interface DeviceTeardownOperationsTable {
   updated_at: Generated<string>;
 }
 
+/**
+ * Durable membership set backing `ToolSelectionProfileRegistry` (issue #6225):
+ * one row per crypto-random tool-selection-profile uuid this daemon process
+ * has minted via `createAndBindToolSelectionProfile`. `profile_uuid` alone is
+ * ever read back to answer "was this server-issued" — see the migration
+ * (`2026_09_06_000_tool_selection_profile_provenance`) for the full rationale.
+ */
+export interface ToolSelectionProfileProvenanceTable {
+  profile_uuid: string;
+  created_at: Generated<string>;
+}
+
 // Feature flags table
 export interface FeatureFlagsTable {
   key: string;
@@ -795,6 +807,7 @@ export interface Database {
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provision_device_operations: ProvisionDeviceOperationsTable;
   device_teardown_operations: DeviceTeardownOperationsTable;
+  tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;
 }
 
 // Convenience types for each table
@@ -807,6 +820,9 @@ export type DeviceSessionUpdate = Updateable<DeviceSessionsTable>;
 
 export type DeviceLock = Selectable<DeviceLocksTable>;
 export type NewDeviceLock = Insertable<DeviceLocksTable>;
+
+export type ToolSelectionProfileProvenanceRow = Selectable<ToolSelectionProfileProvenanceTable>;
+export type NewToolSelectionProfileProvenanceRow = Insertable<ToolSelectionProfileProvenanceTable>;
 
 export type EmulatorLossIncidentRow = Selectable<EmulatorLossIncidentsTable>;
 export type NewEmulatorLossIncidentRow = Insertable<EmulatorLossIncidentsTable>;

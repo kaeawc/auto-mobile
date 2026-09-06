@@ -8,6 +8,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
+import { DefaultDatabaseHealthProbe } from "../../src/db/DatabaseHealthProbe";
+import { FakeToolSelectionProfileProvenanceLoader } from "../fakes/FakeToolSelectionProfileProvenanceLoader";
 
 /**
  * Issue #2784: startup DB/migration failure must be FATAL — `initializeDatabase()`
@@ -58,6 +60,12 @@ function buildDaemon(overrides: {
     new CountingIdGenerator("daemon-session"),
     overrides.initializer,
     overrides.tracker,
+    new DefaultDatabaseHealthProbe({ timer: overrides.timer }),
+    undefined,
+    process.env,
+    undefined,
+    // Never resolve the production default (real getDatabase()) — issue #3067.
+    new FakeToolSelectionProfileProvenanceLoader(),
   );
   return { daemon, deviceSessionRepository, installedAppsRepository };
 }

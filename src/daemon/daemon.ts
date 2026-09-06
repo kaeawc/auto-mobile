@@ -163,6 +163,10 @@ import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLi
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 import { runShutdownCleanupStages } from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
+import {
+  defaultToolSelectionProfileRegistry,
+  type ToolSelectionProfileProvenanceLoader,
+} from "../server/toolSelectionProfileRegistry";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -269,6 +273,7 @@ export class Daemon {
   private timer: Timer;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
+  private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
   private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
@@ -294,6 +299,7 @@ export class Daemon {
     recoverFromDatabaseHealthFailure?: DatabaseHealthFailureRecovery,
     recoveryPolicyEnvironment: NodeJS.ProcessEnv = process.env,
     managedAdbServerShutdown: ManagedAdbServerShutdown = stopManagedAdbServer,
+    toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader = defaultToolSelectionProfileRegistry,
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -305,6 +311,7 @@ export class Daemon {
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
     this.databaseInitializer = databaseInitializer;
+    this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
     this.startupFailureTracker = startupFailureTracker;
     this.stopManagedAdbServer = managedAdbServerShutdown;
@@ -2271,6 +2278,14 @@ export class Daemon {
       // getDatabase() + await ensureMigrations(): a failed startup migration
       // rejects here (rather than swallowing on a detached promise).
       await this.databaseInitializer.initialize();
+      // Reload durable tool-selection-profile provenance (issue #6225) so a
+      // profile minted before this restart/upgrade is still recognized when a
+      // client reaffirms it — without this, `setToolEnabled` would force it
+      // through a re-mint. Never fatal: the loader already logs and swallows
+      // its own failures (see PersistentToolSelectionProfileRegistry), leaving
+      // the registry empty (the pre-#6225 behavior) rather than blocking the
+      // FATAL database bring-up this method guards.
+      await this.toolSelectionProfileProvenanceLoader.load();
       // Clear installed apps cache from previous daemon sessions
       await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(

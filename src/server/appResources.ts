@@ -712,10 +712,18 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
 
 /**
  * Resolves the target device and returns the filtered installed-apps content
- * for it, applying the documented `type` default (see filterAppsByQuery).
- * Shared by the `apps` resource and the `listApps` tool (#6155) so both honor
- * the same default and filtering behavior. Throws on failure — callers that
- * need a resource-shaped error payload should catch via getAppsQueryResource.
+ * for it, applying the documented `type` default (see filterAppsByQuery):
+ * an omitted `type` defaults to "user" everywhere EXCEPT a physical iOS
+ * device whose devicectl listing carries no user/system classification
+ * signal (`iosTypeClassificationUnreliable`) — there, an omitted `type`
+ * returns every app and reports `query.type: "all"` (the "user" default
+ * would otherwise silently let system apps through under a "user" label),
+ * and an explicit `type=user`/`type=system` is rejected rather than
+ * honored against data we cannot actually classify (#6216 review, rounds
+ * 5-6). Shared by the `apps` resource and the `listApps` tool (#6155) so
+ * both honor the same default and filtering behavior. Throws on failure —
+ * callers that need a resource-shaped error payload should catch via
+ * getAppsQueryResource.
  */
 export async function queryInstalledApps(
   options: AppsQueryOptions,

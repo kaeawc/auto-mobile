@@ -419,7 +419,12 @@ export const listAppsSchema = addDeviceTargetingToSchema(
     type: z
       .enum(["user", "system", "all"])
       .optional()
-      .describe("Filter by app type. Defaults to 'user'."),
+      .describe(
+        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
+          "user/system classification is unavailable (devicectl reports no such signal there): " +
+          "on such a device an omitted type returns every app (reported as 'all'), and an " +
+          "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+      ),
     search: z
       .string()
       .optional()

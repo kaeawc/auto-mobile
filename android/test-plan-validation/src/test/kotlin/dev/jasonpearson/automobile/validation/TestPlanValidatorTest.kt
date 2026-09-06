@@ -563,6 +563,67 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects an invalid inline device when params is null`() {
+    // JSON Schema's "required" keyword vacuously passes against a
+    // non-object value, so a naive "params has device" guard would treat
+    // params: null as if it declared 'device', wrongly skipping the inline
+    // check. The guard must require params to be an object before
+    // trusting its presence (#6215 review).
+    val yaml =
+      """
+      name: tapon-null-params-invalid-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: 123
+          params: null
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An invalid inline device with params: null should be invalid")
+  }
+
+  @Test
+  fun `accepts a valid inline device when params is null`() {
+    val yaml =
+      """
+      name: tapon-null-params-valid-device
+      devices:
+        - A
+      steps:
+        - tool: tapOn
+          device: A
+          params: null
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A valid inline device with params: null should be valid")
+  }
+
+  @Test
+  fun `rejects a whitespace-only declared device label`() {
+    // A whitespace-only label like " " satisfies the schema's minLength:1
+    // (and now the non-whitespace pattern too), but the daemon trims
+    // labels before checking emptiness -- mirrors
+    // PlanValidator.validateDevicesField (#6215 review).
+    val yaml =
+      """
+      name: whitespace-only-device-label
+      devices:
+        - " "
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A whitespace-only device label should be invalid")
+  }
+
+  @Test
   fun `rejects a barrier with an inline malformed platform value`() {
     // The inline form must be constrained the same as the nested-params
     // form, or PlanNormalizer moving it into params later would make the

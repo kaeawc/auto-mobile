@@ -86,6 +86,14 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).toThrow("Device labels must be non-empty strings");
     });
 
+    test("throws with a non-empty-string message on a whitespace-only device label", () => {
+      // A whitespace-only label like " " is a non-empty string, but the
+      // daemon trims labels before checking emptiness -- a lone space
+      // must not be treated as a valid device label (#6215 review).
+      const plan: Plan = { name: "Test", devices: [" "], steps: [] };
+      expect(() => PlanValidator.validate(plan)).toThrow("Device labels must be non-empty strings");
+    });
+
     test("throws with a mixed-format message on mixed device formats", () => {
       const plan: Plan = {
         name: "Test",

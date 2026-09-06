@@ -28,7 +28,9 @@
         "oneOf": [
           {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Device label; must contain at least one non-whitespace character (a whitespace-only label like \" \" satisfies minLength but is rejected by the daemon's validateDevicesField, which trims labels before checking emptiness -- #6215 review)."
           },
           {
             "$ref": "#/$defs/planDevice"
@@ -141,8 +143,9 @@
       "properties": {
         "label": {
           "type": "string",
-          "description": "Device label for multi-device routing",
-          "minLength": 1
+          "description": "Device label for multi-device routing; must contain at least one non-whitespace character.",
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "platform": {
           "type": "string",
@@ -201,7 +204,7 @@
           "$comment": "Generic (all tools): params.device (when present) overrides inline device at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, params precedence), so the inline sibling is discarded and must NOT be type-checked in that case -- e.g. a nested criticalSection/barrier sub-step with an invalid inline device but a valid params.device must not be false-rejected (#6215 review).",
           "if": {
             "required": ["params"],
-            "properties": { "params": { "required": ["device"] } }
+            "properties": { "params": { "type": "object", "required": ["device"] } }
           },
           "then": true,
           "else": {
@@ -795,7 +798,10 @@
               {
                 "anyOf": [
                   { "required": ["lock"] },
-                  { "required": ["params"], "properties": { "params": { "required": ["lock"] } } }
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["lock"] } }
+                  }
                 ]
               },
               {
@@ -803,21 +809,24 @@
                   { "required": ["deviceCount"] },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "required": ["deviceCount"] } }
+                    "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
                   }
                 ]
               },
               {
                 "anyOf": [
                   { "required": ["steps"] },
-                  { "required": ["params"], "properties": { "params": { "required": ["steps"] } } }
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["steps"] } }
+                  }
                 ]
               },
               {
                 "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["lock"] } }
+                  "properties": { "params": { "type": "object", "required": ["lock"] } }
                 },
                 "then": true,
                 "else": {
@@ -834,7 +843,7 @@
                 "$comment": "params.deviceCount override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["deviceCount"] } }
+                  "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
                 },
                 "then": true,
                 "else": {
@@ -851,7 +860,7 @@
                 "$comment": "params.steps override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["steps"] } }
+                  "properties": { "params": { "type": "object", "required": ["steps"] } }
                 },
                 "then": true,
                 "else": {
@@ -871,7 +880,7 @@
                 "$comment": "params.timeout override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["timeout"] } }
+                  "properties": { "params": { "type": "object", "required": ["timeout"] } }
                 },
                 "then": true,
                 "else": {
@@ -889,7 +898,7 @@
                 "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["platform"] } }
+                  "properties": { "params": { "type": "object", "required": ["platform"] } }
                 },
                 "then": true,
                 "else": {
@@ -906,7 +915,7 @@
                 "$comment": "params.sessionUuid override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["sessionUuid"] } }
+                  "properties": { "params": { "type": "object", "required": ["sessionUuid"] } }
                 },
                 "then": true,
                 "else": {
@@ -922,7 +931,7 @@
                 "$comment": "params.keepScreenAwake override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["keepScreenAwake"] } }
+                  "properties": { "params": { "type": "object", "required": ["keepScreenAwake"] } }
                 },
                 "then": true,
                 "else": {
@@ -938,7 +947,7 @@
                 "$comment": "params.deviceId override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["deviceId"] } }
+                  "properties": { "params": { "type": "object", "required": ["deviceId"] } }
                 },
                 "then": true,
                 "else": {
@@ -973,7 +982,10 @@
               {
                 "anyOf": [
                   { "required": ["lock"] },
-                  { "required": ["params"], "properties": { "params": { "required": ["lock"] } } }
+                  {
+                    "required": ["params"],
+                    "properties": { "params": { "type": "object", "required": ["lock"] } }
+                  }
                 ]
               },
               {
@@ -981,7 +993,7 @@
                   { "required": ["deviceCount"] },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "required": ["deviceCount"] } }
+                    "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
                   }
                 ]
               },
@@ -989,7 +1001,7 @@
                 "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["lock"] } }
+                  "properties": { "params": { "type": "object", "required": ["lock"] } }
                 },
                 "then": true,
                 "else": {
@@ -1006,7 +1018,7 @@
                 "$comment": "params.deviceCount override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["deviceCount"] } }
+                  "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
                 },
                 "then": true,
                 "else": {
@@ -1023,7 +1035,7 @@
                 "$comment": "params.timeout override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["timeout"] } }
+                  "properties": { "params": { "type": "object", "required": ["timeout"] } }
                 },
                 "then": true,
                 "else": {
@@ -1041,7 +1053,7 @@
                 "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["platform"] } }
+                  "properties": { "params": { "type": "object", "required": ["platform"] } }
                 },
                 "then": true,
                 "else": {
@@ -1058,7 +1070,7 @@
                 "$comment": "params.sessionUuid override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["sessionUuid"] } }
+                  "properties": { "params": { "type": "object", "required": ["sessionUuid"] } }
                 },
                 "then": true,
                 "else": {
@@ -1074,7 +1086,7 @@
                 "$comment": "params.keepScreenAwake override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["keepScreenAwake"] } }
+                  "properties": { "params": { "type": "object", "required": ["keepScreenAwake"] } }
                 },
                 "then": true,
                 "else": {
@@ -1090,7 +1102,7 @@
                 "$comment": "params.deviceId override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "required": ["deviceId"] } }
+                  "properties": { "params": { "type": "object", "required": ["deviceId"] } }
                 },
                 "then": true,
                 "else": {

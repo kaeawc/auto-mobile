@@ -605,6 +605,21 @@ steps:
       expect(result.errors!.some((e) => e.field.includes("devices"))).toBe(true);
     });
 
+    it("should reject a whitespace-only device label", () => {
+      // A whitespace-only label like " " satisfies minLength:1 but is not a
+      // real device label -- the pattern requiring a non-whitespace
+      // character catches it at the schema level too (#6215 review).
+      const yaml = `
+name: test-plan
+devices:
+  - " "
+steps:
+  - tool: observe
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should provide line numbers for field errors when possible", () => {
       const yaml = `
 name: test-plan
@@ -1108,6 +1123,39 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
+    });
+
+    it("should reject an invalid inline device when params is null (not an object)", () => {
+      // JSON Schema's "required" keyword vacuously passes against a
+      // non-object value, so a naive "params has device" guard would treat
+      // params: null as if it declared 'device', wrongly skipping the
+      // inline check. The guard must require params to be an object before
+      // trusting its presence (#6215 review).
+      const yaml = `
+name: tapon-null-params-invalid-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: 123
+    params: null
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a valid inline device when params is null (not an object)", () => {
+      const yaml = `
+name: tapon-null-params-valid-device
+devices:
+  - A
+steps:
+  - tool: tapOn
+    device: A
+    params: null
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
     });
 
     it("should reject a barrier step with an inline malformed platform value", () => {

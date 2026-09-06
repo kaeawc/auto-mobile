@@ -123,6 +123,11 @@ object TestPlanValidator {
     // of passing IDE/JUnit validation and then failing at execution (#6215
     // review).
     val multiDeviceErrors = validateMultiDeviceRequirements(parsedObject)
+    // Every declared device label must be non-blank after trimming -- mirrors
+    // the daemon's PlanValidator.validateDevicesField. The schema's
+    // minLength:1 accepts a whitespace-only label like " ", which the
+    // daemon rejects after trimming (#6215 review).
+    val devicesFieldErrors = validateDevicesField(parsedObject)
     // Every step (not just barrier/criticalSection) must target a declared
     // device label once the plan declares 'devices' -- mirrors the daemon's
     // PlanValidator.validateDeviceLabelsPresent, which checks every step
@@ -136,6 +141,7 @@ object TestPlanValidator {
       validationErrors.isEmpty() &&
         toolNameErrors.isEmpty() &&
         multiDeviceErrors.isEmpty() &&
+        devicesFieldErrors.isEmpty() &&
         deviceLabelErrors.isEmpty() &&
         barrierCoordinationErrors.isEmpty()
     ) {
@@ -148,6 +154,7 @@ object TestPlanValidator {
     // Add tool name and coordination validation errors
     errors.addAll(toolNameErrors)
     errors.addAll(multiDeviceErrors)
+    errors.addAll(devicesFieldErrors)
     errors.addAll(deviceLabelErrors)
     errors.addAll(barrierCoordinationErrors)
 
@@ -280,6 +287,35 @@ object TestPlanValidator {
         }
       }
       .toSet()
+  }
+
+  /**
+   * Validates that every declared device label is non-blank after trimming -- mirrors the daemon's
+   * PlanValidator.validateDevicesField. The schema's minLength:1 (plus the pattern requiring a
+   * non-whitespace character) already rejects most blank labels, but this is a defense-in-depth
+   * semantic check matching the daemon's own trim-then-check logic exactly (#6215 review).
+   */
+  private fun validateDevicesField(parsedObject: Any?): List<ValidationError> {
+    val devices = (parsedObject as? Map<*, *>)?.get("devices") as? List<*> ?: return emptyList()
+    val errors = mutableListOf<ValidationError>()
+    for (entry in devices) {
+      val label =
+        when (entry) {
+          is String -> entry
+          is Map<*, *> -> entry["label"] as? String
+          else -> null
+        } ?: continue
+      if (label.trim().isEmpty()) {
+        errors.add(
+          ValidationError(
+            field = "devices",
+            message = "Invalid device label: \"$label\". Device labels must be non-empty strings.",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+    }
+    return errors
   }
 
   /**

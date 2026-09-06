@@ -1061,6 +1061,124 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should accept a criticalSection sub-step with a discarded invalid inline device overridden by a valid params.device", () => {
+      // PlanNormalizer.normalizeSteps merges params over inline fields for
+      // EVERY step, not just the outer criticalSection/barrier step -- a
+      // nested sub-step is itself validated as a planStep (via the
+      // criticalSectionParams.steps $ref), so this precedence must be
+      // honored there too, or a discarded, invalid inline device would
+      // false-reject an otherwise-valid plan (#6215 review).
+      const yaml = `
+name: critical-section-substep-device-override
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 1
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            device: A
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection sub-step with an invalid inline device when params does not override it", () => {
+      const yaml = `
+name: critical-section-substep-invalid-device
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 1
+      steps:
+        - tool: tapOn
+          device: 123
+          params:
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject a barrier step with an inline malformed platform value", () => {
+      // The inline form must be constrained the same as the nested-params
+      // form, or PlanNormalizer moving it into params later would make the
+      // runtime addDeviceTargetingToSchema reject a plan this authoring
+      // schema accepted (#6215 review).
+      const yaml = `
+name: barrier-inline-malformed-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    platform: windows
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier step with an inline valid platform value", () => {
+      const yaml = `
+name: barrier-inline-valid-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    platform: android
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept a barrier step with an inline malformed platform overridden by a valid params.platform", () => {
+      const yaml = `
+name: barrier-inline-platform-override
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    platform: windows
+    params:
+      platform: android
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should accept a barrier step with a positive timeout", () => {
       const yaml = `
 name: barrier-positive-timeout

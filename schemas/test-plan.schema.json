@@ -173,9 +173,7 @@
           "description": "Tool-specific parameters (can also be specified as top-level properties)"
         },
         "device": {
-          "type": "string",
-          "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
-          "minLength": 1
+          "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools). Type-constrained in allOf below, gated on whether params.device overrides it (params-wins precedence)."
         },
         "label": {
           "type": "string",
@@ -199,6 +197,23 @@
       },
       "description": "A step can have tool-specific parameters either in a 'params' object or as top-level properties (e.g., 'id', 'text', 'appId', 'direction', etc.)",
       "allOf": [
+        {
+          "$comment": "Generic (all tools): params.device (when present) overrides inline device at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, params precedence), so the inline sibling is discarded and must NOT be type-checked in that case -- e.g. a nested criticalSection/barrier sub-step with an invalid inline device but a valid params.device must not be false-rejected (#6215 review).",
+          "if": {
+            "required": ["params"],
+            "properties": { "params": { "required": ["device"] } }
+          },
+          "then": true,
+          "else": {
+            "properties": {
+              "device": {
+                "type": "string",
+                "description": "Device label indicating which device this step runs on (required in multi-device plans for non-device-agnostic tools)",
+                "minLength": 1
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -869,6 +884,71 @@
                     }
                   }
                 }
+              },
+              {
+                "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["platform"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": ["android", "ios"],
+                      "description": "Platform"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.sessionUuid override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["sessionUuid"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "sessionUuid": {
+                      "type": "string",
+                      "description": "Session UUID for device targeting"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.keepScreenAwake override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["keepScreenAwake"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "keepScreenAwake": {
+                      "type": "boolean",
+                      "description": "Keep physical Android devices awake during the session (default: true)"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceId override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["deviceId"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceId": {
+                      "type": "string",
+                      "description": "Device ID override"
+                    }
+                  }
+                }
               }
             ]
           }
@@ -953,6 +1033,71 @@
                       "description": "Barrier timeout in milliseconds (default: 30000ms)",
                       "exclusiveMinimum": 0,
                       "default": 30000
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["platform"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": ["android", "ios"],
+                      "description": "Platform"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.sessionUuid override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["sessionUuid"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "sessionUuid": {
+                      "type": "string",
+                      "description": "Session UUID for device targeting"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.keepScreenAwake override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["keepScreenAwake"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "keepScreenAwake": {
+                      "type": "boolean",
+                      "description": "Keep physical Android devices awake during the session (default: true)"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceId override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["deviceId"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceId": {
+                      "type": "string",
+                      "description": "Device ID override"
                     }
                   }
                 }

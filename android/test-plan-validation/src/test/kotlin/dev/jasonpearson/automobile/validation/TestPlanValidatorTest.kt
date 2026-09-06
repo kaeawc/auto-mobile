@@ -504,6 +504,119 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `accepts a criticalSection sub-step with a discarded invalid inline device overridden by a valid params device`() {
+    // PlanNormalizer.normalizeSteps merges params over inline fields for
+    // EVERY step, not just the outer criticalSection/barrier step -- a
+    // nested sub-step is itself validated as a planStep (via the
+    // criticalSectionParams.steps $ref), so this precedence must be
+    // honored there too (#6215 review).
+    val yaml =
+      """
+      name: critical-section-substep-device-override
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 1
+            steps:
+              - tool: tapOn
+                device: 123
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "A discarded invalid inline device overridden by a valid params.device should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects a criticalSection sub-step with an invalid inline device when params does not override it`() {
+    val yaml =
+      """
+      name: critical-section-substep-invalid-device
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 1
+            steps:
+              - tool: tapOn
+                device: 123
+                params:
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An un-overridden invalid inline device should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier with an inline malformed platform value`() {
+    // The inline form must be constrained the same as the nested-params
+    // form, or PlanNormalizer moving it into params later would make the
+    // runtime addDeviceTargetingToSchema reject a plan this authoring
+    // schema accepted (#6215 review).
+    val yaml =
+      """
+      name: barrier-inline-malformed-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+          platform: windows
+        - tool: barrier
+          device: B
+          lock: sync-point
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An inline platform=windows should be invalid")
+  }
+
+  @Test
+  fun `accepts a barrier with an inline valid platform value`() {
+    val yaml =
+      """
+      name: barrier-inline-valid-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+          platform: android
+        - tool: barrier
+          device: B
+          lock: sync-point
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "An inline platform=android should be valid")
+  }
+
+  @Test
   fun `accepts barrier with a positive timeout`() {
     // Both A and B arrive so the declared deviceCount=2 is satisfiable by 2
     // distinct devices.

@@ -494,15 +494,33 @@ const writeToFile = async (line: string): Promise<void> => {
     }
     return;
   }
-  await new Promise<void>((resolve, reject) => {
-    stream.write(line + "\n", (error) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      stream.write(line + "\n", (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
     });
-  });
+  } catch (error) {
+    // The write itself failed (e.g. EISDIR/ENOSPC surfacing on write rather
+    // than at open). The stream's own 'error' listener (attachStreamFailureHandlers)
+    // will also fire and drop `logStream` so later writes retry/degrade, but
+    // THIS record must not vanish too. `reportLogFailure` intentionally
+    // suppresses its diagnostic for the `file` sink, so degrade the record
+    // itself to stderr here rather than relying on that path (issue #6179).
+    // `stderr`/`both` sinks already have this line on stderr via
+    // writeToConfiguredStderr, so only handle it here for `file`; otherwise
+    // rethrow and let the existing writeToLogFile/reportLogFailure diagnostic
+    // stand, avoiding a duplicate of the same line.
+    if (logSink === "file") {
+      await writeToStderr(line);
+      return;
+    }
+    throw error;
+  }
 };
 
 const writeToConfiguredStderr = async (line: string): Promise<void> => {

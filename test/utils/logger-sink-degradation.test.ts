@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import fs, { mkdtempSync, rmSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -291,5 +291,70 @@ describe("logger sink degradation on async stream error (Codex P1 on #6210)", ()
         );
       }),
     ).toBeTrue();
+  });
+});
+
+describe("logger degrades the record itself under a persistent write failure (Codex P2 on #6210)", () => {
+  test("every ordinary record reaches stderr — not just the emergency diagnostic — when the log target is a directory (EISDIR on every write)", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-eisdir-"));
+    // Reproduce the reviewer's exact repro without mocking fs at all: the
+    // resolved log file path IS a directory, so every real open/write against
+    // it fails with a genuine EISDIR — asynchronously, matching real EACCES/
+    // ENOSPC failures rather than a synchronous constructor throw.
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    mkdirSync(targetLogFile);
+    const stderr = spyStderr();
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "file", logDir);
+      stderr.lines.length = 0;
+
+      // Repeated writes: the no-silent-loss guarantee must hold for every
+      // record, not just the first one after the failure is discovered.
+      mod.logger.info("first record");
+      await mod.logger.flush();
+      mod.logger.info("second record");
+      await mod.logger.flush();
+      mod.logger.info("third record");
+      await mod.logger.flush();
+    } finally {
+      stderr.restore();
+      await mod?.logger.closeAfterFlush();
+      rmSync(logDir, { recursive: true, force: true });
+    }
+
+    // Each actual log line must degrade to stderr, not just an emergency
+    // diagnostic (`log.emergency`/"Log stream error") that says something
+    // failed without preserving what was actually logged.
+    expect(stderr.lines.some((line) => line.includes("first record"))).toBeTrue();
+    expect(stderr.lines.some((line) => line.includes("second record"))).toBeTrue();
+    expect(stderr.lines.some((line) => line.includes("third record"))).toBeTrue();
+  });
+
+  test("does not double-emit the same record to stderr in `both` mode when the file write also fails", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-eisdir-both-"));
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    mkdirSync(targetLogFile);
+    const stderr = spyStderr();
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "both", logDir);
+      stderr.lines.length = 0;
+
+      mod.logger.info("both-mode record");
+      await mod.logger.flush();
+    } finally {
+      stderr.restore();
+      await mod?.logger.closeAfterFlush();
+      rmSync(logDir, { recursive: true, force: true });
+    }
+
+    // `both` already emits every record via writeToConfiguredStderr regardless
+    // of file-sink health; the failed file write must not additionally
+    // duplicate that exact line.
+    const matches = stderr.lines.filter((line) => line.includes("both-mode record"));
+    expect(matches.length).toBe(1);
   });
 });

@@ -263,6 +263,62 @@ describe("DaemonManager stop", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  // #6140 P2 reconciliation: status() becoming observation-only must not lose
+  // the LEGITIMATE cleanup for a well-formed PID file naming an already-exited
+  // daemon. stop() is a deliberate, explicit user action (`--daemon stop`),
+  // not a passive probe a live startup winner could race, so it is safe (and
+  // expected) to reclaim a CONFIRMED-DEAD recorded daemon's files here even
+  // though status() itself no longer does.
+  test("cleans up the PID file and stale socket for a well-formed PID file naming an already-exited daemon", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-already-exited-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4247;
+    // The recorded PID is already dead when stop() is invoked — no live process
+    // to signal at all (unlike the SIGTERM/SIGKILL cases above).
+    const livePids = new Set<number>();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "socket");
+    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      // No SIGTERM/SIGKILL was ever needed — status() already reported the
+      // daemon as not running, so stop() never entered the kill path.
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("leaves files intact when stop() finds no PID file at all", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-no-pidfile-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createManagerForStop(new Set<number>(), timer, pidFilePath, socketPath);
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 // #6140 P1 completion: status() must be purely observation-only. A transient

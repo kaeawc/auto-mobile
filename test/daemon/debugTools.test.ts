@@ -73,7 +73,43 @@ describe("getDaemonHealthReport", () => {
     }
   });
 
-  test("off win32 (default): a nonexistent socket path is reported as not found without probing", async () => {
+  // #6140 P2 follow-up: the win32 branch must not unconditionally assume the
+  // pipe exists — when nothing actually answers, socketExists/socketAccessible
+  // must come back false (derived from the probe), so the health report
+  // reaches its normal "start the daemon" recommendation instead of a
+  // misleading "investigate stale socket state" one.
+  test("simulating win32: reports the pipe as absent when the probe finds nothing (no daemon running)", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-win32-absent-"));
+    tempDirs.push(tempDir);
+    const socketPath = join(tempDir, "daemon.sock");
+    const pidPath = join(tempDir, "daemon.pid");
+
+    const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+    try {
+      const report = await getDaemonHealthReport(undefined, {
+        socketPath,
+        pidFilePath: pidPath,
+        platform: "win32",
+      });
+
+      expect(isAvailable).toHaveBeenCalledWith(socketPath);
+      expect(report.socketExists).toBe(false);
+      expect(report.socketAccessible).toBe(false);
+      expect(report.socketConnectable).toBe(false);
+      expect(report.daemonRunning).toBe(false);
+      expect(report.recommendations).toContain(
+        "Named pipe not found or not responding. Daemon may not be running.",
+      );
+    } finally {
+      isAvailable.mockRestore();
+    }
+  });
+
+  // Pinned to a POSIX platform (not skipIf(win32)): this asserts POSIX-specific
+  // behavior (the existsSync gate firing), so it must run — and pass — on every
+  // CI leg, including the windows-latest one, rather than being skipped there.
+  test("off win32 (posix): a nonexistent socket path is reported as not found without probing", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-posix-"));
     tempDirs.push(tempDir);
     const socketPath = join(tempDir, "daemon.sock");
@@ -85,6 +121,7 @@ describe("getDaemonHealthReport", () => {
       const report = await getDaemonHealthReport(undefined, {
         socketPath,
         pidFilePath: pidPath,
+        platform: "linux",
       });
 
       expect(report.socketExists).toBe(false);
@@ -133,7 +170,36 @@ describe("runSocketDiagnostics", () => {
     }
   });
 
-  test("off win32 (default): a nonexistent socket path is reported as missing without probing", async () => {
+  // #6140 P2 follow-up: matching note above — the win32 branch must derive
+  // socketExists/socketReadable/socketWritable from the probe result, never
+  // assume them true when nothing actually answers.
+  test("simulating win32: reports the pipe as absent when the probe finds nothing (no daemon running)", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "automobile-socket-diag-win32-absent-"));
+    tempDirs.push(tempDir);
+    const socketPath = join(tempDir, "daemon.sock");
+
+    const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+    try {
+      const diagnostics = await runSocketDiagnostics(undefined, {
+        socketPath,
+        platform: "win32",
+      });
+
+      expect(isAvailable).toHaveBeenCalledWith(socketPath);
+      expect(diagnostics.socketExists).toBe(false);
+      expect(diagnostics.socketReadable).toBe(false);
+      expect(diagnostics.socketWritable).toBe(false);
+      expect(diagnostics.socketConnectable).toBe(false);
+      expect(diagnostics.issues).toContain("Named pipe not found or not responding");
+    } finally {
+      isAvailable.mockRestore();
+    }
+  });
+
+  // Pinned to a POSIX platform (not skipIf(win32)): see the matching note above
+  // in the getDaemonHealthReport describe block.
+  test("off win32 (posix): a nonexistent socket path is reported as missing without probing", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "automobile-socket-diag-posix-"));
     tempDirs.push(tempDir);
     const socketPath = join(tempDir, "daemon.sock");
@@ -141,7 +207,7 @@ describe("runSocketDiagnostics", () => {
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
     try {
-      const diagnostics = await runSocketDiagnostics(undefined, { socketPath });
+      const diagnostics = await runSocketDiagnostics(undefined, { socketPath, platform: "linux" });
 
       expect(diagnostics.socketExists).toBe(false);
       expect(isAvailable).not.toHaveBeenCalled();

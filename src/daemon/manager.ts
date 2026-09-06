@@ -1459,6 +1459,13 @@ export class DaemonManager implements DaemonManagerLike {
     const status = await this.status();
 
     if (!status.running) {
+      // status() is deliberately observation-only (issue #6140) and no longer
+      // reclaims a well-formed PID file naming an already-exited daemon.
+      // `stop()` is a deliberate, explicit user action — not a passive
+      // status/isAvailable probe a live winner could race — so it is safe to
+      // reclaim that CONFIRMED-DEAD daemon's files here, gated the same way
+      // status() used to (only if the recorded PID is re-confirmed dead).
+      await this.cleanupConfirmedDeadPidFile();
       stderrLog("Daemon is not running");
       return;
     }
@@ -1505,6 +1512,38 @@ export class DaemonManager implements DaemonManagerLike {
       } else {
         throw error;
       }
+    }
+  }
+
+  /**
+   * Reclaim a well-formed PID file naming an already-exited daemon, from the
+   * explicit `stop()` path only (issue #6140). Independently re-reads and
+   * re-confirms the recorded PID is dead (rather than trusting `status()`'s
+   * now-observation-only result), so this stays gated on the same "confirmed
+   * dead, expected PID" check the removed `status()` cleanup used — the
+   * difference is WHO calls it: an explicit, deliberate `--daemon stop`/
+   * `restart` action, never a passive status/isAvailable/health-diagnostic
+   * probe a live startup winner could race.
+   */
+  private async cleanupConfirmedDeadPidFile(): Promise<void> {
+    if (!existsSync(this.pidFilePath)) {
+      return;
+    }
+    try {
+      const pidFileContent = await readFile(this.pidFilePath, "utf-8");
+      const pidData: PidFileData = JSON.parse(pidFileContent);
+      if (typeof pidData.pid !== "number" || this.isProcessRunning(pidData.pid)) {
+        return;
+      }
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(pidData.socketPath),
+        expectedPid: pidData.pid,
+      });
+    } catch (error) {
+      logger.warn(
+        `Failed to clean up a confirmed-dead PID file during stop(): ${errorMessage(error)}`,
+      );
     }
   }
 

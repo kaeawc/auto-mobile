@@ -94,6 +94,57 @@ export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
  */
 export const TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS = 2000;
 
+/**
+ * Timeout `CtrlProxyVoiceOver.requestVoiceOverState`'s own default applies to
+ * the VoiceOver-detection probe `TapAnyElement` runs before every iOS
+ * longPress gesture (`src/features/observe/ios/CtrlProxyVoiceOver.ts`).
+ * Duplicated here (rather than imported) so this daemon-level timeout module
+ * doesn't take on a dependency on the observe/ios delegate layer just to read
+ * one constant.
+ */
+const TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS = 5000;
+
+/**
+ * Timeout the final post-action hierarchy fetch can take
+ * (`ViewHierarchy`/`CtrlProxyHierarchy`'s own default of 15s for XCUITest
+ * hierarchy extraction) once `BaseVisualChange.takeObservation` re-observes
+ * after the gesture completes.
+ */
+const TAP_ANY_LONG_PRESS_FINAL_OBSERVE_TIMEOUT_MS = 15000;
+
+/**
+ * Consolidated overhead for every non-press phase of a tapAny longPress:
+ * the pre-gesture VoiceOver-detection probe and the post-gesture final
+ * observation, plus the existing fixed headroom. One generous constant
+ * instead of itemizing each phase separately, so the outer MCP deadline
+ * doesn't keep needing another review round every time a new phase is added
+ * (issue #6248 review, P2) -- future phases update this one constant.
+ * Covers:
+ *   - VoiceOver-detection probe (`TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS`)
+ *   - Final post-gesture observation / hierarchy fetch
+ *     (`TAP_ANY_LONG_PRESS_FINAL_OBSERVE_TIMEOUT_MS`)
+ *   - Existing fixed headroom (`TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS`)
+ *
+ * Deliberately does NOT fold in the pre-gesture search window -- that varies
+ * per-call (`searchUntil.duration` or its default) and stays budgeted
+ * explicitly in `resolveTapAnyLongPressBudgetMs` alongside this constant.
+ */
+export const TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS =
+  TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS +
+  TAP_ANY_LONG_PRESS_FINAL_OBSERVE_TIMEOUT_MS +
+  TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS;
+
+/**
+ * Hard ceiling on any daemon-computed MCP request deadline. `setTimeout`
+ * (Node/Bun) silently clamps any delay >= 2^31 to 1ms rather than honoring
+ * it, so a derived deadline anywhere near or above this value must be capped
+ * before it is scheduled -- otherwise the request times out almost
+ * immediately instead of running for the intended duration (issue #6248
+ * review, P2). Precedent: `PlanValidator.MAX_SETTIMEOUT_DELAY_MS` applies the
+ * same 2^31-1 ceiling to plan-step timeouts.
+ */
+export const MAX_SETTIMEOUT_DELAY_MS = 2_147_483_647;
+
 const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
   crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
   getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -249,24 +300,31 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
 }
 
 /**
- * Floor for a `tapAny` longPress derived from its `duration` argument — see
- * `TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS`. A plain tap/doubleTap (no
- * `action: "longPress"`) or a longPress with no positive `duration` keeps the
- * standard floor/default; only a duration-bearing long press is raised.
+ * Floor for a `tapAny` longPress derived from its `duration` argument. A
+ * plain tap/doubleTap (no `action: "longPress"`) or a longPress with no
+ * positive `duration` keeps the standard floor/default; only a
+ * duration-bearing long press is raised.
  *
- * The outer MCP deadline must also cover PRE-GESTURE work that runs before
- * the CtrlProxy press request even starts — element discovery and, in
- * particular, the effective `searchUntil.duration` (issue #6248 review, P2).
- * When `searchUntil` is omitted entirely, `TapAnyElement.getSearchUntilDuration`
- * still defaults every call to `TAP_ANY_SEARCH_UNTIL_DEFAULT_MS` (1500ms) of
- * polling — so budgeting zero search time for an omitted `searchUntil` leaves
- * a call like `tapAny({action:"longPress", duration:60000})` (no `searchUntil`)
- * with an outer deadline sized only for the press itself, while the default
- * search window still eats into that same budget before the press even
- * begins. Use the same default the tool applies so the two stay in sync — the
- * floor is `duration + effectiveSearchWindow + headroom`, where
- * `effectiveSearchWindow` is `searchUntil.duration` when given, or the
- * default otherwise.
+ * The outer MCP deadline must cover every phase of the call, not just the
+ * press itself (issue #6248 review, P2):
+ *   - PRE-GESTURE element discovery, sized by the effective
+ *     `searchUntil.duration` -- when `searchUntil` is omitted entirely,
+ *     `TapAnyElement.getSearchUntilDuration` still defaults every call to
+ *     `TAP_ANY_SEARCH_UNTIL_DEFAULT_MS` (1500ms) of polling, so this budgets
+ *     that implicit default too rather than leaving it unaccounted for.
+ *   - The VoiceOver-detection probe and the final post-gesture observation,
+ *     both budgeted via the single consolidated
+ *     `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` constant (which also
+ *     includes the fixed headroom) rather than as separate itemized terms --
+ *     see that constant's doc for what it covers.
+ *
+ * So the floor is `duration + effectiveSearchWindow + nonPressOverhead`,
+ * where `effectiveSearchWindow` is `searchUntil.duration` when given, or the
+ * default otherwise. The result is clamped to `MAX_SETTIMEOUT_DELAY_MS`
+ * because a large-enough `duration` (the schema permits an unbounded value)
+ * would otherwise push this past `setTimeout`'s 32-bit ceiling, which Bun/Node
+ * silently normalize to 1ms rather than honoring -- timing the request out
+ * almost immediately instead of running for the intended duration.
  */
 function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
@@ -283,11 +341,11 @@ function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefi
   const searchUntilDuration =
     positiveFiniteNumber(asRecord(argumentsRecord.searchUntil)?.duration) ??
     TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
-  return (
+  const budget =
     Math.round(duration) +
     Math.round(searchUntilDuration) +
-    TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS
-  );
+    TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS;
+  return Math.min(budget, MAX_SETTIMEOUT_DELAY_MS);
 }
 
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {

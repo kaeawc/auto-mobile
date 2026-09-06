@@ -18,6 +18,8 @@ import {
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+  TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+  MAX_SETTIMEOUT_DELAY_MS,
   resolveMcpRequestTimeoutMs,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
@@ -446,10 +448,12 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
     const resolved = resolveMcpRequestTimeoutMs(request);
     // No `searchUntil` is given, so the floor must still budget the implicit
-    // default search window `TapAnyElement.getSearchUntilDuration` applies
-    // (#6248 review, P2) -- not just duration + headroom.
+    // default search window `TapAnyElement.getSearchUntilDuration` applies,
+    // plus the consolidated non-press overhead covering the VoiceOver probe,
+    // final observation, and headroom (#6248 review, P2) -- not just
+    // duration + headroom.
     expect(resolved).toBe(
-      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
     );
     // Must not fire before the CtrlProxy-level request timeout TapAnyElement
     // sizes for the same call (duration + the same headroom, #6248 review).
@@ -469,7 +473,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
-      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
     );
   });
 
@@ -492,11 +496,60 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
     const resolved = resolveMcpRequestTimeoutMs(request);
     expect(resolved).toBe(
-      duration + searchUntilDuration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+      duration + searchUntilDuration + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
     );
     expect(resolved).toBeGreaterThanOrEqual(
       duration + searchUntilDuration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
     );
+  });
+
+  test("tapAny longPress budgets the non-press overhead to cover the VoiceOver probe and final observe (#6248 review)", () => {
+    // The consolidated overhead must be generous enough to cover BOTH the
+    // VoiceOver-detection probe (up to a 5s timeout) and
+    // BaseVisualChange.takeObservation's final hierarchy request (up to
+    // ~15s) on top of the existing fixed headroom -- not just the press
+    // itself. Regression guard for the #6248 review P2 finding that neither
+    // phase was budgeted at all.
+    expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
+      5000 + 15000 + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
+  test("tapAny longPress with a duration near the setTimeout ceiling is clamped to MAX_SETTIMEOUT_DELAY_MS", () => {
+    // The public schema accepts an unbounded `duration`. Without a clamp, a
+    // duration near/above 2^31-1 pushes the derived deadline past
+    // setTimeout's 32-bit range, which Bun/Node silently normalize to 1ms --
+    // timing the daemon request out almost immediately instead of honoring
+    // the requested long press (#6248 review, P2).
+    const duration = MAX_SETTIMEOUT_DELAY_MS;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(MAX_SETTIMEOUT_DELAY_MS);
+    expect(resolved).toBeLessThanOrEqual(MAX_SETTIMEOUT_DELAY_MS);
+  });
+
+  test("tapAny longPress with an unbounded duration far past the setTimeout ceiling is still clamped", () => {
+    const duration = Number.MAX_SAFE_INTEGER;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(MAX_SETTIMEOUT_DELAY_MS);
   });
 
   test("tapAny longPress honours an outer timeoutMs already above the derived floor", () => {

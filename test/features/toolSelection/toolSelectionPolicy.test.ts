@@ -203,14 +203,26 @@ describe("exact-tool selection union policy", () => {
     );
   });
 
-  test("assertToolEnabledForAnySession omits sessionUuid when unbound rather than naming the display placeholder", async () => {
+  test("assertToolEnabledForAnySession instructs acquiring a session instead of advertising a sessionless setToolEnabled when unbound (PRRT_kwDOP-GF5M6fucGA)", async () => {
     const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async () => false,
     };
+    // Zero candidates and no connectionProfileUuid (e.g. assertSocketToolEnabled against a
+    // booted device with no owning daemon session): a sessionless setToolEnabled would mint a
+    // new MCP connection profile that the retry (ide/setKeyValue etc.) never rechecks, so the
+    // tool would stay disabled. There is nothing to advertise — tell the caller to acquire a
+    // session first.
     await expect(
       assertToolEnabledForAnySession("systemTray", false, [undefined], disabled),
     ).rejects.toThrow(
-      'Tool systemTray is disabled for device session (not yet bound). Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
+      "Tool systemTray is disabled for device session (not yet bound). " +
+        "No device session owns this device yet, so there is nothing setToolEnabled could enable " +
+        "that a retry would recheck. Acquire a device session with getAndroid { deviceId } " +
+        "(or getApple { deviceId }), then enable the tool with " +
+        'setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.',
+    );
+    await expect(assertToolEnabledForAnySession("systemTray", false, [], disabled)).rejects.toThrow(
+      /Acquire a device session with getAndroid \{ deviceId \}/,
     );
   });
 
@@ -265,6 +277,19 @@ describe("exact-tool selection union policy", () => {
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "derived-only" }.',
     );
+  });
+
+  test("assertToolEnabledForAnySession omits sessionUuid (rather than instructing session acquisition) when a connectionProfileUuid is rechecked even with zero routing candidates (PRRT_kwDOP-GF5M6fucGA)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    // A connectionProfileUuid means the retry DOES recheck a real profile — the connection
+    // one — even though no base/derived session candidates are known, so the omitted-sessionUuid
+    // form (which targets the connection profile) still works and must be preferred over the
+    // "acquire a session" message.
+    await expect(
+      assertToolEnabledForAnySession("observe", true, [], disabled, "connection"),
+    ).rejects.toThrow('Enable it with setToolEnabled { toolName: "observe", enabled: true }.');
   });
 
   test("assertToolEnabledForAnySession names the sole real candidate session uuid, matching resolveSelectionSessionUuid's accepted values", async () => {

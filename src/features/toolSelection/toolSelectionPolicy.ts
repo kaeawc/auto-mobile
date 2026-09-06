@@ -25,6 +25,42 @@ function formatSetToolEnabledRemediation(
   return `setToolEnabled { toolName: "${toolName}", enabled: true${sessionUuidArg} }`;
 }
 
+/**
+ * Builds the remediation sentence for `assertToolEnabledForAnySession`, distinguishing three
+ * cases so the advertised call is always one the retry will actually recheck:
+ *
+ * 1. One or more session candidates — name a real candidate `sessionUuid` (the sole one, or
+ *    the first/base-preferring one the caller's ordering rechecks when there is no
+ *    `connectionProfileUuid` to fall back to).
+ * 2. A `connectionProfileUuid` is part of what gets rechecked — omit `sessionUuid` entirely,
+ *    which updates the connection profile the retry rechecks.
+ * 3. Zero candidates AND no `connectionProfileUuid` (e.g. an IDE storage request against a
+ *    booted device with no owning daemon session) — there is nothing `setToolEnabled` could
+ *    enable that the retry would recheck, so do not advertise it at all. Instead, tell the
+ *    caller to acquire a device session first.
+ */
+function formatToolEnabledRemediationSentence(
+  toolName: string,
+  candidates: readonly string[],
+  connectionProfileUuid: string | undefined,
+): string {
+  if (candidates.length === 0 && connectionProfileUuid === undefined) {
+    return (
+      "No device session owns this device yet, so there is nothing setToolEnabled could enable " +
+      "that a retry would recheck. Acquire a device session with getAndroid { deviceId } " +
+      "(or getApple { deviceId }), then enable the tool with " +
+      `setToolEnabled { toolName: "${toolName}", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.`
+    );
+  }
+  const realSessionUuid =
+    candidates.length === 1
+      ? candidates[0]
+      : connectionProfileUuid === undefined
+        ? candidates[0]
+        : undefined;
+  return `Enable it with ${formatSetToolEnabledRemediation(toolName, realSessionUuid)}.`;
+}
+
 async function explicitOverrideResult(
   service: ToolSelectionReader,
   sessionUuids: readonly string[],
@@ -174,22 +210,8 @@ export async function assertToolEnabledForAnySession(
     new Set(sessionUuids.filter((uuid): uuid is string => Boolean(uuid))),
   );
   const target = candidates.join(" / ") || "(not yet bound)";
-  // Only a single resolvable candidate can be named as the real sessionUuid in the
-  // remediation call — a composite of multiple profiles is not something
-  // resolveSelectionSessionUuid would accept, so it falls back to the connection-profile form
-  // ONLY when a connection profile is actually part of what gets rechecked (`connectionProfileUuid`
-  // is defined, as on the MCP-server path). Callers with no connection profile at all — the IDE
-  // socket-gate path (`assertSocketToolEnabled`), which rechecks only its base/derived session
-  // profiles — have no connection profile for the omitted form to land on, so name the first
-  // (base-preferring, per the caller's ordering) candidate the retry will actually recheck instead.
-  const realSessionUuid =
-    candidates.length === 1
-      ? candidates[0]
-      : connectionProfileUuid === undefined
-        ? candidates[0]
-        : undefined;
   throw new ActionableError(
     `Tool ${toolName} is disabled for device session ${target}. ` +
-      `Enable it with ${formatSetToolEnabledRemediation(toolName, realSessionUuid)}.`,
+      formatToolEnabledRemediationSentence(toolName, candidates, connectionProfileUuid),
   );
 }

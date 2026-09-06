@@ -344,6 +344,38 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
 
+  // Thread PRRT_kwDOP-GF5M6funaa: when the selected element has BOTH a unique
+  // resource-id AND a label shared by multiple controls, activating by label
+  // alone is unsafe -- CtrlProxy resolves `requestVoiceOverActivate`'s label
+  // via `.firstMatch`, a global (not container-scoped) query, so it could
+  // activate a DIFFERENT same-labeled control than the one tapAny selected.
+  // The resource-id must be preferred whenever it is usable.
+  test("VoiceOver enabled + element has both a unique resource-id and a shared label activates via requestAction, not requestVoiceOverActivate", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    fakeElementSelector.setNextElement({
+      bounds: { left: 0, top: 0, right: 84, bottom: 168 },
+      "resource-id": "com.test.app:id/submit_button",
+      "ios-accessibility-label": "Submit",
+      clickable: "true",
+    } as Element);
+    const actionSpy = spyOn(fakeIosClient, "requestAction");
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(true);
+    expect(actionSpy).toHaveBeenCalledWith(
+      "activate",
+      "com.test.app:id/submit_button",
+      undefined,
+      undefined,
+    );
+    expect(fakeIosClient.getActionHistory()).toEqual([
+      { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
+    ]);
+    expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
+    expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
+
   test("VoiceOver enabled + no label and no resource-id fails fast instead of a focus-only coordinate press", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(true);
     fakeElementSelector.setNextElement({

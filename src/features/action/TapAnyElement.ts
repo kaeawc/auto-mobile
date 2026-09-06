@@ -509,13 +509,16 @@ export class TapAnyElement extends BaseVisualChange {
   /**
    * Execute iOS tap using VoiceOver accessibility actions.
    *
-   * Prefers activating by accessibility label (`requestVoiceOverActivate`); when no
-   * label is resolvable but the element has a `resource-id`, activates through the
-   * identifier-based node-action path instead (`requestAction`, mirroring how
+   * Prefers activating by `resource-id` (`requestAction`, mirroring how
    * `TapOnElement`/`TalkBackTapStrategy` activate Android elements by resourceId) —
    * on-device this resolves the element via `elementLocator.findElement(byResourceId:)`
-   * and calls `found.tap()`/`found.press()`, a real activation rather than a bare
-   * coordinate press. Only when NEITHER a label nor a resource-id exists — nothing to
+   * and calls `found.tap()`/`found.press()` on the *specific* node the selector
+   * matched. Only when no usable resource-id exists does this fall back to
+   * activating by accessibility label (`requestVoiceOverActivate`): CtrlProxy
+   * resolves a label via `.firstMatch`, a global (not container-scoped) query, so
+   * an element whose label is shared by multiple controls could activate a
+   * *different*, same-labeled control than the one tapAny selected (issue #6248
+   * review, funaa). Only when NEITHER a resource-id nor a label exists — nothing to
    * activate semantically — does this throw instead of falling back to a coordinate
    * press: under VoiceOver a bare coordinate press only *focuses* an element rather
    * than activating it, so reporting success after that fallback (or after a real
@@ -587,17 +590,16 @@ export class TapAnyElement extends BaseVisualChange {
     const timeoutMs =
       action === "longPress" ? resolveLongPressCtrlProxyTimeoutMs(longPressDuration) : undefined;
 
-    if (!label) {
-      await this.activateIosByResourceId(
-        xcTestClient,
-        resourceId as string,
-        voiceOverAction,
-        timeoutMs,
-      );
+    if (resourceId) {
+      await this.activateIosByResourceId(xcTestClient, resourceId, voiceOverAction, timeoutMs);
       return;
     }
 
-    const result = await xcTestClient.requestVoiceOverActivate(label, voiceOverAction, timeoutMs);
+    const result = await xcTestClient.requestVoiceOverActivate(
+      label as string,
+      voiceOverAction,
+      timeoutMs,
+    );
 
     if (!result.success) {
       throw new ActionableError(

@@ -191,4 +191,58 @@ describe("exact-tool selection union policy", () => {
       'Enable it with setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "session-abc" }.',
     );
   });
+
+  test("assertToolEnabledForSession omits sessionUuid when unbound rather than naming the display placeholder", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    await expect(
+      assertToolEnabledForSession("systemTray", false, undefined, disabled),
+    ).rejects.toThrow(
+      'Tool systemTray is disabled for device session (not yet bound). Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
+    );
+  });
+
+  test("assertToolEnabledForAnySession omits sessionUuid when unbound rather than naming the display placeholder", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    await expect(
+      assertToolEnabledForAnySession("systemTray", false, [undefined], disabled),
+    ).rejects.toThrow(
+      'Tool systemTray is disabled for device session (not yet bound). Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
+    );
+  });
+
+  test("assertToolEnabledForAnySession omits sessionUuid across composite connection/base/label profiles (PRRT_kwDOP-GF5M6fuHM5)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    await expect(
+      assertToolEnabledForAnySession(
+        "systemTray",
+        false,
+        ["connection", "base", "base:label"],
+        disabled,
+      ),
+    ).rejects.toThrow(
+      "Tool systemTray is disabled for device session connection / base / base:label. " +
+        'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
+    );
+  });
+
+  test("assertToolEnabledForAnySession names the sole real candidate session uuid, matching resolveSelectionSessionUuid's accepted values", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    // A single resolvable candidate (e.g. duplicate connection/routing uuids collapsing via
+    // the Set dedupe) is the one case where the advertised sessionUuid must equal what
+    // resolveSelectionSessionUuid (src/server/toolSelectionTools.ts) would accept: the
+    // caller's own connection or routing profile uuid, never a joined display string.
+    await expect(
+      assertToolEnabledForAnySession("systemTray", false, ["session-abc", "session-abc"], disabled),
+    ).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "session-abc" }.',
+    );
+  });
 });

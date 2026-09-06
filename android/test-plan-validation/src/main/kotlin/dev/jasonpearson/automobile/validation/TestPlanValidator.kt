@@ -279,6 +279,9 @@ object TestPlanValidator {
     // Int.toInt() would silently wrap/truncate instead of rejecting it (#6215 review).
     val deviceCounts = mutableSetOf<Long>()
     var arrivals = 0
+    // Per-device occurrence count, used to catch a device scheduled more times than there are
+    // generations for it to participate in.
+    val deviceOccurrences = mutableMapOf<String, Int>()
   }
 
   /**
@@ -344,7 +347,10 @@ object TestPlanValidator {
           )
         )
       }
-      else -> usage.devices.add(device)
+      else -> {
+        usage.devices.add(device)
+        usage.deviceOccurrences[device] = (usage.deviceOccurrences[device] ?: 0) + 1
+      }
     }
   }
 
@@ -491,8 +497,59 @@ object TestPlanValidator {
   }
 
   /**
+   * Validates that no single device is scheduled to arrive at a barrier lock more times than there
+   * are generations for it to participate in -- mirrors the daemon's
+   * PlanValidator.validateBarrierExcessDeviceArrivals.
+   *
+   * PlanPartitioner executes each device's track sequentially, so a device can only ever occupy one
+   * "slot" per generation -- it cannot re-enter the same lock a second time within a generation
+   * it's already part of. For a lock with a single consistent deviceCount N and T total arrivals (T
+   * divisible by N, per validateBarrierGenerationCompleteness), there are G = T / N generations
+   * available in total. A device appearing more than G times can never be scheduled into a
+   * generation it hasn't already used, so it deadlocks waiting at an arrival no generation will
+   * ever admit.
+   *
+   * Sound: a device appearing at most G times is exactly the necessary condition for a feasible
+   * one-arrival-per-generation assignment to exist (e.g. A,A,B,B with deviceCount=2 has G=2 and
+   * each device appears exactly 2 times -- feasible, and correctly accepted).
+   */
+  private fun validateBarrierExcessDeviceArrivals(
+    usageByLock: Map<String, BarrierLockUsage>
+  ): List<ValidationError> {
+    val errors = mutableListOf<ValidationError>()
+    for ((lock, usage) in usageByLock) {
+      if (usage.deviceCounts.size != 1) {
+        continue
+      }
+      val deviceCount = usage.deviceCounts.first()
+      if (deviceCount < 1 || usage.arrivals % deviceCount != 0L) {
+        // Inconsistent-count and incomplete-generation cases are already reported by the other
+        // checks; skip here to avoid a meaningless generation count.
+        continue
+      }
+      val generations = usage.arrivals / deviceCount
+
+      for ((device, occurrences) in usage.deviceOccurrences) {
+        if (occurrences <= generations) {
+          continue
+        }
+        errors.add(
+          ValidationError(
+            field = "steps",
+            message =
+              "barrier lock \"$lock\" has $generations generation(s) available (deviceCount=$deviceCount, ${usage.arrivals} total arrivals), but device \"$device\" arrives $occurrences times. A device can participate in a lock at most once per generation, since each device's track executes sequentially, so this device would deadlock waiting for a generation that never admits it again.",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+    }
+    return errors
+  }
+
+  /**
    * Runs all barrier-lock coordination checks (declared-device membership, deviceCount range and
-   * consistency, distinct-device count, generation completeness) in one pass over the plan's steps.
+   * consistency, distinct-device count, generation completeness, excess single-device arrivals) in
+   * one pass over the plan's steps.
    */
   private fun validateBarrierCoordination(parsedObject: Any?): List<ValidationError> {
     if (parsedObject !is Map<*, *>) {
@@ -509,7 +566,8 @@ object TestPlanValidator {
     return membershipErrors +
       validateBarrierConsistentDeviceCount(usageByLock) +
       validateBarrierDistinctDeviceCounts(usageByLock) +
-      validateBarrierGenerationCompleteness(usageByLock)
+      validateBarrierGenerationCompleteness(usageByLock) +
+      validateBarrierExcessDeviceArrivals(usageByLock)
   }
 
   /** Find the line number of a tool name in a specific step */

@@ -3,6 +3,19 @@ import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
 
 /**
+ * Aggregated usage of a single barrier lock name across a plan, used by the
+ * coordination checks below.
+ */
+interface BarrierLockUsage {
+  devices: Set<string>;
+  deviceCounts: Set<number>;
+  arrivals: number;
+  // Per-device occurrence count, used to catch a device scheduled more times
+  // than there are generations for it to participate in.
+  deviceOccurrences: Map<string, number>;
+}
+
+/**
  * Validates a plan structure and enforces multi-device rules.
  */
 export class PlanValidator {
@@ -257,6 +270,7 @@ export class PlanValidator {
     this.validateBarrierConsistentDeviceCount(plan);
     this.validateBarrierDistinctDeviceCounts(plan);
     this.validateBarrierGenerationCompleteness(plan);
+    this.validateBarrierExcessDeviceArrivals(plan);
   }
 
   /**
@@ -497,13 +511,57 @@ export class PlanValidator {
     }
   }
 
-  private static collectBarrierLockUsage(
-    plan: Plan,
-  ): Map<string, { devices: Set<string>; deviceCounts: Set<number>; arrivals: number }> {
-    const usageByLock = new Map<
-      string,
-      { devices: Set<string>; deviceCounts: Set<number>; arrivals: number }
-    >();
+  /**
+   * Validates that no single device is scheduled to arrive at a barrier lock
+   * more times than there are generations for it to participate in.
+   *
+   * PlanPartitioner executes each device's track sequentially, so a device
+   * can only ever occupy one "slot" per generation — it cannot re-enter the
+   * same lock a second time within a generation it's already part of. For a
+   * lock with a single consistent deviceCount N and T total arrivals (T
+   * divisible by N, per validateBarrierGenerationCompleteness), there are
+   * G = T / N generations available in total. A device appearing more than G
+   * times can never be scheduled into a generation it hasn't already used,
+   * so it deadlocks waiting at an arrival no generation will ever admit.
+   *
+   * Sound: a device appearing at most G times is exactly the necessary
+   * condition for a feasible one-arrival-per-generation assignment to exist
+   * (e.g. A,A,B,B with deviceCount=2 has G=2 and each device appears
+   * exactly 2 times — feasible, and correctly accepted).
+   */
+  private static validateBarrierExcessDeviceArrivals(plan: Plan): void {
+    const usageByLock = this.collectBarrierLockUsage(plan);
+    const errors: string[] = [];
+
+    for (const [lock, usage] of usageByLock.entries()) {
+      if (usage.deviceCounts.size !== 1) {
+        continue;
+      }
+      const deviceCount = usage.deviceCounts.values().next().value as number;
+      if (deviceCount < 1 || usage.arrivals % deviceCount !== 0) {
+        // Inconsistent-count and incomplete-generation cases are already
+        // reported by the other checks; skip here to avoid a meaningless G.
+        continue;
+      }
+      const generations = usage.arrivals / deviceCount;
+
+      for (const [device, occurrences] of usage.deviceOccurrences.entries()) {
+        if (occurrences <= generations) {
+          continue;
+        }
+        errors.push(
+          `barrier lock "${lock}" has ${generations} generation${generations === 1 ? "" : "s"} available (deviceCount=${deviceCount}, ${usage.arrivals} total arrivals), but device "${device}" arrives ${occurrences} times. A device can participate in a lock at most once per generation, since each device's track executes sequentially, so this device would deadlock waiting for a generation that never admits it again.`,
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
+  }
+
+  private static collectBarrierLockUsage(plan: Plan): Map<string, BarrierLockUsage> {
+    const usageByLock = new Map<string, BarrierLockUsage>();
 
     for (const step of plan.steps) {
       if (step.tool === "barrier") {
@@ -515,7 +573,7 @@ export class PlanValidator {
   }
 
   private static recordBarrierLockUsage(
-    usageByLock: Map<string, { devices: Set<string>; deviceCounts: Set<number>; arrivals: number }>,
+    usageByLock: Map<string, BarrierLockUsage>,
     step: PlanStep,
   ): void {
     const lock = this.effectiveField(step, "lock");
@@ -527,12 +585,14 @@ export class PlanValidator {
       devices: new Set<string>(),
       deviceCounts: new Set<number>(),
       arrivals: 0,
+      deviceOccurrences: new Map<string, number>(),
     };
     usage.arrivals += 1;
 
     const device = this.effectiveField(step, "device");
     if (typeof device === "string" && device.length > 0) {
       usage.devices.add(device);
+      usage.deviceOccurrences.set(device, (usage.deviceOccurrences.get(device) ?? 0) + 1);
     }
 
     const deviceCount = this.effectiveField(step, "deviceCount");

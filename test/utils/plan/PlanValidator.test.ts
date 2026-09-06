@@ -561,6 +561,65 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("validateBarrierExcessDeviceArrivals", () => {
+    // PlanPartitioner executes each device's track sequentially, so a
+    // device can participate in a barrier lock at most once per generation.
+    // For a lock with a single consistent deviceCount N and total arrivals
+    // T (divisible by N), there are G = T/N generations; a device appearing
+    // more than G times can never be scheduled and would deadlock.
+    test("throws when a single device arrives more times than there are generations", () => {
+      // A, B, A, A with deviceCount=2: 4 arrivals is divisible by 2 (G=2),
+      // but device A appears 3 times (> G=2) -- after generation 1 {A,B}
+      // releases, A's second arrival starts generation 2, but its third
+      // arrival has no generation left to join.
+      const plan: Plan = {
+        name: "Excess single-device barrier arrivals",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        'barrier lock "sync1" has 2 generations available (deviceCount=2, 4 total arrivals), but device "A" arrives 3 times',
+      );
+    });
+
+    test("accepts a barrier lock where every device arrives at most once per available generation", () => {
+      // A, A, B, B with deviceCount=2: G=2, and each device appears exactly
+      // 2 times (<= G) -- feasible, since generation 1 can be {A,B} and
+      // generation 2 can be {A,B} using the second arrival of each.
+      const plan: Plan = {
+        name: "Feasible repeated-arrival barrier lock",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+
+    test("still accepts the alternating A/B/A/B case", () => {
+      const plan: Plan = {
+        name: "Alternating barrier generations",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+  });
+
   describe("validateBarrierConsistentDeviceCount", () => {
     test("throws when a reused barrier lock declares more than one distinct deviceCount", () => {
       // A/B at deviceCount=2, then A/B/C at deviceCount=3 for the SAME lock

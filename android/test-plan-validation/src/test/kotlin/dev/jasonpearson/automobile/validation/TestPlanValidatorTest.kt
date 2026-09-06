@@ -684,6 +684,91 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects a single device arriving more times than there are generations`() {
+    // A, B, A, A with deviceCount=2: 4 arrivals is divisible by 2 (G=2), but
+    // device A appears 3 times (greater than G=2) -- after generation 1
+    // {A,B} releases, A's second arrival starts generation 2, but its third
+    // arrival has no generation left to join.
+    val yaml =
+      """
+      name: barrier-excess-single-device-arrivals
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Device A arriving 3 times with only 2 generations available should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a barrier lock where every device arrives at most once per available generation`() {
+    // A, A, B, B with deviceCount=2: G=2, and each device appears exactly 2
+    // times (<= G) -- feasible, since generation 1 can be {A,B} and
+    // generation 2 can be {A,B} using the second arrival of each.
+    val yaml =
+      """
+      name: barrier-feasible-repeated-arrivals
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "Each device arriving exactly as many times as there are generations should be valid",
+    )
+  }
+
+  @Test
   fun `rejects a reused barrier lock declared with more than one distinct deviceCount`() {
     // A/B at deviceCount=2, then A/B/C at deviceCount=3 for the SAME lock
     // name: the runtime coordinator keeps one shared expected count per

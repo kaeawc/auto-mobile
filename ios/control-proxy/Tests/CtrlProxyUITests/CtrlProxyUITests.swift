@@ -133,6 +133,11 @@ final class CtrlProxyUITests: XCTestCase {
         let gestures = GesturePerformer(application: app, elementLocator: locator)
         try gestures.performAction("tap", label: "Message #sample")
         try gestures.typeText(text: "hello")
+        let typedTextExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "hello"),
+            object: messageTextView
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
         XCTAssertEqual(messageTextView.value as? String, "hello")
 
         let secureField = app.secureTextFields["secure-field"]

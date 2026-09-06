@@ -14,6 +14,9 @@ import { TerminalSessionError } from "../daemon/sessionManager";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 } from "../daemon/constants";
 import {
@@ -143,7 +146,6 @@ export interface McpServerOptions {
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
 const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
-const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 async function resolveDeviceLossOutcome(
   deviceLoss: DeviceLossOutcome,
@@ -184,6 +186,30 @@ function extractInternalMcpRequestTimeoutMs(params: unknown): number | undefined
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * Extract {@link INTERNAL_MCP_REQUEST_DEADLINE_PARAM} -- the ABSOLUTE
+ * deadline the daemon anchored at capture time, before this process's own
+ * HTTP dispatch and admission/tool-selection repo reads could consume any of
+ * `requestTimeoutMs`'s budget (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1).
+ * A handler that receives this should prefer it outright over recomputing
+ * `execution.startTime + requestTimeoutMs`, which re-grants that gap.
+ */
+function extractInternalMcpRequestDeadlineMs(params: unknown): number | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function stripInternalToolParams(params: unknown): unknown {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return params;
@@ -203,6 +229,8 @@ function stripInternalToolParams(params: unknown): unknown {
   delete rest[INTERNAL_EXECUTION_ID_PARAM];
   delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
   delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  delete rest[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  delete rest[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
   // Safety net: revival already strips this transport-provenance flag (#5863), but
   // guard the tool boundary against any future path that sets it without reviving.
   delete rest[DAEMON_NON_FINITE_ENCODED_PARAM];
@@ -587,7 +615,27 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     );
 
     const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
-    const requestTimeoutMs = extractInternalMcpRequestTimeoutMs(toolParams);
+    // Only ever honor these two when the call is DAEMON-forwarded. Extraction
+    // happens on the RAW `toolParams` before schema validation, and a direct
+    // (non-daemon, e.g. stdio) caller controls those raw arguments outright --
+    // `daemonMode` is a server-CONSTRUCTION boundary such a caller cannot
+    // influence (see the `reviveNonFiniteArguments` gate above for the same
+    // reasoning), so gating on it is the only thing that stops a direct
+    // caller from forging its own transport deadline: a huge value would
+    // silently disable `setUIState`'s internal fallback budget, and a tiny
+    // one would make it discard already-completed work immediately (issue
+    // #6222 P1 review, fuQ8_ / fuTtS). Only a daemon-forwarded request ever
+    // legitimately sets either of these (`withSocketSessionAutolockKey` in
+    // `src/daemon/socketServer.ts`).
+    const requestTimeoutMs = daemonMode
+      ? extractInternalMcpRequestTimeoutMs(toolParams)
+      : undefined;
+    const requestDeadlineMs = daemonMode
+      ? extractInternalMcpRequestDeadlineMs(toolParams)
+      : undefined;
+    const requestLiveDeadlineKey = daemonMode
+      ? extractInternalLiveDeadlineKey(toolParams)
+      : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     const rawSessionUuid =
@@ -646,6 +694,34 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               : {}),
             [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
             [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+            // Forwarded back onto handlerParams (rather than only used locally
+            // above) so a handler that needs the ACTUAL transport deadline --
+            // not a fresh internal budget -- can recover it: this value plus
+            // `execution.startTime` is the absolute wall-clock deadline of the
+            // current request. Only present on a daemon-forwarded call (see
+            // `withSocketSessionAutolockKey` in `src/daemon/socketServer.ts`);
+            // absent on a direct/non-daemon call, which a handler must treat as
+            // "no transport deadline known" (issue #6222 P1, `setUIStateHandler`
+            // is the first consumer).
+            ...(requestTimeoutMs !== undefined
+              ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: requestTimeoutMs }
+              : {}),
+            // The daemon's own capture-time-anchored absolute deadline, when
+            // present -- see `INTERNAL_MCP_REQUEST_DEADLINE_PARAM`. Forwarded
+            // through unchanged so a handler can prefer it over recomputing
+            // `execution.startTime + requestTimeoutMs`, which would re-grant
+            // whatever time this dispatch/admission step itself consumed
+            // (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1).
+            ...(requestDeadlineMs !== undefined
+              ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: requestDeadlineMs }
+              : {}),
+            // Same daemon-only provenance as `requestTimeoutMs` above -- lets
+            // `setUIStateHandler` resolve the LIVE (possibly progress-extended)
+            // deadline via `liveDeadlineRegistry` instead of only this frozen
+            // snapshot (issue #6222 P1 reopen).
+            ...(requestLiveDeadlineKey !== undefined
+              ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: requestLiveDeadlineKey }
+              : {}),
           }
         : parsedParams;
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { SetUIState } from "../../../src/features/action/SetUIState";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { MIN_SET_UI_STATE_MCP_TIMEOUT_MS } from "../../../src/daemon/mcpRequestTimeout";
 import {
   FakeTapOnElement,
   FakeInputText,
@@ -1428,11 +1429,19 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
 
     fakeFieldTypeDetector.setSkipVerification("first", true);
 
+    let observeCalls = 0;
     fakeObserve.setResultFactory(() => {
-      // Must EXCEED the 20s budget. At 19s the old rolling deadline — re-armed
-      // to now+20s just before this observe — still had a second left, so a
-      // scroll attempt happened either way and the test could not fail.
-      fakeTimer.advanceTime(25_000);
+      observeCalls++;
+      // Only the post-success refresh observe (the 2nd call) needs to EXCEED
+      // the 20s search budget to regression-proof #4252 — at 19s the old
+      // rolling deadline, re-armed to now+20s just before this observe,
+      // still had a second left, so a scroll attempt happened either way and
+      // the test could not fail. The initial pre-loop observe stays cheap so
+      // the total stays comfortably under the whole-call
+      // RESULT_DEADLINE_BUDGET_MS safety net added for issue #6222's
+      // reopen — that budget is a different, larger concern this test does
+      // not exercise.
+      fakeTimer.advanceTime(observeCalls === 1 ? 1_000 : 25_000);
       return {
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
@@ -1451,5 +1460,895 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     // The off-screen field must have been searched for, not skipped because
     // earlier work had already aged the deadline.
     expect(fakeSwipe.getCallCount()).toBeGreaterThan(0);
+  });
+});
+
+describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  /** All three fields are visible on screen from the very first observation. */
+  const threeFieldHierarchy: ViewHierarchyResult = {
+    hierarchy: {
+      node: [
+        {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            "resource-id": "firstName",
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+            "resource-id": "lastName",
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+            "resource-id": "phone",
+            class: "android.widget.EditText",
+          },
+        },
+      ],
+    },
+  } as unknown as ViewHierarchyResult;
+
+  /**
+   * A tap/clear/input trio that costs `perFieldMs` of simulated device time
+   * per field, modeling the real per-field apply work (tap + clear + type)
+   * that on real hardware takes several seconds each -- the same layers
+   * (SetUIState's field loop) the CLI->daemon path drives in production.
+   */
+  function buildSlowFieldDependencies(perFieldMs: number) {
+    const tapOnElement = {
+      execute: async () => {
+        fakeTimer.advanceTime(Math.round(perFieldMs * 0.6));
+        return { success: true };
+      },
+    };
+    const clearText = {
+      execute: async () => {
+        fakeTimer.advanceTime(Math.round(perFieldMs * 0.2));
+        return { success: true };
+      },
+    };
+    const inputText = {
+      execute: async (text: string) => {
+        fakeTimer.advanceTime(Math.round(perFieldMs * 0.2));
+        return { success: true, text };
+      },
+    };
+    return { tapOnElement, clearText, inputText };
+  }
+
+  const build = (perFieldMs: number) => {
+    const { tapOnElement, clearText, inputText } = buildSlowFieldDependencies(perFieldMs);
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeFieldTypeDetector.setSkipVerification("lastName", true);
+    fakeFieldTypeDetector.setSkipVerification("phone", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+    return new SetUIState(device, null, {
+      tapOnElement,
+      clearText,
+      inputText,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+  };
+
+  test("reproduces the reopen: realistic per-field cost applies one field then must return a structured partial result, never nothing", async () => {
+    // ~23s per field: two fields (46s) alone exceeds the whole-call budget,
+    // reproducing "applies fields, then the transport would time out and
+    // discard everything" from the dogfood report on a real CtrlProxy/adb
+    // round trip -- except here execute() must stop itself and hand back
+    // what it already did, instead of relying on the caller's transport to
+    // ever return anything at all.
+    //
+    // The second field is admitted (field 1 finished well inside the 45s
+    // budget), but its own cost (23s) does not fit in what remains of that
+    // budget (22s) -- the per-field safety net (issue #6222 review,
+    // coderabbit fuTtO) now cuts it off mid-flight at the 45s deadline
+    // instead of letting it run to completion 1s past that deadline, which is
+    // exactly the overrun this whole feature exists to prevent.
+    const result = await build(23_000).execute({
+      fields: [
+        { selector: { elementId: "firstName" }, value: "Grace" },
+        { selector: { elementId: "lastName" }, value: "Hopper" },
+        { selector: { elementId: "phone" }, value: "5125550199" },
+      ],
+    });
+
+    // A real result -- never a thrown timeout -- and it must not lie about
+    // overall success once a field was left unattempted.
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(3);
+
+    const [first, last, phone] = result.fields;
+    expect(first.success).toBe(true);
+    expect(first.notAttempted).toBeFalsy();
+    // Admitted, started, but cut off by the per-field safety net before it
+    // could settle -- distinct from both "not attempted" and "attempted and
+    // failed".
+    expect(last.success).toBe(false);
+    expect(last.notAttempted).toBeFalsy();
+    expect(last.timedOut).toBe(true);
+
+    // The third field was never reached -- marked distinctly from "attempted
+    // and failed" so a client knows it is safe to retry just this one field
+    // without re-sending (and duplicating) the one that already landed.
+    expect(phone.success).toBe(false);
+    expect(phone.notAttempted).toBe(true);
+    expect(result.error).toContain("result deadline");
+  });
+
+  test("stays within the setUIState transport floor even in the worst case", async () => {
+    const result = await build(23_000).execute({
+      fields: [
+        { selector: { elementId: "firstName" }, value: "Grace" },
+        { selector: { elementId: "lastName" }, value: "Hopper" },
+        { selector: { elementId: "phone" }, value: "5125550199" },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    // The whole call must return well inside MIN_SET_UI_STATE_MCP_TIMEOUT_MS
+    // (the transport floor added alongside this fix) -- this is the property
+    // that keeps a real client from ever seeing a bare -32001 after work was
+    // applied, on the direct CLI->daemon path where progress relay never
+    // extends anything.
+    expect(fakeTimer.now()).toBeLessThan(MIN_SET_UI_STATE_MCP_TIMEOUT_MS);
+  });
+
+  test("bounds field admission by the ACTUAL transport deadline, not just the internal 45s budget (issue #6222 P1)", async () => {
+    // Models the exact overshoot the P1 review flagged: a daemon-forwarded
+    // call whose 60s transport budget already had queue time deducted by the
+    // time it reached execute() -- represented here directly as the absolute
+    // deadline `transportDeadlineMs`, since that is all `execute()` ever
+    // sees. Field 1 costs 44s, landing close to that deadline with only 6s
+    // of transport budget left -- far short of the reserved per-field
+    // headroom -- so field 2 must NOT be admitted.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 50_000;
+
+    const result = await build(44_000).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    // A real, structured result -- never a bare discard.
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(3);
+
+    const [first, last, phone] = result.fields;
+    expect(first.success).toBe(true);
+    expect(first.notAttempted).toBeFalsy();
+    // Neither remaining field was admitted -- there wasn't enough of the
+    // ACTUAL transport budget left to safely start another.
+    expect(last.notAttempted).toBe(true);
+    expect(phone.notAttempted).toBe(true);
+
+    // The structured result comes back with real time to spare before the
+    // transport's own deadline -- never at or past it.
+    expect(fakeTimer.now()).toBeLessThan(transportDeadlineMs);
+    // And it also stays comfortably inside the setUIState transport floor,
+    // measured from when this call actually started.
+    expect(fakeTimer.now() - callStartMs).toBeLessThan(MIN_SET_UI_STATE_MCP_TIMEOUT_MS);
+  });
+
+  test("a fast multi-field call still returns full, unmarked results (no false positives from the new budget)", async () => {
+    const result = await build(500).execute({
+      fields: [
+        { selector: { elementId: "firstName" }, value: "Grace" },
+        { selector: { elementId: "lastName" }, value: "Hopper" },
+        { selector: { elementId: "phone" }, value: "5125550199" },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.success)).toBe(true);
+    expect(result.fields.every((f) => !f.notAttempted)).toBe(true);
+  });
+
+  test("single-field fast-fail is unaffected by the new budget", async () => {
+    // Matches the issue's "Phone" case: an unclassifiable single field fails
+    // instantly with its own diagnosis, well under any budget.
+    const hierarchyWithLabel: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Phone" },
+          },
+        ],
+      },
+    } as unknown as ViewHierarchyResult;
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchyWithLabel,
+    });
+    fakeFieldTypeDetector.setFieldType("Phone", "unknown" as any);
+
+    const result = await new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    }).execute({
+      fields: [{ selector: { text: "Phone" }, value: "5125550199" }],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBeFalsy();
+    expect(result.error).toContain("Phone");
+    expect(fakeTimer.now()).toBeLessThan(1_000);
+  });
+
+  test("a progress-extended transport deadline (200s) is respected, NOT capped at the internal 45s budget (issue #6222 P1)", async () => {
+    // Models a progress-aware caller (executePlan, or a daemon call with a
+    // progressToken) whose ProgressExtendableDeadline has extended the
+    // transport deadline well past the fixed internal RESULT_DEADLINE_BUDGET_MS
+    // fallback -- e.g. toward the 300s ceiling. Three fields at 50s each (150s
+    // total) would have been truncated at ~45s by the old `Math.min` against
+    // the fixed internal budget; with a known, larger transport deadline all
+    // three must be admitted and none marked `notAttempted`.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 200_000;
+
+    const result = await build(50_000).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.success)).toBe(true);
+    expect(result.fields.every((f) => !f.notAttempted)).toBe(true);
+
+    // The whole call ran well past the fixed 45s internal budget (the
+    // fallback used only when no transport deadline is known) -- proof the
+    // extended transport deadline was actually honored rather than clamped.
+    const INTERNAL_RESULT_DEADLINE_BUDGET_MS = 45_000;
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(INTERNAL_RESULT_DEADLINE_BUDGET_MS);
+    // And it still lands safely under the ACTUAL (extended) transport deadline.
+    expect(fakeTimer.now()).toBeLessThan(transportDeadlineMs);
+  });
+
+  test("checks the budget BEFORE the initial observation: an already-expired admission deadline returns all-notAttempted without observing (issue #6222 P1)", async () => {
+    // Models queueing having already consumed more than 40s of a 60s socket
+    // budget before execute() is even invoked: the transport deadline handed
+    // in has only 20s left, which is entirely eaten by
+    // PER_FIELD_ADMISSION_HEADROOM_MS, so there is no budget left for even one
+    // field. The initial observation must never be awaited in this case -- a
+    // cold/stalled observe could otherwise blow the transport deadline before
+    // any field is attempted, discarding everything.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 20_000;
+
+    // If the initial observe were ever called, this would burn 30s of
+    // simulated time -- proving (via the call count and elapsed time
+    // assertions below) that execute() never reached it.
+    fakeObserve.setResultFactory(() => {
+      fakeTimer.advanceTime(30_000);
+      return {
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      };
+    });
+
+    const result = await build(500).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.totalAttempts).toBe(0);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.notAttempted)).toBe(true);
+    expect(result.fields.every((f) => !f.success)).toBe(true);
+    expect(result.error).toContain("before the initial observation");
+
+    // The initial observe was never awaited -- no simulated time was burned
+    // and the fake was never invoked.
+    expect(fakeObserve.getCallCount()).toBe(0);
+    expect(fakeTimer.now()).toBe(callStartMs);
+  });
+
+  test("reads the LIVE (progress-extended) transport deadline via getLiveTransportDeadlineMs, not the frozen snapshot (issue #6222 P1 reopen, fuQ88 review)", async () => {
+    // A daemon call with a progress token keeps pushing its REAL transport
+    // deadline forward via `ProgressExtendableDeadline` as THIS call emits
+    // its own per-field progress notifications -- but the frozen
+    // `transportDeadlineMs` snapshot captured before `execute()` even started
+    // can never reflect that extension. `getLiveTransportDeadlineMs` models
+    // the caller (`setUIStateHandler`) reading that live object's CURRENT
+    // value at every check instead.
+    const callStartMs = fakeTimer.now();
+    const frozenTransportDeadlineMs = callStartMs + 50_000;
+    const liveTransportDeadlineMs = callStartMs + 300_000;
+
+    const result = await build(44_000).execute(
+      {
+        fields: [
+          { selector: { elementId: "firstName" }, value: "Grace" },
+          { selector: { elementId: "lastName" }, value: "Hopper" },
+          { selector: { elementId: "phone" }, value: "5125550199" },
+        ],
+      },
+      undefined,
+      undefined,
+      frozenTransportDeadlineMs,
+      () => liveTransportDeadlineMs,
+    );
+
+    // All three fields admitted and completed -- the frozen 50s snapshot
+    // alone would only have admitted the first (as the dedicated "ACTUAL
+    // transport deadline" test above proves).
+    expect(result.success).toBe(true);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.success)).toBe(true);
+    expect(result.fields.every((f) => !f.notAttempted)).toBe(true);
+    expect(result.fields.every((f) => !f.timedOut)).toBe(true);
+
+    // Proof the LIVE value won, not the smaller frozen snapshot.
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(50_000);
+    expect(fakeTimer.now()).toBeLessThan(liveTransportDeadlineMs);
+  });
+
+  test("a single admitted field that stalls past its budget returns a structured partial result before the transport deadline, never a bare discard (issue #6222 review, coderabbit fuTtO)", async () => {
+    // Models a field that is correctly ADMITTED (plenty of budget at the
+    // time) but then stalls indefinitely mid-flight -- e.g. a UI mutation
+    // that never settles. `ClearTextLike`/`InputTextLike` cannot currently be
+    // cancelled, so without the per-field safety net this would block
+    // `execute()` past the transport deadline and rediscover the exact
+    // silent-discard this whole feature exists to prevent.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 60_000;
+
+    let tapCalls = 0;
+    const stallingDependencies = {
+      tapOnElement: {
+        execute: async () => {
+          tapCalls++;
+          // Never resolves -- the only way this field's own promise can ever
+          // settle from here is if the abandoned call happens to finish in
+          // the background sometime after the race has already timed out.
+          return new Promise<{ success: boolean }>(() => {});
+        },
+      },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+    };
+
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const setUIState = new SetUIState(device, null, {
+      ...stallingDependencies,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    // Flush microtasks until the field's own admission/tap path has run and
+    // its race's timeout is armed against `fakeTimer` -- `advanceTime()`
+    // before that point would have nothing due to fire. Waiting on `tapCalls`
+    // rather than merely "a pending timeout exists" matters now that the
+    // initial observation is ALSO raced (issue #6222 P1, fujun): that race
+    // arms (and quickly clears) its own timeout first, so a bare
+    // `pendingTimeoutCount() > 0` check could observe that earlier timer
+    // instead of the field's.
+    for (let i = 0; i < 50 && tapCalls === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(tapCalls).toBe(1);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    // Advance past the field's entire budget (the full transport deadline
+    // minus RESPONSE_HEADROOM_MS, per issue #6222 P1 -- headroom only bounds
+    // admission of the NEXT field, not this one's own hard deadline, but the
+    // race must still finish strictly before the outer transport abort).
+    fakeTimer.advanceTime(60_000);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].success).toBe(false);
+    expect(result.fields[0].timedOut).toBe(true);
+    expect(result.fields[0].notAttempted).toBeFalsy();
+
+    // The structured result comes back with time to spare before the
+    // transport's own deadline -- never at or past it -- even though the
+    // stalled tap call is still pending in the background.
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+
+  test("a stalled field's race is armed to end at liveDeadline - RESPONSE_HEADROOM_MS, strictly before the daemon's outer abort (issue #6222 P1, fujug)", async () => {
+    // The daemon's own outer abort (`controller.abort()` in
+    // `handleIdeRequest`, `src/daemon/socketServer.ts`) fires EXACTLY at the
+    // live deadline, with no headroom of its own. If this field's race were
+    // armed for the SAME instant, the two timers would be a coin flip
+    // against response serialization instead of a guarantee that the
+    // structured partial result wins. Assert the armed duration directly,
+    // rather than only the final (forced-to-target) fake-clock reading a
+    // single big `advanceTime()` call would otherwise leave observable.
+    const RESPONSE_HEADROOM_MS = 3_000; // mirrors SetUIState's internal constant
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 60_000;
+
+    let tapCalls = 0;
+    const stallingDependencies = {
+      tapOnElement: {
+        execute: async () => {
+          tapCalls++;
+          // Never resolves.
+          return new Promise<{ success: boolean }>(() => {});
+        },
+      },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+    };
+
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const setUIState = new SetUIState(device, null, {
+      ...stallingDependencies,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && tapCalls === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(tapCalls).toBe(1);
+
+    // Exactly one pending timeout at this point -- the initial observation's
+    // own race already resolved and cleared its timer. Its duration must be
+    // the deadline minus the response headroom, not the full transport
+    // deadline.
+    const pending = fakeTimer.getPendingTimeouts();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toBe(transportDeadlineMs - RESPONSE_HEADROOM_MS - fakeTimer.now());
+
+    fakeTimer.advanceTime(60_000);
+    const result = await resultPromise;
+
+    expect(result.fields[0].timedOut).toBe(true);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+
+  test("a mid-field progress notification that extends the live deadline re-arms THAT field's own race, not just fields admitted afterward (issue #6222 P1, fujuk)", async () => {
+    // Models a field whose total device cost (50s) exceeds the ORIGINAL 30s
+    // transport deadline's own cutoff (27s, after RESPONSE_HEADROOM_MS), but
+    // whose own tap step reports progress partway through -- the trigger
+    // that extends a real `ProgressExtendableDeadline` on the daemon side.
+    // Without re-arming against the LIVE deadline on that tick, this field
+    // would incorrectly time out at the stale 27s snapshot despite the
+    // transport itself remaining valid far longer.
+    const callStartMs = fakeTimer.now();
+    const frozenTransportDeadlineMs = callStartMs + 30_000;
+    let liveDeadlineMs = frozenTransportDeadlineMs;
+
+    const stallingDependencies = {
+      tapOnElement: {
+        execute: async (
+          _opts: unknown,
+          progress?: (p: number, t?: number, m?: string) => Promise<void>,
+        ) => {
+          fakeTimer.advanceTime(10_000);
+          await progress?.(1, 2, "tap done");
+          return { success: true };
+        },
+      },
+      clearText: {
+        execute: async () => {
+          fakeTimer.advanceTime(20_000);
+          return { success: true };
+        },
+      },
+      inputText: {
+        execute: async (text: string) => {
+          fakeTimer.advanceTime(20_000);
+          return { success: true, text };
+        },
+      },
+    };
+
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const setUIState = new SetUIState(device, null, {
+      ...stallingDependencies,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const result = await setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      // Stands in for the daemon's onprogress handler: extends the shared
+      // `ProgressExtendableDeadline` SYNCHRONOUSLY as part of handling this
+      // call's own progress notification, exactly as `extendOnProgress`
+      // (`src/daemon/socketServer.ts`) does before the notification's own
+      // round trip completes -- not merely sometime after.
+      async () => {
+        liveDeadlineMs = callStartMs + 120_000;
+      },
+      undefined,
+      frozenTransportDeadlineMs,
+      () => liveDeadlineMs,
+    );
+
+    // The field ran for 50s total -- well past the ORIGINAL 30s deadline's
+    // own cutoff -- and still succeeded, because the mid-field progress
+    // extension re-armed its race against the NEW, larger live deadline
+    // instead of leaving it bound by the stale snapshot captured at
+    // admission.
+    expect(result.success).toBe(true);
+    expect(result.fields[0].success).toBe(true);
+    expect(result.fields[0].timedOut).toBeFalsy();
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(30_000);
+    expect(fakeTimer.now()).toBeLessThan(liveDeadlineMs);
+  });
+
+  test("a stalled initial observation with a tight post-queue budget returns bounded all-notAttempted results, never awaited unbounded (issue #6222 P1, fujun)", async () => {
+    // Queueing leaves just over the 20s admission headroom (21s), so the
+    // coarse pre-check passes -- but the initial observation itself then
+    // stalls indefinitely. Only racing the observation itself (not merely
+    // preceding it with the pre-check) keeps this bounded.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 21_000;
+
+    const stallingObserve = {
+      execute: () => new Promise<never>(() => {}),
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: fakeSwipe,
+      observeScreen: stallingObserve as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && fakeTimer.getPendingTimeoutCount() === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(21_000);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.totalAttempts).toBe(0);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBe(true);
+    expect(result.error).toContain("initial observation");
+
+    // Returned strictly before the outer transport deadline, never at or
+    // past it.
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+});
+
+describe("SetUIState off-screen search device I/O is bounded by the result deadline (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  /** The requested field is absent from every observation -- the search loop runs. */
+  const emptyHierarchy: ViewHierarchyResult = {
+    hierarchy: { node: [] },
+  } as unknown as ViewHierarchyResult;
+
+  beforeEach(() => {
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  test("a stalled SwipeOn.execute during off-screen search returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // When a requested field is absent from the current hierarchy, the last
+    // deadline check runs BEFORE the unbounded swipe + re-observe pair. If
+    // the swipe stalls, that award must still be bounded by the same live
+    // cutoff every other device call in this method already respects.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 30_000;
+
+    let swipeCalls = 0;
+    const stallingSwipe = {
+      execute: async () => {
+        swipeCalls++;
+        // Never resolves.
+        return new Promise<{ success: boolean }>(() => {});
+      },
+    };
+
+    const observeScreen = {
+      execute: async () => ({
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: emptyHierarchy,
+      }),
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: stallingSwipe as unknown as FakeSwipeOn,
+      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && swipeCalls === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(swipeCalls).toBe(1);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(30_000);
+    const result = await resultPromise;
+
+    // A real, structured result -- never a hang past the deadline -- with the
+    // never-found field marked not-attempted rather than silently discarded.
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBe(true);
+    expect(result.error).toContain("result deadline");
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+
+  test("a stalled follow-up ObserveScreen.execute during off-screen search returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // Same hazard as above, but the swipe itself completes and it is the
+    // follow-up re-observe (the second call into ObserveScreen -- the first
+    // is the initial observation) that stalls.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 30_000;
+
+    const swipeOn = {
+      execute: async () => ({ success: true }),
+    };
+
+    let observeCalls = 0;
+    const observeScreen = {
+      execute: async () => {
+        observeCalls++;
+        if (observeCalls === 1) {
+          return {
+            updatedAt: fakeTimer.now(),
+            screenSize: { width: 1080, height: 1920 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: emptyHierarchy,
+          };
+        }
+        // The follow-up re-observe after the swipe -- never resolves.
+        return new Promise<never>(() => {});
+      },
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: swipeOn as unknown as FakeSwipeOn,
+      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && observeCalls < 2; i++) {
+      await Promise.resolve();
+    }
+    expect(observeCalls).toBe(2);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(30_000);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBe(true);
+    expect(result.error).toContain("result deadline");
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
+  });
+});
+
+describe("SetUIState post-success observation refresh is bounded by the result deadline (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  test("a stalled post-success observation refresh after a verification-skipped field returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // Password fields skip verification, so `processField()` returns without
+    // a `freshObservation` -- `observationAfterSuccess()`'s fallback then
+    // issues an unbounded `ObserveScreen.execute()`. If THAT stalls, it must
+    // still be bounded by the same live cutoff every other device call in
+    // this method already respects.
+    const callStartMs = fakeTimer.now();
+    const transportDeadlineMs = callStartMs + 30_000;
+
+    const passwordHierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "password",
+              text: "",
+              class: "android.widget.EditText",
+              password: "true",
+            },
+          },
+        ],
+      },
+    };
+
+    fakeFieldTypeDetector.setFieldType("password", "text");
+    fakeFieldTypeDetector.setIsPasswordField("password", true);
+
+    let observeCalls = 0;
+    const observeScreen = {
+      execute: async () => {
+        observeCalls++;
+        if (observeCalls === 1) {
+          return {
+            updatedAt: fakeTimer.now(),
+            screenSize: { width: 1080, height: 1920 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: passwordHierarchy,
+          };
+        }
+        // The post-success observation refresh -- never resolves.
+        return new Promise<never>(() => {});
+      },
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: { execute: async () => ({ success: true }) } as unknown as FakeSwipeOn,
+      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "password" }, value: "secret123" }] },
+      undefined,
+      undefined,
+      transportDeadlineMs,
+    );
+
+    for (let i = 0; i < 50 && observeCalls < 2; i++) {
+      await Promise.resolve();
+    }
+    expect(observeCalls).toBe(2);
+    expect(fakeTimer.getPendingTimeoutCount()).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(30_000);
+    const result = await resultPromise;
+
+    // The field itself succeeded and must be reported as such -- only the
+    // follow-up observation stalled -- and the call must return a real,
+    // structured result rather than hang past the deadline.
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].success).toBe(true);
+    expect(result.error).toContain("post-success observation refresh");
+    expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
   });
 });

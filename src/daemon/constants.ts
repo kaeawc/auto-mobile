@@ -27,6 +27,60 @@ export const DEFAULT_DAEMON_PORT = 3000;
 export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 
 /**
+ * This execution's own start time, on the same `defaultTimer` clock used
+ * throughout `src/server/` and `src/features/`. Combined with
+ * {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} (`startTime + remainingMs`),
+ * gives a tool handler the ABSOLUTE wall-clock deadline of the current MCP
+ * request -- exported here (rather than kept local to `server/index.ts`,
+ * where it originates) so a tool handler outside `server/` (e.g.
+ * `setUIStateHandler` in `server/formTools.ts`) can read it back without an
+ * import cycle through `server/index.ts` (issue #6222 P1).
+ */
+export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
+
+/**
+ * ABSOLUTE wall-clock deadline (on the same `defaultTimer` clock used
+ * throughout `src/server/` and `src/features/`), computed at the instant the
+ * daemon captured {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} in
+ * `UnixSocketServer.withSocketSessionAutolockKey`, immediately before the
+ * loopback `mcpClient.callTool` -- NOT re-derived from
+ * `startTime + remainingMs` on the receiving side (issue #6222 review,
+ * PRRT_kwDOP-GF5M6fuyts P1). `startTime` (see
+ * {@link INTERNAL_EXECUTION_START_TIME_PARAM}) is recorded only AFTER HTTP
+ * dispatch and this process's own admission/tool-selection repo reads
+ * complete, so `startTime + remainingMs` silently RE-GRANTS whatever time
+ * that dispatch/admission gap consumed: if it exceeds the daemon's response
+ * margin, the recomputed deadline lands LATER than the daemon's actual outer
+ * abort, and `SetUIState` can return a would-be-partial result too late for
+ * anything to still be listening. Carrying the deadline as an absolute
+ * timestamp anchored at capture time removes that gap entirely -- a handler
+ * that finds this param present should prefer it outright over recomputing
+ * from `startTime + remainingMs`, which remains only as a fallback for a
+ * caller that predates this param.
+ */
+export const INTERNAL_MCP_REQUEST_DEADLINE_PARAM = "__mcpRequestDeadlineMs";
+
+/**
+ * Key into the in-process {@link module:daemon/liveDeadlineRegistry} for the
+ * LIVE (possibly progress-extended) `ProgressExtendableDeadline` backing the
+ * current daemon-forwarded request, when one exists (issue #6222 P1 reopen).
+ *
+ * {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} is a snapshot taken once, before
+ * the request is forwarded -- it never reflects a later extension made by
+ * `UnixSocketServer.handleIdeRequest`'s `onprogress` handler as the SAME call
+ * keeps emitting progress. The daemon and the MCP HTTP server it forwards to
+ * run in one Node process (`Daemon` in `daemon.ts` owns both), so rather than
+ * try to serialize a live object over the loopback HTTP transport, the daemon
+ * registers its `ProgressExtendableDeadline` under a fresh key in that
+ * shared, in-process registry and forwards only this key. A handler that
+ * recognizes it (currently only `setUIStateHandler`) can then read the
+ * deadline's CURRENT value at each of its own admission checks instead of a
+ * frozen number. Absent when the request carries no progress token (nothing
+ * to extend) or is not daemon-forwarded at all.
+ */
+export const INTERNAL_LIVE_DEADLINE_KEY_PARAM = "__mcpLiveDeadlineKey";
+
+/**
  * Port range to try if default port is unavailable
  */
 export const DAEMON_PORT_RANGE_START = 3000;

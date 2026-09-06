@@ -1099,23 +1099,30 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     },
   });
 
-  test("reports per-field progress as a multi-field call advances", async () => {
+  test("reports strictly increasing progress as a multi-field call advances", async () => {
+    // No textValue overrides: the real FieldTypeDetector.getTextValue reads
+    // whichever hierarchy findElement actually resolved against, so each
+    // field's own isFieldAlreadyCorrect check genuinely fails on the
+    // not-yet-edited value and the real apply+verify path runs for all
+    // three fields -- exercising FakeTapOnElement/FakeClearText's own
+    // 0,10 / 0,10 child-progress pattern (not just the boundary ticks).
     let observeCallCount = 0;
+    const targets: [string, string, string] = ["a", "b", "c"];
     fakeObserve.setResultFactory(() => {
       observeCallCount++;
-      if (observeCallCount <= 1) {
-        return createObserveResultFor(threeFieldHierarchy(["", "", ""]));
+      // Exactly one observe happens per successfully-verified field after the
+      // initial one (the verify observe is reused as the post-success
+      // refresh), so call N reflects the first (N-1) fields already landed.
+      const doneCount = Math.min(3, observeCallCount - 1);
+      const values: [string, string, string] = ["", "", ""];
+      for (let i = 0; i < doneCount; i++) {
+        values[i] = targets[i];
       }
-      // Every observe after the initial one reflects all three fields filled --
-      // this test only cares about the progress trace, not exact sequencing.
-      return createObserveResultFor(threeFieldHierarchy(["a", "b", "c"]));
+      return createObserveResultFor(threeFieldHierarchy(values));
     });
     fakeFieldTypeDetector.setFieldType("first", "text");
     fakeFieldTypeDetector.setFieldType("second", "text");
     fakeFieldTypeDetector.setFieldType("third", "text");
-    fakeFieldTypeDetector.setTextValue("first", "a");
-    fakeFieldTypeDetector.setTextValue("second", "b");
-    fakeFieldTypeDetector.setTextValue("third", "c");
 
     const progressCalls: Array<{ progress: number; total?: number; message?: string }> = [];
     const progress = async (progressValue: number, total?: number, message?: string) => {
@@ -1134,21 +1141,23 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     );
 
     expect(result.success).toBe(true);
-    // One progress notification per field-completed boundary at minimum, plus
-    // whatever each field's own tap/clear child steps contributed.
-    expect(progressCalls.length).toBeGreaterThanOrEqual(3);
+    // Each field's tap AND clear child steps report their own local 0,10 --
+    // two ticks apiece -- plus one field-boundary tick: at least 9 total.
+    expect(progressCalls.length).toBeGreaterThanOrEqual(9);
     // Every notification shares ONE consistent total across the whole call
     // (fieldCount * 100) -- not the per-field child steps' own local total,
     // and not a bare field-count total that would collide with those.
     expect(progressCalls.every((c) => c.total === 300)).toBe(true);
-    // Every field's own child steps (TapOnElement/ClearText, each reporting
-    // their own local 0..100 via the SAME callback) are projected into that
-    // field's 100-wide slice of the overall range, so the sequence across
-    // the whole call -- child ticks AND per-field boundary ticks together --
-    // never regresses.
+    // The whole sequence -- tap's 0,10, then clear's own 0,10 reset, repeated
+    // per field, plus the per-field boundary ticks -- must be STRICTLY
+    // increasing. MCP clients that enforce monotonicity reject or ignore a
+    // repeated value, not just a decrease, so a tie is as unacceptable as a
+    // regression here.
     for (let i = 1; i < progressCalls.length; i++) {
-      expect(progressCalls[i].progress).toBeGreaterThanOrEqual(progressCalls[i - 1].progress);
+      expect(progressCalls[i].progress).toBeGreaterThan(progressCalls[i - 1].progress);
     }
+    // Never exceeds the declared total.
+    expect(progressCalls.every((c) => c.progress <= 300)).toBe(true);
     // The three field-boundary ticks land at the top of each field's slice.
     expect(progressCalls.map((c) => c.progress)).toEqual(
       expect.arrayContaining([100, 200, 300]) as unknown as number[],
@@ -1197,10 +1206,11 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     expect(boundaryTicks[0].message).toContain("Set field");
     expect(boundaryTicks[1].message).toContain("Failed field");
     // The whole trace -- child ticks from both fields' retries included --
-    // must never regress, even though field 2's tap fails and retries three
-    // times inside the same 100-wide slice.
+    // must be STRICTLY increasing, even though field 2's tap fails and
+    // retries three times inside the same 100-wide slice (each retry's tap
+    // re-emits the same local 0,10 pattern, which would otherwise tie).
     for (let i = 1; i < progressCalls.length; i++) {
-      expect(progressCalls[i].progress).toBeGreaterThanOrEqual(progressCalls[i - 1].progress);
+      expect(progressCalls[i].progress).toBeGreaterThan(progressCalls[i - 1].progress);
     }
   });
 

@@ -150,20 +150,29 @@ export class SetUIState extends BaseVisualChange {
     let totalAttempts = 0;
 
     // Progress reported to the client MUST stay on one consistent scale and
-    // never regress. Sub-steps a field's work delegates to (TapOnElement,
-    // ClearText, ...) each independently report their own local 0..100
-    // range via the SAME callback, and would otherwise reset to 0 mid-field
-    // or between fields. Give every field a fixed 100-wide slice of one
-    // overall range and clamp every emission to the high-water mark so nested
-    // resets can never read as a regression (#6222 review).
+    // strictly increase -- MCP clients that enforce monotonicity reject or
+    // ignore a repeated value, not just a decrease. Sub-steps a field's work
+    // delegates to (TapOnElement, ClearText, ...) each independently report
+    // their own local 0..100 range via the SAME callback (e.g. tap emits
+    // 0,10 and then clear ALSO emits 0,10), which would otherwise collide or
+    // reset mid-field or between fields. Give every field a fixed 100-wide
+    // slice of one overall range, and force every emission strictly above the
+    // last one actually sent (bumping by 1 when the mapped value would tie or
+    // fall behind) so nested resets can never read as a non-increase (#6222
+    // review). A field's slice has ample headroom for these +1 bumps -- a
+    // field's own child steps and retries emit only a handful of ticks well
+    // under 100 -- and the per-field boundary tick (top of the slice) is
+    // always emitted last for that field, so it remains the largest value in
+    // the slice regardless of how many bumps preceded it.
     const overallProgressTotal = options.fields.length * 100;
     let maxProgressReported = 0;
     const emitProgress = async (raw: number, message?: string): Promise<void> => {
       if (!progress) {
         return;
       }
-      maxProgressReported = Math.max(raw, maxProgressReported);
-      await progress(maxProgressReported, overallProgressTotal, message);
+      const next = Math.min(Math.max(raw, maxProgressReported + 1), overallProgressTotal);
+      maxProgressReported = next;
+      await progress(next, overallProgressTotal, message);
     };
     // Projects a child step's own 0..N progress into the 100-wide slice for
     // the field currently being worked on (identified by how many fields are

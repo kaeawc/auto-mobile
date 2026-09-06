@@ -31,6 +31,11 @@ import {
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
 import { LsofSocketHolderProbe, type SocketHolderProbe } from "./socketHolderProbe";
+import {
+  defaultSocketInodeProbe,
+  sameSocketInode,
+  type SocketInodeProbe,
+} from "./socketInodeProbe";
 
 /**
  * Upper bound on the observation-only reachability probe consulted before a
@@ -144,6 +149,20 @@ export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptio
    * socket or a real `lsof`.
    */
   socketHolderProbe?: SocketHolderProbe;
+
+  /**
+   * Inode-identity probe that makes the "confirmed no live holder" check ATOMIC
+   * with the eventual unlink (issue #6140 TOCTOU). `socketHolderProbe` above only
+   * samples ownership at one point in time; between that sample and the actual
+   * unlink, a concurrent startup winner can unlink the stale socket and bind a NEW
+   * one at the same path — `cleanupStaleSocketIfDaemonDead` only re-checks the PID
+   * file (still the dead loser), so it would delete the winner's live socket.
+   * `connect()` captures the socket's `{dev, ino}` before the holder probe and
+   * requires it to be unchanged immediately before authorizing the unlink.
+   * Defaults to a real `FsSocketInodeProbe`; injectable so tests can drive the
+   * outcome without a real socket.
+   */
+  socketInodeProbe?: SocketInodeProbe;
 }
 
 /**
@@ -354,7 +373,14 @@ export class DaemonClient {
    *    (ownership could not be determined — no `lsof`, an unexpected error) is
    *    treated the same as "a live holder exists": inconclusive is never grounds
    *    to unlink.
-   * 4. {@link cleanupStaleSocketIfDaemonDead} independently confirms the PID
+   * 4. {@link socketInodeProbe} confirms the socket path is still the EXACT SAME
+   *    `{dev, ino}` captured before the holder probe — the atomicity gate (issue
+   *    #6140 TOCTOU): the holder probe only samples ownership at one point in
+   *    time, so a concurrent startup winner could unlink the stale socket and
+   *    bind a NEW one at the same path in the window before the unlink below. A
+   *    changed or now-missing inode means "no longer provably the socket we
+   *    checked" and is never grounds to unlink.
+   * 5. {@link cleanupStaleSocketIfDaemonDead} independently confirms the PID
    *    file's recorded owner is dead and performs the unlink.
    */
   private async recoverStaleSocketAndUnlink(
@@ -385,6 +411,11 @@ export class DaemonClient {
     if (remainingForHolderProbe <= 0) {
       return false;
     }
+    // Capture the socket's inode identity BEFORE the (async, potentially slow)
+    // holder probe below — not after — so a concurrent winner replacing the
+    // stale socket with a NEW one WHILE the probe is in flight is still caught
+    // by the re-stat immediately before the unlink (issue #6140 TOCTOU).
+    const capturedInode = this.socketInodeProbe().statSocket(this.socketPath);
     const holderPids = await this.socketHolderProbe().getHolderPids(this.socketPath, {
       timeoutMs: remainingForHolderProbe,
       signal,
@@ -395,6 +426,17 @@ export class DaemonClient {
     // exact regression class this PR exists to prevent. A merely-empty result
     // reported too late is treated the same as an inconclusive one.
     if (!this.isConfirmedNoLiveHolder(holderPids, deadline, signal)) {
+      return false;
+    }
+    // Immediately before authorizing the unlink: re-stat and require the socket
+    // to still be the EXACT SAME inode captured above. This is the atomicity
+    // gate — a missing path or a changed `{dev, ino}` means a concurrent winner
+    // replaced (or removed) it while the holder probe was in flight, so the
+    // "confirmed no live holder" sample above no longer describes what is
+    // actually at this path. Never unlink in that case, even though every prior
+    // guard passed.
+    const currentInode = this.socketInodeProbe().statSocket(this.socketPath);
+    if (!sameSocketInode(capturedInode, currentInode)) {
       return false;
     }
     return DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions);
@@ -417,6 +459,10 @@ export class DaemonClient {
 
   private socketHolderProbe(): SocketHolderProbe {
     return this.recoveryOptions.socketHolderProbe ?? defaultSocketHolderProbe;
+  }
+
+  private socketInodeProbe(): SocketInodeProbe {
+    return this.recoveryOptions.socketInodeProbe ?? defaultSocketInodeProbe;
   }
 
   /**

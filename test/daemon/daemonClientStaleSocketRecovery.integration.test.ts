@@ -9,6 +9,7 @@ import type {
   SocketHolderProbe,
   SocketHolderProbeOptions,
 } from "../../src/daemon/socketHolderProbe";
+import type { SocketInodeIdentity, SocketInodeProbe } from "../../src/daemon/socketInodeProbe";
 import type { PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -542,6 +543,154 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
       expect(existsSync(socketPath)).toBe(true);
     },
   );
+
+  // #6140 TOCTOU: getHolderPids() sampling no live holder and the actual unlink
+  // are not atomic on their own. A concurrent startup winner could unlink the
+  // stale socket and bind a NEW one at the same path in that window;
+  // cleanupStaleSocketIfDaemonDead only re-checks the (still-dead-loser) PID
+  // file, so it would delete the winner's live socket. The inode-identity gate
+  // closes that window by comparing {dev, ino} captured before the holder probe
+  // against a fresh stat immediately before the unlink.
+  describe("socket-inode atomicity gate (#6140)", () => {
+    function neverReachable(): DaemonSocketReachabilityLike {
+      return {
+        async isReachable(): Promise<boolean> {
+          return false;
+        },
+      };
+    }
+
+    function noHolder(): SocketHolderProbe {
+      return {
+        async getHolderPids(): Promise<number[]> {
+          return [];
+        },
+      };
+    }
+
+    (isWindows ? test.skip : test)(
+      "unlinks when the socket inode is unchanged between capture and the unlink",
+      async () => {
+        const { socketPath, pidFilePath } = createTempPaths();
+        writeFileSync(socketPath, "stale socket placeholder");
+        writePidFile(pidFilePath, socketPath);
+
+        const sameIdentity: SocketInodeIdentity = { dev: 1, ino: 42 };
+        class UnchangedInode implements SocketInodeProbe {
+          calls = 0;
+          statSocket(): SocketInodeIdentity {
+            this.calls++;
+            return sameIdentity;
+          }
+        }
+        const inodeProbe = new UnchangedInode();
+
+        let cleanupCalls = 0;
+        const client = new DaemonClient(socketPath, 500, undefined, {
+          pidFilePath,
+          socketPaths: [socketPath],
+          isProcessRunning: () => {
+            cleanupCalls++;
+            return false;
+          },
+          reachability: neverReachable(),
+          socketHolderProbe: noHolder(),
+          socketInodeProbe: inodeProbe,
+        });
+
+        await expect(client.connect()).rejects.toThrow("Daemon socket not found");
+        // Captured once before the holder probe, compared once immediately before
+        // the unlink.
+        expect(inodeProbe.calls).toBe(2);
+        expect(cleanupCalls).toBeGreaterThanOrEqual(1);
+        expect(existsSync(socketPath)).toBe(false);
+        expect(existsSync(pidFilePath)).toBe(false);
+      },
+    );
+
+    (isWindows ? test.skip : test)(
+      "does not unlink when the socket inode changed between capture and the unlink (a winner replaced it)",
+      async () => {
+        const { socketPath, pidFilePath } = createTempPaths();
+        writeFileSync(socketPath, "stale socket placeholder");
+        writePidFile(pidFilePath, socketPath);
+
+        class ChangingInode implements SocketInodeProbe {
+          calls = 0;
+          statSocket(): SocketInodeIdentity {
+            this.calls++;
+            // First stat (captured before the holder probe): the stale socket.
+            // Second stat (immediately before the unlink): a DIFFERENT inode — a
+            // concurrent winner unlinked it and bound a new one at the same path.
+            return this.calls === 1 ? { dev: 1, ino: 42 } : { dev: 1, ino: 999 };
+          }
+        }
+        const inodeProbe = new ChangingInode();
+
+        let cleanupCalls = 0;
+        const client = new DaemonClient(socketPath, 500, undefined, {
+          pidFilePath,
+          socketPaths: [socketPath],
+          isProcessRunning: () => {
+            cleanupCalls++;
+            return false;
+          },
+          reachability: neverReachable(),
+          socketHolderProbe: noHolder(),
+          socketInodeProbe: inodeProbe,
+        });
+
+        await expect(client.connect()).rejects.toThrow();
+        expect(inodeProbe.calls).toBe(2);
+        // The dead-PID cleanup (and thus the unlink) must never run: the winner's
+        // NEW socket must survive.
+        expect(cleanupCalls).toBe(0);
+        expect(existsSync(pidFilePath)).toBe(true);
+        expect(existsSync(socketPath)).toBe(true);
+      },
+    );
+
+    (isWindows ? test.skip : test)(
+      "does not unlink, and does not throw unexpectedly, when the socket is gone at the final stat",
+      async () => {
+        const { socketPath, pidFilePath } = createTempPaths();
+        writeFileSync(socketPath, "stale socket placeholder");
+        writePidFile(pidFilePath, socketPath);
+
+        class GoneAtFinalStat implements SocketInodeProbe {
+          calls = 0;
+          statSocket(): SocketInodeIdentity | undefined {
+            this.calls++;
+            // First stat: the stale socket existed. Second stat: gone (removed by
+            // someone else in the window).
+            return this.calls === 1 ? { dev: 1, ino: 42 } : undefined;
+          }
+        }
+        const inodeProbe = new GoneAtFinalStat();
+
+        let cleanupCalls = 0;
+        const client = new DaemonClient(socketPath, 500, undefined, {
+          pidFilePath,
+          socketPaths: [socketPath],
+          isProcessRunning: () => {
+            cleanupCalls++;
+            return false;
+          },
+          reachability: neverReachable(),
+          socketHolderProbe: noHolder(),
+          socketInodeProbe: inodeProbe,
+        });
+
+        // Rejects with the ORIGINAL connect failure — no unexpected exception from
+        // the inode-compare logic itself.
+        await expect(client.connect()).rejects.toThrow();
+        expect(inodeProbe.calls).toBe(2);
+        expect(cleanupCalls).toBe(0);
+        expect(existsSync(pidFilePath)).toBe(true);
+        expect(existsSync(socketPath)).toBe(true);
+      },
+    );
+  });
 
   // The caller can abort WHILE the reachability probe from the fix above is
   // in flight. The pre-await `!signal?.aborted` check cannot see an abort that

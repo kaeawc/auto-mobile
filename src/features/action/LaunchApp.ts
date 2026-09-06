@@ -1138,14 +1138,32 @@ export class LaunchApp extends BaseVisualChange {
     return foregroundActivity.split("/")[0] || undefined;
   }
 
+  /**
+   * `foregroundActivity` is a FALLBACK identity signal, not an equal-weight
+   * match requirement (issue #6220 follow-up, P1): the primary signals
+   * (`activeWindow.appId`, `viewHierarchy.packageName`) are reconciled/settled
+   * values, while `foregroundActivity` is the raw accessibility read and can
+   * lag a same-observation A->B transition — e.g. a successful launch to B
+   * where `activeWindow`/`viewHierarchy` already agree on B but the wire's
+   * `foregroundActivity` still names the PREVIOUS app A. Contributing A as a
+   * competing package alongside a settled B would fail the `every` match
+   * check on a launch that actually succeeded. So: when either primary signal
+   * is present, it ALONE decides the match/attribution and `foregroundActivity`
+   * is not even consulted; only when BOTH primary signals are absent does
+   * `foregroundActivity`'s package become the (sole) fallback.
+   */
   private getLaunchObservationPackageNames(observation: ObserveResult): string[] {
-    const packageNames = [
+    const primaryPackageNames = [
       observation.activeWindow?.appId,
       observation.viewHierarchy?.packageName,
-      this.packageFromForegroundActivity(observation),
     ].filter((packageName): packageName is string => !!packageName);
 
-    return [...new Set(packageNames)];
+    if (primaryPackageNames.length > 0) {
+      return [...new Set(primaryPackageNames)];
+    }
+
+    const fallbackPackageName = this.packageFromForegroundActivity(observation);
+    return fallbackPackageName ? [fallbackPackageName] : [];
   }
 
   /**

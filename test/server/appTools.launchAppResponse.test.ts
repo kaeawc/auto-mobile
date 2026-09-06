@@ -206,4 +206,33 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.verified).toBeUndefined();
     expect(payload.message).toBe("Launched app com.android.settings");
   });
+
+  // P1 review finding on #6239: a settled `activeWindow.appId` (a primary
+  // signal) must win over a lagging `foregroundActivity` naming the previous
+  // app — the fallback is only consulted when BOTH primary signals are absent.
+  test("a settled activeWindow.appId wins over a lagging foregroundActivity naming the previous app", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        activeWindow: {
+          appId: "com.android.settings",
+          activityName: "SubSettings",
+          layoutSeqSum: 1,
+        },
+        viewHierarchy: {
+          node: {},
+          packageName: "com.android.settings",
+          // Stale/lagging raw signal still naming the PREVIOUS app.
+          foregroundActivity: "com.example.previous/.MainActivity",
+        },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.android.settings");
+    expect(payload.verified).toBe(true);
+    expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
+  });
 });

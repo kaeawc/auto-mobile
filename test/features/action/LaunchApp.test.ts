@@ -663,6 +663,63 @@ describe("LaunchApp", () => {
     expect(result.observationOmitted).toBeDefined();
   });
 
+  // P1 review finding on #6239: `foregroundActivity` must be a FALLBACK
+  // identity signal, never a competing one. The reconciled/settled primary
+  // signals (`activeWindow.appId`, `viewHierarchy.packageName`) already agree
+  // on the just-launched app B, but the raw `foregroundActivity` wire field
+  // can lag a same-observation A->B transition and still name the PREVIOUS
+  // app A. Contributing A alongside a settled B must not fail the match and
+  // turn a successful launch into a failure.
+  test("succeeds when primary signals agree on the launched app despite a lagging foregroundActivity", async () => {
+    fakeTimer.enableAutoAdvance();
+    const previousPackageName = "com.example.previous";
+    const laggedObservation: ObserveResult = {
+      ...createObserveResult(packageName),
+      viewHierarchy: {
+        ...createObserveResult(packageName).viewHierarchy,
+        // Raw accessibility signal still names the PREVIOUS app A, even
+        // though activeWindow/viewHierarchy.packageName already settled on B.
+        foregroundActivity: `${previousPackageName}/.MainActivity`,
+      } as any,
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(laggedObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(result.observationOmitted).toBeUndefined();
+    // No retry needed: the primary signals alone decided the match.
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  // Counterpart to the wrong-app case above: when only `foregroundActivity`
+  // names an app (no primary signals at all) and it names the RIGHT app, the
+  // launch must succeed via that fallback rather than being rejected.
+  test("succeeds via foregroundActivity fallback when it names the launched app and no primary signal is present", async () => {
+    fakeTimer.enableAutoAdvance();
+    const rightAppObservation: ObserveResult = {
+      ...createObserveResult(undefined),
+      viewHierarchy: {
+        node: {},
+        foregroundActivity: `${packageName}/.MainActivity`,
+      } as any,
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(rightAppObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observationOmitted).toBeUndefined();
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+  });
+
   test("treats Android notification permission dialogs as valid launch observations", async () => {
     fakeTimer.enableAutoAdvance();
     const permissionControllerPackageName = "com.google.android.permissioncontroller";

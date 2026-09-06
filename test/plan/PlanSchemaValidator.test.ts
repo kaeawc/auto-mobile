@@ -905,6 +905,106 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should accept a barrier step with INLINE coordination params (no nested params object)", () => {
+      // Plans may place lock/deviceCount/device directly on the step, the
+      // same inline-vs-params shape criticalSection (and most other tools)
+      // accept -- PlanNormalizer merges inline fields into params before
+      // execution (#6215 review).
+      const yaml = `
+name: barrier-inline-test
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+  - tool: barrier
+    device: B
+    lock: sync-point
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept a criticalSection step with INLINE coordination params", () => {
+      const yaml = `
+name: critical-section-inline-test
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    lock: sync-point
+    deviceCount: 1
+    steps:
+      - tool: tapOn
+        params:
+          device: A
+          text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step with a zero timeout", () => {
+      const yaml = `
+name: barrier-zero-timeout
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      timeout: 0
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier step with a positive timeout", () => {
+      const yaml = `
+name: barrier-positive-timeout
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      timeout: 5000
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection step with a zero timeout", () => {
+      const yaml = `
+name: critical-section-zero-timeout
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      lock: sync-point
+      deviceCount: 1
+      timeout: 0
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should validate expectations array", () => {
       const yaml = `
 name: expectations-test

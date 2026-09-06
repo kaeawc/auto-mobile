@@ -360,7 +360,7 @@ describe("PlanValidator", () => {
     });
   });
 
-  describe("validateCoordinationLocks (barrier)", () => {
+  describe("validateBarrierParams", () => {
     test("accepts a well-formed dual-device barrier sharing a lock", () => {
       const plan: Plan = {
         name: "Well-formed dual-device barrier",
@@ -373,69 +373,58 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).not.toThrow();
     });
 
-    test("throws when barrier steps sharing a lock disagree on deviceCount", () => {
+    test("accepts a barrier reused across multiple rounds, even with different device sets per round", () => {
+      // Barrier rounds aren't statically delineated in plan YAML, and are not
+      // required to share the same participants: cross-round arrival-count
+      // consistency is left to the runtime coordinator
+      // (CriticalSectionCoordinator), which matches arrivals per round at
+      // execution time. Static validation only checks each step's own params.
       const plan: Plan = {
-        name: "Inconsistent barrier deviceCount",
-        devices: ["A", "B"],
+        name: "Multi-round barrier with varying device sets",
+        devices: ["A", "B", "C"],
         steps: [
-          { tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } },
-          { tool: "barrier", params: { device: "B", lock: "shared", deviceCount: 3 } },
-        ],
-      };
-      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
-      expect(() => PlanValidator.validate(plan)).toThrow("inconsistent deviceCount values");
-    });
-
-    test("throws when a barrier lock declares more devices than the steps that reference it", () => {
-      const plan: Plan = {
-        name: "Underpopulated barrier lock",
-        devices: ["A", "B"],
-        steps: [{ tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } }],
-      };
-      expect(() => PlanValidator.validate(plan)).toThrow(
-        "declares deviceCount=2 but 1 step references it",
-      );
-    });
-
-    test("accepts a barrier reused across two rounds with consistent per-round arrivals", () => {
-      // Unlike criticalSection, a barrier is meant to fire once per round: the
-      // same lock name recurs across phases, and each device arrives at it
-      // multiple times (the runtime coordinator clears arrival state once a
-      // round's deviceCount is reached). This must NOT be flagged as
-      // over-populating a single lock.
-      const plan: Plan = {
-        name: "Two-round barrier",
-        devices: ["A", "B"],
-        steps: [
-          { tool: "observe", params: { device: "A" } },
           { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
-          { tool: "tapOn", params: { device: "A", text: "Continue" } },
-          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
-          { tool: "observe", params: { device: "B" } },
           { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
-          { tool: "tapOn", params: { device: "B", text: "Continue" } },
-          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
+          { tool: "barrier", params: { device: "C", lock: "sync1", deviceCount: 3 } },
         ],
       };
       expect(() => PlanValidator.validate(plan)).not.toThrow();
     });
 
-    test("throws when a single round of a reused barrier lock has mismatched deviceCount", () => {
+    test("throws when a barrier step is missing 'lock'", () => {
       const plan: Plan = {
-        name: "Two-round barrier with one bad round",
-        devices: ["A", "B"],
-        steps: [
-          // Round 1: consistent.
-          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
-          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
-          // Round 2: device B disagrees on deviceCount.
-          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
-          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
-        ],
+        name: "Barrier missing lock",
+        devices: ["A"],
+        steps: [{ tool: "barrier", params: { device: "A", deviceCount: 2 } }],
       };
       expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
       expect(() => PlanValidator.validate(plan)).toThrow(
-        'barrier lock "sync1" round 2 has inconsistent deviceCount values',
+        "barrier step 0 is missing a non-empty 'lock' parameter",
+      );
+    });
+
+    test("throws when a barrier step is missing 'deviceCount'", () => {
+      const plan: Plan = {
+        name: "Barrier missing deviceCount",
+        devices: ["A"],
+        steps: [{ tool: "barrier", params: { device: "A", lock: "sync1" } }],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "barrier step 0 must declare a positive integer 'deviceCount'",
+      );
+    });
+
+    test("throws when a barrier step declares a non-positive-integer 'deviceCount'", () => {
+      const plan: Plan = {
+        name: "Barrier bad deviceCount",
+        devices: ["A"],
+        steps: [{ tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 0 } }],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "barrier step 0 must declare a positive integer 'deviceCount'",
       );
     });
   });

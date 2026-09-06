@@ -761,6 +761,7 @@
           }
         },
         {
+          "$comment": "criticalSection accepts lock/deviceCount/steps/timeout either inline on the step (like dragAndDrop's source/target) or nested under params -- PlanNormalizer merges both into params before execution, so either authoring style must validate (#6215 review).",
           "if": {
             "properties": {
               "tool": {
@@ -773,12 +774,44 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/criticalSectionParams"
+              },
+              "lock": {
+                "type": "string",
+                "description": "Global lock identifier for synchronization across devices",
+                "minLength": 1
+              },
+              "steps": {
+                "type": "array",
+                "description": "Steps to execute serially within the critical section",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/planStep"
+                }
+              },
+              "deviceCount": {
+                "type": "integer",
+                "description": "Expected number of devices that must reach the barrier before execution proceeds",
+                "minimum": 1
+              },
+              "timeout": {
+                "type": "integer",
+                "description": "Barrier timeout in milliseconds (default: 30000ms)",
+                "exclusiveMinimum": 0,
+                "default": 30000
               }
             },
-            "required": ["params"]
+            "anyOf": [
+              {
+                "required": ["lock", "deviceCount", "steps"]
+              },
+              {
+                "required": ["params"]
+              }
+            ]
           }
         },
         {
+          "$comment": "barrier accepts lock/deviceCount/timeout either inline on the step or nested under params, same as criticalSection (#6215 review).",
           "if": {
             "properties": {
               "tool": {
@@ -791,9 +824,32 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/barrierParams"
+              },
+              "lock": {
+                "type": "string",
+                "description": "Shared barrier name; all devices using the same name synchronize together",
+                "minLength": 1
+              },
+              "deviceCount": {
+                "type": "integer",
+                "description": "Number of devices that must arrive before the barrier lifts",
+                "minimum": 1
+              },
+              "timeout": {
+                "type": "integer",
+                "description": "Barrier timeout in milliseconds (default: 30000ms)",
+                "exclusiveMinimum": 0,
+                "default": 30000
               }
             },
-            "required": ["params"]
+            "anyOf": [
+              {
+                "required": ["lock", "deviceCount"]
+              },
+              {
+                "required": ["params"]
+              }
+            ]
           }
         }
       ]
@@ -1504,7 +1560,7 @@
         "timeout": {
           "type": "integer",
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "default": 30000
         }
       },
@@ -1528,7 +1584,7 @@
         "timeout": {
           "type": "integer",
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "default": 30000
         }
       },

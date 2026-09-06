@@ -258,6 +258,124 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `accepts barrier with inline coordination params (no nested params object)`() {
+    // Plans may place lock/deviceCount/device directly on the step, the same
+    // inline-vs-params shape criticalSection (and most other tools) accept.
+    val yaml =
+      """
+      name: barrier-inline-test
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+        - tool: barrier
+          device: B
+          lock: sync-point
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Inline-form barrier plan should be valid")
+  }
+
+  @Test
+  fun `accepts criticalSection with inline coordination params`() {
+    val yaml =
+      """
+      name: critical-section-inline-test
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          lock: sync-point
+          deviceCount: 1
+          steps:
+            - tool: tapOn
+              params:
+                device: A
+                text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Inline-form criticalSection plan should be valid")
+  }
+
+  @Test
+  fun `rejects barrier with a zero timeout`() {
+    val yaml =
+      """
+      name: barrier-zero-timeout
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            timeout: 0
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "barrier with timeout=0 should be invalid")
+  }
+
+  @Test
+  fun `accepts barrier with a positive timeout`() {
+    val yaml =
+      """
+      name: barrier-positive-timeout
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            timeout: 5000
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "barrier with a positive timeout should be valid")
+  }
+
+  @Test
+  fun `rejects criticalSection with a zero timeout`() {
+    val yaml =
+      """
+      name: critical-section-zero-timeout
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            lock: sync-point
+            deviceCount: 1
+            timeout: 0
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "criticalSection with timeout=0 should be invalid")
+  }
+
+  @Test
   fun `validates expectations array`() {
     val yaml =
       """

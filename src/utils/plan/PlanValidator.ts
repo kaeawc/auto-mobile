@@ -2,11 +2,6 @@ import { Plan } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
 
-interface BarrierOccurrence {
-  stepIndex: number;
-  deviceCount: unknown;
-}
-
 /**
  * Validates a plan structure and enforces multi-device rules.
  */
@@ -224,13 +219,13 @@ export class PlanValidator {
   }
 
   /**
-   * Validates cross-step consistency for both coordination tools:
-   * criticalSection locks (a lock is entered at most once per plan) and
-   * barrier locks (a lock may recur across multiple synchronization rounds).
+   * Validates coordination-tool params: criticalSection's cross-step lock
+   * consistency (a lock is entered at most once per plan), and barrier's
+   * own per-step params.
    */
   private static validateCoordinationLocks(plan: Plan): void {
     this.validateCriticalSectionLocks(plan);
-    this.validateBarrierRounds(plan);
+    this.validateBarrierParams(plan);
   }
 
   /**
@@ -329,40 +324,23 @@ export class PlanValidator {
   }
 
   /**
-   * Validates that every barrier lock has a consistent contract *per round*.
+   * Validates each barrier step's own params (required `lock`, required
+   * positive-integer `deviceCount`) — the same per-step param parity
+   * criticalSection gets.
    *
-   * Unlike criticalSection, the same barrier lock name is meant to be reused
-   * across multiple synchronization phases within a plan: the runtime
-   * coordinator (CriticalSectionCoordinator.waitAtBarrier) clears its arrival
-   * set once a round's deviceCount is reached, so each device can arrive at
-   * the same lock again for a later round. Collapsing every occurrence of a
-   * lock name into one bucket (as criticalSection does) would false-reject a
-   * plan that legitimately reuses a barrier across phases, since the total
-   * occurrence count would outnumber deviceCount.
-   *
-   * Rounds are inferred positionally: for a given lock, a device's Nth
-   * barrier step (in plan step order) belongs to round N, and round N across
-   * devices is validated as one group — same deviceCount declared, and
-   * exactly deviceCount devices participate in that round.
+   * Unlike criticalSection, a barrier lock name is meant to be reused across
+   * multiple synchronization rounds within a plan (the runtime coordinator,
+   * CriticalSectionCoordinator.waitAtBarrier, clears its arrival set once a
+   * round's deviceCount is reached). Rounds aren't explicitly delineated in
+   * plan YAML, so this deliberately does NOT try to statically reconstruct
+   * them or validate arrival counts across steps — that would require
+   * inferring round boundaries from step order, which is unsound when
+   * successive rounds use different device sets. Cross-round arrival-count
+   * consistency is left to the runtime coordinator, which already matches
+   * arrivals per round at execution time.
    */
-  private static validateBarrierRounds(plan: Plan): void {
-    const perLockPerDevice = this.collectBarrierOccurrencesByLockAndDevice(plan);
-
+  private static validateBarrierParams(plan: Plan): void {
     const errors: string[] = [];
-    for (const [lock, byDevice] of perLockPerDevice.entries()) {
-      errors.push(...this.validateBarrierLockRounds(lock, byDevice));
-    }
-
-    if (errors.length > 0) {
-      throw new ActionableError(errors.join("\n"));
-    }
-  }
-
-  private static collectBarrierOccurrencesByLockAndDevice(
-    plan: Plan,
-  ): Map<string, Map<string, BarrierOccurrence[]>> {
-    // lock -> device -> ordered occurrences (index within the array is the round)
-    const perLockPerDevice = new Map<string, Map<string, BarrierOccurrence[]>>();
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
@@ -371,82 +349,26 @@ export class PlanValidator {
       }
       const params = step.params;
       if (!params || typeof params !== "object") {
+        errors.push(`barrier step ${i} is missing its params object.`);
         continue;
       }
+
       const lock = (params as { lock?: unknown }).lock;
       if (typeof lock !== "string" || lock.length === 0) {
-        // Schema-level requirements are validated elsewhere; skip silently.
-        continue;
-      }
-      const device = (params as { device?: unknown }).device;
-      if (typeof device !== "string" || device.length === 0) {
-        // Missing/invalid device labels are reported by validateDeviceLabelsPresent.
-        continue;
+        errors.push(`barrier step ${i} is missing a non-empty 'lock' parameter.`);
       }
 
-      const byDevice = perLockPerDevice.get(lock) ?? new Map<string, BarrierOccurrence[]>();
-      const occurrences = byDevice.get(device) ?? [];
-      occurrences.push({
-        stepIndex: i,
-        deviceCount: (params as { deviceCount?: unknown }).deviceCount,
-      });
-      byDevice.set(device, occurrences);
-      perLockPerDevice.set(lock, byDevice);
+      const deviceCount = (params as { deviceCount?: unknown }).deviceCount;
+      if (typeof deviceCount !== "number" || !Number.isInteger(deviceCount) || deviceCount < 1) {
+        errors.push(
+          `barrier step ${i} must declare a positive integer 'deviceCount', got ${JSON.stringify(deviceCount)}.`,
+        );
+      }
     }
 
-    return perLockPerDevice;
-  }
-
-  /**
-   * Validates every round of a single barrier lock: a device's Nth barrier
-   * step (in plan step order) belongs to round N, and round N across devices
-   * is validated as one group.
-   */
-  private static validateBarrierLockRounds(
-    lock: string,
-    byDevice: Map<string, BarrierOccurrence[]>,
-  ): string[] {
-    const roundCounts = Array.from(byDevice.values()).map((o) => o.length);
-    const maxRounds = roundCounts.length > 0 ? Math.max(...roundCounts) : 0;
-    const rounds = Array.from({ length: maxRounds }, (_, round) =>
-      Array.from(byDevice.values())
-        .map((occurrences) => occurrences[round])
-        .filter((occurrence): occurrence is BarrierOccurrence => occurrence !== undefined),
-    );
-
-    return rounds.flatMap((roundOccurrences, round) =>
-      this.validateBarrierRound(lock, round, roundOccurrences),
-    );
-  }
-
-  private static validateBarrierRound(
-    lock: string,
-    round: number,
-    roundOccurrences: BarrierOccurrence[],
-  ): string[] {
-    const deviceCounts = new Set(
-      roundOccurrences.map((o) => o.deviceCount).filter((c) => typeof c === "number"),
-    );
-
-    if (deviceCounts.size > 1) {
-      const detail = roundOccurrences
-        .map((o) => `step ${o.stepIndex} deviceCount=${String(o.deviceCount)}`)
-        .join(", ");
-      return [
-        `barrier lock "${lock}" round ${round + 1} has inconsistent deviceCount values: ${detail}. All steps sharing a barrier round must declare the same deviceCount.`,
-      ];
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
     }
-
-    const declaredCount =
-      deviceCounts.size === 1 ? (deviceCounts.values().next().value as number) : undefined;
-
-    if (declaredCount !== undefined && roundOccurrences.length !== declaredCount) {
-      return [
-        `barrier lock "${lock}" round ${round + 1} declares deviceCount=${declaredCount} but ${roundOccurrences.length} step${roundOccurrences.length === 1 ? "" : "s"} reference${roundOccurrences.length === 1 ? "s" : ""} it. Every participating device needs its own barrier step for this round.`,
-      ];
-    }
-
-    return [];
   }
 
   /**

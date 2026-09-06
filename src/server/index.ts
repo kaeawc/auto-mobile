@@ -110,6 +110,10 @@ import {
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
 import { DaemonState } from "../daemon/daemonState";
+import {
+  defaultToolSelectionProfileRegistry,
+  type ToolSelectionProfileRegistry,
+} from "./toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
   debug?: boolean;
@@ -124,6 +128,17 @@ export interface McpServerOptions {
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession" | "getOverride">>;
   toolSelectionSessionManager?: ToolSelectionSessionManager;
+  /**
+   * Process-wide registry of tool-selection profiles this server has minted
+   * (see src/server/toolSelectionProfileRegistry.ts). Defaults to the shared
+   * module singleton, which is what production needs — every `createMcpServer`
+   * call inside one daemon process must share it so a profile minted on one
+   * internal loopback session is still recognized on another after crossing
+   * the daemon-proxy hop. Only override this in tests that must isolate
+   * multiple `createMcpServer()` instances from other test files' state, or
+   * that explicitly simulate that hop with more than one instance.
+   */
+  toolSelectionProfileRegistry?: ToolSelectionProfileRegistry;
 }
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
@@ -256,6 +271,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
   const daemonMode = options.daemonMode ?? false;
+  const toolSelectionProfileRegistry =
+    options.toolSelectionProfileRegistry ?? defaultToolSelectionProfileRegistry;
   void FeatureFlagService.getInstance()
     .initialize()
     .catch((error) => {
@@ -516,6 +533,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       !requestedToolSelectionProfileUuid?.trim().length
     ) {
       connectionProfileUuid = sessionToolBinding.createAndBindToolSelectionProfile(sessionId);
+      toolSelectionProfileRegistry.record(connectionProfileUuid);
     }
     // Tool selection honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
@@ -665,30 +683,39 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !tool.requiresDevice &&
         !isDeviceSessionAcquisitionTool(name) &&
         name !== "setActiveDevice" &&
-        // #6148 (#6069 residual, review round 3): setToolEnabled is exempt ONLY
-        // when the explicit sessionUuid is a profile THIS server instance itself
-        // minted and bound for this exact connection
-        // (SessionToolBinding.isServerIssuedToolSelectionProfile — set only by
-        // createAndBindToolSelectionProfile, keyed by the real mcpSessionId the
-        // MCP initialize handshake assigned). That is deliberately narrower than
+        // #6148 (#6069 residual, review round 4): setToolEnabled is exempt ONLY
+        // when the explicit sessionUuid is a profile THIS DAEMON PROCESS itself
+        // minted (toolSelectionProfileRegistry.has — populated only alongside
+        // createAndBindToolSelectionProfile). Round 3 keyed this check on the
+        // exact mcpSessionId that minted the profile, which broke in the DEFAULT
+        // daemon-proxy loopback topology (src/server/proxyServer.ts ->
+        // DaemonMcpProxy -> src/daemon/socketServer.ts -> an internal HTTP call
+        // back into this same server): the mint call and a later explicit
+        // reaffirm route through DIFFERENT internal client keys
+        // (sharedMcpForwardRoute vs sessionScopedForwardRoute /
+        // toolSelectionProfileScopedForwardRoute), each spinning up its OWN
+        // createMcpServer()/SessionToolBinding instance with no memory of the
+        // other's mint. toolSelectionProfileRegistry is process-wide instead,
+        // so it survives that hop. It is deliberately narrower than
         // `connectionProfileUuid`, which also falls back to the unauthenticated
         // `initialToolSelectionProfileUuid` threaded verbatim from a
         // caller-controlled HTTP header (DAEMON_TOOL_SELECTION_PROFILE_HEADER,
         // see src/daemon/daemon.ts) with no issuance check — a proxied caller
         // could set that header to the same fabricated string it also sends as
         // `arguments.sessionUuid` and satisfy a plain equality check (round 2's
-        // bug). The cross-connection resume path never puts the profile in
-        // `arguments.sessionUuid` at all (it flows solely through that
-        // header/DAEMON_TOOL_SELECTION_PROFILE_PARAM), so it never reaches this
-        // branch; a caller that DOES pass its own server-minted profile back as
-        // `sessionUuid` (the documented "update this connection's profile"
-        // contract) is legitimate and must not be forced through device-session
-        // admission. Any other explicit sessionUuid — including one that merely
-        // echoes the unverified header value — clears the same admission check
-        // every sibling plain session tool already enforces.
+        // bug); a fabricated value is never recorded in the registry either, so
+        // it still fails this check. The cross-connection resume path never
+        // puts the profile in `arguments.sessionUuid` at all (it flows solely
+        // through that header/DAEMON_TOOL_SELECTION_PROFILE_PARAM), so it never
+        // reaches this branch; a caller that DOES pass its own server-minted
+        // profile back as `sessionUuid` (the documented "update this
+        // connection's profile" contract) is legitimate and must not be forced
+        // through device-session admission. Any other explicit sessionUuid —
+        // including one that merely echoes the unverified header value — clears
+        // the same admission check every sibling plain session tool enforces.
         !(
           name === SET_TOOL_ENABLED_TOOL_NAME &&
-          sessionToolBinding.isServerIssuedToolSelectionProfile(sessionId, providedSessionUuid)
+          toolSelectionProfileRegistry.has(providedSessionUuid)
         )
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware

@@ -51,6 +51,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
+  let originalToolCallRepository: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
   let originalClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
@@ -98,6 +99,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
     (ToolRegistry as any).toolCallRepository = {
       async recordToolCall(): Promise<void> {},
     };
@@ -121,6 +123,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
 
   afterEach(() => {
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

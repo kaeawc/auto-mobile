@@ -5264,6 +5264,7 @@ export function registerDeviceTools() {
           verifiedAndroidAvdIdentity,
         );
       if (autolockSessionId) {
+        recordAcquiredSessionReadiness(daemonState, autolockSessionId);
         return autolockSessionId;
       }
     }
@@ -5273,7 +5274,7 @@ export function registerDeviceTools() {
       registerDirectSessionDevice(sessionId, device);
       return sessionId;
     }
-    return daemonState
+    const boundSessionId = await daemonState
       .getDevicePool()
       .bindOrReuseDeviceSession(
         sessionId,
@@ -5286,6 +5287,30 @@ export function registerDeviceTools() {
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
       );
+    recordAcquiredSessionReadiness(daemonState, boundSessionId);
+    return boundSessionId;
+  }
+
+  /**
+   * Record `automationReady` for a session bound by `bindBootedDeviceSession`
+   * (#6227 P1 follow-up). By the time that function runs, the caller
+   * (`bootAndPrepareDevice`) has already awaited
+   * `prepareStartDeviceRunnerReadiness` successfully for this device — CtrlProxy
+   * / accessibility-service setup for android is genuinely done, not merely
+   * assumed. Without recording it here, the session's `deviceReadiness` slot
+   * stays `undefined` and the first subsequent `automationReady` tool call
+   * (e.g. `observe`) sees that as unsatisfied and redundantly reruns setup via
+   * `ToolExecutionContext`'s `existingSession` upgrade path.
+   *
+   * This is only reached for a freshly-bound (non-recovered) session: the
+   * `readinessResult.preservedSessionId` recovery path in `bootAndPrepareDevice`
+   * skips `bindBootedDeviceSession` entirely, so a recovered session whose
+   * readiness was never actually re-verified after recovery stays unrecorded
+   * and still runs setup on next use, preserving the concurrency-hole fix in
+   * `isReadinessSatisfied`.
+   */
+  function recordAcquiredSessionReadiness(daemonState: DaemonState, sessionId: string): void {
+    daemonState.getSessionManager().setDeviceReadiness(sessionId, "automationReady");
   }
 
   async function buildBootedResponse(

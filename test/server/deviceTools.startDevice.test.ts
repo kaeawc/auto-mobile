@@ -375,6 +375,43 @@ describe("startDevice handler", () => {
     expect(childProcess.killed).toBe(false);
   });
 
+  // #6227 (round 5 P1): `prepareStartDeviceRunnerReadiness` already completed
+  // before `bindBootedDeviceSession` binds the session, so the acquisition
+  // path must record `automationReady` on the freshly-bound session — not
+  // leave it `undefined`, which would make the first subsequent
+  // `automationReady` tool call redundantly re-run CtrlProxy setup.
+  it("records automationReady on the session bound after a successful cold boot (#6227 round 5)", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    const childProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      coldBootImage.name,
+      childProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.source).toBe("cold-boot");
+    const sessionUuid = result.sessionUuid as string;
+    expect(sessionUuid).toBeDefined();
+    expect(daemonSessionManager!.getDeviceReadiness(sessionUuid)).toBe("automationReady");
+  });
+
   it("tracks the process handle for a public Android cold boot", async () => {
     const recoveryKeys = [
       "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",

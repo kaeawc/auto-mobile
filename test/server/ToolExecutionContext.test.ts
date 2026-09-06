@@ -229,6 +229,83 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
+  // #6227 P1 (round 5): a NORMAL freshly-acquired session (getAndroid /
+  // startDevice) already ran `prepareStartDeviceRunnerReadiness` — CtrlProxy /
+  // accessibility-service setup genuinely completed — before the session was
+  // bound. The acquisition/binding path now records that achieved level via
+  // `setDeviceReadiness` at bind time (mirroring what `bindBootedDeviceSession`
+  // in deviceTools.ts does), so the first subsequent `automationReady` tool
+  // call must NOT see `undefined` and redundantly re-run setup.
+  test("does not redundantly re-run setup for a session whose readiness was recorded at acquisition (#6227 round 5 P1)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // Simulate the acquisition/binding path: the session is created and its
+    // achieved readiness is recorded (as `bindBootedDeviceSession` now does)
+    // BEFORE any tool call reaches `createToolExecutionContext`.
+    await sessionManager.createSession("session-acquired", "device-1", "android");
+    sessionManager.setDeviceReadiness("session-acquired", "automationReady");
+
+    const context = await createToolExecutionContext(
+      "session-acquired",
+      sessionManager,
+      devicePool,
+      {
+        ...sessionOptions,
+        deviceReadiness: "automationReady",
+      },
+    );
+
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(0);
+  });
+
+  // Companion case: a session recovered without its readiness genuinely
+  // re-established (e.g. mid-recovery, unrecorded) must still be treated as
+  // not-ready and run setup — the acquisition-time recording above must not
+  // widen the concurrency-hole fix in `isReadinessSatisfied`.
+  test("still runs setup for a genuinely-unrecorded recovered session (#6227 round 5 P1)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // No `setDeviceReadiness` call here — this session's readiness was never
+    // recorded, mirroring a recovered session whose acquisition never
+    // completed `prepareStartDeviceRunnerReadiness` cleanly.
+    await sessionManager.createSession("session-unrecorded-recovery", "device-1", "android");
+
+    const context = await createToolExecutionContext(
+      "session-unrecorded-recovery",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+  });
+
   // #6227 P1 follow-up: a session first reached via a `booted` tool must be
   // *upgraded* — not left disconnected — when a later call on the same
   // sessionUuid needs `automationReady`. The `existingSession` fast path must

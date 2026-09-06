@@ -612,17 +612,46 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
-    if (
-      this.device.platform !== "android" ||
-      !previousObservation ||
-      immediateEffect?.screenChanged === true
-    ) {
+    if (this.device.platform !== "android" || !previousObservation) {
       return { effect: immediateEffect, observation: currentObservation };
     }
 
-    // A stable source tree can arrive before Android begins the activity
-    // transition. Wait for an actual post-tap difference instead of treating
-    // that transient stability as proof that the tap had no effect.
+    if (immediateEffect?.screenChanged !== true) {
+      // A stable source tree can arrive before Android begins the activity
+      // transition. Wait for an actual post-tap difference instead of treating
+      // that transient stability as proof that the tap had no effect.
+      return this.waitForPostTapChange(previousObservation, currentObservation, signal);
+    }
+
+    if (immediateEffect.basis !== "viewHierarchy changed") {
+      // activeWindow/screenIdentity changes are authoritative on their own —
+      // return immediately.
+      return { effect: immediateEffect, observation: currentObservation };
+    }
+
+    // Issue #6266 (review): a hierarchy-ONLY change (activeWindow unchanged)
+    // is not, by itself, trustworthy proof of the DESTINATION screen. The
+    // initial post-tap observation uses `changeExpected: false`, so a
+    // transient intermediate mutation (a `focused`/`selected`/`checked`
+    // attribute flip, or a partial hierarchy update before a delayed
+    // navigation/dialog) can look identical to a real screen change on the
+    // very first frame. Settle it through the transition poll before trusting
+    // it as terminal, so a transient mutation isn't returned in place of the
+    // actual destination.
+    return this.settleHierarchyOnlyChange(previousObservation, currentObservation, signal);
+  }
+
+  /**
+   * The post-tap observation showed no change yet. Poll (via the injected
+   * waiter) for an actual post-tap difference, then hand a hierarchy-only
+   * result through the same settle step a first-frame change would take
+   * (#6266) rather than trusting it as terminal straight off the poll.
+   */
+  private async waitForPostTapChange(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const effectObservation = await this.waitForCondition.execute(
       (observation) => ({
         matched: this.deriveTapEffect(previousObservation, observation)?.screenChanged === true,
@@ -637,12 +666,65 @@ export class TapOnElement extends BaseVisualChange {
     if (!effectObservation.matched && effect?.screenChanged !== true) {
       return { effect, observation: currentObservation };
     }
+    if (effect?.basis === "viewHierarchy changed") {
+      return this.settleHierarchyOnlyChange(
+        previousObservation,
+        effectObservation.observation,
+        signal,
+      );
+    }
     return {
       effect,
       observation: {
         ...effectObservation.observation,
         gfxMetrics: effectObservation.observation.gfxMetrics ?? currentObservation.gfxMetrics,
         perfTiming: effectObservation.observation.perfTiming ?? currentObservation.perfTiming,
+      },
+    };
+  }
+
+  /**
+   * Issue #6266 (review): confirm a hierarchy-only tap effect is the settled
+   * DESTINATION rather than a transient intermediate mutation before it is
+   * trusted as terminal. Polls (via the existing injected waiter/FakeTimer
+   * seam) until either:
+   *  - `activeWindow` changes — authoritative on its own, stop immediately; or
+   *  - the hierarchy is unchanged from the PRIOR poll — two consecutive
+   *    observations agreeing means the transition has settled.
+   * On timeout the loop's last-polled observation is used as the best
+   * available evidence rather than blocking indefinitely.
+   */
+  private async settleHierarchyOnlyChange(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
+    let lastObservation = currentObservation;
+    const settled = await this.waitForCondition.execute(
+      (observation) => {
+        const activeWindowChanged =
+          this.compareActiveWindow(previousObservation, observation)?.screenChanged === true;
+        const hierarchyStableSincePriorPoll =
+          this.hashViewHierarchy(observation.viewHierarchy ?? null) ===
+          this.hashViewHierarchy(lastObservation.viewHierarchy ?? null);
+        lastObservation = observation;
+        return { matched: activeWindowChanged || hierarchyStableSincePriorPoll };
+      },
+      {
+        timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
+        pollMs: POST_TAP_EFFECT_POLL_MS,
+        signal,
+      },
+    );
+
+    const settledObservation = settled.observation;
+    const effect = this.deriveTapEffect(previousObservation, settledObservation);
+    return {
+      effect,
+      observation: {
+        ...settledObservation,
+        gfxMetrics: settledObservation.gfxMetrics ?? currentObservation.gfxMetrics,
+        perfTiming: settledObservation.perfTiming ?? currentObservation.perfTiming,
       },
     };
   }

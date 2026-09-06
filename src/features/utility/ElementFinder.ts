@@ -7,6 +7,45 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
 import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
+import { STABLE_VIEW_ID_PREFIX } from "../observe/android/StableNodeIdentity";
+
+/**
+ * `resourceId`/`elementId` selectors carry an `s-<hash>` content-derived
+ * stable id (`assignStableViewIds`, issue #3228) for nodes with no real
+ * `resource-id` — the skeleton projection emits exactly that value as
+ * `elementId` (`SkeletonProjection.deriveId`). Resolve it against the node's
+ * `view-id` field, not `resource-id`, so a skeleton id round-trips back to
+ * its element (issue #6218). Exact match only: the hash carries no partial-
+ * or bare-suffix semantics the way a `pkg:id/name` resource-id does.
+ */
+function isStableViewId(id: string): boolean {
+  return id.startsWith(STABLE_VIEW_ID_PREFIX);
+}
+
+function matchesResourceIdOrStableViewId(
+  nodeProperties: Record<string, unknown>,
+  resourceId: string,
+  bareResourceId: string | null,
+  partialMatch: boolean,
+): boolean {
+  const nodeResourceId = nodeProperties["resource-id"];
+  if (typeof nodeResourceId === "string") {
+    if (
+      nodeResourceId === resourceId ||
+      (bareResourceId !== null && nodeResourceId === bareResourceId) ||
+      (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
+    ) {
+      return true;
+    }
+  }
+  if (isStableViewId(resourceId)) {
+    const nodeViewId = nodeProperties["view-id"];
+    if (typeof nodeViewId === "string" && nodeViewId === resourceId) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Handles searching and selection of elements in view hierarchy
@@ -47,12 +86,14 @@ export class DefaultElementFinder implements ElementFinder {
         }
 
         const nodeProperties = this.parser.extractNodeProperties(node);
-        const nodeResourceId = nodeProperties["resource-id"];
         const nodeText = nodeProperties.text;
         const nodeContentDesc = nodeProperties["content-desc"];
         const nodeIosLabel = nodeProperties["ios-accessibility-label"];
 
-        if (container.elementId && nodeResourceId === container.elementId) {
+        if (
+          container.elementId &&
+          matchesResourceIdOrStableViewId(nodeProperties, container.elementId, null, false)
+        ) {
           containerNode = node;
           return;
         }
@@ -226,17 +267,12 @@ export class DefaultElementFinder implements ElementFinder {
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties["resource-id"] && typeof nodeProperties["resource-id"] === "string") {
-          const nodeResourceId = nodeProperties["resource-id"];
-          if (
-            nodeResourceId === resourceId ||
-            (bareResourceId !== null && nodeResourceId === bareResourceId) ||
-            (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
-          ) {
-            const parsedNode = this.parser.parseNodeBounds(node);
-            if (parsedNode) {
-              matches.push(parsedNode);
-            }
+        if (
+          matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch)
+        ) {
+          const parsedNode = this.parser.parseNodeBounds(node);
+          if (parsedNode) {
+            matches.push(parsedNode);
           }
         }
       });
@@ -1148,15 +1184,8 @@ export class DefaultElementFinder implements ElementFinder {
     const idSeparatorIndex = resourceId.lastIndexOf("/");
     const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
 
-    const matchesId = (input?: string): boolean => {
-      if (!input) {
-        return false;
-      }
-      if (partialMatch) {
-        return input.toLowerCase().includes(resourceId.toLowerCase());
-      }
-      return input === resourceId || (bareResourceId !== null && input === bareResourceId);
-    };
+    const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
+      matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch);
 
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
@@ -1194,7 +1223,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private collectClickableSiblingsWithResourceIdInRoots(
     rootNodes: ViewHierarchyNode[],
-    matchesId: (input?: string) => boolean,
+    matchesId: (nodeProperties: Record<string, unknown>) => boolean,
   ): Element[] {
     const results: Element[] = [];
     for (const rootNode of rootNodes) {
@@ -1205,7 +1234,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private findClickableSiblingsOfResourceIdInNode(
     node: ViewHierarchyNode,
-    matchesId: (input?: string) => boolean,
+    matchesId: (nodeProperties: Record<string, unknown>) => boolean,
     results: Element[],
   ): void {
     const children = node.node;
@@ -1217,16 +1246,14 @@ export class DefaultElementFinder implements ElementFinder {
 
     const hasIdMatch = childArray.some((child) => {
       const props = this.parser.extractNodeProperties(child);
-      const rid = props["resource-id"];
-      return typeof rid === "string" && matchesId(rid);
+      return matchesId(props);
     });
 
     if (hasIdMatch) {
       for (const child of childArray) {
         const childProps = this.parser.extractNodeProperties(child);
         const isClickable = this.isClickableNode(childProps);
-        const childRid = childProps["resource-id"];
-        const isIdMatch = typeof childRid === "string" && matchesId(childRid);
+        const isIdMatch = matchesId(childProps);
 
         if (isClickable && !isIdMatch) {
           const parsedNode = this.parser.parseNodeBounds(child);

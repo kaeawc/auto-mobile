@@ -149,12 +149,16 @@ export class PlanValidator {
         continue;
       }
 
-      // Every step must declare a device, including criticalSection.
-      const device = step.params?.device;
+      // Every step must declare a device, including criticalSection. Uses
+      // effectiveField (not a raw params read) so an inline-form barrier
+      // step -- lock/deviceCount/device sitting directly on the step rather
+      // than nested under params -- is resolved correctly instead of
+      // reporting a spurious missing-device error (#6215 review).
+      const device = this.effectiveField(step, "device");
       if (device === undefined || device === null || device === "") {
         missingLabels.push({ index: i, tool: step.tool });
-      } else if (!deviceSet.has(device)) {
-        invalidLabels.push({ index: i, tool: step.tool, device });
+      } else if (typeof device !== "string" || !deviceSet.has(device)) {
+        invalidLabels.push({ index: i, tool: step.tool, device: String(device) });
       }
 
       // Additionally, criticalSection sub-steps must each declare a device.
@@ -363,6 +367,28 @@ export class PlanValidator {
       throw new ActionableError(errors.join("\n"));
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Barrier coordination checks below enforce NECESSARY conditions for a
+  // barrier plan to be executable — they do not prove full deadlock-freedom.
+  // Specifically NOT checked (tracked in issue #6231):
+  //   - Generation-boundary stranding within one lock: e.g. deviceCount=3
+  //     with arrivals A,A/B,B/C/D passes every check below (4 distinct
+  //     devices, 6 arrivals divisible by 3, no device exceeds its 2-generation
+  //     budget), but if A/C/D happen to complete generation 1 first, B's two
+  //     arrivals can never both be scheduled into the same generation and it
+  //     deadlocks. Proving this requires reasoning about which subsets of
+  //     arrivals can complete each generation — a scheduling-feasibility
+  //     problem, not a simple count check.
+  //   - Cross-lock ordering cycles: device A doing barrier(X) then
+  //     barrier(Y), and device B doing barrier(Y) then barrier(X), with both
+  //     locks needing exactly {A, B} — A blocks at X waiting for B, B blocks
+  //     at Y waiting for A. Every per-lock check below passes because each
+  //     lock individually has enough distinct arrivals and no device exceeds
+  //     its generation budget. A sound version of this check is possible but
+  //     only for locks with zero population slack (evaluated and deferred
+  //     during the #6215 review — see issue #6231 for why).
+  // ---------------------------------------------------------------------
 
   /**
    * Validates each barrier step's own params (required `lock`, required

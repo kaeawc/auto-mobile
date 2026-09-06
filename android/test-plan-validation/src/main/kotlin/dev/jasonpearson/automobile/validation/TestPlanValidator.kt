@@ -123,12 +123,20 @@ object TestPlanValidator {
     // of passing IDE/JUnit validation and then failing at execution (#6215
     // review).
     val multiDeviceErrors = validateMultiDeviceRequirements(parsedObject)
+    // Every step (not just barrier/criticalSection) must target a declared
+    // device label once the plan declares 'devices' -- mirrors the daemon's
+    // PlanValidator.validateDeviceLabelsPresent, which checks every step
+    // generically. Without this, a barrier plan with valid A/B barriers
+    // plus e.g. a device-less or undeclared-device tapOn step passed here
+    // while the daemon rejects it (#6215 review).
+    val deviceLabelErrors = validateDeviceLabelsPresent(parsedObject)
     val barrierCoordinationErrors = validateBarrierCoordination(parsedObject)
 
     if (
       validationErrors.isEmpty() &&
         toolNameErrors.isEmpty() &&
         multiDeviceErrors.isEmpty() &&
+        deviceLabelErrors.isEmpty() &&
         barrierCoordinationErrors.isEmpty()
     ) {
       return ValidationResult(valid = true)
@@ -140,6 +148,7 @@ object TestPlanValidator {
     // Add tool name and coordination validation errors
     errors.addAll(toolNameErrors)
     errors.addAll(multiDeviceErrors)
+    errors.addAll(deviceLabelErrors)
     errors.addAll(barrierCoordinationErrors)
 
     return ValidationResult(valid = false, errors = errors)
@@ -272,6 +281,100 @@ object TestPlanValidator {
       }
       .toSet()
   }
+
+  /**
+   * Validates that EVERY step (not just barrier/criticalSection) targets a declared device label
+   * once the plan declares 'devices' -- mirrors the daemon's
+   * PlanValidator.validateDeviceLabelsPresent, which checks every step generically rather than only
+   * the coordination tools. Without this, a barrier plan with valid A/B barriers plus e.g. a
+   * device-less or undeclared-device tapOn step passes here while the daemon rejects it (#6215
+   * review). Also validates each criticalSection sub-step's device, matching the daemon's nested
+   * check.
+   */
+  private fun validateDeviceLabelsPresent(parsedObject: Any?): List<ValidationError> {
+    val declaredDevices = declaredDeviceLabels(parsedObject) ?: return emptyList()
+    val steps = (parsedObject as? Map<*, *>)?.get("steps") as? List<*> ?: return emptyList()
+
+    val errors = mutableListOf<ValidationError>()
+    steps.forEachIndexed { index, step ->
+      if (step !is Map<*, *>) {
+        return@forEachIndexed
+      }
+      val tool = step["tool"] as? String ?: "unknown"
+      checkStepDeviceLabel(step, "step $index ($tool)", declaredDevices, errors)
+
+      if (tool == "criticalSection") {
+        val subSteps = effectiveCoordinationField(step, "steps") as? List<*>
+        subSteps?.forEachIndexed { subIndex, sub ->
+          if (sub !is Map<*, *>) {
+            return@forEachIndexed
+          }
+          val subTool = sub["tool"] as? String ?: "unknown"
+          checkStepDeviceLabel(
+            sub,
+            "step $index.steps[$subIndex] ($subTool)",
+            declaredDevices,
+            errors,
+          )
+        }
+      }
+    }
+    return errors
+  }
+
+  /** Checks one step's effective device label against the declared devices set. */
+  private fun checkStepDeviceLabel(
+    step: Map<*, *>,
+    label: String,
+    declaredDevices: Set<String>,
+    errors: MutableList<ValidationError>,
+  ) {
+    val device = effectiveCoordinationField(step, "device")
+    when {
+      device == null || (device as? String)?.isEmpty() == true -> {
+        errors.add(
+          ValidationError(
+            field = "steps",
+            message = "$label is missing a 'device' parameter, but the plan declares 'devices'.",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+      device !is String || device !in declaredDevices -> {
+        errors.add(
+          ValidationError(
+            field = "steps",
+            message =
+              "$label targets device \"$device\", which is not in the plan's declared devices [${declaredDevices.joinToString(", ")}].",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Barrier coordination checks below enforce NECESSARY conditions for a
+  // barrier plan to be executable -- they do not prove full deadlock-freedom.
+  // Specifically NOT checked (tracked in issue #6231):
+  //   - Generation-boundary stranding within one lock: e.g. deviceCount=3
+  //     with arrivals A,A/B,B/C/D passes every check below (4 distinct
+  //     devices, 6 arrivals divisible by 3, no device exceeds its
+  //     2-generation budget), but if A/C/D happen to complete generation 1
+  //     first, B's two arrivals can never both be scheduled into the same
+  //     generation and it deadlocks. Proving this requires reasoning about
+  //     which subsets of arrivals can complete each generation -- a
+  //     scheduling-feasibility problem, not a simple count check.
+  //   - Cross-lock ordering cycles: device A doing barrier(X) then
+  //     barrier(Y), and device B doing barrier(Y) then barrier(X), with
+  //     both locks needing exactly {A, B} -- A blocks at X waiting for B, B
+  //     blocks at Y waiting for A. Every per-lock check below passes
+  //     because each lock individually has enough distinct arrivals and no
+  //     device exceeds its generation budget. A sound version of this
+  //     check is possible but only for locks with zero population slack
+  //     (evaluated and deferred during the #6215 review -- see issue #6231
+  //     for why).
+  // -----------------------------------------------------------------------
 
   private class BarrierLockUsage {
     val devices = mutableSetOf<String>()

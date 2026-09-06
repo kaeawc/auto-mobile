@@ -151,6 +151,24 @@ describe("PlanValidator", () => {
       };
       expect(() => PlanValidator.validate(plan)).toThrow("does not declare 'devices' field");
     });
+
+    test("accepts an inline-form barrier step with a declared device (no spurious missing-device error)", () => {
+      // Before PlanNormalizer merges inline fields into params, a step's
+      // 'device' can sit directly on the step rather than nested under
+      // params. validateDeviceLabelsPresent must resolve this via
+      // effectiveField, not a raw params?.device read, or a perfectly valid
+      // inline barrier plan is rejected with a spurious missing-device
+      // error (#6215 review).
+      const plan: any = {
+        name: "Inline barrier device label",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", device: "A", lock: "sync1", deviceCount: 2 },
+          { tool: "barrier", device: "B", lock: "sync1", deviceCount: 2 },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
   });
 
   describe("validateCriticalSectionLocks", () => {

@@ -1669,9 +1669,30 @@
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
           "exclusiveMinimum": 0,
           "default": 30000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
         }
       },
-      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are not rejected. lock/steps/deviceCount are intentionally NOT required here: a plan may declare any of them inline on the step instead of nested here, and PlanNormalizer merges the two -- the planStep if/then block enforces required-ness against that merged union, not against this def in isolation (#6215 review)."
+      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/steps/deviceCount are intentionally NOT required here: a plan may declare any of them inline on the step instead of nested here, and PlanNormalizer merges the two -- the planStep if/then block enforces required-ness against that merged union, not against this def in isolation."
     },
     "barrierParams": {
       "type": "object",
@@ -1692,9 +1713,34 @@
           "description": "Barrier timeout in milliseconds (default: 30000ms)",
           "exclusiveMinimum": 0,
           "default": 30000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        },
+        "__lockNamespace": {
+          "type": "string",
+          "description": "Internal plan-scoped lock namespace (injected)"
         }
       },
-      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) and the internally-injected __lockNamespace are not rejected. lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block (#6215 review)."
+      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block."
     }
   }
 }

@@ -113,6 +113,7 @@ class TestPlanValidatorTest {
       steps:
         - tool: criticalSection
           params:
+            device: A
             lock: sync-point
             deviceCount: 2
             steps:
@@ -151,6 +152,76 @@ class TestPlanValidatorTest {
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue(result.valid, "Barrier plan should be valid")
+  }
+
+  @Test
+  fun `rejects a plan with valid barriers plus a device-less non-coordination step`() {
+    // devices=[A,B] and both barrier steps are individually valid, but the
+    // trailing tapOn step declares no device at all. The daemon's
+    // PlanValidator.validateDeviceLabelsPresent checks every step
+    // generically, not just barrier/criticalSection -- this must be
+    // rejected here too (#6215 review).
+    val yaml =
+      """
+      name: barrier-plan-with-device-less-tapon
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: tapOn
+          params:
+            text: Continue
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A device-less tapOn step under a plan that declares devices should be invalid",
+    )
+  }
+
+  @Test
+  fun `rejects a plan with valid barriers plus a non-coordination step targeting an undeclared device`() {
+    val yaml =
+      """
+      name: barrier-plan-with-undeclared-device-tapon
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: tapOn
+          params:
+            device: C
+            text: Continue
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A tapOn step targeting an undeclared device should be invalid",
+    )
   }
 
   @Test
@@ -342,6 +413,7 @@ class TestPlanValidatorTest {
         - A
       steps:
         - tool: criticalSection
+          device: A
           lock: sync-point
           deviceCount: 1
           steps:
@@ -376,6 +448,59 @@ class TestPlanValidatorTest {
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse(result.valid, "barrier with timeout=0 should be invalid")
+  }
+
+  @Test
+  fun `rejects barrier with a malformed platform value`() {
+    // addDeviceTargetingToSchema restricts platform to android/ios at
+    // execution; the authoring schema must reject an invalid value too,
+    // instead of only failing at execution (#6215 review).
+    val yaml =
+      """
+      name: barrier-malformed-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            platform: windows
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "barrier with platform=windows should be invalid")
+  }
+
+  @Test
+  fun `accepts barrier with a valid platform value`() {
+    val yaml =
+      """
+      name: barrier-valid-platform
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+            platform: android
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+            platform: android
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "barrier with platform=android should be valid")
   }
 
   @Test

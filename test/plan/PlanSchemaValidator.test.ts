@@ -1000,6 +1000,67 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should reject a barrier step with a malformed platform value", () => {
+      // addDeviceTargetingToSchema restricts platform to android/ios at
+      // execution; the authoring schema must reject an invalid value too,
+      // instead of only failing at execution (#6215 review).
+      const yaml = `
+name: barrier-malformed-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      platform: windows
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should accept a barrier step with a valid platform value", () => {
+      const yaml = `
+name: barrier-valid-platform
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+      platform: android
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection step with a malformed platform value", () => {
+      const yaml = `
+name: critical-section-malformed-platform
+devices:
+  - A
+steps:
+  - tool: criticalSection
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 1
+      platform: windows
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: Button
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should accept a barrier step with a positive timeout", () => {
       const yaml = `
 name: barrier-positive-timeout

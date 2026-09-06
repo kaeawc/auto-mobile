@@ -25,7 +25,20 @@ interface TouchLatencyResult {
   error?: string;
   /** Number of samples taken */
   sampleCount: number;
+  /**
+   * True when the app was rendering frames on its own (spinner, video,
+   * ongoing transition) during the pre-tap idle window, so any measured
+   * latency cannot be attributed to the synthetic touch (issue #6167).
+   */
+  animating?: boolean;
 }
+
+/**
+ * A baseline `Total frames rendered` above this during the pre-tap idle
+ * window is treated as the app animating on its own rather than a single
+ * post-reset redraw settling.
+ */
+const ANIMATING_BASELINE_FRAME_THRESHOLD = 2;
 
 /**
  * True when a gfxinfo counter was parsed on both sides and grew. A `null` on
@@ -63,11 +76,26 @@ export class TouchLatencyTracker {
    * @param screenSize - Device screen dimensions
    * @returns Touch coordinates (x, y)
    */
-  private selectSafeTouchLocation(screenSize: ScreenSize): { x: number; y: number } {
-    // Use top-right corner of status bar area (typically safe and non-interactive)
-    // Status bar is usually ~50-75px tall
-    const x = Math.floor(screenSize.width * 0.95); // 95% to right
-    const y = Math.floor(screenSize.height * 0.02); // 2% from top (status bar)
+  private selectSafeTouchLocation(
+    screenSize: ScreenSize,
+    touchPoint?: { x: number; y: number },
+  ): { x: number; y: number } {
+    if (touchPoint) {
+      logger.debug(
+        `[TouchLatency] Using caller-provided touch location: (${touchPoint.x}, ${touchPoint.y})`,
+      );
+      return touchPoint;
+    }
+
+    // A point at y = 2% of screen height lands inside the SystemUI status bar
+    // on most devices, not the audited app's own window (issue #6167) — a tap
+    // there never reaches the app, so a static-but-responsive app would
+    // falsely read as frozen. Target a point horizontally centered (avoiding
+    // corner overflow-menu / navigation icons) and vertically just below the
+    // status bar and a typical top app bar, which is still content that is
+    // unlikely to be interactive.
+    const x = Math.floor(screenSize.width * 0.5); // horizontally centered
+    const y = Math.floor(screenSize.height * 0.12); // below status bar + app bar
 
     logger.debug(`[TouchLatency] Selected safe touch location: (${x}, ${y})`);
     return { x, y };
@@ -141,6 +169,94 @@ export class TouchLatencyTracker {
   }
 
   /**
+   * Take a single touch-latency sample: reset gfxinfo, wait out a no-input
+   * idle window to read the baseline, then either flag the app as animating
+   * (baseline already accumulated frames on its own, #6167) or inject the
+   * synthetic touch and measure the frame response.
+   */
+  private async takeSample(
+    packageName: string,
+    touchLocation: { x: number; y: number },
+    maxWaitMs: number,
+    perf: PerformanceTracker,
+    sampleIndex: number,
+  ): Promise<{ latencyMs: number | null; animating: boolean }> {
+    // Reset gfxinfo to get clean baseline
+    await perf.track("adbGfxinfoReset", () =>
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
+    );
+
+    // Small delay to ensure reset is processed - this is also the no-input
+    // idle window the animating check reads the baseline over.
+    await this.timer.sleep(50);
+
+    // Get baseline frame stats
+    const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaseline", () =>
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+    );
+    const baselineStats = this.idle.parseMetrics(baselineStdout);
+
+    // If frames already accumulated during the idle window above, the app is
+    // rendering on its own (spinner/video/ongoing transition) — any frame
+    // delta seen after the tap can't be attributed to it.
+    if (
+      baselineStats.totalFrames !== null &&
+      baselineStats.totalFrames > ANIMATING_BASELINE_FRAME_THRESHOLD
+    ) {
+      logger.warn(
+        `[TouchLatency] Sample ${sampleIndex + 1}: ${baselineStats.totalFrames} frame(s) ` +
+          "rendered during the pre-tap idle window - app is animating, skipping this sample",
+      );
+      return { latencyMs: null, animating: true };
+    }
+
+    // Inject touch and immediately start measuring
+    await this.injectTouch(touchLocation.x, touchLocation.y, perf);
+
+    const latencyMs = await this.measureFrameResponse(packageName, baselineStats, maxWaitMs, perf);
+    return { latencyMs, animating: false };
+  }
+
+  /**
+   * Reduce the per-sample results of a `measureLatency` run into the final
+   * result: a median latency on success, or a failure carrying the
+   * animating disposition when every sample was discounted for it.
+   */
+  private buildResult(
+    touchLocation: { x: number; y: number },
+    measurements: number[],
+    animatingDetected: boolean,
+  ): TouchLatencyResult {
+    if (measurements.length === 0) {
+      return {
+        latencyMs: 0,
+        touchCoordinates: touchLocation,
+        success: false,
+        error: animatingDetected
+          ? "App renders continuously (animating); touch latency cannot be isolated"
+          : "No successful measurements - UI may be frozen or gfxinfo unavailable",
+        sampleCount: 0,
+        animating: animatingDetected,
+      };
+    }
+
+    // Median latency (more robust than average). The empty case is handled above.
+    const medianLatency = calculateMedian(measurements) ?? 0;
+
+    logger.info(
+      `[TouchLatency] Measured latency: ${medianLatency}ms (from ${measurements.length} samples)`,
+    );
+
+    return {
+      latencyMs: medianLatency,
+      touchCoordinates: touchLocation,
+      success: true,
+      sampleCount: measurements.length,
+      ...(animatingDetected ? { animating: true } : {}),
+    };
+  }
+
+  /**
    * Measure touch latency for a given package
    * @param packageName - Package name to monitor
    * @param screenSize - Device screen dimensions
@@ -154,6 +270,8 @@ export class TouchLatencyTracker {
     options: {
       sampleCount?: number;
       maxWaitMs?: number;
+      /** Override the synthetic-tap coordinate (e.g. a known-inert point inside the app window). */
+      touchPoint?: { x: number; y: number };
     } = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<TouchLatencyResult> {
@@ -164,41 +282,21 @@ export class TouchLatencyTracker {
       `[TouchLatency] Measuring touch latency for ${packageName} (${sampleCount} samples)`,
     );
 
-    const touchLocation = this.selectSafeTouchLocation(screenSize);
+    const touchLocation = this.selectSafeTouchLocation(screenSize, options.touchPoint);
     const measurements: number[] = [];
+    let animatingDetected = false;
 
     try {
       for (let i = 0; i < sampleCount; i++) {
         logger.debug(`[TouchLatency] Taking sample ${i + 1}/${sampleCount}`);
 
-        // Reset gfxinfo to get clean baseline
-        await perf.track("adbGfxinfoReset", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
-        );
+        const sampleResult = await this.takeSample(packageName, touchLocation, maxWaitMs, perf, i);
 
-        // Small delay to ensure reset is processed
-        await this.timer.sleep(50);
-
-        // Get baseline frame stats
-        const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaseline", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
-        );
-        const baselineStats = this.idle.parseMetrics(baselineStdout);
-
-        // Inject touch and immediately start measuring
-        await this.injectTouch(touchLocation.x, touchLocation.y, perf);
-
-        // Measure time until frame response
-        const latency = await this.measureFrameResponse(
-          packageName,
-          baselineStats,
-          maxWaitMs,
-          perf,
-        );
-
-        if (latency !== null) {
-          measurements.push(latency);
-          logger.debug(`[TouchLatency] Sample ${i + 1}: ${latency}ms`);
+        if (sampleResult.animating) {
+          animatingDetected = true;
+        } else if (sampleResult.latencyMs !== null) {
+          measurements.push(sampleResult.latencyMs);
+          logger.debug(`[TouchLatency] Sample ${i + 1}: ${sampleResult.latencyMs}ms`);
         } else {
           logger.warn(`[TouchLatency] Sample ${i + 1} timeout - no response within ${maxWaitMs}ms`);
         }
@@ -209,29 +307,7 @@ export class TouchLatencyTracker {
         }
       }
 
-      if (measurements.length === 0) {
-        return {
-          latencyMs: 0,
-          touchCoordinates: touchLocation,
-          success: false,
-          error: "No successful measurements - UI may be frozen or gfxinfo unavailable",
-          sampleCount: 0,
-        };
-      }
-
-      // Median latency (more robust than average). The empty case is handled above.
-      const medianLatency = calculateMedian(measurements) ?? 0;
-
-      logger.info(
-        `[TouchLatency] Measured latency: ${medianLatency}ms (from ${measurements.length} samples)`,
-      );
-
-      return {
-        latencyMs: medianLatency,
-        touchCoordinates: touchLocation,
-        success: true,
-        sampleCount: measurements.length,
-      };
+      return this.buildResult(touchLocation, measurements, animatingDetected);
     } catch (error) {
       logger.error(`[TouchLatency] Failed to measure touch latency: ${error}`);
       return {

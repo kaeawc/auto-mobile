@@ -125,7 +125,11 @@ describe("TouchLatencyTracker - Unit Tests", function () {
   });
 
   describe("selectSafeTouchLocation", function () {
-    test("should select a location in the top-right corner", function () {
+    // A tap at 2% of screen height lands in the SystemUI status bar, not the
+    // audited app's window (#6167) - the default location must clear it.
+    const STATUS_BAR_BAND_RATIO = 0.02;
+
+    test("should select a location inside the app window, below the status bar", function () {
       const fakeAdb = new FakeAdbExecutor();
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -133,9 +137,10 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       // Access private method via type assertion for testing
       const location = (tracker as any).selectSafeTouchLocation(screenSize);
 
-      // Should be at 95% width and 2% height (status bar area)
-      expect(location.x).toBe(Math.floor(1080 * 0.95)); // 1026
-      expect(location.y).toBe(Math.floor(1920 * 0.02)); // 38
+      expect(location.x).toBe(Math.floor(1080 * 0.5));
+      expect(location.y).toBe(Math.floor(1920 * 0.12));
+      // The old status-bar band is no longer the target.
+      expect(location.y).toBeGreaterThan(screenSize.height * STATUS_BAR_BAND_RATIO);
     });
 
     test("should handle different screen sizes", function () {
@@ -146,8 +151,19 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       const smallScreen: ScreenSize = { width: 720, height: 1280 };
       const location = (tracker as any).selectSafeTouchLocation(smallScreen);
 
-      expect(location.x).toBe(Math.floor(720 * 0.95)); // 684
-      expect(location.y).toBe(Math.floor(1280 * 0.02)); // 25
+      expect(location.x).toBe(Math.floor(720 * 0.5));
+      expect(location.y).toBe(Math.floor(1280 * 0.12));
+      expect(location.y).toBeGreaterThan(smallScreen.height * STATUS_BAR_BAND_RATIO);
+    });
+
+    test("should honor a caller-provided touchPoint override", function () {
+      const fakeAdb = new FakeAdbExecutor();
+      const factory: AdbClientFactory = { create: () => fakeAdb };
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const location = (tracker as any).selectSafeTouchLocation(screenSize, { x: 42, y: 84 });
+
+      expect(location).toEqual({ x: 42, y: 84 });
     });
   });
 
@@ -467,9 +483,11 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         // Frame counter present but flat, jank flat: no frame was rendered.
+        // Stays below the animating-detection threshold so this exercises
+        // the "no increase" timeout path, not the animating path (#6167).
         return {
           stdout: `
-            Total frames rendered: 42
+            Total frames rendered: 1
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
@@ -496,6 +514,137 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.success).toBe(false);
       expect(result.sampleCount).toBe(0);
       expect(result.error).toContain("No successful measurements");
+      expect(result.animating).toBeFalsy();
+    });
+
+    test("should flag an app as animating when frames render during the pre-tap idle window (#6167)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        // The app keeps rendering (spinner/video) with no input at all -
+        // every read, including the pre-tap baseline, sees frame growth.
+        return {
+          stdout: `
+            Total frames rendered: 12
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // No misleading pollIntervalMs-ish latency: the sample is discounted
+      // and the result carries the animating disposition instead.
+      expect(result.animating).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.sampleCount).toBe(0);
+      expect(result.error).toContain("animating");
+    });
+
+    test("should not flag a static app as animating and should measure a real post-tap latency", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let pollCount = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          pollCount = 0;
+          return { stdout: "", stderr: "" };
+        }
+
+        pollCount++;
+        // Baseline (first read after reset) is idle: no frames. Only after
+        // the synthetic tap does the frame counter move.
+        const totalFrames = pollCount === 1 ? 0 : 5;
+        return {
+          stdout: `
+            Total frames rendered: ${totalFrames}
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.animating).toBeFalsy();
+      expect(result.success).toBe(true);
+      expect(result.sampleCount).toBe(1);
+      expect(result.latencyMs).toBeGreaterThan(0);
+    });
+
+    test("synthetic tap coordinate lands inside the app window, not the status-bar band", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+        return {
+          stdout: `
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 50 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // The old default (y = 2% of height) is the SystemUI status-bar band.
+      const statusBarBandY = Math.floor(screenSize.height * 0.02);
+      expect(result.touchCoordinates.y).toBeGreaterThan(statusBarBandY);
+      expect(result.touchCoordinates.y).toBeLessThan(screenSize.height);
+      expect(result.touchCoordinates.x).toBeGreaterThan(0);
+      expect(result.touchCoordinates.x).toBeLessThan(screenSize.width);
     });
 
     test("should handle errors gracefully and return error result", async function () {

@@ -342,6 +342,14 @@ export class PerformanceAudit {
         ),
       );
 
+      if (result.animating) {
+        logger.warn(
+          "[PerformanceAudit] Touch latency measurement discarded: app is rendering frames " +
+            "on its own (animating) - latency cannot be attributed to the synthetic touch",
+        );
+        return null;
+      }
+
       if (result.success) {
         logger.info(`[PerformanceAudit] Touch latency measured: ${result.latencyMs}ms`);
         return result.latencyMs;

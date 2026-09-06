@@ -6,7 +6,7 @@
 import crypto from "crypto";
 import { Element } from "../../models/Element";
 import { ElementBounds } from "../../models/ElementBounds";
-import { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
+import { ViewHierarchyNode, ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
 import {
   AccessibilityAuditConfig,
   AccessibilityAuditResult,
@@ -50,6 +50,7 @@ export class WcagAudit {
     packageName: string,
     config: AccessibilityAuditConfig,
     density?: number,
+    windows?: ViewHierarchyWindowInfo[],
   ): Promise<AccessibilityAuditResult> {
     const violations: WcagViolation[] = [];
 
@@ -74,7 +75,7 @@ export class WcagAudit {
     violations.push(...this.checkFormInputLabels(elements, viewHierarchy, density));
 
     // Generate screen ID for baseline tracking
-    const screenId = this.generateScreenId(packageName, viewHierarchy);
+    const screenId = this.generateScreenId(packageName, viewHierarchy, windows);
 
     // Filter violations based on baseline if enabled
     let filteredViolations = violations;
@@ -404,7 +405,11 @@ export class WcagAudit {
   /**
    * Generate screen identifier for baseline tracking
    */
-  private generateScreenId(packageName: string, hierarchy: ViewHierarchyNode): string {
+  private generateScreenId(
+    packageName: string,
+    hierarchy: ViewHierarchyNode,
+    windows?: ViewHierarchyWindowInfo[],
+  ): string {
     // Use package name + root activity/fragment identifier
     // This is a simplified approach - could be enhanced with more specific identifiers
     //
@@ -416,7 +421,8 @@ export class WcagAudit {
     // shape leaves the other always undefined, collapsing every screen on that
     // source to the same "unknown:" id and defeating per-screen baseline
     // tracking. `getNodeClass`/`getNodeResourceId` check both.
-    const rootNode = this.resolveRootNode(hierarchy);
+    const activeRoot = this.resolveRootNode(hierarchy, windows);
+    const rootNode = this.descendToMeaningfulNode(activeRoot);
     const rootClass = this.getNodeClass(rootNode) || "unknown";
     const rootId = this.getNodeResourceId(rootNode) || "";
 
@@ -432,14 +438,24 @@ export class WcagAudit {
    */
   private asFlatAttrNode(
     node: ViewHierarchyNode,
-  ): ViewHierarchyNode & { class?: unknown; "resource-id"?: unknown } {
-    return node as ViewHierarchyNode & { class?: unknown; "resource-id"?: unknown };
+  ): ViewHierarchyNode & { class?: unknown; className?: unknown; "resource-id"?: unknown } {
+    return node as ViewHierarchyNode & {
+      class?: unknown;
+      className?: unknown;
+      "resource-id"?: unknown;
+    };
   }
 
-  /** Read `class` from either node-attribute shape (see `generateScreenId`). */
+  /**
+   * Read `class` from either node-attribute shape (see `generateScreenId`).
+   * `className` (issue #6274) is the field name CtrlProxy's accessibility
+   * hierarchy actually writes (see test/fixtures/observe/android-home.json) —
+   * neither `$.class` nor flat `class` is ever populated on it, so without
+   * this fallback every production Android node reads as classless.
+   */
   private getNodeClass(node: ViewHierarchyNode): string | undefined {
     const flat = this.asFlatAttrNode(node);
-    const value = flat.$?.class ?? flat.class;
+    const value = flat.$?.class ?? flat.class ?? flat.className;
     return typeof value === "string" ? value : undefined;
   }
 
@@ -450,15 +466,115 @@ export class WcagAudit {
     return typeof value === "string" ? value : undefined;
   }
 
-  private resolveRootNode(hierarchy: ViewHierarchyNode): ViewHierarchyNode {
+  /**
+   * Descend through attribute-less pass-through wrappers (window decor, content
+   * frame) to the first descendant that actually carries a class or
+   * resource-id, so the baseline id reflects real screen content instead of
+   * generic window chrome. Stops at a branch point (multiple children) or a
+   * leaf so it never silently jumps to an unrelated subtree.
+   */
+  private descendToMeaningfulNode(
+    node: ViewHierarchyNode,
+    maxDepth: number = 10,
+  ): ViewHierarchyNode {
+    let current = node;
+    for (let depth = 0; depth < maxDepth; depth++) {
+      if (this.getNodeClass(current) || this.getNodeResourceId(current)) {
+        return current;
+      }
+      const child = current.node;
+      // A single-object child (not wrapped in an array) is the common
+      // pass-through shape for CtrlProxy's accessibility hierarchy despite the
+      // `ViewHierarchyNode[]` static type (see `resolveRootNode`'s identical
+      // runtime-shape handling above). An array child is a branch point —
+      // stop rather than guess which sibling to follow.
+      if (child && typeof child === "object" && !Array.isArray(child)) {
+        current = child as ViewHierarchyNode;
+        continue;
+      }
+      return current;
+    }
+    return current;
+  }
+
+  /** `AccessibilityWindowInfo.TYPE_SYSTEM` — the window type CtrlProxy reports for SystemUI. */
+  private static readonly ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
+  private static readonly SYSTEM_UI_PACKAGE = "com.android.systemui";
+
+  /** Same window/package signal `ObserveScreen` uses to distinguish app vs SystemUI windows. */
+  private isSystemUiWindow(window: ViewHierarchyWindowInfo): boolean {
+    return (
+      window.packageName === WcagAudit.SYSTEM_UI_PACKAGE ||
+      window.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_SYSTEM
+    );
+  }
+
+  private boundsEqual(a: ElementBounds | undefined, b: ElementBounds | undefined): boolean {
+    if (!a || !b) {
+      return false;
+    }
+    return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
+  }
+
+  private boundsArea(bounds: ElementBounds | undefined): number {
+    if (!bounds) {
+      return 0;
+    }
+    return Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
+  }
+
+  /**
+   * Pick the root node baseline tracking should key off. A production-shaped
+   * hierarchy carries one root PER WINDOW (issue #6274 — see
+   * test/fixtures/observe/android-home.json and
+   * test/fixtures/observe/diff/scroll-before.json), so blindly taking the last
+   * entry lands on the attribute-less SystemUI status-bar wrapper, generating
+   * an `<appId>:unknown:` baseline id that lets one screen's baseline suppress
+   * another screen's violations.
+   *
+   * Prefer the ACTIVE APP window root: the focused (falling back to active),
+   * non-SystemUI window from the accessibility `windows[]` metadata — the same
+   * signal `ObserveScreen`'s `classifyFocusedSystemUiWindow` uses to
+   * distinguish app vs SystemUI windows — matched to its root node by bounds.
+   * When no `windows[]` metadata is available, fall back to the largest root by
+   * bounds area: the SystemUI status/navigation bar is always a thin sliver
+   * next to the full-screen app content root.
+   */
+  private resolveRootNode(
+    hierarchy: ViewHierarchyNode,
+    windows?: ViewHierarchyWindowInfo[],
+  ): ViewHierarchyNode {
     const node = hierarchy.node;
-    if (Array.isArray(node) && node.length > 0) {
-      return node[node.length - 1] as ViewHierarchyNode;
+    if (!Array.isArray(node)) {
+      if (node && typeof node === "object") {
+        return node as ViewHierarchyNode;
+      }
+      return hierarchy;
     }
-    if (node && typeof node === "object") {
-      return node as ViewHierarchyNode;
+    if (node.length === 0) {
+      return hierarchy;
     }
-    return hierarchy;
+    if (node.length === 1) {
+      return node[0] as ViewHierarchyNode;
+    }
+
+    if (windows && windows.length > 0) {
+      const activeWindow =
+        windows.find((w) => w.isFocused === true && !this.isSystemUiWindow(w)) ??
+        windows.find((w) => w.isActive === true && !this.isSystemUiWindow(w));
+      if (activeWindow?.bounds) {
+        const matched = node.find((candidate) =>
+          this.boundsEqual((candidate as ViewHierarchyNode).bounds, activeWindow.bounds),
+        );
+        if (matched) {
+          return matched as ViewHierarchyNode;
+        }
+      }
+    }
+
+    return (node as ViewHierarchyNode[]).reduce((largest, candidate) =>
+      this.boundsArea(candidate.bounds) > this.boundsArea(largest.bounds) ? candidate : largest,
+    );
   }
 
   /**

@@ -1,4 +1,5 @@
 import { ToolSelectionProfileProvenanceRepository } from "../db/toolSelectionProfileProvenanceRepository";
+import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 
 /**
  * Tracks tool-selection-profile identifiers this daemon PROCESS itself has
@@ -82,13 +83,22 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
  * minted profile is recognized again after a daemon restart/upgrade once
  * `load()` has repopulated the in-memory set.
  *
- * The write-through is fire-and-forget: the repository already logs and
- * swallows its own failures (matching `DeviceLockRepository`'s best-effort
- * convention), so a persistence hiccup degrades to the pre-#6225
- * in-memory-only behavior for that one entry rather than failing the
- * `setToolEnabled` call that triggered the mint. A value that is never
- * inserted — a fabricated or merely-echoed-header uuid — is never recorded
- * here either, so it is rejected identically before and after a restart.
+ * The write-through is fire-and-forget from the CALLER's perspective (`record()`
+ * stays synchronous), but it is NOT untracked: it is routed through the shared
+ * `DbWriteBarrier` (`getDbWriteBarrier().track(...)`, resolved fresh per call
+ * per the barrier's use-time-resolution contract), the same barrier
+ * `Daemon.stop()`'s graceful-shutdown drain awaits before closing the database
+ * (issue #2792's mechanism). Without this, a restart during a slow/queued
+ * SQLite write could have the drain see no outstanding work and close the DB
+ * before the insert commits — the repository would then swallow that failure,
+ * and the very next daemon would reject the profile this PR is meant to let it
+ * recognize. The repository still logs and swallows its OWN failures (matching
+ * `DeviceLockRepository`'s best-effort convention), so a genuine persistence
+ * failure (not a race with shutdown) degrades to the pre-#6225 in-memory-only
+ * behavior for that one entry rather than failing the `setToolEnabled` call
+ * that triggered the mint. A value that is never inserted — a fabricated or
+ * merely-echoed-header uuid — is never recorded here either, so it is
+ * rejected identically before and after a restart.
  */
 export class PersistentToolSelectionProfileRegistry
   implements ToolSelectionProfileRegistry, ToolSelectionProfileProvenanceLoader
@@ -100,7 +110,7 @@ export class PersistentToolSelectionProfileRegistry
   record(profileUuid: string): void {
     this.memory.record(profileUuid);
     if (profileUuid.trim().length > 0) {
-      void this.repository.insert(profileUuid);
+      void getDbWriteBarrier().track(() => this.repository.insert(profileUuid));
     }
   }
 

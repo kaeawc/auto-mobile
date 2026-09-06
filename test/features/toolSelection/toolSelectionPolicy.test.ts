@@ -6,6 +6,7 @@ import {
   isToolEnabledForAnyRoute,
   isToolEnabledForAnySession,
 } from "../../../src/features/toolSelection/toolSelectionPolicy";
+import { IDE_SET_SESSION_TOOL_ENABLED_METHOD } from "../../../src/features/toolSelection/toolSelectionControl";
 
 describe("exact-tool selection union policy", () => {
   const only = (enabledSession: string): Pick<SessionToolSelectionService, "isEnabled"> => ({
@@ -263,6 +264,41 @@ describe("exact-tool selection union policy", () => {
         ["base-session", "base-session:label"],
         disabled,
       ),
+    ).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
+    );
+  });
+
+  test("assertSocketToolEnabled's IDE-socket rejection names ide/setSessionToolEnabled, never the MCP setToolEnabled tool (issue #6259, PRRT_kwDOP-GF5M6fumZY)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    // A caller on the direct IDE socket channel (src/daemon/socketServer.ts
+    // `assertSocketToolEnabled`) cannot invoke an MCP tool — only the socket's own
+    // `ide/setSessionToolEnabled` method (src/daemon/socketServer.ts:2418-2444), which requires
+    // sessionUuid, toolName, and enabled params.
+    await expect(
+      assertToolEnabledForAnySession(
+        "setKeyValue",
+        false,
+        ["base-session", "base-session:label"],
+        disabled,
+        undefined,
+        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      ),
+    ).rejects.toThrow(
+      'Enable it with ide/setSessionToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
+    );
+  });
+
+  test("the MCP tool-dispatch rejection still names the MCP setToolEnabled tool (issue #6259)", async () => {
+    const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async () => false,
+    };
+    // src/server/index.ts calls assertToolEnabledForAnySession without a remediationMethodName,
+    // so the MCP channel keeps naming the `setToolEnabled` MCP tool.
+    await expect(
+      assertToolEnabledForAnySession("setKeyValue", false, ["base-session"], disabled),
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
     );

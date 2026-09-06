@@ -20,9 +20,10 @@ type ToolSelectionReader = Pick<SessionToolSelectionService, "isEnabled"> &
 function formatSetToolEnabledRemediation(
   toolName: string,
   realSessionUuid: string | undefined,
+  remediationMethodName: string = SET_TOOL_ENABLED_TOOL_NAME,
 ): string {
   const sessionUuidArg = realSessionUuid ? `, sessionUuid: "${realSessionUuid}"` : "";
-  return `setToolEnabled { toolName: "${toolName}", enabled: true${sessionUuidArg} }`;
+  return `${remediationMethodName} { toolName: "${toolName}", enabled: true${sessionUuidArg} }`;
 }
 
 /**
@@ -43,13 +44,14 @@ function formatToolEnabledRemediationSentence(
   toolName: string,
   candidates: readonly string[],
   connectionProfileUuid: string | undefined,
+  remediationMethodName: string = SET_TOOL_ENABLED_TOOL_NAME,
 ): string {
   if (candidates.length === 0 && connectionProfileUuid === undefined) {
     return (
-      "No device session owns this device yet, so there is nothing setToolEnabled could enable " +
+      `No device session owns this device yet, so there is nothing ${remediationMethodName} could enable ` +
       "that a retry would recheck. Acquire a device session with getAndroid { deviceId } " +
       "(or getApple { deviceId }), then enable the tool with " +
-      `setToolEnabled { toolName: "${toolName}", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.`
+      `${formatSetToolEnabledRemediation(toolName, "<uuid from getAndroid/getApple>", remediationMethodName)}.`
     );
   }
   const realSessionUuid =
@@ -58,7 +60,7 @@ function formatToolEnabledRemediationSentence(
       : connectionProfileUuid === undefined
         ? candidates[0]
         : undefined;
-  return `Enable it with ${formatSetToolEnabledRemediation(toolName, realSessionUuid)}.`;
+  return `Enable it with ${formatSetToolEnabledRemediation(toolName, realSessionUuid, remediationMethodName)}.`;
 }
 
 async function explicitOverrideResult(
@@ -188,12 +190,20 @@ export async function isToolEnabledForAnyRoute(
   return false;
 }
 
+/**
+ * @param remediationMethodName The callable the remediation sentence names — the MCP
+ * `setToolEnabled` tool by default. Pass `IDE_SET_SESSION_TOOL_ENABLED_METHOD` from a rejection
+ * raised on the direct IDE socket channel (see `assertSocketToolEnabled` in
+ * src/daemon/socketServer.ts): that caller cannot invoke an MCP tool, only the socket's own
+ * `ide/setSessionToolEnabled` method (issue #6259).
+ */
 export async function assertToolEnabledForAnySession(
   toolName: string,
   declaredDefault: boolean,
   sessionUuids: ReadonlyArray<string | undefined>,
   sessionToolSelectionService?: ToolSelectionReader,
   connectionProfileUuid?: string,
+  remediationMethodName: string = SET_TOOL_ENABLED_TOOL_NAME,
 ): Promise<void> {
   if (
     await isToolEnabledForAnySession(
@@ -212,6 +222,11 @@ export async function assertToolEnabledForAnySession(
   const target = candidates.join(" / ") || "(not yet bound)";
   throw new ActionableError(
     `Tool ${toolName} is disabled for device session ${target}. ` +
-      formatToolEnabledRemediationSentence(toolName, candidates, connectionProfileUuid),
+      formatToolEnabledRemediationSentence(
+        toolName,
+        candidates,
+        connectionProfileUuid,
+        remediationMethodName,
+      ),
   );
 }

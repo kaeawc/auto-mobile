@@ -1,5 +1,14 @@
 export const SET_TOOL_ENABLED_TOOL_NAME = "setToolEnabled";
 
+/**
+ * The daemon IDE-socket method (src/daemon/socketServer.ts, `ide/setSessionToolEnabled` case)
+ * that grants a tool for a session over the direct IDE socket channel. Rejections raised on that
+ * channel (`ide/setKeyValue`, `ide/removeKeyValue`, `ide/clearKeyValueFile`) must name THIS method
+ * in their remediation, not the MCP `setToolEnabled` tool — a caller on the socket channel has no
+ * way to invoke an MCP tool (issue #6259).
+ */
+export const IDE_SET_SESSION_TOOL_ENABLED_METHOD = "ide/setSessionToolEnabled";
+
 function textContent(response: unknown): string[] {
   if (!response || typeof response !== "object") {
     return [];

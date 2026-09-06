@@ -79,6 +79,16 @@ interface SetUIStateDependencies {
   timer?: Timer;
 }
 
+/**
+ * Internal per-field outcome. Carries the fresh observation (if
+ * verifyFieldValue already fetched one) alongside the public FieldResult so
+ * execute() can reuse it instead of paying for a second, effectively
+ * redundant observe against the device (#6222).
+ */
+interface InternalFieldResult extends FieldResult {
+  freshObservation?: ObserveResult;
+}
+
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_SCROLL_DIRECTION = "down";
 const MAX_FUTILE_SCROLLS = 3;
@@ -181,18 +191,26 @@ export class SetUIState extends BaseVisualChange {
         // work. The next search re-arms it from scratch (#4252 review).
         searchDeadline = null;
 
-        // Refresh observation after each success
+        // Report per-field advancement. This keeps the request alive on
+        // progress-aware clients (a live request timeout is commonly reset by
+        // progress notifications) and, independent of transport behavior,
+        // gives the client a durable trace of what has already been applied
+        // before a bare timeout could otherwise leave it blind (#6222).
+        await progress?.(
+          processed.size,
+          options.fields.length,
+          result.success
+            ? `Set field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
+            : `Failed field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
+        );
+
+        // Refresh observation after each success. processField already fetched
+        // a fresh observation as part of verification for most field types —
+        // reuse it instead of paying for a second, effectively redundant
+        // observe against the device, which is exactly the per-field cost that
+        // was pushing multi-field calls past the request timeout (#6222).
         if (result.success) {
-          const freshObs = await this.getObserveScreen().execute(
-            undefined,
-            undefined,
-            false,
-            0,
-            signal,
-          );
-          if (freshObs) {
-            lastObservation = freshObs;
-          }
+          lastObservation = await this.observationAfterSuccess(result, signal);
         }
 
         // Fail fast on failure
@@ -278,6 +296,22 @@ export class SetUIState extends BaseVisualChange {
   }
 
   /**
+   * Observation to use as the "current state" after a field succeeded. Reuses
+   * the fresh observation processField already fetched during verification
+   * when one is available, avoiding a second observe against the device for
+   * the same state (#6222).
+   */
+  private async observationAfterSuccess(
+    result: InternalFieldResult,
+    signal?: AbortSignal,
+  ): Promise<ObserveResult> {
+    if (result.freshObservation) {
+      return result.freshObservation;
+    }
+    return this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+  }
+
+  /**
    * Find all unprocessed fields visible in the current hierarchy, sorted by bounds.top ascending
    */
   private findVisibleFieldsInScreenOrder(
@@ -336,7 +370,7 @@ export class SetUIState extends BaseVisualChange {
     initialElement: Element,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<FieldResult> {
+  ): Promise<InternalFieldResult> {
     let attempts = 0;
     let lastError: string | undefined;
     let fieldType: FieldType | undefined;
@@ -411,6 +445,7 @@ export class SetUIState extends BaseVisualChange {
         // - Text-only selector on a mutable field type (typing replaces the label text
         //   used as the selector, so re-lookup by original text fails)
         let verified: boolean | undefined;
+        let freshObservation: ObserveResult | undefined;
         const hasTextOnlySelector =
           fieldSpec.selector.text !== undefined && fieldSpec.selector.elementId === undefined;
         const isMutableTextField = fieldType === "text" || fieldType === "dropdown";
@@ -419,7 +454,9 @@ export class SetUIState extends BaseVisualChange {
           this.fieldTypeDetector.shouldSkipVerification(element, fieldType) ||
           (hasTextOnlySelector && isMutableTextField);
         if (!shouldSkipVerify) {
-          verified = await this.verifyFieldValue(fieldSpec, fieldType, signal);
+          const verifyResult = await this.verifyFieldValue(fieldSpec, fieldType, signal);
+          verified = verifyResult.verified;
+          freshObservation = verifyResult.observation;
           if (!verified) {
             lastError = `Verification failed for ${this.describeSelector(fieldSpec.selector)}`;
             continue;
@@ -432,6 +469,7 @@ export class SetUIState extends BaseVisualChange {
           attempts,
           verified,
           fieldType,
+          freshObservation,
         };
       } catch (error) {
         lastError = errorMessage(error);
@@ -660,8 +698,10 @@ export class SetUIState extends BaseVisualChange {
     fieldSpec: FieldSpec,
     fieldType: FieldType,
     signal?: AbortSignal,
-  ): Promise<boolean> {
-    // Get fresh observation
+  ): Promise<{ verified: boolean; observation?: ObserveResult }> {
+    // Get fresh observation. The caller (processField -> execute) reuses this
+    // as its own post-success refresh instead of issuing a second, effectively
+    // redundant observe against the device (#6222).
     const observation = await this.getObserveScreen().execute(
       undefined,
       undefined,
@@ -670,13 +710,13 @@ export class SetUIState extends BaseVisualChange {
       signal,
     );
     if (!observation?.viewHierarchy) {
-      return false;
+      return { verified: false, observation };
     }
 
     // Find the element again
     const element = this.findElement(fieldSpec.selector, observation.viewHierarchy);
     if (!element) {
-      return false;
+      return { verified: false, observation };
     }
 
     // Verify based on field type
@@ -684,27 +724,27 @@ export class SetUIState extends BaseVisualChange {
       case "text":
         if (fieldSpec.value !== undefined) {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return { verified: currentValue === fieldSpec.value, observation };
         }
-        return true;
+        return { verified: true, observation };
 
       case "checkbox":
       case "toggle":
         if (fieldSpec.selected !== undefined) {
           const isChecked = this.fieldTypeDetector.isChecked(element);
-          return isChecked === fieldSpec.selected;
+          return { verified: isChecked === fieldSpec.selected, observation };
         }
-        return true;
+        return { verified: true, observation };
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return { verified: currentValue === fieldSpec.value, observation };
         }
-        return true;
+        return { verified: true, observation };
 
       default:
-        return true;
+        return { verified: true, observation };
     }
   }
 

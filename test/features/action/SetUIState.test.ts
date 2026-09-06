@@ -1035,6 +1035,177 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
   });
 });
 
+describe("SetUIState progress reporting and observe reuse (#6222)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+
+  let fakeTap: FakeTapOnElement;
+  let fakeInput: FakeInputText;
+  let fakeClear: FakeClearText;
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeTap = new FakeTapOnElement();
+    fakeInput = new FakeInputText();
+    fakeClear = new FakeClearText();
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+  });
+
+  const build = () =>
+    new SetUIState(device, null, {
+      tapOnElement: fakeTap,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+  const threeFieldHierarchy = (values: [string, string, string]): ViewHierarchyResult => ({
+    hierarchy: {
+      node: [
+        {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            "resource-id": "first",
+            text: values[0],
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+            "resource-id": "second",
+            text: values[1],
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+            "resource-id": "third",
+            text: values[2],
+            class: "android.widget.EditText",
+          },
+        },
+      ],
+    },
+  });
+
+  test("reports per-field progress as a multi-field call advances", async () => {
+    let observeCallCount = 0;
+    fakeObserve.setResultFactory(() => {
+      observeCallCount++;
+      if (observeCallCount <= 1) {
+        return createObserveResultFor(threeFieldHierarchy(["", "", ""]));
+      }
+      // Every observe after the initial one reflects all three fields filled --
+      // this test only cares about the progress trace, not exact sequencing.
+      return createObserveResultFor(threeFieldHierarchy(["a", "b", "c"]));
+    });
+    fakeFieldTypeDetector.setFieldType("first", "text");
+    fakeFieldTypeDetector.setFieldType("second", "text");
+    fakeFieldTypeDetector.setFieldType("third", "text");
+    fakeFieldTypeDetector.setTextValue("first", "a");
+    fakeFieldTypeDetector.setTextValue("second", "b");
+    fakeFieldTypeDetector.setTextValue("third", "c");
+
+    const progressCalls: Array<{ progress: number; total?: number; message?: string }> = [];
+    const progress = async (progressValue: number, total?: number, message?: string) => {
+      progressCalls.push({ progress: progressValue, total, message });
+    };
+
+    const result = await build().execute(
+      {
+        fields: [
+          { selector: { elementId: "first" }, value: "a" },
+          { selector: { elementId: "second" }, value: "b" },
+          { selector: { elementId: "third" }, value: "c" },
+        ],
+      },
+      progress,
+    );
+
+    expect(result.success).toBe(true);
+    // One progress notification per field, reporting cumulative advancement.
+    expect(progressCalls.length).toBeGreaterThanOrEqual(3);
+    expect(progressCalls.map((c) => c.progress)).toEqual(
+      expect.arrayContaining([1, 2, 3]) as unknown as number[],
+    );
+    expect(progressCalls.every((c) => c.total === 3)).toBe(true);
+    expect(progressCalls[progressCalls.length - 1].message).toContain("3/3");
+  });
+
+  test("reports progress up to the point of a mid-loop failure, not silence", async () => {
+    fakeObserve.setResult(createObserveResultFor(threeFieldHierarchy(["", "", ""])));
+    fakeFieldTypeDetector.setFieldType("first", "text");
+    fakeFieldTypeDetector.setFieldType("second", "text");
+    fakeFieldTypeDetector.setSkipVerification("first", true);
+
+    // Second field's tap fails every attempt.
+    fakeTap.setResult("second", {
+      success: false,
+      action: "tap",
+      element: { bounds: { left: 0, top: 60, right: 100, bottom: 110 } },
+      error: "Element not clickable",
+    });
+
+    const progressCalls: Array<{ progress: number; message?: string }> = [];
+    const progress = async (progressValue: number, _total?: number, message?: string) => {
+      progressCalls.push({ progress: progressValue, message });
+    };
+
+    const result = await build().execute(
+      {
+        fields: [
+          { selector: { elementId: "first" }, value: "a" },
+          { selector: { elementId: "second" }, value: "b" },
+        ],
+      },
+      progress,
+    );
+
+    expect(result.success).toBe(false);
+    // A client watching progress must see field 1 succeed before field 2 fails
+    // -- it must not look like nothing happened.
+    expect(progressCalls.length).toBe(2);
+    expect(progressCalls[0].message).toContain("Set field");
+    expect(progressCalls[1].message).toContain("Failed field");
+  });
+
+  test("does not re-observe after a verified success -- reuses verification's own observation", async () => {
+    // Single field, verification enabled (no text-only-selector skip, since
+    // elementId selector is used). Only two observes should occur total: the
+    // initial observe, and the one verifyFieldValue performs. No third,
+    // separate "refresh" observe should follow it.
+    fakeObserve.setResultFactory(() => createObserveResultFor(threeFieldHierarchy(["a", "", ""])));
+    fakeFieldTypeDetector.setFieldType("first", "text");
+    fakeFieldTypeDetector.setTextValue("first", "a");
+
+    await build().execute({
+      fields: [{ selector: { elementId: "first" }, value: "a" }],
+    });
+
+    expect(fakeObserve.getCallCount()).toBe(2);
+  });
+
+  function createObserveResultFor(hierarchy: ViewHierarchyResult): ObserveResult {
+    return {
+      updatedAt: fakeTimer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy,
+    };
+  }
+});
+
 describe("SetUIState budget is unaffected by slow work before the search (#4252 review 2)", () => {
   const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
   let fakeTap: FakeTapOnElement;

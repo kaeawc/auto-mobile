@@ -15,10 +15,14 @@
 #     host (the prior narrow `/?$` + `/translations/?$` patterns let `/faq`
 #     through, which is exactly the URL that reset the connection).
 #
-# github.com `issues/*` links are deliberately NOT excluded: they are legitimate
-# references we want validated, routed through the authenticated GitHub API
-# (GITHUB_TOKEN, #5405) rather than throttled HTTP scraping; the backoff above is
-# the correct lever for their transient timeouts.
+# #5622 recurred TWICE after the retry/backoff hardening above landed (runs
+# 33010560252 and 33032939183) — both still exited 2 with 20 [TIMEOUT]s, 0 real
+# errors, 100% against self-referential `github.com/kaeawc/auto-mobile/issues/*`
+# and `pull/*` links (GITHUB_TOKEN routing, #5405, was already in effect too).
+# Client-side retries cannot outrun GitHub's own rate limit under bulk lookups,
+# so those self-referential links (we created the issue/PR, so the link is
+# guaranteed valid) are now excluded from network validation entirely. Links to
+# OTHER repos' issues/PRs are unaffected and still checked.
 #
 # TOML is parsed with yq (the repo's canonical config/workflow parser), not
 # grepped, so a value in a comment cannot satisfy these assertions. The
@@ -75,7 +79,7 @@ requires_lychee() {
 # fixture
 [faq](https://www.contributor-covenant.org/faq)
 [root](https://www.contributor-covenant.org/)
-[issue](https://github.com/kaeawc/auto-mobile/issues/50)
+[other repo issue](https://github.com/lycheeverse/lychee/issues/50)
 EOF
 
   # `--dump` extracts and filters links through the config WITHOUT hitting the
@@ -86,7 +90,32 @@ EOF
   [ "$status" -eq 0 ]
   # The connection-reset URL from the flake must now be excluded.
   [[ "$output" != *"contributor-covenant.org/faq"* ]]
-  # Sanity: github issue links are still checked (not over-excluded), so we keep
-  # validating real references.
-  [[ "$output" == *"github.com/kaeawc/auto-mobile/issues/50"* ]]
+  # Sanity: a DIFFERENT repo's issue link is still checked (not over-excluded),
+  # so we keep validating real references — only our own repo's self-referential
+  # issue/PR links are exempt (next test).
+  [[ "$output" == *"github.com/lycheeverse/lychee/issues/50"* ]]
+}
+
+@test "self-referential auto-mobile issue and PR links are excluded (recurring #5622 rate-limit)" {
+  requires_lychee
+
+  local fixture
+  fixture="$(mktemp)"
+  cat > "$fixture" <<'EOF'
+# fixture
+[issue](https://github.com/kaeawc/auto-mobile/issues/50)
+[pr](https://github.com/kaeawc/auto-mobile/pull/6000)
+[other repo issue](https://github.com/lycheeverse/lychee/issues/50)
+EOF
+
+  run lychee --config "$CONFIG" --dump "$fixture"
+  rm -f "$fixture"
+
+  [ "$status" -eq 0 ]
+  # Self-referential issue/PR links: excluded, since retries alone could not
+  # outrun GitHub's rate limit on repeated recurrence of #5622.
+  [[ "$output" != *"github.com/kaeawc/auto-mobile/issues/50"* ]]
+  [[ "$output" != *"github.com/kaeawc/auto-mobile/pull/6000"* ]]
+  # A different repo's issue link is unaffected.
+  [[ "$output" == *"github.com/lycheeverse/lychee/issues/50"* ]]
 }

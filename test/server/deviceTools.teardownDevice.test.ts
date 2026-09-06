@@ -241,6 +241,97 @@ describe("deleteDevice handler", () => {
     ]);
   });
 
+  // #6250: delete-by-name on iOS (where the caller's identifier is the
+  // simulator's display name, not its UDID) must resolve to the real device
+  // and destroy it, never falsely report already_absent while it still lists.
+  test("resolves an iOS delete-by-name (name != UDID) to the real device and destroys it", async () => {
+    const device: BootedDevice = {
+      platform: "ios",
+      name: "am-sweep-sim",
+      deviceId: "466A9467-CD90-41F3-902B-DC1625471C77",
+    };
+    manager.setBootedDevices("ios", [device]);
+    manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
+
+    // stableId is the device NAME here, exactly like the issue's repro
+    // (no stableName supplied, and no UDID supplied at all).
+    const response = await teardownTool().handler(request("ios", device.name));
+    const body = responseBody(response);
+
+    expect(body.state).toBe("destroyed");
+    expect(body.command).toEqual({ stop: "accepted", destroy: "accepted" });
+    expect(body.verification).toEqual({
+      notRunning: "confirmed",
+      inventory: "complete_absence_confirmed",
+    });
+    expect(manager.wasMethodCalled("killDevice")).toBe(true);
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({
+          platform: "ios",
+          name: device.name,
+          deviceId: device.deviceId,
+        }),
+      }),
+    ]);
+  });
+
+  test("resolves an unbooted iOS delete-by-name (name != UDID) via inventory and destroys it", async () => {
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "am-sweep-sim",
+      deviceId: "466A9467-CD90-41F3-902B-DC1625471C77",
+      isRunning: false,
+    };
+    manager.setDeviceImages("ios", [device]);
+
+    const response = await teardownTool().handler(request("ios", device.name));
+    const body = responseBody(response);
+
+    expect(body.state).toBe("destroyed");
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({
+          platform: "ios",
+          name: device.name,
+          deviceId: device.deviceId,
+        }),
+      }),
+    ]);
+  });
+
+  test("does not report already_absent for an iOS delete-by-name while the device still lists", async () => {
+    const device: BootedDevice = {
+      platform: "ios",
+      name: "am-sweep-sim",
+      deviceId: "466A9467-CD90-41F3-902B-DC1625471C77",
+    };
+    manager.setBootedDevices("ios", [device]);
+    manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
+
+    const response = await teardownTool().handler(request("ios", device.name));
+    const body = responseBody(response);
+
+    expect(body.state).not.toBe("already_absent");
+  });
+
+  test("still reports already_absent for a genuinely absent iOS device looked up by name", async () => {
+    // A different device exists, but nothing matches the requested name by
+    // either UDID or display name — this must remain a true absence, not a
+    // false positive from an unrelated device being present.
+    manager.setBootedDevices("ios", []);
+    manager.setDeviceImages("ios", [
+      { platform: "ios", name: "some-other-sim", deviceId: "OTHER-UDID", isRunning: false },
+    ]);
+
+    const response = await teardownTool().handler(request("ios", "totally-unknown-sim"));
+    const body = responseBody(response);
+
+    expect(body.state).toBe("already_absent");
+    expect(body.command).toEqual({ stop: "not_required", destroy: "not_required" });
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   test("finalizes a segmented recording before deleting its booted Android AVD", async () => {
     const device: BootedDevice = {
       platform: "android",

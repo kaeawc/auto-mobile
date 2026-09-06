@@ -2135,6 +2135,16 @@ function getBootedAndroidStableName(
   return getValidatedPooledAndroidAvdName(device, devicePool) ?? device.name;
 }
 
+// iOS `deleteDevice` targets are frequently expressed by name (the identifier
+// `provisionDevice` echoes back), not by UDID. Matching only on `deviceId`
+// leaves a name-based lookup unresolved even though the simulator is present,
+// which upstream callers treat as proof of absence (#6250). Match on either
+// the UDID or the display name so name-based delete resolves to the real
+// device, and only a lookup that matches neither is treated as "not found".
+function matchesIosTeardownIdentity(device: { deviceId?: string; name: string }, stableId: string) {
+  return device.deviceId === stableId || device.name === stableId;
+}
+
 function matchesTeardownStableId(
   device: BootedDevice,
   stableId: string,
@@ -2142,7 +2152,7 @@ function matchesTeardownStableId(
 ): boolean {
   return device.platform === "android" && isVirtualAndroidDevice(device)
     ? getBootedAndroidStableName(device, devicePool) === stableId
-    : device.deviceId === stableId;
+    : matchesIosTeardownIdentity(device, stableId);
 }
 
 function teardownDeadlineDevice(args: TeardownDeviceArgs): BootedDevice {
@@ -2286,7 +2296,7 @@ function findInventoryTeardownTarget(
     (device) =>
       device.platform === args.target.platform &&
       (device.platform === "ios"
-        ? device.deviceId === args.target.stableId
+        ? matchesIosTeardownIdentity(device, args.target.stableId)
         : device.name === args.target.stableId),
   );
   if (matches.length > 1) {

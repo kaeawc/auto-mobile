@@ -17,6 +17,7 @@ import {
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+  TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
   resolveMcpRequestTimeoutMs,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
@@ -428,6 +429,68 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
       300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
+  });
+
+  test("tapAny longPress with a large duration raises the outer deadline beyond duration + headroom", () => {
+    const duration = 60_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
+    // Must not fire before the CtrlProxy-level request timeout TapAnyElement
+    // sizes for the same call (duration + the same headroom, #6248 review).
+    expect(resolved).toBeGreaterThanOrEqual(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
+  });
+
+  test("tapAny longPress honours an outer timeoutMs already above the derived floor", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration: 60_000 },
+      },
+      timeoutMs: 120_000,
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(120_000);
+  });
+
+  test("a normal tapAny tap keeps the standard default timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "tap" },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("a tapAny longPress with no duration keeps the standard default timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress" },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 
   test("keeps transport alive for getAndroid's named preparation budgets", () => {

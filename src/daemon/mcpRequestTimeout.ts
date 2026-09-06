@@ -79,6 +79,20 @@ export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
  */
 export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
 
+/**
+ * Headroom added to a `tapAny` longPress duration when sizing the OUTER MCP
+ * request deadline. `TapAnyElement` raises the CtrlProxy-level request
+ * timeout for a long press to `duration + LONG_PRESS_TIMEOUT_HEADROOM_MS`
+ * (src/features/action/TapAnyElement.ts) so CtrlProxy's reply isn't aborted
+ * before the on-device press finishes — but that only widens the INNER
+ * request. Without a matching floor here, the daemon's outer deadline still
+ * defaults to `DEFAULT_MCP_REQUEST_TIMEOUT_MS` (30s) and can kill a
+ * legitimately-running long press well before a longer inner timeout expires
+ * (issue #6248 review, P2). Keep this value in sync with
+ * `LONG_PRESS_TIMEOUT_HEADROOM_MS` in TapAnyElement.ts.
+ */
+export const TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS = 2000;
+
 const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
   crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
   getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -233,6 +247,27 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
   }
 }
 
+/**
+ * Floor for a `tapAny` longPress derived from its `duration` argument — see
+ * `TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS`. A plain tap/doubleTap (no
+ * `action: "longPress"`) or a longPress with no positive `duration` keeps the
+ * standard floor/default; only a duration-bearing long press is raised.
+ */
+function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
+    return undefined;
+  }
+  const argumentsRecord = asRecord(request.params?.arguments);
+  if (!argumentsRecord || argumentsRecord.action !== "longPress") {
+    return undefined;
+  }
+  const duration = positiveFiniteNumber(argumentsRecord.duration);
+  if (duration === undefined) {
+    return undefined;
+  }
+  return Math.round(duration) + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS;
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
   const base =
@@ -242,7 +277,8 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const floor =
     request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
-  return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0);
+  const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
+  return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0, tapAnyLongPressBudget ?? 0);
 }
 
 /**

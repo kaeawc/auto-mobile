@@ -584,11 +584,14 @@ export interface ObserveDiffNodeChange {
  * such marker). Empty `added`/`removed`/`changed` and absent `fields` means the
  * screen is unchanged.
  *
- * `skeleton` is populated by the `finalizeToolResponse` call site — never by
- * {@link diffObserveResult} itself, which only ever sees the full sanitized
- * tree — so that an agent-facing diff ALWAYS carries a usable actionable-only
- * selector surface alongside it (issue #6221 item 4.1), the same array a full
- * observation's `.skeleton` carries.
+ * `skeleton` and `context` are populated by the `finalizeToolResponse` call site
+ * — never by {@link diffObserveResult} itself, which only ever sees the full
+ * sanitized tree — so that an agent-facing diff ALWAYS carries a usable
+ * actionable-only selector surface alongside it (issue #6221 item 4.1), the same
+ * arrays a full observation's `.skeleton` / `.context` carry (issue #6256: a
+ * diff must not silently drop the non-actionable state readout `context` keeps
+ * that `skeleton` alone cannot represent, e.g. a timer countdown or a toggle's
+ * current state text).
  */
 export interface ObserveDiff {
   isDiff: true;
@@ -599,6 +602,16 @@ export interface ObserveDiff {
    * the post-action observation, not by {@link diffObserveResult}.
    */
   skeleton: SkeletonElement[];
+  /**
+   * Non-actionable state-readout rows from the same projection as `skeleton`
+   * (issue #6221 item 1, #6256), present only when at least one such row
+   * survived. Populated by the `finalizeToolResponse` call site alongside
+   * `skeleton`, not by {@link diffObserveResult} — without this a diff-mode
+   * response (`--actions-diff-observe`) carries `skeleton` but silently drops
+   * every zero-affordance readout (a timer countdown, a toggle's state text),
+   * leaving a client unable to tell a failed input from a successful one.
+   */
+  context?: SkeletonElement[];
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];

@@ -71,8 +71,11 @@ describe("advertiseBoundsForCompact (#2990)", () => {
       return node.map(stripSkeletonNodes);
     }
     if (node && typeof node === "object") {
-      const { skeleton: _skeleton, ...rest } = node as Record<string, unknown>;
+      // `context` (issue #6256) shares `skeleton`'s always-compact-tuple bounds
+      // schema, so it must be stripped here too.
+      const { skeleton: _skeleton, context: _context, ...rest } = node as Record<string, unknown>;
       void _skeleton;
+      void _context;
       const out: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(rest)) {
         out[key] = stripSkeletonNodes(value);

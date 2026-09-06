@@ -9815,6 +9815,92 @@
                     "additionalProperties": {}
                   }
                 },
+                "context": {
+                  "description": "Non-actionable state-readout rows from the same projection as `skeleton` (issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state text — present only when at least one such row survived. Populated alongside `skeleton` so a diff-mode response never silently drops the readout a client needs to tell a failed input from a successful one.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "elementId": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "sublabel": {
+                        "type": "string"
+                      },
+                      "testTag": {
+                        "type": "string"
+                      },
+                      "semanticLinks": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "occurrence": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "start": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "end": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["text", "occurrence"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "bounds": {
+                        "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": ["tap", "long-press", "input", "scroll", "toggle"]
+                        }
+                      },
+                      "checked": {
+                        "type": "boolean"
+                      },
+                      "index": {
+                        "description": "Disambiguator present only when elementId repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": ["bounds", "affordances"],
+                    "additionalProperties": {}
+                  }
+                },
                 "added": {
                   "type": "array",
                   "items": {

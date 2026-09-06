@@ -686,6 +686,16 @@ export const observeDiffSchema = z
         "Always present alongside a diff (issue #6221 item 4.1): the same " +
           "actionable-only selector surface a full observation's `skeleton` carries.",
       ),
+    context: z
+      .array(skeletonElementSchema)
+      .optional()
+      .describe(
+        "Non-actionable state-readout rows from the same projection as `skeleton` " +
+          "(issue #6221 item 1, #6256) — a timer countdown, a toggle's current-state " +
+          "text — present only when at least one such row survived. Populated " +
+          "alongside `skeleton` so a diff-mode response never silently drops the " +
+          "readout a client needs to tell a failed input from a successful one.",
+      ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),
     changed: z.array(observeDiffNodeChangeSchema),

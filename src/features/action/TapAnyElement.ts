@@ -220,6 +220,43 @@ export class TapAnyElement extends BaseVisualChange {
     return this.device.platform === "ios" ? 1500 : 1000;
   }
 
+  /**
+   * Execute a tap/doubleTap/longPress action on iOS via the CtrlProxy gesture API.
+   *
+   * `IOSCtrlProxyClient` has no `tap`/`doubleTap`/`longPress` methods; the real
+   * gesture API is `requestTapCoordinates`, which `TapOnElement.executeiOSTapWithCoordinates`
+   * also uses. doubleTap is implemented as two taps with a short pause, matching that
+   * same pattern.
+   */
+  private async executeIosTap(
+    action: string,
+    x: number,
+    y: number,
+    longPressDuration: number,
+  ): Promise<void> {
+    const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
+    // Short duration (50ms) for tap/doubleTap, full duration for longPress.
+    const tapDuration = action === "longPress" ? longPressDuration : 50;
+
+    if (action === "doubleTap") {
+      const firstResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration);
+      if (!firstResult.success) {
+        throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
+      }
+      await this.timer.sleep(200);
+      const secondResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration);
+      if (!secondResult.success) {
+        throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
+      }
+      return;
+    }
+
+    const result = await xcTestClient.requestTapCoordinates(x, y, tapDuration);
+    if (!result.success) {
+      throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
+    }
+  }
+
   async execute(
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
@@ -333,17 +370,9 @@ export class TapAnyElement extends BaseVisualChange {
                 await this.adb.executeCommand(`shell input tap ${tapPoint.x} ${tapPoint.y}`);
               }
               break;
-            case "ios": {
-              const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-              if (action === "longPress") {
-                await xcTestClient.longPress(tapPoint.x, tapPoint.y, longPressDuration / 1000);
-              } else if (action === "doubleTap") {
-                await xcTestClient.doubleTap(tapPoint.x, tapPoint.y);
-              } else {
-                await xcTestClient.tap(tapPoint.x, tapPoint.y);
-              }
+            case "ios":
+              await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration);
               break;
-            }
             default:
               throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
           }

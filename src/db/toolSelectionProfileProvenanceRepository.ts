@@ -4,6 +4,25 @@ import type { Database } from "./types";
 import { logger } from "../utils/logger";
 
 /**
+ * The narrow slice of `ToolSelectionProfileProvenanceRepository` that
+ * `ToolSelectionProfileRegistry` (`src/server/toolSelectionProfileRegistry.ts`)
+ * actually consumes (YAGNI). The concrete repository holds a private `db`
+ * field, so a structurally-compatible test fake could not satisfy the
+ * concrete class type without an `as unknown as` cast — a future change to
+ * the repository's real contract could then leave such a fake compiling but
+ * silently wrong. Consumers (and their test fakes) depend on this interface
+ * instead, so the compiler enforces the contract for real. Co-located with
+ * the concrete implementation (rather than in the registry module) so the
+ * registry can import just this type without a circular module dependency.
+ */
+export interface ToolSelectionProfileProvenanceStore {
+  /** Persist a minted profile uuid. Idempotent: re-inserting the same uuid is a no-op. */
+  insert(profileUuid: string): Promise<void>;
+  /** Every previously-minted profile uuid, for reloading into the in-memory registry at startup. */
+  loadAll(): Promise<string[]>;
+}
+
+/**
  * Durable membership set for `ToolSelectionProfileRegistry` (issue #6225): one
  * row per crypto-random tool-selection-profile uuid this daemon process has
  * minted. Backs the in-memory registry's write-through/load so a legitimately
@@ -15,7 +34,7 @@ import { logger } from "../utils/logger";
  * in-memory-only behavior (re-mint on reconnect), never fail the `setToolEnabled`
  * call that triggered it or block daemon startup.
  */
-export class ToolSelectionProfileProvenanceRepository {
+export class ToolSelectionProfileProvenanceRepository implements ToolSelectionProfileProvenanceStore {
   private db: Kysely<Database> | null;
 
   constructor(db?: Kysely<Database>) {

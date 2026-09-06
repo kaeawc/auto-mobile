@@ -1,5 +1,10 @@
-import { ToolSelectionProfileProvenanceRepository } from "../db/toolSelectionProfileProvenanceRepository";
+import {
+  ToolSelectionProfileProvenanceRepository,
+  type ToolSelectionProfileProvenanceStore,
+} from "../db/toolSelectionProfileProvenanceRepository";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
+
+export type { ToolSelectionProfileProvenanceStore };
 
 /**
  * Tracks tool-selection-profile identifiers this daemon PROCESS itself has
@@ -105,7 +110,7 @@ export class PersistentToolSelectionProfileRegistry
 {
   private readonly memory = new InMemoryToolSelectionProfileRegistry();
 
-  constructor(private readonly repository: ToolSelectionProfileProvenanceRepository) {}
+  constructor(private readonly repository: ToolSelectionProfileProvenanceStore) {}
 
   record(profileUuid: string): void {
     this.memory.record(profileUuid);

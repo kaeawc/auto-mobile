@@ -2,18 +2,21 @@ import { describe, expect, test } from "bun:test";
 import {
   InMemoryToolSelectionProfileRegistry,
   PersistentToolSelectionProfileRegistry,
+  type ToolSelectionProfileProvenanceStore,
 } from "../../src/server/toolSelectionProfileRegistry";
-import type { ToolSelectionProfileProvenanceRepository } from "../../src/db/toolSelectionProfileProvenanceRepository";
 
 /**
- * A synchronous in-memory stand-in for `ToolSelectionProfileProvenanceRepository`
- * (issue #6225). `insert`/`loadAll` mutate `stored` before their `async` body
- * hits its first (nonexistent) `await`, so the mutation is visible synchronously
- * even though the method returns a `Promise` — matching how the real repository's
- * write-through is exercised via the fire-and-forget `record()` path. Keeps this
- * suite <100ms with no DB (per CLAUDE.md).
+ * A synchronous in-memory stand-in for `ToolSelectionProfileProvenanceStore`
+ * (issue #6225 review round 3: depend on the narrow interface, not the
+ * concrete `ToolSelectionProfileProvenanceRepository`, so this fake implements
+ * the real contract directly — no `as unknown as` type-erasure). `insert`/
+ * `loadAll` mutate `stored` before their `async` body hits its first
+ * (nonexistent) `await`, so the mutation is visible synchronously even though
+ * the method returns a `Promise` — matching how the real repository's
+ * write-through is exercised via the fire-and-forget `record()` path. Keeps
+ * this suite <100ms with no DB (per CLAUDE.md).
  */
-class FakeToolSelectionProfileProvenanceRepository {
+class FakeToolSelectionProfileProvenanceStore implements ToolSelectionProfileProvenanceStore {
   readonly stored = new Set<string>();
   insertCalls: string[] = [];
 
@@ -25,12 +28,6 @@ class FakeToolSelectionProfileProvenanceRepository {
   async loadAll(): Promise<string[]> {
     return [...this.stored];
   }
-}
-
-function asRepository(
-  fake: FakeToolSelectionProfileProvenanceRepository,
-): ToolSelectionProfileProvenanceRepository {
-  return fake as unknown as ToolSelectionProfileProvenanceRepository;
 }
 
 /**
@@ -83,7 +80,7 @@ describe("InMemoryToolSelectionProfileRegistry (#6148)", () => {
 describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
   test("recognizes a recorded uuid immediately (in-memory fast path unchanged)", () => {
     const registry = new PersistentToolSelectionProfileRegistry(
-      asRepository(new FakeToolSelectionProfileProvenanceRepository()),
+      new FakeToolSelectionProfileProvenanceStore(),
     );
     registry.record("minted-uuid");
 
@@ -92,7 +89,7 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
 
   test("rejects a value that was never recorded", () => {
     const registry = new PersistentToolSelectionProfileRegistry(
-      asRepository(new FakeToolSelectionProfileProvenanceRepository()),
+      new FakeToolSelectionProfileProvenanceStore(),
     );
     registry.record("minted-uuid");
 
@@ -100,8 +97,8 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
   });
 
   test("ignores an empty or blank uuid, and never writes it through", () => {
-    const repo = new FakeToolSelectionProfileProvenanceRepository();
-    const registry = new PersistentToolSelectionProfileRegistry(asRepository(repo));
+    const repo = new FakeToolSelectionProfileProvenanceStore();
+    const registry = new PersistentToolSelectionProfileRegistry(repo);
     registry.record("");
     registry.record("   ");
 
@@ -111,8 +108,8 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
   });
 
   test("record() write-throughs the minted uuid to the durable store", () => {
-    const repo = new FakeToolSelectionProfileProvenanceRepository();
-    const registry = new PersistentToolSelectionProfileRegistry(asRepository(repo));
+    const repo = new FakeToolSelectionProfileProvenanceStore();
+    const registry = new PersistentToolSelectionProfileRegistry(repo);
     registry.record("minted-uuid");
 
     expect(repo.insertCalls).toEqual(["minted-uuid"]);
@@ -120,8 +117,8 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
   });
 
   test("a fabricated value is never persisted (has() stays false even after a would-be reload)", async () => {
-    const repo = new FakeToolSelectionProfileProvenanceRepository();
-    const registry = new PersistentToolSelectionProfileRegistry(asRepository(repo));
+    const repo = new FakeToolSelectionProfileProvenanceStore();
+    const registry = new PersistentToolSelectionProfileRegistry(repo);
     registry.record("minted-uuid");
 
     // Never call record("fabricated-uuid") — a caller merely CLAIMING that
@@ -134,15 +131,15 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
 
   test("simulated daemon restart: a fresh registry sharing the durable store recognizes a previously minted profile after load()", async () => {
     // "Before restart": one daemon process mints a profile against the durable store.
-    const sharedRepo = new FakeToolSelectionProfileProvenanceRepository();
-    const before = new PersistentToolSelectionProfileRegistry(asRepository(sharedRepo));
+    const sharedRepo = new FakeToolSelectionProfileProvenanceStore();
+    const before = new PersistentToolSelectionProfileRegistry(sharedRepo);
     before.record("minted-uuid");
     expect(before.has("minted-uuid")).toBe(true);
 
     // "After restart": a BRAND NEW registry (in-memory set is empty, as it would
     // be for a freshly-constructed process-wide singleton) backed by the SAME
     // durable store the old process wrote to.
-    const after = new PersistentToolSelectionProfileRegistry(asRepository(sharedRepo));
+    const after = new PersistentToolSelectionProfileRegistry(sharedRepo);
     expect(after.has("minted-uuid")).toBe(false); // not yet loaded
 
     await after.load();
@@ -152,11 +149,11 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
   });
 
   test("simulated daemon restart: a fabricated/never-minted value is still rejected after load()", async () => {
-    const sharedRepo = new FakeToolSelectionProfileProvenanceRepository();
-    const before = new PersistentToolSelectionProfileRegistry(asRepository(sharedRepo));
+    const sharedRepo = new FakeToolSelectionProfileProvenanceStore();
+    const before = new PersistentToolSelectionProfileRegistry(sharedRepo);
     before.record("minted-uuid");
 
-    const after = new PersistentToolSelectionProfileRegistry(asRepository(sharedRepo));
+    const after = new PersistentToolSelectionProfileRegistry(sharedRepo);
     await after.load();
 
     expect(after.has("minted-uuid")).toBe(true);
@@ -164,9 +161,9 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
   });
 
   test("load() merges persisted entries without clearing anything already recorded in this process", async () => {
-    const sharedRepo = new FakeToolSelectionProfileProvenanceRepository();
+    const sharedRepo = new FakeToolSelectionProfileProvenanceStore();
     sharedRepo.stored.add("persisted-uuid");
-    const registry = new PersistentToolSelectionProfileRegistry(asRepository(sharedRepo));
+    const registry = new PersistentToolSelectionProfileRegistry(sharedRepo);
     registry.record("locally-minted-uuid");
 
     await registry.load();

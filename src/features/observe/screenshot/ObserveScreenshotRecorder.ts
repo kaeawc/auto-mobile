@@ -46,6 +46,13 @@ export interface ObserveScreenshotRecorder {
    * (successfully or not) and state has been updated.
    */
   capture(perf?: PerformanceTracker, signal?: AbortSignal): Promise<void>;
+
+  /**
+   * Await a fresh capture after any already-pending capture. Terminal evidence
+   * must reflect the completed action or wait condition rather than an earlier
+   * in-flight observation.
+   */
+  captureFresh(perf?: PerformanceTracker, signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -112,15 +119,28 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
+    await this.captureWithOptions(perf, signal, { coalesceWithPending: true });
+  }
+
+  async captureFresh(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.captureWithOptions(perf, signal, { queueAfterPending: true });
+  }
+
+  private async captureWithOptions(
+    perf: PerformanceTracker,
+    signal: AbortSignal | undefined,
+    trackerOptions: Pick<ScreenshotJobOptions, "coalesceWithPending" | "queueAfterPending">,
+  ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
         const { promise } = this.screenshotUtil.startTrackedCapture(
           {},
           {
             parentSignal: signal,
-            // Awaitable observe captures share an ordinary in-flight capture,
-            // but queue behind a non-coalescible fresh resource capture.
-            coalesceWithPending: true,
+            ...trackerOptions,
             onComplete: async (completion) => {
               if (!completion.isLatest) {
                 return;

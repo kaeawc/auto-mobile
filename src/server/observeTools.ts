@@ -1047,7 +1047,11 @@ export const waitForObservation = async (
     outcome: WaitForObservationOutcome,
   ): Promise<WaitForObservationOutcome> => {
     if (!shouldSkipObserveWaitForScreenshot()) {
-      await observeScreen.captureScreenshot?.(createGlobalPerformanceTracker(), signal);
+      await observeScreen.captureScreenshot?.(
+        createGlobalPerformanceTracker(),
+        signal,
+        outcome.observation,
+      );
     }
     return outcome;
   };
@@ -1081,6 +1085,7 @@ export const waitForObservation = async (
       signal,
       skipBackStack: skipPollingOverhead || skipBackStack,
       skipScreenshot: true,
+      skipAccessibilityAudit: true,
     });
 
   // Settle gate (issue #3490 §3): once the predicate matches, hold until the

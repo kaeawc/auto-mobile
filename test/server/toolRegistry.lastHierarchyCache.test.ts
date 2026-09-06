@@ -9,7 +9,11 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
+import {
+  createJSONToolResponse,
+  createStructuredToolResponse,
+  stringifyToolResponse,
+} from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
 /**
@@ -181,5 +185,30 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
     expect(typeof cacheData.lastObserveTime).toBe("number");
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
+  });
+
+  test("caches a text-only action response's nested observation", async () => {
+    const sessionId = await setupAutolockedSession();
+    const observation = makeObserveResult();
+    ToolRegistry.registerDeviceAware("inputText", "inputText", toolSchema, async () =>
+      createJSONToolResponse({
+        success: true,
+        message: "Input complete",
+        observation,
+      }),
+    );
+    const tool = ToolRegistry.getTool("inputText")!;
+
+    await tool.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
+
+    const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
+    const cachedHierarchy = cacheData.lastHierarchy as any;
+    expect(cachedHierarchy).toBeDefined();
+    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
+    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    expect(typeof cacheData.lastObserveTime).toBe("number");
   });
 });

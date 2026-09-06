@@ -21,6 +21,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private callCounter: number = 0;
   private autoVaryHierarchy: boolean = false;
   private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
+  private readonly capturedScreenshotObservations: Array<ObserveResult | undefined> = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -147,6 +148,7 @@ export class FakeObserveScreen implements ObserveScreen {
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
     this.executeOptionsHistory.length = 0;
+    this.capturedScreenshotObservations.length = 0;
   }
 
   /**
@@ -159,6 +161,11 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Total captureScreenshot() calls. */
   getCaptureScreenshotCallCount(): number {
     return this.captureScreenshotCallCount;
+  }
+
+  /** Observations associated with terminal screenshot capture, in call order. */
+  getCapturedScreenshotObservations(): Array<ObserveResult | undefined> {
+    return [...this.capturedScreenshotObservations];
   }
 
   /**
@@ -183,9 +190,14 @@ export class FakeObserveScreen implements ObserveScreen {
     return this.getNextObserveResult();
   }
 
-  async captureScreenshot(): Promise<void> {
+  async captureScreenshot(
+    _perf?: unknown,
+    _signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void> {
     this.executedOperations.push("captureScreenshot");
     this.captureScreenshotCallCount++;
+    this.capturedScreenshotObservations.push(observation);
 
     const error = this.failures.get("captureScreenshot");
     if (error) {

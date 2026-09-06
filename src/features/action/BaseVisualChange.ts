@@ -45,6 +45,7 @@ interface ObservedChangeOptions {
   overrideMinTimestamp?: number;
   signal?: AbortSignal;
   deferPredictionOutcome?: boolean;
+  deferPostActionScreenshot?: boolean;
   predictionContext?: {
     toolName: string;
     toolArgs: Record<string, any>;
@@ -65,7 +66,7 @@ export class BaseVisualChange {
   >();
   protected timer: Timer;
 
-  private shouldCapturePostActionScreenshot(): boolean {
+  protected shouldCapturePostActionScreenshot(): boolean {
     // Preserve the pre-existing live-view behavior, while allowing other
     // clients to opt in with AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT=0.
     return (
@@ -271,6 +272,7 @@ export class BaseVisualChange {
       actionStartTime: options.overrideMinTimestamp ?? observationStartTime,
       predictionContext: options.deferPredictionOutcome ? undefined : predictionContext,
       signal: options.signal,
+      deferPostActionScreenshot: options.deferPostActionScreenshot,
     });
     if (options.deferPredictionOutcome && predictionContext && typeof observed === "object") {
       this.deferredPredictionOutcomes.set(observed, async (finalObservation) => {
@@ -326,6 +328,20 @@ export class BaseVisualChange {
     await recordOutcome(finalObservation);
   }
 
+  /**
+   * Capture exactly one fresh screenshot after any subclass-specific
+   * observation reconciliation has selected the result returned to the caller.
+   */
+  protected async captureTerminalObservationScreenshot(
+    observation: ObserveResult | undefined,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (observation && this.shouldCapturePostActionScreenshot()) {
+      await this.observeScreen.captureScreenshot?.(perf, signal, observation);
+    }
+  }
+
   private static buildDeviceLockWarning(lock: DeviceLockState): string {
     const preamble = "Device is locked; this interaction likely did not reach the app under test.";
     if (lock.secure === true) {
@@ -349,6 +365,7 @@ export class BaseVisualChange {
       actionStartTime?: number;
       predictionContext?: PredictionActionContext;
       signal?: AbortSignal;
+      deferPostActionScreenshot?: boolean;
     },
   ): Promise<any> {
     const perf = options.perf ?? new NoOpPerformanceTracker();
@@ -374,6 +391,7 @@ export class BaseVisualChange {
       // Retries collect hierarchy only. If enabled, visual evidence is captured
       // once from the final observation below.
       skipScreenshot: true,
+      skipAccessibilityAudit: true,
     });
     perf.end();
 
@@ -409,6 +427,7 @@ export class BaseVisualChange {
         minTimestamp,
         signal: options.signal,
         skipScreenshot: true,
+        skipAccessibilityAudit: true,
       });
       perf.end();
     }
@@ -428,8 +447,8 @@ export class BaseVisualChange {
       logger.warn(`[BaseVisualChange] ${warning}`);
     }
 
-    if (capturePostActionScreenshot) {
-      await this.observeScreen.captureScreenshot?.(perf, options.signal);
+    if (capturePostActionScreenshot && !options.deferPostActionScreenshot) {
+      await this.captureTerminalObservationScreenshot(latestObservation, perf, options.signal);
     }
 
     if (

@@ -631,7 +631,9 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Audits + accessibility state detection (each is config-gated; failures don't propagate)
       await this.performanceAuditor.run(result, perf);
-      await this.accessibilityAuditor.run(result, perf);
+      if (!options?.skipAccessibilityAudit) {
+        await this.accessibilityAuditor.run(result, perf);
+      }
       await this.accessibilityStateDetector.run(result, perf, signal);
 
       // Predictive UI (opt-in via config)
@@ -755,8 +757,12 @@ export class RealObserveScreen implements ObserveScreen {
   async captureScreenshot(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    observation?: ObserveResult,
   ): Promise<void> {
-    await this.screenshotRecorder.capture(perf, signal);
+    await this.screenshotRecorder.captureFresh(perf, signal);
+    if (observation) {
+      await this.accessibilityAuditor.run(observation, perf);
+    }
   }
 
   /**

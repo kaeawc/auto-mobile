@@ -1103,7 +1103,11 @@ describe("waitForObservation activeWindow", () => {
     expect(outcome.awaitTimeout).toBe(false);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
     expect(observeScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(true);
+    expect(
+      observeScreen.getExecuteOptions().every((options) => options.skipAccessibilityAudit),
+    ).toBe(true);
     expect(observeScreen.getCaptureScreenshotCallCount()).toBe(1);
+    expect(observeScreen.getCapturedScreenshotObservations()).toEqual([outcome.observation]);
     expect(shouldSkipObserveWaitForScreenshot()).toBe(false);
   });
 

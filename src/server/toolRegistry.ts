@@ -330,10 +330,11 @@ function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
  */
 function getObservedHierarchy(
   name: string,
-  response: { structuredContent?: unknown } | undefined,
+  response: { structuredContent?: unknown; content?: unknown } | undefined,
 ): ViewHierarchyResult | undefined {
-  const payload = getStructuredPayload<Record<string, unknown>>(response);
-  if (!payload) {
+  const structuredPayload = getStructuredPayload<Record<string, unknown>>(response);
+  const payload = structuredPayload ?? unwrapToolResponse(response);
+  if (!isRecord(payload)) {
     return undefined;
   }
 

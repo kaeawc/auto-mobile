@@ -234,6 +234,15 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
     expect(svc.lastTrackerOptions?.coalesceWithPending).toBe(true);
   });
+
+  test("captureFresh() queues terminal evidence after pending work", async () => {
+    svc.setNextResult({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+
+    await recorder.captureFresh(new NoOpPerformanceTracker());
+
+    expect(svc.lastTrackerOptions?.queueAfterPending).toBe(true);
+    expect(svc.lastTrackerOptions?.coalesceWithPending).toBeUndefined();
+  });
 });
 
 describe("DefaultObserveScreenshotRecorder.start", () => {

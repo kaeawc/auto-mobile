@@ -173,23 +173,26 @@ const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefi
 
 interface FailureProneStream {
   on(event: "error", listener: (error: Error) => void): void;
-  on(event: "close", listener: () => void): void;
 }
 
 // A stream that opened successfully can still fail later — e.g. EACCES/ENOSPC
 // surfacing asynchronously once bun/node actually touches the fd. An 'error'
 // event with no listener throws and crashes the process, the exact failure
 // mode #6111/#6179 exists to prevent (just reached via the async path instead
-// of the synchronous constructor throw). Attach handlers so that instead: (a)
+// of the synchronous constructor throw). Attach a handler so that instead: (a)
 // the error never goes unhandled, (b) the broken stream is dropped so the next
 // write retries opening it (or degrades to stderr, same as the sync path), and
 // (c) the diagnostic stays valid NDJSON in json mode (issue #6179).
+//
+// Deliberately NOT listening for 'close': checkAndRotateLog() ends the active
+// stream on purpose at the size cap and immediately opens its replacement —
+// a normal, expected close with no error. Clearing `logStream` on every close
+// (regardless of cause) raced that legitimate rotation and could drop the
+// freshly-opened replacement stream right after rotating, breaking logging
+// for the rest of the process. An unexpected close without a preceding
+// 'error' is rare enough (and self-healing via the next write's lazy retry
+// once a subsequent write actually fails) that it doesn't need a handler here.
 const attachStreamFailureHandlers = (stream: FailureProneStream, target: string): void => {
-  const dropIfCurrent = (): void => {
-    if (logStream === stream) {
-      logStream = undefined;
-    }
-  };
   stream.on("error", (error) => {
     try {
       writeEmergencyLog(`Log stream error on ${target}`, error);
@@ -198,9 +201,10 @@ const attachStreamFailureHandlers = (stream: FailureProneStream, target: string)
       // event emitter — that would just relocate the crash.
       void loggingError;
     }
-    dropIfCurrent();
+    if (logStream === stream) {
+      logStream = undefined;
+    }
   });
-  stream.on("close", dropIfCurrent);
 };
 
 // Constructing an appending WriteStream can throw synchronously — e.g. bun's

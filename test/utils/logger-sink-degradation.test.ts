@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -356,5 +356,48 @@ describe("logger degrades the record itself under a persistent write failure (Co
     // duplicate that exact line.
     const matches = stderr.lines.filter((line) => line.includes("both-mode record"));
     expect(matches.length).toBe(1);
+  });
+});
+
+describe("size-based rotation is not broken by the stream-error handler (Codex P2 on #6210)", () => {
+  test("logging still works after a normal rotation — the freshly-opened stream survives the old stream's close", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-rotate-"));
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    // Pre-seed the target past the 10MiB rotation threshold so the very first
+    // write triggers checkAndRotateLog's real rotation path (end() the old
+    // stream, rename it to a backup, open a fresh stream) without having to
+    // push 10MiB of traffic through the logger itself.
+    writeFileSync(targetLogFile, Buffer.alloc(11 * 1024 * 1024, "x"));
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "file", logDir);
+
+      mod.logger.info("first record after rotation");
+      await mod.logger.flush();
+      // A previous buggy 'close' handler cleared `logStream` whenever ANY
+      // stream closed, including the old stream's normal post-rotation close
+      // — which could race the freshly-opened replacement and silently break
+      // every write after the first one. Prove a second write also lands.
+      mod.logger.info("second record after rotation");
+      await mod.logger.flush();
+      await mod.logger.closeAfterFlush();
+
+      const files = fs.readdirSync(logDir);
+      // The pre-seeded 11MiB file must have been rotated out to a timestamped
+      // backup, and a fresh (small) active log file created in its place.
+      const backups = files.filter((f) => f !== `stdio-${process.pid}.log`);
+      expect(backups.length).toBeGreaterThan(0);
+
+      const activeContents = fs.readFileSync(targetLogFile, "utf-8");
+      expect(activeContents).toContain("first record after rotation");
+      expect(activeContents).toContain("second record after rotation");
+      // The active file should be tiny — proof the writes landed in the new
+      // post-rotation stream, not silently dropped nor appended to the old
+      // (now-renamed) 11MiB file.
+      expect(activeContents.length).toBeLessThan(1024);
+    } finally {
+      rmSync(logDir, { recursive: true, force: true });
+    }
   });
 });

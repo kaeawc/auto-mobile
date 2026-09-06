@@ -792,4 +792,56 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
     expect(decision.touchPoint).toBeDefined();
     expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
   });
+
+  // P2: ObserveScreen deliberately keeps activeWindow.appId on the
+  // underlying app while a notification-permission prompt is open (only
+  // stamping activeWindow.type), but CtrlProxy reports the prompt itself as
+  // a package-less type-1 APPLICATION window - so findAppWindowBounds
+  // derives the PROMPT's bounds while gfxinfo would sample the underlying
+  // app's package, and a synthetic tap can grant/deny a live permission
+  // prompt.
+  test("skips touch-latency when activeWindow.type is notification_permission_dialog", () => {
+    const result = makeResult({
+      activeWindow: {
+        appId: "com.example.app",
+        activityName: "MainActivity",
+        type: "notification_permission_dialog",
+      } as any,
+      viewHierarchy: { hierarchy: {} as any } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
+  });
+
+  test("skips touch-latency when notificationPermissionDetected is set, even without activeWindow.type stamped", () => {
+    const result = makeResult({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity" } as any,
+      viewHierarchy: { hierarchy: {} as any } as any,
+      notificationPermissionDetected: true,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
+  });
+
+  test("is unaffected by a normal app window with no dialog type and no permission flag", () => {
+    const result = makeResult({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity" } as any,
+      viewHierarchy: { hierarchy: {} as any } as any,
+      notificationPermissionDetected: false,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
+  });
 });

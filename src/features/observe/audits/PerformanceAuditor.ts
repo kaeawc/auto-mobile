@@ -40,6 +40,15 @@ import { SYSTEM_TRAY_PACKAGE } from "../../../server/system-tray/notificationHin
  */
 const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
 
+/**
+ * `ActiveWindowInfo.type` value `ObserveScreen` stamps when a
+ * notification-permission prompt owns the window (see
+ * `ObserveScreen.reconcileActiveWindowAttribution` and the other call sites
+ * of this literal in `ObserveScreen.ts` / `LaunchApp.ts`; not otherwise
+ * exported as a shared constant there, so this mirrors the literal).
+ */
+const NOTIFICATION_PERMISSION_DIALOG_WINDOW_TYPE = "notification_permission_dialog";
+
 function isCandidateAppWindow(window: ViewHierarchyWindowInfo, appId: string): boolean {
   if (!window.bounds || window.type !== ACCESSIBILITY_WINDOW_TYPE_APPLICATION) {
     return false;
@@ -259,41 +268,56 @@ export interface TouchLatencyPointDecision {
  * `deriveTouchLatencyPoint` log line can say *why* - useful when triaging a
  * report of touch-latency going unexpectedly missing.
  */
-function unreliableHierarchyReason(
+/**
+ * One reliability check, run in order by `unreliableHierarchyReason`.
+ * Returns the rejection reason, or `null` when this particular check passes.
+ * Modeled as a list (rather than a chain of `if`s in one function) so adding
+ * a future signal is a one-line addition here instead of growing a single
+ * function's complexity indefinitely (issue #6167 follow-up).
+ */
+type ReliabilityCheck = (
   windowBounds: ElementBounds | undefined,
   result: ObserveResult,
-): string | null {
-  if (!windowBounds) {
-    return "no app window bounds were found";
-  }
-  if (!isValidWindowBounds(windowBounds)) {
-    return (
-      "window bounds are malformed (zero-area, inverted, or non-finite): " +
-      JSON.stringify(windowBounds)
-    );
-  }
+) => string | null;
+
+const RELIABILITY_CHECKS: readonly ReliabilityCheck[] = [
+  (windowBounds) => (windowBounds ? null : "no app window bounds were found"),
+
+  (windowBounds) =>
+    windowBounds && !isValidWindowBounds(windowBounds)
+      ? "window bounds are malformed (zero-area, inverted, or non-finite): " +
+        JSON.stringify(windowBounds)
+      : null,
+
   // A stale cached tree was never verified against the device on this call -
   // an element it reports as absent (or present) may no longer reflect
   // what's actually on screen (issue #6167 follow-up).
-  if (result.viewHierarchy?.fresh === false) {
-    return "the view hierarchy is a stale cached snapshot (fresh: false), not verified against the device on this call";
-  }
+  (_windowBounds, result) =>
+    result.viewHierarchy?.fresh === false
+      ? "the view hierarchy is a stale cached snapshot (fresh: false), not verified against the device on this call"
+      : null,
+
   // CtrlProxy can withhold the focused app's own root entirely (observed in
   // split-screen) while still returning windows/elements from a DIFFERENT
   // app - certifying a point here can tap the wrong app, not just an
   // unemitted node of the right one (issue #6167 follow-up).
-  if (result.viewHierarchy?.ctrlProxyIncomplete) {
-    return "CtrlProxy reported an incomplete capture (ctrlProxyIncomplete) - the focused app's own root may have been withheld";
-  }
+  (_windowBounds, result) =>
+    result.viewHierarchy?.ctrlProxyIncomplete
+      ? "CtrlProxy reported an incomplete capture (ctrlProxyIncomplete) - the focused app's own root may have been withheld"
+      : null,
+
   // CtrlProxy stops emitting descendants once it hits a hard limit
   // (`max_nodes`, `max_depth`) or is cancelled mid-walk - the resulting
   // hierarchy is silently PARTIAL, not "no obstacles here". Certifying a
   // point inert against an incomplete obstacle map risks tapping a real
   // control whose node was simply never emitted (issue #6167 follow-up).
-  const truncationReasons = result.viewHierarchy?.truncationReasons;
-  if (truncationReasons && truncationReasons.length > 0) {
-    return `view hierarchy is truncated (${truncationReasons.join(", ")}) - the obstacle map may be incomplete`;
-  }
+  (_windowBounds, result) => {
+    const truncationReasons = result.viewHierarchy?.truncationReasons;
+    return truncationReasons && truncationReasons.length > 0
+      ? `view hierarchy is truncated (${truncationReasons.join(", ")}) - the obstacle map may be incomplete`
+      : null;
+  },
+
   // When a SystemUI surface (status bar, notification shade, keyguard) owns
   // focus, `ObserveScreen.reconcileActiveWindowAttribution` rewrites
   // `activeWindow.appId` to `com.android.systemui` - but the real
@@ -303,8 +327,39 @@ function unreliableHierarchyReason(
   // A point certified inert there would tap the occluded app underneath
   // while `gfxinfo` samples `com.android.systemui`, measuring the wrong
   // surface's response entirely (issue #6167 follow-up).
-  if (result.activeWindow?.appId === SYSTEM_TRAY_PACKAGE) {
-    return `a SystemUI overlay owns focus (activeWindow.appId === "${SYSTEM_TRAY_PACKAGE}") - the app window beneath it cannot be safely probed`;
+  (_windowBounds, result) =>
+    result.activeWindow?.appId === SYSTEM_TRAY_PACKAGE
+      ? `a SystemUI overlay owns focus (activeWindow.appId === "${SYSTEM_TRAY_PACKAGE}") - the app window beneath it cannot be safely probed`
+      : null,
+
+  // A notification-permission prompt is a special case: unlike the SystemUI
+  // overlay above, `ObserveScreen` deliberately keeps `activeWindow.appId` on
+  // the underlying app (only tagging `activeWindow.type`), while CtrlProxy
+  // reports the permission-controller prompt itself as a package-less type-1
+  // APPLICATION window - so `findAppWindowBounds` derives the PROMPT's
+  // bounds while `gfxinfo` samples the underlying app's package, producing
+  // garbage latency, AND a synthetic tap can land on the live prompt and
+  // grant/deny it (issue #6167 follow-up). `result.notificationPermissionDetected`
+  // is the primary source `ObserveScreen.reconcileActiveWindowAttribution`
+  // reads to set `activeWindow.type`; checking both covers a capture where
+  // the flag was set but the reconciliation step that stamps `type` didn't
+  // run on this particular result.
+  (_windowBounds, result) =>
+    result.notificationPermissionDetected ||
+    result.activeWindow?.type === NOTIFICATION_PERMISSION_DIALOG_WINDOW_TYPE
+      ? "a notification-permission dialog owns the window - the underlying app's bounds/gfxinfo don't correspond to the same surface"
+      : null,
+];
+
+function unreliableHierarchyReason(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+): string | null {
+  for (const check of RELIABILITY_CHECKS) {
+    const reason = check(windowBounds, result);
+    if (reason !== null) {
+      return reason;
+    }
   }
   return null;
 }
@@ -313,13 +368,24 @@ function unreliableHierarchyReason(
  * Single gate for every known way a capture can be too unreliable to trust
  * for a synthetic touch-latency tap: absent/malformed app window bounds, a
  * stale cached tree (`fresh: false`), an incomplete CtrlProxy capture
- * (`ctrlProxyIncomplete`), a truncated hierarchy (`truncationReasons`), or a
+ * (`ctrlProxyIncomplete`), a truncated hierarchy (`truncationReasons`), a
  * SystemUI overlay owning focus (`activeWindow.appId ===
  * "com.android.systemui"`, which can pass through a real but occluded app
- * window as if it belonged to the overlay). Consolidated into one predicate
- * (issue #6167 follow-up) so a future reliability signal has exactly one
- * place to live and can't be missed by only patching one of several
- * scattered checks.
+ * window as if it belonged to the overlay), or a notification-permission
+ * dialog owning the window (`notificationPermissionDetected` /
+ * `activeWindow.type === "notification_permission_dialog"` - here
+ * `activeWindow.appId` stays on the underlying app while the derived window
+ * bounds are actually the live permission prompt's). Consolidated into one
+ * predicate (issue #6167 follow-up) so a future reliability signal has
+ * exactly one place to live and can't be missed by only patching one of
+ * several scattered checks.
+ *
+ * An inverted "positive confirmation" design (require a matching window
+ * entry with a real `packageName`, a plain application type, and no dialog
+ * flag) was considered instead of enumerating bad cases, but rejected: the
+ * real accessibility window wire format never populates `packageName` at all
+ * (see `isCandidateAppWindow` above) - requiring it would reject every
+ * normal capture, not just the unreliable ones.
  *
  * Content-hidden regions (`contentHiddenRegions`) are deliberately NOT a
  * blanket-reject signal here: unlike the checks above, the reliable part of

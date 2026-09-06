@@ -26,6 +26,28 @@ import {
   getDaemonSocketPathList,
   type StaleDaemonFileCleanupOptions,
 } from "./daemonFiles";
+import {
+  DaemonSocketReachability,
+  type DaemonSocketReachabilityLike,
+} from "./daemonSocketReachability";
+
+/**
+ * Bound on the observation-only reachability probe consulted before a
+ * stale-socket recovery unlink in {@link DaemonClient.connect} (issue #6140).
+ * Short by design: it only needs to distinguish "something is already bound to
+ * this path" from "nothing is listening" before falling back to the existing
+ * dead-PID cleanup, not to wait out a slow daemon.
+ */
+const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
+
+/**
+ * A single lazily-constructed default probe, shared across instances that don't
+ * inject their own (mirrors the module-level default the manager's rejoin path
+ * uses). Constructed once so a real `DaemonSocketReachability` isn't allocated
+ * per connect attempt.
+ */
+const defaultStaleSocketRecoveryReachability: DaemonSocketReachabilityLike =
+  new DaemonSocketReachability();
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -67,6 +89,19 @@ export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptio
    * daemon cannot delete its live socket (issue #2658).
    */
   skipStaleCleanup?: boolean;
+
+  /**
+   * Observation-only reachability probe consulted before {@link DaemonClient.connect}
+   * falls back to a stale-socket unlink (issue #6140). Even when the recorded PID
+   * is confirmed dead, a peer process can already be bound to the same socket path
+   * during a startup race (the PID file still names the just-exited loser while a
+   * winner has taken over the path but not yet updated it) — unlinking then would
+   * destroy the live winner's endpoint, exactly the class of bug PR #6109's
+   * observation-only rejoin probe exists to avoid. Defaults to a real
+   * `DaemonSocketReachability`; injectable so tests can drive the outcome without a
+   * real socket.
+   */
+  reachability?: DaemonSocketReachabilityLike;
 }
 
 /**
@@ -99,6 +134,13 @@ export class DaemonClient {
   private recoveryOptions: DaemonClientRecoveryOptions;
   private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
   private readonly idGenerator: IdGenerator;
+  /**
+   * Injected so a test can simulate Windows named-pipe semantics without a real
+   * OS switch (issue #6140). Defaults to the real platform. A Windows named pipe
+   * has no filesystem entry, so `connectOnce`'s `existsSync` precheck must be
+   * skipped there, mirroring the platform branch already in {@link isAvailable}.
+   */
+  private readonly platform: NodeJS.Platform;
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -113,6 +155,7 @@ export class DaemonClient {
       build: getCurrentBuildIdentity(),
     },
     idGenerator: IdGenerator = defaultIdGenerator,
+    platformOverride: NodeJS.Platform = platform(),
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
@@ -120,6 +163,7 @@ export class DaemonClient {
     this.recoveryOptions = recoveryOptions;
     this.clientIdentity = clientIdentity;
     this.idGenerator = idGenerator;
+    this.platform = platformOverride;
   }
 
   /**
@@ -242,6 +286,16 @@ export class DaemonClient {
     } catch (error) {
       if (
         !signal?.aborted &&
+        // Never fall through to the dead-PID unlink while something is still
+        // actually bound to this socket path (issue #6140): a startup race can
+        // leave the PID file naming the just-exited losing child while a live
+        // winner already owns the path but hasn't published its own PID record
+        // yet. This observation-only probe never itself unlinks anything — it
+        // only decides whether the existing dead-PID cleanup below is safe to run.
+        !(await this.staleSocketRecoveryReachability().isReachable(
+          this.socketPath,
+          STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS,
+        )) &&
         DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
       ) {
         await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
@@ -249,6 +303,10 @@ export class DaemonClient {
       }
       throw error;
     }
+  }
+
+  private staleSocketRecoveryReachability(): DaemonSocketReachabilityLike {
+    return this.recoveryOptions.reachability ?? defaultStaleSocketRecoveryReachability;
   }
 
   private remainingConnectTimeout(deadline: number, timeoutMs: number): number {
@@ -268,7 +326,10 @@ export class DaemonClient {
       throw new DaemonUnavailableError("Daemon connection attempt aborted");
     }
 
-    if (!existsSync(this.socketPath)) {
+    // Unix domain sockets have a filesystem entry; Windows named pipes do not, so
+    // this precheck must be skipped there and the connect attempted regardless
+    // (issue #6140) — mirroring the platform branch already in {@link isAvailable}.
+    if (this.platform !== "win32" && !existsSync(this.socketPath)) {
       throw new DaemonUnavailableError(`Daemon socket not found: ${this.socketPath}`);
     }
 

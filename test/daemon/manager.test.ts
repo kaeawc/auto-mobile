@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
@@ -445,10 +446,10 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("uses an expanded buffer when reading the full process table", () => {
+  test("uses an expanded buffer and a bounded timeout when reading the full process table", () => {
     const calls: Array<{
       command: string;
-      options: { encoding: "utf-8"; maxBuffer: number };
+      options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
     }> = [];
     const finder = new PsDaemonProcessFinder((command, options) => {
       calls.push({ command, options });
@@ -468,6 +469,7 @@ describe("Daemon manager process detection", () => {
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
         },
       },
     ]);
@@ -516,10 +518,10 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("uses a Windows-native process table command with the expanded buffer", () => {
+  test("uses a Windows-native process table command with the expanded buffer and a bounded timeout", () => {
     const calls: Array<{
       command: string;
-      options: { encoding: "utf-8"; maxBuffer: number };
+      options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
     }> = [];
     const finder = new WindowsDaemonProcessFinder((command, options) => {
       calls.push({ command, options });
@@ -544,6 +546,7 @@ describe("Daemon manager process detection", () => {
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
         },
       },
     ]);

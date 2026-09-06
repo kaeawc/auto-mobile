@@ -1,6 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { execSync, type ChildProcess } from "node:child_process";
-import { open, readFile, rm, unlink } from "node:fs/promises";
+import { open, readFile, rm } from "node:fs/promises";
 import { existsSync, openSync, closeSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { devNull, tmpdir } from "node:os";
@@ -123,9 +123,18 @@ export interface DaemonProcessFinder {
 
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
+/**
+ * Bound on the synchronous `ps`/PowerShell/CIM process-table scan (issue #6140,
+ * folded from PR #6109 review). `execSync` has no timeout by default, so a slow
+ * `ps` or Windows CIM query on a loaded machine can block the event loop for far
+ * longer than the caller's remaining rejoin budget — this caps that single call so
+ * it can never itself consume the whole budget.
+ */
+export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5000;
+
 type ProcessTableCommandRunner = (
   command: string,
-  options: { encoding: "utf-8"; maxBuffer: number },
+  options: { encoding: "utf-8"; maxBuffer: number; timeout: number },
 ) => string;
 
 function normalizeProcessCommand(command: string): string {
@@ -281,6 +290,7 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
     const psOutput = this.runCommand("ps -eo pid=,ppid=,command=", {
       encoding: "utf-8",
       maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+      timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
     });
     return parseDaemonProcessTable(psOutput);
   }
@@ -301,6 +311,7 @@ export class WindowsDaemonProcessFinder
       {
         encoding: "utf-8",
         maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+        timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
       },
     );
     return parseWindowsDaemonProcessTable(processTableJson);
@@ -412,6 +423,22 @@ const PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS = 1000;
 const PEER_DAEMON_JOIN_DELIVERY_HEADROOM_MS = 2000;
 
 /**
+ * Upper bound on how long the post-exit peer rejoin (issue #6103) may run when
+ * this manager uses an isolated socket namespace (a non-default PID/socket path,
+ * e.g. a test harness or a manually isolated daemon). {@link findLiveDaemonProcesses}
+ * scans the WHOLE process table and cannot tell a daemon bound to THIS namespace's
+ * socket apart from an unrelated daemon — e.g. one from another worktree or test
+ * run — using the DEFAULT namespace or a different isolated one entirely (issue
+ * #6140, folded from PR #6109 review). Trusting that unscoped "a live daemon
+ * process exists somewhere" signal for the full rejoin budget lets a failed
+ * isolated-socket launch poll an unrelated, permanently-unreachable socket for the
+ * whole budget. Capping the isolated-namespace rejoin to this short grace bounds
+ * the cost of that false signal without touching the default-namespace path, where
+ * a process-table match is far more likely to be the actual peer.
+ */
+const PEER_DAEMON_UNCORRELATED_NAMESPACE_GRACE_MS = 2000;
+
+/**
  * Cadence at which the liveness watchdog re-samples the "keep waiting" predicate
  * while a full-budget readiness probe is in flight (issue #5904). A per-poll
  * precheck only samples liveness between probes; if the holder dies *during* a
@@ -513,6 +540,14 @@ export class DaemonManager implements DaemonManagerLike {
    * is the one canonical randomness primitive rather than an ad-hoc UUID path.
    */
   private readonly startupLockOwnerToken: string;
+  /**
+   * Injected so a test can simulate Windows named-pipe semantics without a real
+   * OS switch (issue #6140). Defaults to the real platform; a Unix domain socket
+   * has a filesystem entry, but a Windows named pipe does not, so every
+   * `existsSync(this.socketPath)` readiness gate must be skipped on win32 the
+   * same way {@link DaemonClient.isAvailable} already is.
+   */
+  private readonly platform: NodeJS.Platform;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -530,7 +565,9 @@ export class DaemonManager implements DaemonManagerLike {
     processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
     idGenerator: IdGenerator = defaultIdGenerator,
     peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
+    platformOverride: NodeJS.Platform = process.platform,
   ) {
+    this.platform = platformOverride;
     this.startupLockOwnerToken = idGenerator.next();
     // Construct the reachability probe here (not in a field initializer) so its connect
     // timeout is bound to the injected timer — a field initializer would capture the
@@ -775,7 +812,7 @@ export class DaemonManager implements DaemonManagerLike {
     );
     if (
       confirmBudget > 0 &&
-      existsSync(this.socketPath) &&
+      this.socketPathObservable() &&
       (await this.verifyDaemonConnection(confirmBudget))
     ) {
       stderrLog("Daemon became ready before reporting startup failure");
@@ -1268,7 +1305,7 @@ export class DaemonManager implements DaemonManagerLike {
     const confirmBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
     if (
       confirmBudget > 0 &&
-      existsSync(this.socketPath) &&
+      this.socketPathObservable() &&
       (await this.verifyDaemonConnection(confirmBudget))
     ) {
       return true;
@@ -1621,7 +1658,7 @@ export class DaemonManager implements DaemonManagerLike {
       // already-connectable daemon rather than absorbing the client's deadline
       // (issue #5878).
       const keepWaiting = shouldContinueWaiting();
-      if (existsSync(this.socketPath)) {
+      if (this.socketPathObservable()) {
         socketObserved = true;
         const outcome = await this.probeObservedSocketWithWatchdog(
           keepWaiting,
@@ -1686,9 +1723,7 @@ export class DaemonManager implements DaemonManagerLike {
    * `connect()` would otherwise absorb the whole deadline if the holder died while
    * the per-poll precheck was blocked; the watchdog aborts the probe the instant no
    * live holder remains. The capped probe (holder already gone) is short enough to
-   * never race the client's deadline, so it needs no watchdog. Only the full-budget
-   * wait is authoritative enough to unlink a stale socket, so `allowSocketRemoval`
-   * tracks `keepWaiting` (issue #5878).
+   * never race the client's deadline, so it needs no watchdog.
    */
   private async probeObservedSocketWithWatchdog(
     keepWaiting: boolean,
@@ -1707,11 +1742,7 @@ export class DaemonManager implements DaemonManagerLike {
       ? this.startLivenessWatchdog(signal, shouldContinueWaiting)
       : undefined;
     try {
-      return await this.probeObservedSocket(
-        probeDeadline,
-        watchdog?.signal ?? signal,
-        keepWaiting && maxProbeDurationMs === undefined,
-      );
+      return await this.probeObservedSocket(probeDeadline, watchdog?.signal ?? signal);
     } finally {
       watchdog?.dispose();
     }
@@ -1725,31 +1756,29 @@ export class DaemonManager implements DaemonManagerLike {
    * namespace's PID record, so a successful socket connection is authoritative
    * readiness even when `status()` cannot prove ownership.
    *
-   * `allowSocketRemoval` gates the stale-socket cleanup on the unready path.
-   * Unlinking a socket whose daemon still reports running is only safe after an
-   * authoritative full-budget probe; a probe capped to a short confirm budget can
-   * fail merely because a healthy daemon was slow to accept (backlog / first accept
-   * after restart), so cleaning up there would unlink a LIVE daemon's socket and
-   * break every later client (issue #5878, guarded by
-   * `daemonManagerReadiness.integration.test.ts` "recovers on a later retry without removing a
-   * live daemon's socket"). Callers running a capped probe pass `false`.
+   * Deliberately NEVER unlinks the socket on an "unready" outcome (issue #6140): a
+   * live daemon under load (a busy accept queue, a concurrent heavy operation) can
+   * fail every readiness attempt within budget while still genuinely owning the
+   * socket. The prior behavior unlinked the socket whenever `status()` reported the
+   * recorded PID alive, on the theory that a SIGKILL'd daemon's PID could have been
+   * reused by an unrelated process — but that same code path cannot distinguish
+   * that rare case from an ordinary busy-but-alive daemon, and field evidence
+   * (dogfood repro, issue #6140) confirms it fires on the latter. Deleting a
+   * still-live daemon's socket combined with the #5253 guard (which then refuses to
+   * replace a daemon it believes is alive) permanently bricks every later client
+   * until an explicit `--daemon restart` — a strictly worse failure mode than the
+   * readiness loop spinning out to its own timeout. A genuinely dead recorded PID
+   * is already cleaned up by {@link status} itself, so no removal is needed here.
    */
   private async probeObservedSocket(
     deadline: number,
     signal: AbortSignal | undefined,
-    allowSocketRemoval: boolean,
   ): Promise<"ready" | "aborted" | "unready"> {
     if (await this.verifyDaemonConnection(this.remainingTime(deadline), signal)) {
       return "ready";
     }
     if (signal?.aborted) {
       return "aborted";
-    }
-    if (allowSocketRemoval) {
-      const status = await this.status();
-      if (status.running) {
-        await this.removeInvalidSocketPath();
-      }
     }
     return "unready";
   }
@@ -1830,7 +1859,15 @@ export class DaemonManager implements DaemonManagerLike {
    * enforced separately by the proxy handshake.
    */
   private async tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean> {
-    const deadline = this.timer.now() + budgetMs;
+    // A non-default PID/socket path means the process-table scan below cannot be
+    // trusted to identify a peer IN THIS socket namespace (issue #6140) — bound the
+    // whole rejoin to a short grace in that case rather than the caller's full
+    // start budget. The default namespace keeps the full budget, matching #6103.
+    const usesIsolatedSocketNamespace = this.pidFilePath !== PID_FILE_PATH;
+    const effectiveBudgetMs = usesIsolatedSocketNamespace
+      ? Math.min(budgetMs, PEER_DAEMON_UNCORRELATED_NAMESPACE_GRACE_MS)
+      : budgetMs;
+    const deadline = this.timer.now() + effectiveBudgetMs;
 
     // The process-table scan is a synchronous `ps`/PowerShell/CIM call that blocks the
     // event loop, so it must (a) never run BEFORE the authoritative socket probe, and
@@ -1863,7 +1900,13 @@ export class DaemonManager implements DaemonManagerLike {
       // socket inode with no listener and no backing process) fails promptly (#5878).
       // The scan runs at most once up front (when still undefined) and once per interval
       // thereafter, so a peer that dies mid-wait still ends the loop without a scan per
-      // poll.
+      // poll. Recheck the deadline immediately before it: the scan itself is an
+      // uncancellable synchronous call, so once the budget is exhausted it must
+      // return rather than start a scan that can only blow past the deadline
+      // (issue #6140, folded from PR #6109 review).
+      if (this.remainingTime(deadline) === 0) {
+        return false;
+      }
       if (peerProcessComingUp === undefined || this.timer.now() >= nextProcessScanAt) {
         peerProcessComingUp = this.hasComingUpPeerDaemon();
         nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
@@ -1975,15 +2018,26 @@ export class DaemonManager implements DaemonManagerLike {
     return Math.max(0, deadline - this.timer.now());
   }
 
+  /**
+   * Whether the daemon socket/pipe is observable at the filesystem layer before
+   * attempting a connect. A Unix domain socket has a filesystem entry, so a
+   * missing path means nothing is listening; a Windows named pipe has none, so
+   * the existsSync gate must be skipped there entirely and the connect attempted
+   * regardless (issue #6140) — mirroring {@link DaemonClient.isAvailable}'s
+   * `platform() !== "win32"` branch.
+   */
+  private socketPathObservable(): boolean {
+    return this.platform === "win32" || existsSync(this.socketPath);
+  }
+
   private async verifyDaemonConnection(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
     const deadline = this.timer.now() + timeoutMs;
 
-    // Retry the connect probe before declaring the socket dead. A single failed
+    // Retry the connect probe before declaring the socket unready. A single failed
     // probe is not authoritative — a live daemon under load can transiently
-    // refuse a connection. Only a socket that fails every attempt is treated as
-    // stale (which then triggers removeInvalidSocketPath). This is what keeps a
-    // healthy daemon's socket from being unlinked on a flaky probe, the dominant
-    // cause of "devices not found after daemon start/restart".
+    // refuse a connection. The caller never unlinks the socket on a retry
+    // exhaustion (issue #6140): a socket that fails every attempt here may still
+    // be owned by a genuinely live, merely busy daemon.
     for (let attempt = 1; attempt <= READINESS_PROBE_MAX_ATTEMPTS; attempt++) {
       const remainingTimeoutMs = this.remainingTime(deadline);
       if (remainingTimeoutMs === 0 || signal?.aborted) {
@@ -2061,29 +2115,6 @@ export class DaemonManager implements DaemonManagerLike {
       status.pid === pid &&
       (await this.verifyDaemonConnection(timeoutMs, signal))
     );
-  }
-
-  /**
-   * Remove a daemon socket path that failed the readiness probe.
-   *
-   * This is only invoked after {@link verifyDaemonConnection} could not connect,
-   * which is the authoritative signal that the path is unusable. A stale socket
-   * inode left behind by a SIGKILL'd daemon is still an `isSocket()` inode, so we
-   * must remove it regardless of file type — otherwise a reused PID makes
-   * `status()` report running and the readiness loop spins until it times out.
-   * This mirrors the unconditional stale-socket cleanup in {@link start}.
-   */
-  private async removeInvalidSocketPath(): Promise<void> {
-    if (!existsSync(this.socketPath)) {
-      return;
-    }
-
-    try {
-      await unlink(this.socketPath);
-      logger.debug(`Removed invalid daemon socket path: ${this.socketPath}`);
-    } catch (error) {
-      logger.debug(`Failed to remove invalid daemon socket path: ${errorMessage(error)}`);
-    }
   }
 
   /**

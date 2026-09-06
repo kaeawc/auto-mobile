@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -130,6 +130,7 @@ describe("DaemonManager stop", () => {
     pidFilePath: string,
     socketPath: string,
     onLivenessCheck?: () => void,
+    lockFilePath: string = join(tmpdir(), "unused-daemon-lock"),
   ): DaemonManager {
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses: () => [],
@@ -142,7 +143,7 @@ describe("DaemonManager stop", () => {
       undefined,
       undefined,
       timer,
-      join(tmpdir(), "unused-daemon-lock"),
+      lockFilePath,
       pidFilePath,
       socketPath,
       processFinder,
@@ -282,6 +283,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-already-exited-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
     const pid = 4247;
     // The recorded PID is already dead when stop() is invoked — no live process
     // to signal at all (unlike the SIGTERM/SIGKILL cases above).
@@ -290,7 +292,14 @@ describe("DaemonManager stop", () => {
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "socket");
-    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      lockFilePath,
+    );
     const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
@@ -319,6 +328,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-live-winner-race-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
     const deadLoserPid = 4248;
     // The recorded (loser) PID is confirmed dead, but a DIFFERENT, live winner
     // process now holds the socket path — stop() has no way to know this from
@@ -330,7 +340,14 @@ describe("DaemonManager stop", () => {
     // The winner's live socket — indistinguishable, by pathname alone, from an
     // ordinary stale socket inode.
     writeFileSync(socketPath, "live winner socket");
-    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      lockFilePath,
+    );
     const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
@@ -340,6 +357,108 @@ describe("DaemonManager stop", () => {
       expect(existsSync(pidFilePath)).toBe(false);
       // The live winner's socket must survive — this is the brick #6140 exists
       // to prevent.
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // #6140 P2 reconciliation: restricting removeConfirmedDeadPidFile to the PID
+  // file protected the socket, but left the SAME check/use race on the PID
+  // FILE itself — a concurrent daemon start could rewrite it with its own LIVE
+  // record between this method's liveness check and cleanupDaemonFiles's
+  // unlink. Fixed by acquiring the same O_EXCL namespace startup lock a
+  // concurrent start holds while binding, then RE-READING under the lock
+  // before deleting.
+  test("does not delete the PID file when a concurrent start rewrites it with a live record before the under-lock recheck", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-concurrent-start-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
+    const deadLoserPid = 4249;
+    const winnerPid = 4250;
+    const livePids = new Set<number>([winnerPid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, deadLoserPid, socketPath);
+    writeFileSync(socketPath, "socket");
+
+    let livenessChecks = 0;
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      () => {
+        livenessChecks++;
+        // The 2nd liveness check is removeConfirmedDeadPidFile's PRE-LOCK
+        // pre-check (the 1st is status()'s own check). Simulate a concurrent
+        // daemon start winning the race right after that pre-check: it
+        // rewrites the PID file with its own live record before this
+        // method's UNDER-LOCK re-read (the 3rd liveness check) runs.
+        if (livenessChecks === 2) {
+          writeStopPidFile(pidFilePath, winnerPid, socketPath);
+        }
+      },
+      lockFilePath,
+    );
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      // The winner's live PID record must survive intact.
+      expect(existsSync(pidFilePath)).toBe(true);
+      const survivingPidData = JSON.parse(readFileSync(pidFilePath, "utf-8")) as { pid: number };
+      expect(survivingPidData.pid).toBe(winnerPid);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("skips PID-file deletion without hanging when the startup lock cannot be acquired within the bound", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-lock-unavailable-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
+    const deadLoserPid = 4251;
+    const lockHolderPid = 4252;
+    // The lock holder is alive for the whole test — every acquire attempt
+    // inside the bounded retry loop must see it as genuinely held.
+    const livePids = new Set<number>([lockHolderPid]);
+    writeStopPidFile(pidFilePath, deadLoserPid, socketPath);
+    writeFileSync(socketPath, "socket");
+    // A live process already holds the namespace startup lock (e.g. a
+    // concurrent daemon start in progress).
+    writeFileSync(lockFilePath, String(lockHolderPid));
+
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      lockFilePath,
+    );
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      const start = timer.getCurrentTime();
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+      // Bounded: stop() must give up within its own acquire bound rather than
+      // hang waiting for the lock.
+      expect(timer.getCurrentTime() - start).toBeLessThan(5_000);
+
+      expect(killSpy).not.toHaveBeenCalled();
+      // Deletion was skipped — the stale PID file survives for the next
+      // locked bind to reclaim, exactly like the socket already does.
+      expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);
     } finally {
       killSpy.mockRestore();

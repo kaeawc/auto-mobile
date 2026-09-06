@@ -489,6 +489,21 @@ const LIVENESS_WATCHDOG_INTERVAL_MS = 100;
 const LOCK_HOLDER_PROBE_TIMEOUT_MS = 1000;
 
 /**
+ * Bound on `stop()`'s attempt to acquire the namespace startup lock before
+ * removing a confirmed-dead PID file (issue #6140). Coordinates PID-file
+ * deletion with a concurrent daemon start, which holds the SAME lock while
+ * binding and publishing its own record — closing the window where a
+ * concurrent start rewrites the PID file between `stop()`'s liveness check and
+ * its unlink. Bounded so `stop()` can never hang if a start holds the lock
+ * unusually long; on timeout the stale file is left for the next locked bind
+ * to reclaim instead (safe — see {@link DaemonManager.removeConfirmedDeadPidFile}).
+ */
+const PID_FILE_DELETE_LOCK_ACQUIRE_TIMEOUT_MS = 2000;
+
+/** Poll interval while retrying {@link PID_FILE_DELETE_LOCK_ACQUIRE_TIMEOUT_MS}. */
+const PID_FILE_DELETE_LOCK_POLL_MS = 50;
+
+/**
  * A snapshot of the daemon startup lock's current holder, as read from the lock
  * file. `token` carries the holder's per-instance owner token (issue #5904) so a
  * replacement holder is distinguishable from the prior one even under PID reuse.
@@ -1515,14 +1530,34 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
+   * Reads the PID file and returns its data only if it names a CONFIRMED-DEAD
+   * PID (a well-formed record whose recorded process is not currently running).
+   * Returns `undefined` for a missing file, a malformed record, or a record
+   * naming a still-live process — all of which mean "nothing to clean up here".
+   */
+  private async readConfirmedDeadPidData(): Promise<PidFileData | undefined> {
+    if (!existsSync(this.pidFilePath)) {
+      return undefined;
+    }
+    try {
+      const pidFileContent = await readFile(this.pidFilePath, "utf-8");
+      const pidData: PidFileData = JSON.parse(pidFileContent);
+      if (typeof pidData.pid !== "number" || this.isProcessRunning(pidData.pid)) {
+        return undefined;
+      }
+      return pidData;
+    } catch (error) {
+      logger.warn(`Failed to read PID file during stop(): ${errorMessage(error)}`);
+      return undefined;
+    }
+  }
+
+  /**
    * Remove a well-formed PID file naming an already-exited daemon, from the
-   * explicit `stop()` path only (issue #6140). Independently re-reads and
-   * re-confirms the recorded PID is dead (rather than trusting `status()`'s
-   * now-observation-only result), so this stays gated on the same "confirmed
-   * dead, expected PID" check the removed `status()` cleanup used — the
-   * difference is WHO calls it: an explicit, deliberate `--daemon stop`
-   * action, never a passive status/isAvailable/health-diagnostic probe a live
-   * startup winner could race.
+   * explicit `stop()` path only (issue #6140). The difference from `status()`
+   * (which never deletes anything) is WHO calls this: an explicit, deliberate
+   * `--daemon stop` action, never a passive status/isAvailable/health-diagnostic
+   * probe a live startup winner could race.
    *
    * Deliberately removes ONLY the PID file — never the socket pathname. A
    * daemon publishes its control socket (`daemon.ts`, `UnixSocketServer.start()`)
@@ -1532,22 +1567,55 @@ export class DaemonManager implements DaemonManagerLike {
    * cheap way to establish current ownership — the lsof/inode ownership-proof
    * machinery was deliberately removed earlier in #6140 for exactly this
    * reason) would delete that winner's live socket: the exact brick #6140 is
-   * about. The PID file alone is safe to remove: its recorded PID is
-   * confirmed dead, so removing it cannot un-publish anything a live process
-   * depends on — a startup winner (dead-PID-record or not) always writes its
-   * own fresh PID record before it is done starting. A leftover socket file
-   * is harmless; it is unconditionally reclaimed by the next daemon start's
-   * unlink-before-`listen()`, under the O_EXCL startup lock
-   * (`UnixSocketServer.start()`).
+   * about. A leftover socket file is harmless; it is unconditionally reclaimed
+   * by the next daemon start's unlink-before-`listen()`, under the O_EXCL
+   * startup lock (`UnixSocketServer.start()`).
+   *
+   * Even the PID file alone is NOT unconditionally safe to delete on a single
+   * read, though: a concurrent daemon start can rewrite it — with its own LIVE
+   * record — between this method's liveness check and the eventual `unlink()`
+   * (`cleanupDaemonFiles`'s own `expectedPid` check only re-reads the file, it
+   * does not coordinate with a writer). Deleting that rewritten record would
+   * make a live daemon unrecorded (`status()`/`stop()` would report it absent)
+   * and reopen the startup DB-ownership gap an early-owner record exists to
+   * close. So this ACQUIRES the SAME `O_EXCL` namespace startup lock a
+   * concurrent `start()` holds while binding and publishing its own record,
+   * bounded so `stop()` can never hang if a start holds the lock unusually
+   * long, then RE-READS and RE-CONFIRMS the PID file under the lock before
+   * deleting. Either `stop()` wins the race (deletes the truly-stale record;
+   * the concurrent start then writes its own afterward) or the start wins it
+   * (writes its live record; `stop()`'s re-read under the lock then sees a
+   * live/different PID and skips). A lock that cannot be acquired within the
+   * bound, or a record that no longer matches, both mean "skip deletion" —
+   * never delete a record this method cannot prove is still the confirmed-dead
+   * one.
    */
   private async removeConfirmedDeadPidFile(): Promise<void> {
-    if (!existsSync(this.pidFilePath)) {
+    // Cheap unlocked pre-check: skip acquiring the lock entirely when there is
+    // plainly nothing to clean up (already gone, or already live).
+    if (!(await this.readConfirmedDeadPidData())) {
       return;
     }
+
+    const deadline = this.timer.now() + PID_FILE_DELETE_LOCK_ACQUIRE_TIMEOUT_MS;
+    let acquired = this.acquireLock();
+    while (!acquired && this.remainingTime(deadline) > 0) {
+      await this.timer.sleep(Math.min(PID_FILE_DELETE_LOCK_POLL_MS, this.remainingTime(deadline)));
+      acquired = this.acquireLock();
+    }
+    if (!acquired) {
+      logger.warn(
+        "Could not acquire the startup lock to remove a stale PID file during stop(); " +
+          "leaving it for the next daemon start to reclaim.",
+      );
+      return;
+    }
+
     try {
-      const pidFileContent = await readFile(this.pidFilePath, "utf-8");
-      const pidData: PidFileData = JSON.parse(pidFileContent);
-      if (typeof pidData.pid !== "number" || this.isProcessRunning(pidData.pid)) {
+      // RE-READ under the lock: a concurrent start could have rewritten the PID
+      // file with its own live record in the window before the lock was ours.
+      const pidData = await this.readConfirmedDeadPidData();
+      if (!pidData) {
         return;
       }
       await cleanupDaemonFiles({
@@ -1559,6 +1627,8 @@ export class DaemonManager implements DaemonManagerLike {
       logger.warn(
         `Failed to remove a confirmed-dead PID file during stop(): ${errorMessage(error)}`,
       );
+    } finally {
+      this.releaseLock();
     }
   }
 

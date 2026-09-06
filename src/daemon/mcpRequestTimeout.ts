@@ -7,6 +7,7 @@ import {
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
+import { TAP_ANY_SEARCH_UNTIL_DEFAULT_MS } from "../features/action/TapAnyElement";
 
 export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS };
 
@@ -255,12 +256,17 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
  *
  * The outer MCP deadline must also cover PRE-GESTURE work that runs before
  * the CtrlProxy press request even starts — element discovery and, in
- * particular, `searchUntil.duration` (issue #6248 review, P2). Without it,
- * a call like `tapAny({action:"longPress", duration:60000,
- * searchUntil:{duration:12000}})` gets an outer budget sized only for the
- * press itself, while up to `searchUntil.duration` of discovery time eats
- * into that same budget before the press even begins — so the floor is
- * `searchUntil.duration + duration + headroom`.
+ * particular, the effective `searchUntil.duration` (issue #6248 review, P2).
+ * When `searchUntil` is omitted entirely, `TapAnyElement.getSearchUntilDuration`
+ * still defaults every call to `TAP_ANY_SEARCH_UNTIL_DEFAULT_MS` (1500ms) of
+ * polling — so budgeting zero search time for an omitted `searchUntil` leaves
+ * a call like `tapAny({action:"longPress", duration:60000})` (no `searchUntil`)
+ * with an outer deadline sized only for the press itself, while the default
+ * search window still eats into that same budget before the press even
+ * begins. Use the same default the tool applies so the two stay in sync — the
+ * floor is `duration + effectiveSearchWindow + headroom`, where
+ * `effectiveSearchWindow` is `searchUntil.duration` when given, or the
+ * default otherwise.
  */
 function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
@@ -275,7 +281,8 @@ function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefi
     return undefined;
   }
   const searchUntilDuration =
-    positiveFiniteNumber(asRecord(argumentsRecord.searchUntil)?.duration) ?? 0;
+    positiveFiniteNumber(asRecord(argumentsRecord.searchUntil)?.duration) ??
+    TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
   return (
     Math.round(duration) +
     Math.round(searchUntilDuration) +

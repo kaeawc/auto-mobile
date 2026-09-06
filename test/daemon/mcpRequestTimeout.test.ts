@@ -22,6 +22,7 @@ import {
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
+import { TAP_ANY_SEARCH_UNTIL_DEFAULT_MS } from "../../src/features/action/TapAnyElement";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -444,10 +445,32 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     const resolved = resolveMcpRequestTimeoutMs(request);
-    expect(resolved).toBe(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
+    // No `searchUntil` is given, so the floor must still budget the implicit
+    // default search window `TapAnyElement.getSearchUntilDuration` applies
+    // (#6248 review, P2) -- not just duration + headroom.
+    expect(resolved).toBe(
+      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
     // Must not fire before the CtrlProxy-level request timeout TapAnyElement
     // sizes for the same call (duration + the same headroom, #6248 review).
     expect(resolved).toBeGreaterThanOrEqual(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
+  });
+
+  test("tapAny longPress with no searchUntil budgets the implicit default search window (#6248 review)", () => {
+    const duration = 60_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
   });
 
   test("tapAny longPress budgets pre-gesture searchUntil.duration ahead of the press (#6248 review)", () => {

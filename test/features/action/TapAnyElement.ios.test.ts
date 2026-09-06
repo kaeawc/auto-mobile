@@ -224,6 +224,24 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1501 }]);
   });
 
+  // Thread PRRT_kwDOP-GF5M6fuHzW: a positive sub-1ms-rounded longPress duration
+  // (e.g. 0.4) must never normalize to 0 -- CtrlProxy's `GesturePerformer` treats
+  // a non-positive `duration` as a plain tap (`coordinate.tap()`), silently
+  // downgrading a requested long press into a tap that reports success instead
+  // of performing a genuine (if very short) long press.
+  test("longPress with a sub-1ms duration floors to 1ms instead of becoming a tap", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+
+    const result = await tapAny.execute({ action: "longPress", duration: 0.4 });
+
+    expect(result.success).toBe(true);
+    // Floored to 1ms — still a long press (duration > 0), not a tap — and the
+    // timeout is sized from that same floored value (1 + 2000 headroom).
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1, 2001);
+    expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1 }]);
+  });
+
   // Thread PRRT_kwDOP-GF5M6ftxl6: under VoiceOver, a coordinate press only
   // FOCUSES an element — it does not activate it. When the selected clickable has
   // a resource-id but no label/content-desc/text, tapAny must activate it through

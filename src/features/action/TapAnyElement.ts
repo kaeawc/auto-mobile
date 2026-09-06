@@ -46,6 +46,18 @@ interface TapAnyElementDependencies {
  */
 const LONG_PRESS_TIMEOUT_HEADROOM_MS = 2000;
 
+/**
+ * Default `searchUntil.duration` (ms) applied when a `tapAny` call omits it
+ * (`getSearchUntilDuration` below). Exported so the daemon's outer MCP
+ * timeout budgeting (`resolveTapAnyLongPressBudgetMs` in
+ * `src/daemon/mcpRequestTimeout.ts`) can share the same value instead of
+ * assuming an omitted `searchUntil` costs zero search time (issue #6248
+ * review, P2) -- a call like `tapAny({action:"longPress", duration:60000})`
+ * still spends this long polling for the element before the press even
+ * starts.
+ */
+export const TAP_ANY_SEARCH_UNTIL_DEFAULT_MS = 1500;
+
 export class TapAnyElement extends BaseVisualChange {
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
@@ -55,7 +67,7 @@ export class TapAnyElement extends BaseVisualChange {
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private featureFlags: FeatureFlagService;
 
-  private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
+  private static readonly SEARCH_UNTIL_DEFAULT_MS = TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
   private static readonly SEARCH_POLL_INTERVAL_MS = 100;
@@ -238,7 +250,12 @@ export class TapAnyElement extends BaseVisualChange {
       // the runner rather than performing a shorter/longer press (issue
       // #6248 review). Round rather than truncate so a value like 999.6
       // still reads as "about a second" instead of quietly losing time.
-      return Math.round(options.duration);
+      // A sub-1ms-rounded positive duration (e.g. 0.4) must never normalize
+      // to 0 -- CtrlProxy's `GesturePerformer` treats a non-positive duration
+      // as a plain tap, silently downgrading a requested long press into a
+      // tap that reports success (issue #6248 review, P2). Floor at 1ms so
+      // any positive `duration` stays a genuine long press.
+      return Math.max(1, Math.round(options.duration));
     }
     return this.device.platform === "ios" ? 1500 : 1000;
   }

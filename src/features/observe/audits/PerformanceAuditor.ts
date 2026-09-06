@@ -16,6 +16,8 @@ import {
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
+import type { ElementParser } from "../../../utils/interfaces/ElementParser";
+import { DefaultElementParser } from "../../utility/ElementParser";
 
 /**
  * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1): the
@@ -164,6 +166,70 @@ export function findInertTouchPoint(
   return { point: pointFor(FALLBACK_TOUCH_POINT_FRACTION), inert: false };
 }
 
+/**
+ * Collect every hierarchy element that could be an obstacle for
+ * `findInertTouchPoint` - i.e. everything `isInteractiveElement` would flag,
+ * across the main hierarchy and any secondary windows (dialogs, sheets).
+ *
+ * Deliberately NOT `result.elements.clickable`: `DefaultObserveElementCollector`
+ * populates that list only for `clickable`/`click`-action nodes, but
+ * `isInteractiveElement` (and therefore the inert-point scan) also treats
+ * `focusable`, `long-clickable`, and `long_click` nodes as obstacles. A
+ * focusable-only or long-clickable-only control covering a candidate point
+ * would otherwise never be supplied as an obstacle, and the scan could land
+ * on (and activate/focus) it (issue #6167 follow-up). Walking the raw
+ * hierarchy with the same `isInteractiveElement` predicate the scan itself
+ * applies keeps the two from drifting apart.
+ */
+export function collectInteractiveObstacles(
+  result: ObserveResult,
+  elementParser: ElementParser = new DefaultElementParser(),
+): Element[] {
+  if (!result.viewHierarchy) {
+    return result.elements?.clickable ?? [];
+  }
+  return elementParser
+    .flattenViewHierarchy(result.viewHierarchy, { includeWindows: true })
+    .map((entry) => entry.element);
+}
+
+export interface TouchLatencyPointDecision {
+  /** A verified-inert coordinate to tap, present only when one was found. */
+  touchPoint?: { x: number; y: number };
+  /**
+   * True when there is no verified-inert point to tap - either `windowBounds`
+   * was undefined (no app window found), or every scanned candidate
+   * overlapped an interactive element. The caller must skip the
+   * touch-latency measurement entirely in this case rather than fall
+   * through to `TouchLatencyTracker`'s own unverified default point, which
+   * risks activating a full-screen button, WebView, or map (issue #6167).
+   */
+  skipTouchLatency: boolean;
+}
+
+/**
+ * Derive the synthetic touch-latency tap point exactly as
+ * `PerformanceAuditor.run` does, so tests can exercise this decision through
+ * the real production obstacle-collection path rather than hand-building an
+ * obstacle list for `findInertTouchPoint` directly.
+ */
+export function deriveTouchLatencyPoint(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+  elementParser: ElementParser = new DefaultElementParser(),
+): TouchLatencyPointDecision {
+  if (!windowBounds) {
+    return { skipTouchLatency: true };
+  }
+
+  const obstacles = collectInteractiveObstacles(result, elementParser);
+  const { point, inert } = findInertTouchPoint(windowBounds, obstacles);
+  if (!inert) {
+    return { skipTouchLatency: true };
+  }
+  return { touchPoint: point, skipTouchLatency: false };
+}
+
 export interface PerformanceAuditorOptions {
   device: BootedDevice;
   /**
@@ -235,9 +301,7 @@ export class PerformanceAuditor {
         // activating a real control - a read-only performance audit must
         // not tap a button, list item, or link as a side effect (#6167).
         const windowBounds = findAppWindowBounds(result, result.activeWindow!.appId);
-        const touchPoint = windowBounds
-          ? findInertTouchPoint(windowBounds, result.elements?.clickable ?? []).point
-          : undefined;
+        const { touchPoint, skipTouchLatency } = deriveTouchLatencyPoint(windowBounds, result);
 
         // Run the audit
         const auditResult = await performanceAudit.runAudit(
@@ -247,6 +311,7 @@ export class PerformanceAuditor {
           perf,
           windowBounds,
           touchPoint,
+          skipTouchLatency,
         );
 
         // Attach audit result to observe result

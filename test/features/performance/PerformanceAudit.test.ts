@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { PerformanceAudit } from "../../../src/features/performance/PerformanceAudit";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 interface TestViolation {
   metric: string;
@@ -220,5 +221,41 @@ describe("PerformanceAudit.resolveTouchLatency (#6167)", function () {
 
   test("returns null on an ordinary measurement failure", function () {
     expect(resolve({ success: false, latencyMs: 0, error: "timeout" })).toBe(null);
+  });
+});
+
+describe("PerformanceAudit.measureTouchLatency skip (#6167 P1)", function () {
+  let audit: PerformanceAudit;
+  let factory: FakeAdbClientFactory;
+
+  beforeEach(function () {
+    factory = new FakeAdbClientFactory();
+    audit = new PerformanceAudit(
+      { deviceId: "test-device", name: "test", platform: "android" },
+      factory,
+    );
+  });
+
+  const measure = (skipTouchLatency?: boolean) =>
+    (audit as any).measureTouchLatency(
+      "com.example",
+      { width: 1080, height: 1920 },
+      new NoOpPerformanceTracker(),
+      undefined,
+      // A caller that still supplied a touch point despite asking to skip
+      // must not have it used - `skipTouchLatency` takes precedence.
+      { x: 540, y: 960 },
+      skipTouchLatency,
+    );
+
+  // Regression: when the caller (PerformanceAuditor) found no point known
+  // not to overlap an interactive element - e.g. every scanned candidate
+  // overlapped a full-screen button, WebView, or map - the touch-latency
+  // measurement must be skipped entirely rather than injecting a real tap
+  // at an unverified fallback point.
+  test("skips the measurement and injects no synthetic tap when skipTouchLatency is set", async () => {
+    const result = await measure(true);
+    expect(result).toBeNull();
+    expect(factory.getFakeClient().wasCommandExecuted("input tap")).toBe(false);
   });
 });

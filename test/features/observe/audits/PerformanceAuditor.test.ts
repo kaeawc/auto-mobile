@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  collectInteractiveObstacles,
+  deriveTouchLatencyPoint,
   findAppWindowBounds,
   findInertTouchPoint,
   PerformanceAuditor,
@@ -378,6 +380,97 @@ describe("findInertTouchPoint (#6167)", () => {
       x < focusableField.bounds.right &&
       y >= focusableField.bounds.top &&
       y < focusableField.bounds.bottom;
+    expect(insideField).toBe(false);
+  });
+});
+
+describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up)", () => {
+  const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
+
+  test("falls back to elements.clickable when there is no raw view hierarchy to walk", () => {
+    const clickableEl: Element = {
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      clickable: true,
+    } as Element;
+    const result = makeResult({
+      elements: { clickable: [clickableEl], scrollable: [], text: [], media: [] },
+    });
+
+    expect(collectInteractiveObstacles(result)).toEqual([clickableEl]);
+  });
+
+  // Regression: `DefaultObserveElementCollector` only populates
+  // `elements.clickable` for clickable/click-action nodes, but a
+  // focusable-only or long-clickable-only control is also an obstacle for
+  // the inert-point scan. `elements.clickable` being empty here mirrors what
+  // the real collector produces for such a node - the obstacle must still
+  // come from walking the raw hierarchy.
+  test("includes a focusable-only node from the raw hierarchy even when elements.clickable omits it", () => {
+    const focusableBounds = { left: 440, top: 900, right: 640, bottom: 1020 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { focusable: "true", clickable: "false", bounds: focusableBounds } },
+        },
+      } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const obstacles = collectInteractiveObstacles(result);
+    expect(obstacles.some((el) => el.bounds?.left === focusableBounds.left)).toBe(true);
+  });
+
+  test("deriveTouchLatencyPoint reports skipTouchLatency when windowBounds is undefined", () => {
+    const result = makeResult();
+    expect(deriveTouchLatencyPoint(undefined, result)).toEqual({ skipTouchLatency: true });
+  });
+
+  // P1: when every scanned candidate overlaps a control (a full-screen
+  // button, WebView, or map), the caller must skip the touch-latency
+  // measurement entirely rather than tap the known-unsafe fallback point.
+  test("deriveTouchLatencyPoint skips when every candidate overlaps a control, via the production hierarchy-walk path", () => {
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { clickable: "true", bounds: appWindow } },
+        },
+      } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
+  // P2: a focusable-only control covering a candidate point must be avoided
+  // through the real production obstacle-collection path (raw hierarchy
+  // walk), not just via a hand-built obstacle list passed directly to
+  // findInertTouchPoint.
+  test("deriveTouchLatencyPoint avoids a focusable-only control found via the production hierarchy-walk path", () => {
+    const focusableBounds = { left: 440, top: 900, right: 640, bottom: 1020 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: { focusable: "true", clickable: "false", bounds: focusableBounds },
+          },
+        },
+      } as any,
+      // Mirrors the real DefaultObserveElementCollector output: a
+      // focusable-only node is never added to `clickable`.
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+    const { x, y } = decision.touchPoint!;
+    const insideField =
+      x >= focusableBounds.left &&
+      x < focusableBounds.right &&
+      y >= focusableBounds.top &&
+      y < focusableBounds.bottom;
     expect(insideField).toBe(false);
   });
 });

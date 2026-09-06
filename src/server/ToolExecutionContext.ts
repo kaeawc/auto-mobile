@@ -169,7 +169,7 @@ function isReadinessSatisfied(
 }
 
 /**
- * Per-session in-flight readiness upgrade (#6227 P1 follow-up: single-flight).
+ * Per-session in-flight readiness setup (#6227 P1 follow-ups: single-flight).
  *
  * A recovered/newly-published session can be observed by two concurrent
  * `automationReady` calls (e.g. reaching the daemon through different
@@ -182,6 +182,19 @@ function isReadinessSatisfied(
  * caller await the same in-flight promise (rather than starting its own)
  * closes that race; each waiter re-checks the achieved readiness once the
  * in-flight setup settles, upgrading further only if still insufficient.
+ *
+ * This map is shared by BOTH the fresh-session setup path (`setupSession`'s
+ * `!existingSession` branch) and the existing-session upgrade path
+ * (`ensureReadinessUpgraded`). A second P1 follow-up closed a further race:
+ * two post-restart calls racing for the same recovered UUID can each compute
+ * `existingSession` before the session is published, then one takes the
+ * fresh path and the other the existing-session path — if only the upgrade
+ * path went through this map, the fresh-path call would run
+ * `runDeviceReadinessSetup` directly and unguarded, concurrently with a
+ * guarded upgrade for the very same session. Routing the fresh path through
+ * `ensureReadinessUpgraded` too (keyed by the same `session.sessionId`)
+ * ensures any concurrent caller — fresh or existing — for that session joins
+ * the one in-flight setup instead of starting a second.
  */
 const readinessUpgradeInFlight = new Map<string, Promise<void>>();
 
@@ -246,7 +259,12 @@ async function setupSession(
   }
 
   ensureSessionIsCurrent(session, sessionManager);
-  await runDeviceReadinessSetup(session, sessionManager, requiredReadiness);
+  // #6227 P1 follow-up: route the fresh-session setup through the same
+  // single-flight map used by the existing-session upgrade path (keyed by
+  // `session.sessionId`) so a concurrent caller racing for the same
+  // recovered session — whether it takes the fresh or existing-session path
+  // — joins the one in-flight setup instead of starting a second.
+  await ensureReadinessUpgraded(session, sessionManager, requiredReadiness);
   ensureSessionIsCurrent(session, sessionManager);
 
   // Start test coverage session for navigation graph tracking

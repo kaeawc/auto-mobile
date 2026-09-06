@@ -439,6 +439,85 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBe("automationReady");
   });
 
+  // #6227 P1 follow-up (round 3): the round-2 single-flight above only
+  // serialized the *existing-session upgrade* path. A brand-new sessionUuid
+  // that two callers race for concurrently hits a second, unguarded hole:
+  // `getSessionForNewExecution` returns `null` (existingSession) for BOTH
+  // callers before either's `getOrCreateSession` call has published the
+  // session, so both `setupSession` invocations take the *fresh-session*
+  // branch (`existingSession === session` is false for both) — and, before
+  // this fix, that branch called `runDeviceReadinessSetup` directly,
+  // unguarded by `readinessUpgradeInFlight`. Both callers join the same
+  // `pendingSessionAssignments` entry (so they resolve to the identical
+  // `Session` object), then both would concurrently call
+  // `resetSetupState()`/`setup()` on the shared per-device CtrlProxy manager.
+  // Routing the fresh-session branch through `ensureReadinessUpgraded` too
+  // (same map, keyed by `session.sessionId`) closes this: setup must run
+  // exactly once even when both concurrent callers take the fresh path.
+  test("routes concurrent fresh-session setups for the same new sessionUuid through the single-flight so setup runs exactly once (#6227)", async () => {
+    let setupCalls = 0;
+    let resetCalls = 0;
+    let releaseSetup!: () => void;
+    const setupGate = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    let setupEnteredResolve!: () => void;
+    const setupEntered = new Promise<void>((resolve) => {
+      setupEnteredResolve = resolve;
+    });
+
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {
+          resetCalls += 1;
+        },
+        setup: async () => {
+          setupCalls += 1;
+          setupEnteredResolve();
+          await setupGate;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // Neither call awaits before the other starts: both synchronously
+    // observe `getSessionForNewExecution` returning `null` for this
+    // never-before-seen sessionUuid, then join the same
+    // `pendingSessionAssignments` entry once the second call reaches it —
+    // exactly the race described above.
+    const call1 = createToolExecutionContext(
+      "session-race-fresh-both",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+    const call2 = createToolExecutionContext(
+      "session-race-fresh-both",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+
+    // Let the single in-flight setup actually enter `setup()` before
+    // releasing it, then give any second (would-be) caller a chance to
+    // observe the in-flight upgrade before it completes.
+    await setupEntered;
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseSetup();
+
+    const [context1, context2] = await Promise.all([call1, call2]);
+
+    expect(context1.deviceId).toBe("device-1");
+    expect(context2.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(resetCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-race-fresh-both")).toBe("automationReady");
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

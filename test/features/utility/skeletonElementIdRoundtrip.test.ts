@@ -275,6 +275,87 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     );
   });
 
+  test("identical controls in two distinct, uniquely-identified containers resolve via tapOn({elementId, container}) instead of being rejected as ambiguous", () => {
+    // Review thread PRRT_kwDOP-GF5M6fouI_: the ambiguity check must be scoped
+    // to the RESOLVED container, not the whole capture. Two containers each
+    // hold one content-identical target node - globally ambiguous (2 nodes
+    // share the base hash), but each container's own subtree contains only
+    // ONE of them, so a `container`-scoped selector must resolve cleanly.
+    const container1 = {
+      class: "android.view.ViewGroup",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      "resource-id": "com.app:id/container1",
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 10, top: 10, right: 90, bottom: 40 },
+          clickable: "true",
+          "view-id": generatedViewId("target-in-container-1"),
+        },
+      ],
+    };
+    const container2 = {
+      class: "android.view.ViewGroup",
+      bounds: { left: 0, top: 200, right: 100, bottom: 300 },
+      "resource-id": "com.app:id/container2",
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 10, top: 210, right: 90, bottom: 240 },
+          clickable: "true",
+          "view-id": generatedViewId("target-in-container-2"),
+        },
+      ],
+    };
+    const rawRoot = { node: [container1, container2] };
+    assignStableViewIds(rawRoot);
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    const idInContainer1 = (container1.node[0] as Record<string, unknown>)["view-id"] as string;
+    const idInContainer2 = (container2.node[0] as Record<string, unknown>)["view-id"] as string;
+
+    // Same base content hash, disambiguated globally by document order - the
+    // first (container1's) is bare, the second (container2's) is suffixed.
+    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}$/);
+    expect(idInContainer2).toBe(`${idInContainer1}-2`);
+
+    // Without a container, this is genuinely globally ambiguous.
+    expect(() => selector.selectByResourceId(viewHierarchy, idInContainer1)).toThrow(/ambiguous/i);
+
+    // Scoped to its OWN container, each resolves cleanly - the peer outside
+    // the container does not block or misdirect resolution inside it.
+    const resultInContainer1 = selector.selectByResourceId(viewHierarchy, idInContainer1, {
+      container: { elementId: "com.app:id/container1" },
+    });
+    expect(resultInContainer1.element).not.toBeNull();
+    expect(resultInContainer1.totalMatches).toBe(1);
+    expect(resultInContainer1.element!.bounds).toEqual({
+      left: 10,
+      top: 10,
+      right: 90,
+      bottom: 40,
+    });
+
+    const resultInContainer2 = selector.selectByResourceId(viewHierarchy, idInContainer2, {
+      container: { elementId: "com.app:id/container2" },
+    });
+    expect(resultInContainer2.element).not.toBeNull();
+    expect(resultInContainer2.totalMatches).toBe(1);
+    expect(resultInContainer2.element!.bounds).toEqual({
+      left: 10,
+      top: 210,
+      right: 90,
+      bottom: 240,
+    });
+
+    // The peer's id, scoped to the WRONG container, correctly finds nothing -
+    // not a misdirected match onto that container's own (different) node.
+    const wrongContainerResult = selector.selectByResourceId(viewHierarchy, idInContainer2, {
+      container: { elementId: "com.app:id/container1" },
+    });
+    expect(wrongContainerResult.element).toBeNull();
+  });
+
   test("recomputing the synthetic id over a fresh capture of the same hierarchy is deterministic", () => {
     const buildRoot = () => ({
       node: [

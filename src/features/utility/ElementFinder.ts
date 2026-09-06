@@ -168,7 +168,12 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (container.elementId) {
-      this.assertStableViewIdSelectorNotAmbiguous(viewHierarchy, container.elementId);
+      // A container selector has no enclosing scope of its own to resolve
+      // first, so it is always checked against the whole capture.
+      this.assertStableViewIdSelectorNotAmbiguous(
+        this.collectFullCaptureSearchRoots(viewHierarchy),
+        container.elementId,
+      );
     }
 
     const matchesContainerText = container.text
@@ -420,98 +425,118 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Count nodes anywhere in the current capture (main hierarchy plus every
-   * window) whose `view-id` is `base` or an ordinal-suffixed duplicate of it.
-   * Used to decide whether an ordinal-suffixed `s-<hash>-<k>` selector is safe
-   * to trust in THIS capture (see `assertStableViewIdSelectorNotAmbiguous`).
+   * The full set of search roots for a capture — main hierarchy roots plus
+   * every window's roots — for callers that scope an ambiguity check to the
+   * WHOLE capture rather than one already-resolved container (see
+   * `assertStableViewIdSelectorNotAmbiguous`).
+   */
+  private collectFullCaptureSearchRoots(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[] {
+    const roots = [...this.parser.extractRootNodes(viewHierarchy)];
+    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    for (const windowRoots of windowRootGroups) {
+      roots.push(...windowRoots);
+    }
+    return roots;
+  }
+
+  /**
+   * Count nodes within `searchRoots` whose `view-id` is `base` or an
+   * ordinal-suffixed duplicate of it. Used to decide whether a synthetic
+   * `s-<hash>(-<k>)?` selector is safe to trust WITHIN THE GIVEN SCOPE (see
+   * `assertStableViewIdSelectorNotAmbiguous`) — the scope is the whole
+   * capture when there is no container, or just the resolved container's
+   * subtree when there is one, so a duplicate OUTSIDE a selected container
+   * never blocks resolution inside it.
    */
   private countNodesSharingStableViewIdBase(
-    viewHierarchy: ViewHierarchyResult,
+    searchRoots: ViewHierarchyNode[],
     base: string,
   ): number {
     let count = 0;
-    const countInRoots = (roots: ViewHierarchyNode[]): void => {
-      for (const root of roots) {
-        this.parser.traverseNode(root, (node: any) => {
-          const nodeProperties = this.parser.extractNodeProperties(node);
-          const viewId = nodeProperties["view-id"];
-          if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
-            count++;
-          }
-        });
-      }
-    };
-
-    countInRoots(this.parser.extractRootNodes(viewHierarchy));
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      countInRoots(windowRoots);
+    for (const root of searchRoots) {
+      this.parser.traverseNode(root, (node: any) => {
+        const nodeProperties = this.parser.extractNodeProperties(node);
+        const viewId = nodeProperties["view-id"];
+        if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
+          count++;
+        }
+      });
     }
     return count;
   }
 
   /**
-   * True when some node anywhere in the current capture (main hierarchy plus
-   * every window) carries `id` as its REAL `resource-id` field (not merely a
-   * `view-id` that happens to look synthetic-shaped). A real resource-id is
-   * never subject to `assignStableViewIds`' ordinal semantics, so it must win
-   * over a synthetic-ordinal interpretation of the same string (review thread
+   * True when some node within `searchRoots` carries `id` as its REAL
+   * `resource-id` field (not merely a `view-id` that happens to look
+   * synthetic-shaped). A real resource-id is never subject to
+   * `assignStableViewIds`' ordinal semantics, so it must win over a
+   * synthetic-ordinal interpretation of the same string (review thread
    * PRRT_kwDOP-GF5M6fomgA) even in the astronomically unlikely case a real id
    * collides with the producer's exact `s-<16 hex>(-<k>)?` shape.
    */
-  private hasExactResourceIdFieldMatch(viewHierarchy: ViewHierarchyResult, id: string): boolean {
+  private hasExactResourceIdFieldMatch(searchRoots: ViewHierarchyNode[], id: string): boolean {
     let found = false;
-    const checkRoots = (roots: ViewHierarchyNode[]): void => {
-      for (const root of roots) {
+    for (const root of searchRoots) {
+      if (found) {
+        break;
+      }
+      this.parser.traverseNode(root, (node: any) => {
         if (found) {
           return;
         }
-        this.parser.traverseNode(root, (node: any) => {
-          if (found) {
-            return;
-          }
-          const resourceId = this.parser.extractNodeProperties(node)["resource-id"];
-          if (typeof resourceId === "string" && resourceId === id) {
-            found = true;
-          }
-        });
-      }
-    };
-
-    checkRoots(this.parser.extractRootNodes(viewHierarchy));
-    if (!found) {
-      const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-      for (const windowRoots of windowRootGroups) {
-        checkRoots(windowRoots);
-      }
+        const resourceId = this.parser.extractNodeProperties(node)["resource-id"];
+        if (typeof resourceId === "string" && resourceId === id) {
+          found = true;
+        }
+      });
     }
     return found;
   }
 
   /**
    * Reject a synthetic stable-view-id selector (`s-<hash>` bare OR
-   * `s-<hash>-<k>` ordinal-suffixed) when MORE THAN ONE node in the current
-   * capture shares its base content hash — i.e. it has content-identical
-   * peers, so which node holds the bare id vs. which ordinal is load-bearing
-   * / capture-local rather than moot. A selector whose base hash is unique in
-   * this capture is left alone, and so is a real `resource-id`-backed id that
-   * merely resembles the synthetic shape (issue #6218 review threads
-   * PRRT_kwDOP-GF5M6foer0, PRRT_kwDOP-GF5M6fomf-, PRRT_kwDOP-GF5M6fomgA).
+   * `s-<hash>-<k>` ordinal-suffixed) when MORE THAN ONE node within
+   * `searchRoots` shares its base content hash — i.e. it has
+   * content-identical peers IN THIS SCOPE, so which node holds the bare id
+   * vs. which ordinal is load-bearing / capture-local rather than moot. A
+   * selector whose base hash is unique within `searchRoots` is left alone,
+   * and so is a real `resource-id`-backed id that merely resembles the
+   * synthetic shape (issue #6218 review threads PRRT_kwDOP-GF5M6foer0,
+   * PRRT_kwDOP-GF5M6fomf-, PRRT_kwDOP-GF5M6fomgA, PRRT_kwDOP-GF5M6fouI_).
    * Rejecting is correct here: a wrong tap is worse than a clear failure
    * telling the caller to use a more specific selector.
+   *
+   * `searchRoots` MUST already reflect any container scoping — callers with a
+   * `container` selector resolve the container FIRST and pass only its
+   * subtree, so a content-identical duplicate OUTSIDE the named container
+   * cannot block (or wrongly influence) resolution inside it. A duplicate
+   * that exists only outside the container leaves the id's exact `view-id`
+   * string matching at most one node inside the container, which the normal
+   * exact-match lookup resolves safely (or returns no-match) on its own.
+   *
+   * KNOWN LIMITATION (issue #6229, review thread PRRT_kwDOP-GF5M6fouI8): this
+   * guard is only as good as what a single, fresh capture can reveal. If node
+   * `A` (bare `s-H`) is REMOVED before the next capture and content-identical
+   * `B` (previously `s-H-2`) is now the sole survivor, `B` is reassigned the
+   * bare `s-H` id and `duplicateCount` here is 1 — the guard cannot tell that
+   * apart from an id that was always unique, so it passes and a selector
+   * meant for `A` silently resolves to `B` instead. A correct fix needs the
+   * id to carry capture-origin provenance (which generation/session it was
+   * observed in), a design change spanning the observe layer and this finder
+   * - out of scope for the current-capture-only check implemented here.
    */
   private assertStableViewIdSelectorNotAmbiguous(
-    viewHierarchy: ViewHierarchyResult,
+    searchRoots: ViewHierarchyNode[],
     id: string,
   ): void {
     const base = syntheticStableViewIdBase(id);
     if (!base) {
       return;
     }
-    if (this.hasExactResourceIdFieldMatch(viewHierarchy, id)) {
+    if (this.hasExactResourceIdFieldMatch(searchRoots, id)) {
       return;
     }
-    const duplicateCount = this.countNodesSharingStableViewIdBase(viewHierarchy, base);
+    const duplicateCount = this.countNodesSharingStableViewIdBase(searchRoots, base);
     if (duplicateCount > 1) {
       throw new ActionableError(
         `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
@@ -682,8 +707,11 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
-    this.assertStableViewIdSelectorNotAmbiguous(viewHierarchy, resourceId);
-
+    // Resolve the container FIRST when one is given, so the ambiguity check
+    // below can be scoped to just its subtree - a content-identical duplicate
+    // OUTSIDE the named container must not block (or misdirect) resolution
+    // of a uniquely-identified control inside it (review thread
+    // PRRT_kwDOP-GF5M6fouI_).
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
       : null;
@@ -693,6 +721,7 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (containerNode) {
+      this.assertStableViewIdSelectorNotAmbiguous([containerNode], resourceId);
       return this.collectResourceIdMatchesInRoots(
         [containerNode],
         resourceId,
@@ -700,6 +729,11 @@ export class DefaultElementFinder implements ElementFinder {
         !preserveTraversalOrder,
       );
     }
+
+    this.assertStableViewIdSelectorNotAmbiguous(
+      this.collectFullCaptureSearchRoots(viewHierarchy),
+      resourceId,
+    );
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectResourceIdMatchesInRoots(
@@ -1332,8 +1366,6 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
-    this.assertStableViewIdSelectorNotAmbiguous(viewHierarchy, resourceId);
-
     // See collectResourceIdMatchesInRoots: Compose testTag nodes report a bare
     // viewIdResourceName with no package qualifier, so a fully-qualified query must also
     // match against the bare suffix - not just partialMatch/exact on the full string.
@@ -1343,6 +1375,8 @@ export class DefaultElementFinder implements ElementFinder {
     const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
       matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch);
 
+    // Resolve the container FIRST (same ordering fix as findElementsByResourceId)
+    // so the ambiguity check can be scoped to just its subtree.
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
       : null;
@@ -1354,6 +1388,11 @@ export class DefaultElementFinder implements ElementFinder {
     const searchRoots = containerNode
       ? [containerNode]
       : this.parser.extractRootNodes(viewHierarchy);
+
+    this.assertStableViewIdSelectorNotAmbiguous(
+      containerNode ? searchRoots : this.collectFullCaptureSearchRoots(viewHierarchy),
+      resourceId,
+    );
 
     const siblings = this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId);
 

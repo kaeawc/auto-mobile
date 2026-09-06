@@ -105,6 +105,29 @@ const MAX_FUTILE_SCROLLS = 3;
 const SEARCH_BUDGET_MS = 20_000;
 
 /**
+ * Wall-clock ceiling for the WHOLE `execute()` call, measured from when it is
+ * invoked. This is the safety net for issue #6222's reopen: PR #6237 made
+ * per-field progress notifications extend the *transport's* request
+ * deadline, but that extension only fires for a caller who set MCP's
+ * `_meta.progressToken` -- the direct CLI->daemon path never does
+ * (`runToolViaDaemon` in `src/cli/index.ts` calls `DaemonMcpProxy.callTool`
+ * with no progressToken), so on that path the per-field progress plumbing is
+ * entirely inert and a multi-field call that keeps applying fields
+ * successfully still hits the transport's fixed deadline and gets its
+ * accumulated `fields` results discarded by a bare `-32001` timeout.
+ *
+ * `SetUIState` cannot see or rely on the transport's actual deadline (it is
+ * never threaded down through the tool handler), so it self-limits instead:
+ * once this internal budget is spent, it stops starting new fields and
+ * returns the accumulated per-field results as a normal (if
+ * `success: false`) result -- never a silent discard -- while there is still
+ * headroom before `DEFAULT_MCP_REQUEST_TIMEOUT_MS` (and the larger
+ * `MIN_SET_UI_STATE_MCP_TIMEOUT_MS` floor added alongside this) can fire.
+ * Deliberately smaller than both so this always wins the race.
+ */
+const RESULT_DEADLINE_BUDGET_MS = 45_000;
+
+/**
  * SetUIState - Declarative form field population tool
  *
  * Populates form fields by specifying desired end-state rather than procedural steps.
@@ -148,6 +171,10 @@ export class SetUIState extends BaseVisualChange {
     const fieldResults: FieldResult[] = new Array(options.fields.length);
     const processed = new Set<number>();
     let totalAttempts = 0;
+    // See RESULT_DEADLINE_BUDGET_MS -- this is the whole-call safety net,
+    // independent of (and in addition to) the search budget below.
+    const resultDeadlineMs = this.timer.now() + RESULT_DEADLINE_BUDGET_MS;
+    let resultBudgetSpent = false;
 
     // Progress reported to the client MUST stay on one consistent scale and
     // strictly increase -- MCP clients that enforce monotonicity reject or
@@ -223,6 +250,16 @@ export class SetUIState extends BaseVisualChange {
     let budgetSpent = false;
 
     while (processed.size < options.fields.length) {
+      // Check the whole-call budget BEFORE starting another field's work --
+      // give each field the same bounded budget it gets when it is the only
+      // field in the call, then stop and return what has already been
+      // applied rather than let the transport's own deadline discard it
+      // (issue #6222 reopen).
+      if (this.timer.now() >= resultDeadlineMs) {
+        resultBudgetSpent = true;
+        break;
+      }
+
       // Find all unprocessed fields visible in the current hierarchy, sorted by bounds.top
       const visibleFields = this.findVisibleFieldsInScreenOrder(
         options.fields,
@@ -348,14 +385,24 @@ export class SetUIState extends BaseVisualChange {
         .filter((_, i) => !processed.has(i))
         .map((f) => this.describeSelector(f.selector));
 
+      // The result-deadline case is NOT "not found" -- these fields may well
+      // be on screen, they were simply never reached. Say so distinctly and
+      // mark them `notAttempted` so a client can tell "safe to retry just
+      // these" apart from "attempted and failed" (issue #6222 reopen).
+      const notAttemptedReason = resultBudgetSpent
+        ? `Not attempted: setUIState's internal result deadline (${Math.round(RESULT_DEADLINE_BUDGET_MS / 1000)}s) was reached after applying ${processed.size}/${options.fields.length} field(s)`
+        : undefined;
+
       return {
         success: false,
-        fields: this.collectResults(fieldResults, options.fields, processed),
+        fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
         totalAttempts,
         observation: lastObservation,
-        error: budgetSpent
-          ? `Fields not found within the ${Math.round(SEARCH_BUDGET_MS / 1000)}s search budget: ${missing.join(", ")}`
-          : `Fields not found after scrolling: ${missing.join(", ")}`,
+        error: resultBudgetSpent
+          ? `setUIState result deadline (${Math.round(RESULT_DEADLINE_BUDGET_MS / 1000)}s) reached after applying ${processed.size}/${options.fields.length} field(s); not attempted: ${missing.join(", ")}`
+          : budgetSpent
+            ? `Fields not found within the ${Math.round(SEARCH_BUDGET_MS / 1000)}s search budget: ${missing.join(", ")}`
+            : `Fields not found after scrolling: ${missing.join(", ")}`,
       };
     }
 
@@ -437,11 +484,20 @@ export class SetUIState extends BaseVisualChange {
     results: FieldResult[],
     fields: FieldSpec[],
     processed: Set<number>,
+    notAttemptedReason?: string,
   ): FieldResult[] {
     const out: FieldResult[] = [];
     for (let i = 0; i < fields.length; i++) {
       if (processed.has(i) && results[i]) {
         out.push(results[i]);
+      } else if (notAttemptedReason !== undefined) {
+        out.push({
+          selector: fields[i].selector,
+          success: false,
+          attempts: 0,
+          notAttempted: true,
+          error: notAttemptedReason,
+        });
       } else {
         out.push({
           selector: fields[i].selector,

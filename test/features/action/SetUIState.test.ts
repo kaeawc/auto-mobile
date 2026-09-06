@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { SetUIState } from "../../../src/features/action/SetUIState";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { MIN_SET_UI_STATE_MCP_TIMEOUT_MS } from "../../../src/daemon/mcpRequestTimeout";
 import {
   FakeTapOnElement,
   FakeInputText,
@@ -1428,11 +1429,19 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
 
     fakeFieldTypeDetector.setSkipVerification("first", true);
 
+    let observeCalls = 0;
     fakeObserve.setResultFactory(() => {
-      // Must EXCEED the 20s budget. At 19s the old rolling deadline — re-armed
-      // to now+20s just before this observe — still had a second left, so a
-      // scroll attempt happened either way and the test could not fail.
-      fakeTimer.advanceTime(25_000);
+      observeCalls++;
+      // Only the post-success refresh observe (the 2nd call) needs to EXCEED
+      // the 20s search budget to regression-proof #4252 — at 19s the old
+      // rolling deadline, re-armed to now+20s just before this observe,
+      // still had a second left, so a scroll attempt happened either way and
+      // the test could not fail. The initial pre-loop observe stays cheap so
+      // the total stays comfortably under the whole-call
+      // RESULT_DEADLINE_BUDGET_MS safety net added for issue #6222's
+      // reopen — that budget is a different, larger concern this test does
+      // not exercise.
+      fakeTimer.advanceTime(observeCalls === 1 ? 1_000 : 25_000);
       return {
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
@@ -1451,5 +1460,205 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     // The off-screen field must have been searched for, not skipped because
     // earlier work had already aged the deadline.
     expect(fakeSwipe.getCallCount()).toBeGreaterThan(0);
+  });
+});
+
+describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  /** All three fields are visible on screen from the very first observation. */
+  const threeFieldHierarchy: ViewHierarchyResult = {
+    hierarchy: {
+      node: [
+        {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            "resource-id": "firstName",
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+            "resource-id": "lastName",
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+            "resource-id": "phone",
+            class: "android.widget.EditText",
+          },
+        },
+      ],
+    },
+  } as unknown as ViewHierarchyResult;
+
+  /**
+   * A tap/clear/input trio that costs `perFieldMs` of simulated device time
+   * per field, modeling the real per-field apply work (tap + clear + type)
+   * that on real hardware takes several seconds each -- the same layers
+   * (SetUIState's field loop) the CLI->daemon path drives in production.
+   */
+  function buildSlowFieldDependencies(perFieldMs: number) {
+    const tapOnElement = {
+      execute: async () => {
+        fakeTimer.advanceTime(Math.round(perFieldMs * 0.6));
+        return { success: true };
+      },
+    };
+    const clearText = {
+      execute: async () => {
+        fakeTimer.advanceTime(Math.round(perFieldMs * 0.2));
+        return { success: true };
+      },
+    };
+    const inputText = {
+      execute: async (text: string) => {
+        fakeTimer.advanceTime(Math.round(perFieldMs * 0.2));
+        return { success: true, text };
+      },
+    };
+    return { tapOnElement, clearText, inputText };
+  }
+
+  const build = (perFieldMs: number) => {
+    const { tapOnElement, clearText, inputText } = buildSlowFieldDependencies(perFieldMs);
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeFieldTypeDetector.setSkipVerification("lastName", true);
+    fakeFieldTypeDetector.setSkipVerification("phone", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+    return new SetUIState(device, null, {
+      tapOnElement,
+      clearText,
+      inputText,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+  };
+
+  test("reproduces the reopen: realistic per-field cost applies two fields then must return a structured partial result, never nothing", async () => {
+    // ~23s per field: two fields (46s) alone exceeds the whole-call budget,
+    // reproducing "applies fields, then the transport would time out and
+    // discard everything" from the dogfood report on a real CtrlProxy/adb
+    // round trip -- except here execute() must stop itself and hand back
+    // what it already did, instead of relying on the caller's transport to
+    // ever return anything at all.
+    const result = await build(23_000).execute({
+      fields: [
+        { selector: { elementId: "firstName" }, value: "Grace" },
+        { selector: { elementId: "lastName" }, value: "Hopper" },
+        { selector: { elementId: "phone" }, value: "5125550199" },
+      ],
+    });
+
+    // A real result -- never a thrown timeout -- and it must not lie about
+    // overall success once a field was left unattempted.
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(3);
+
+    const [first, last, phone] = result.fields;
+    expect(first.success).toBe(true);
+    expect(first.notAttempted).toBeFalsy();
+    expect(last.success).toBe(true);
+    expect(last.notAttempted).toBeFalsy();
+
+    // The third field was never reached -- marked distinctly from "attempted
+    // and failed" so a client knows it is safe to retry just this one field
+    // without re-sending (and duplicating) the two that already landed.
+    expect(phone.success).toBe(false);
+    expect(phone.notAttempted).toBe(true);
+    expect(result.error).toContain("result deadline");
+  });
+
+  test("stays within the setUIState transport floor even in the worst case", async () => {
+    const result = await build(23_000).execute({
+      fields: [
+        { selector: { elementId: "firstName" }, value: "Grace" },
+        { selector: { elementId: "lastName" }, value: "Hopper" },
+        { selector: { elementId: "phone" }, value: "5125550199" },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    // The whole call must return well inside MIN_SET_UI_STATE_MCP_TIMEOUT_MS
+    // (the transport floor added alongside this fix) -- this is the property
+    // that keeps a real client from ever seeing a bare -32001 after work was
+    // applied, on the direct CLI->daemon path where progress relay never
+    // extends anything.
+    expect(fakeTimer.now()).toBeLessThan(MIN_SET_UI_STATE_MCP_TIMEOUT_MS);
+  });
+
+  test("a fast multi-field call still returns full, unmarked results (no false positives from the new budget)", async () => {
+    const result = await build(500).execute({
+      fields: [
+        { selector: { elementId: "firstName" }, value: "Grace" },
+        { selector: { elementId: "lastName" }, value: "Hopper" },
+        { selector: { elementId: "phone" }, value: "5125550199" },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fields).toHaveLength(3);
+    expect(result.fields.every((f) => f.success)).toBe(true);
+    expect(result.fields.every((f) => !f.notAttempted)).toBe(true);
+  });
+
+  test("single-field fast-fail is unaffected by the new budget", async () => {
+    // Matches the issue's "Phone" case: an unclassifiable single field fails
+    // instantly with its own diagnosis, well under any budget.
+    const hierarchyWithLabel: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Phone" },
+          },
+        ],
+      },
+    } as unknown as ViewHierarchyResult;
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchyWithLabel,
+    });
+    fakeFieldTypeDetector.setFieldType("Phone", "unknown" as any);
+
+    const result = await new SetUIState(device, null, {
+      tapOnElement: { execute: async () => ({ success: true }) },
+      clearText: { execute: async () => ({ success: true }) },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    }).execute({
+      fields: [{ selector: { text: "Phone" }, value: "5125550199" }],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.fields).toHaveLength(1);
+    expect(result.fields[0].notAttempted).toBeFalsy();
+    expect(result.error).toContain("Phone");
+    expect(fakeTimer.now()).toBeLessThan(1_000);
   });
 });

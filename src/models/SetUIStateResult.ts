@@ -24,6 +24,14 @@ export interface FieldResult {
   fieldType?: FieldType;
   /** Whether the field was skipped because it already had the correct value */
   skipped?: boolean;
+  /**
+   * True when this field was never reached because the overall call's
+   * internal result deadline (issue #6222 reopen) was hit before processing
+   * got to it -- distinct from `error` describing an attempted-and-failed
+   * field. Lets a client tell "not attempted, safe to retry" apart from
+   * "attempted and failed" without parsing `error` text.
+   */
+  notAttempted?: boolean;
 }
 
 /**

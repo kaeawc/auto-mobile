@@ -8645,6 +8645,9 @@
               },
               "skipped": {
                 "type": "boolean"
+              },
+              "notAttempted": {
+                "type": "boolean"
               }
             },
             "required": ["selector", "success", "attempts"],

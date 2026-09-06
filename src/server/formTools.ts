@@ -53,6 +53,7 @@ const fieldResultSchema = z.object({
   error: z.string().optional(),
   fieldType: z.enum(["text", "checkbox", "toggle", "dropdown", "unknown"]).optional(),
   skipped: z.boolean().optional(),
+  notAttempted: z.boolean().optional(),
 });
 
 /**
@@ -124,6 +125,7 @@ export const setUIStateHandler = async (
       error: f.error,
       fieldType: f.fieldType,
       skipped: f.skipped,
+      notAttempted: f.notAttempted,
     })),
     totalAttempts: result.totalAttempts,
     error: result.error,

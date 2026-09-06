@@ -6,7 +6,7 @@
 import crypto from "crypto";
 import { Element } from "../../models/Element";
 import { ElementBounds } from "../../models/ElementBounds";
-import { ViewHierarchyNode, ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
+import { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import {
   AccessibilityAuditConfig,
   AccessibilityAuditResult,
@@ -50,7 +50,6 @@ export class WcagAudit {
     packageName: string,
     config: AccessibilityAuditConfig,
     density?: number,
-    windows?: ViewHierarchyWindowInfo[],
   ): Promise<AccessibilityAuditResult> {
     const violations: WcagViolation[] = [];
 
@@ -75,7 +74,7 @@ export class WcagAudit {
     violations.push(...this.checkFormInputLabels(elements, viewHierarchy, density));
 
     // Generate screen ID for baseline tracking
-    const screenId = this.generateScreenId(packageName, viewHierarchy, windows);
+    const screenId = this.generateScreenId(packageName, viewHierarchy);
 
     // Filter violations based on baseline if enabled
     let filteredViolations = violations;
@@ -405,303 +404,30 @@ export class WcagAudit {
   /**
    * Generate screen identifier for baseline tracking
    */
-  private generateScreenId(
-    packageName: string,
-    hierarchy: ViewHierarchyNode,
-    windows?: ViewHierarchyWindowInfo[],
-  ): string {
+  private generateScreenId(packageName: string, hierarchy: ViewHierarchyNode): string {
     // Use package name + root activity/fragment identifier
     // This is a simplified approach - could be enhanced with more specific identifiers
     //
-    // Node attributes (class, resource-id) live in one of TWO shapes depending on
-    // the hierarchy's source (issue #6252): xml2js-parsed uiautomator dumps nest
-    // them under `$` (`node.$.class`), while CtrlProxy's accessibility-service
-    // conversion (`CtrlProxyHierarchy.convertAccessibilityNode`) writes `class`/
-    // `resource-id` directly on the node and never creates `$`. Reading only one
-    // shape leaves the other always undefined, collapsing every screen on that
-    // source to the same "unknown:" id and defeating per-screen baseline
-    // tracking. `getNodeClass`/`getNodeResourceId` check both.
-    const activeRoot = this.resolveRootNode(hierarchy, windows);
-    const rootNode = this.descendToMeaningfulNode(activeRoot);
-    const rootId = this.getNodeResourceId(rootNode) || "";
-    // A resource-id alone is already a real, screen-distinguishing signal
-    // (issue #6274 — e.g. Compose semantics nodes carry a destination-specific
-    // resource-id but never a `class`). Only fall back to the literal
-    // "unknown" when NEITHER signal was found, so a resource-id-only stop
-    // doesn't get mislabeled as "unknown" and spuriously collide across
-    // screens that share nothing but that literal string.
-    const rootClass = this.getNodeClass(rootNode) || (rootId ? "" : "unknown");
+    // Node attributes (class, resource-id) live under `$`, not directly on the
+    // node (issue #6252) -- `rootNode.class`/`rootNode["resource-id"]` were
+    // always undefined, so every screen collapsed to the same "unknown:" id,
+    // defeating per-screen baseline tracking.
+    const rootNode = this.resolveRootNode(hierarchy);
+    const rootClass = (rootNode.$?.class as string | undefined) || "unknown";
+    const rootId = (rootNode.$?.["resource-id"] as string | undefined) || "";
 
     return `${packageName}:${rootClass}:${rootId}`;
   }
 
-  /**
-   * A `ViewHierarchyNode` as actually produced by the CtrlProxy accessibility
-   * conversion path, which writes `class`/`resource-id` as flat properties
-   * instead of nesting them under `$` (see `generateScreenId`). Declared as an
-   * intersection (additional optional properties), not a cast to an unrelated
-   * type, so it does not trip TS2352 the way `as ViewHierarchyNode` would.
-   */
-  private asFlatAttrNode(
-    node: ViewHierarchyNode,
-  ): ViewHierarchyNode & { class?: unknown; className?: unknown; "resource-id"?: unknown } {
-    return node as ViewHierarchyNode & {
-      class?: unknown;
-      className?: unknown;
-      "resource-id"?: unknown;
-    };
-  }
-
-  /**
-   * Read `class` from either node-attribute shape (see `generateScreenId`).
-   * `className` (issue #6274) is the field name CtrlProxy's accessibility
-   * hierarchy actually writes (see test/fixtures/observe/android-home.json) —
-   * neither `$.class` nor flat `class` is ever populated on it, so without
-   * this fallback every production Android node reads as classless.
-   */
-  private getNodeClass(node: ViewHierarchyNode): string | undefined {
-    const flat = this.asFlatAttrNode(node);
-    const value = flat.$?.class ?? flat.class ?? flat.className;
-    return typeof value === "string" ? value : undefined;
-  }
-
-  /** Read `resource-id` from either node-attribute shape (see `generateScreenId`). */
-  private getNodeResourceId(node: ViewHierarchyNode): string | undefined {
-    const flat = this.asFlatAttrNode(node);
-    const value = flat.$?.["resource-id"] ?? flat["resource-id"];
-    return typeof value === "string" ? value : undefined;
-  }
-
-  /**
-   * Generic layout-container classes that carry no resource-id in the
-   * committed Android fixtures (e.g. `test/fixtures/observe/android-home.json`)
-   * — window decor/content frames sit inside a chain of these before reaching
-   * a screen-specific node. Treated as non-meaningful even though they carry a
-   * `class` value, so `descendToMeaningfulNode` keeps descending past them
-   * instead of stopping at the first one it meets: two distinct screens in the
-   * same package both reach a bare `android.widget.LinearLayout` before their
-   * screen-specific `resource-id` (e.g. `tap_screen_content`), so stopping
-   * there produces an identical baseline key for both and suppresses one
-   * screen's violations using the other's baseline.
-   */
-  private static readonly GENERIC_DECOR_CLASSES = new Set([
-    "android.widget.FrameLayout",
-    "android.widget.LinearLayout",
-    "android.widget.RelativeLayout",
-    "android.view.ViewGroup",
-    // Every Compose screen in the same package mounts its whole UI under one
-    // of these (see test/fixtures/observe/diff/scroll-before.json) — a real
-    // class, but no more screen-specific than a plain layout wrapper, so it
-    // must be skipped too or Compose apps re-collapse to a single baseline id.
-    "androidx.compose.ui.platform.ComposeView",
-  ]);
-
-  /** Android's own reserved id namespace (`android:id/...`) — framework chrome present on every screen, never app/screen-specific. */
-  private static readonly FRAMEWORK_RESOURCE_ID_PREFIX = "android:id/";
-
-  /**
-   * Whether `node` carries a screen-distinguishing signal: a resource-id
-   * outside Android's reserved `android:id/` namespace (framework chrome, e.g.
-   * `android:id/content`, present identically on every screen), or a class not
-   * in `GENERIC_DECOR_CLASSES`.
-   */
-  private hasScreenSignal(node: ViewHierarchyNode): boolean {
-    const resourceId = this.getNodeResourceId(node);
-    if (
-      resourceId !== undefined &&
-      !resourceId.startsWith(WcagAudit.FRAMEWORK_RESOURCE_ID_PREFIX)
-    ) {
-      return true;
-    }
-    const className = this.getNodeClass(node);
-    return className !== undefined && !WcagAudit.GENERIC_DECOR_CLASSES.has(className);
-  }
-
-  /**
-   * Descend through attribute-less pass-through wrappers (window decor, content
-   * frame) and generic decor/container nodes (see `hasScreenSignal`) to the
-   * first descendant that actually carries a screen-distinguishing signal — a
-   * resource-id, or a non-generic class — so the baseline id reflects real
-   * screen content instead of generic window chrome. Stops at a branch point
-   * (multiple children) or a leaf so it never silently jumps to an unrelated
-   * subtree.
-   */
-  private descendToMeaningfulNode(
-    node: ViewHierarchyNode,
-    maxDepth: number = 10,
-  ): ViewHierarchyNode {
-    let current = node;
-    for (let depth = 0; depth < maxDepth; depth++) {
-      if (this.hasScreenSignal(current)) {
-        return current;
-      }
-      const child = current.node;
-      // A single-object child (not wrapped in an array) is the common
-      // pass-through shape for CtrlProxy's accessibility hierarchy despite the
-      // `ViewHierarchyNode[]` static type (see `resolveRootNode`'s identical
-      // runtime-shape handling above). An array child is a branch point —
-      // stop rather than guess which sibling to follow.
-      if (child && typeof child === "object" && !Array.isArray(child)) {
-        current = child as ViewHierarchyNode;
-        continue;
-      }
-      return current;
-    }
-    return current;
-  }
-
-  /** `AccessibilityWindowInfo.TYPE_SYSTEM` — the window type CtrlProxy reports for SystemUI. */
-  private static readonly ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
-  private static readonly SYSTEM_UI_PACKAGE = "com.android.systemui";
-  /**
-   * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1) — the
-   * only window type that represents genuine app content (see the identical
-   * predicate and rationale in
-   * `src/features/observe/audits/PerformanceAuditor.ts`). Excluding every
-   * other type — not just SystemUI (`TYPE_SYSTEM` = 3) — matters because
-   * `TYPE_INPUT_METHOD` (2), the soft keyboard, can hold focus while open and
-   * would otherwise win the "focused, non-SystemUI" window selection below,
-   * combining the app's package with the keyboard root's class/resource-id.
-   */
-  private static readonly ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
-
-  /** Same window/package signal `ObserveScreen` uses to distinguish app vs SystemUI windows. */
-  private isSystemUiWindow(window: ViewHierarchyWindowInfo): boolean {
-    return (
-      window.packageName === WcagAudit.SYSTEM_UI_PACKAGE ||
-      window.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_SYSTEM
-    );
-  }
-
-  /** Same `TYPE_APPLICATION` signal `PerformanceAuditor.isCandidateAppWindow` uses. */
-  private isApplicationWindow(window: ViewHierarchyWindowInfo): boolean {
-    return window.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_APPLICATION;
-  }
-
-  private boundsEqual(a: ElementBounds | undefined, b: ElementBounds | undefined): boolean {
-    if (!a || !b) {
-      return false;
-    }
-    return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
-  }
-
-  private boundsArea(bounds: ElementBounds | undefined): number {
-    if (!bounds) {
-      return 0;
-    }
-    return Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
-  }
-
-  /**
-   * Pick the root node baseline tracking should key off. A production-shaped
-   * hierarchy carries one root PER WINDOW (issue #6274 — see
-   * test/fixtures/observe/android-home.json and
-   * test/fixtures/observe/diff/scroll-before.json), so blindly taking the last
-   * entry lands on the attribute-less SystemUI status-bar wrapper, generating
-   * an `<appId>:unknown:` baseline id that lets one screen's baseline suppress
-   * another screen's violations.
-   *
-   * Prefer the ACTIVE APP window root: the focused (falling back to active),
-   * `TYPE_APPLICATION` window from the accessibility `windows[]` metadata —
-   * the same signal `PerformanceAuditor.isCandidateAppWindow` uses to isolate
-   * app content — matched to its root node by bounds. Requiring
-   * `TYPE_APPLICATION` (not just non-SystemUI) excludes `TYPE_INPUT_METHOD`
-   * (the soft keyboard), which can hold focus while open and would otherwise
-   * win selection, combining the app's package with the keyboard root's
-   * class/resource-id and suppressing findings across unrelated screens that
-   * share the same IME. When no `windows[]` metadata is available, fall back
-   * to the largest root by bounds area: the SystemUI status/navigation bar is
-   * always a thin sliver next to the full-screen app content root.
-   */
-  private resolveRootNode(
-    hierarchy: ViewHierarchyNode,
-    windows?: ViewHierarchyWindowInfo[],
-  ): ViewHierarchyNode {
+  private resolveRootNode(hierarchy: ViewHierarchyNode): ViewHierarchyNode {
     const node = hierarchy.node;
-    if (!Array.isArray(node)) {
-      if (node && typeof node === "object") {
-        return node as ViewHierarchyNode;
-      }
-      return hierarchy;
+    if (Array.isArray(node) && node.length > 0) {
+      return node[node.length - 1] as ViewHierarchyNode;
     }
-    if (node.length === 0) {
-      return hierarchy;
+    if (node && typeof node === "object") {
+      return node as ViewHierarchyNode;
     }
-    if (node.length === 1) {
-      return node[0] as ViewHierarchyNode;
-    }
-
-    if (windows && windows.length > 0) {
-      const activeWindow =
-        windows.find(
-          (w) => w.isFocused === true && !this.isSystemUiWindow(w) && this.isApplicationWindow(w),
-        ) ??
-        windows.find(
-          (w) => w.isActive === true && !this.isSystemUiWindow(w) && this.isApplicationWindow(w),
-        );
-      if (activeWindow?.bounds) {
-        const matched = node.find((candidate) =>
-          this.boundsEqual((candidate as ViewHierarchyNode).bounds, activeWindow.bounds),
-        );
-        if (matched) {
-          return matched as ViewHierarchyNode;
-        }
-      }
-    }
-
-    return this.pickLargestRoot(node as ViewHierarchyNode[], windows);
-  }
-
-  /** `AccessibilityWindowInfo.TYPE_INPUT_METHOD` (Android SDK constant = 2) — the soft keyboard's window type. */
-  private static readonly ACCESSIBILITY_WINDOW_TYPE_INPUT_METHOD = 2;
-
-  /**
-   * Largest-bounds-area fallback used when no focused/active `TYPE_APPLICATION`
-   * window was found above (e.g. an IME owns focus while the app window is
-   * neither focused nor active). Restricted to `TYPE_APPLICATION` roots first:
-   * in split-screen/freeform layouts a keyboard root can be LARGER than the
-   * app pane, so picking the largest root among *every* root (issue #6252's
-   * round-2 regression) selects the keyboard and produces a keyboard-derived
-   * baseline id shared across unrelated app screens. Only when there is
-   * genuinely no application-typed root at all does this fall back further —
-   * and even then it prefers excluding SystemUI/IME-typed roots before
-   * considering every remaining root.
-   */
-  private pickLargestRoot(
-    candidates: ViewHierarchyNode[],
-    windows?: ViewHierarchyWindowInfo[],
-  ): ViewHierarchyNode {
-    if (windows && windows.length > 0) {
-      const applicationCandidates = candidates.filter((candidate) =>
-        windows.some(
-          (w) => this.isApplicationWindow(w) && this.boundsEqual(w.bounds, candidate.bounds),
-        ),
-      );
-      if (applicationCandidates.length > 0) {
-        return this.largestByArea(applicationCandidates);
-      }
-
-      const nonSystemNonImeCandidates = candidates.filter(
-        (candidate) =>
-          !windows.some(
-            (w) =>
-              this.boundsEqual(w.bounds, candidate.bounds) &&
-              (this.isSystemUiWindow(w) ||
-                w.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_INPUT_METHOD),
-          ),
-      );
-      if (nonSystemNonImeCandidates.length > 0) {
-        return this.largestByArea(nonSystemNonImeCandidates);
-      }
-    }
-
-    return this.largestByArea(candidates);
-  }
-
-  private largestByArea(candidates: ViewHierarchyNode[]): ViewHierarchyNode {
-    return candidates.reduce((largest, candidate) =>
-      this.boundsArea(candidate.bounds) > this.boundsArea(largest.bounds) ? candidate : largest,
-    );
+    return hierarchy;
   }
 
   /**

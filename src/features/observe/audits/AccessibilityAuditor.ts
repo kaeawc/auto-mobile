@@ -138,7 +138,6 @@ export class AccessibilityAuditor {
           result.activeWindow!.appId,
           auditConfig,
           result.viewHierarchy!.density,
-          result.viewHierarchy!.windows,
         );
 
         // Attach audit result to observe result

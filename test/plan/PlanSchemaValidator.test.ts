@@ -840,8 +840,26 @@ steps:
     });
 
     it("should accept steps with tool-specific parameters", () => {
-      // Note: Tool-specific parameter validation happens at runtime by the tool handler,
-      // not by the JSON Schema. The schema only validates the basic step structure.
+      // Note: most tool-specific parameter validation happens at runtime by the
+      // tool handler, not by the JSON Schema. The schema only validates the
+      // basic step structure for the general case.
+      const yaml = `
+name: generic-tool-test
+steps:
+  - tool: tapOn
+    params:
+      text: Login
+      customField: anything
+`;
+      const result = validator.validateYaml(yaml);
+      // This is valid from a schema perspective - tapOn params are validated at runtime
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a criticalSection step missing required params (schema-level parity with barrier)", () => {
+      // Unlike most tools, criticalSection/barrier ARE validated at the schema
+      // level (parity fix #6175): missing 'deviceCount'/'steps' surfaces here
+      // instead of only at a runtime coordination timeout.
       const yaml = `
 name: critical-section-test
 steps:
@@ -850,8 +868,41 @@ steps:
       lock: sync-point
 `;
       const result = validator.validateYaml(yaml);
-      // This is valid from a schema perspective - tool params are validated at runtime
+      expect(result.valid).toBe(false);
+    });
+
+    it("should validate barrier parameters", () => {
+      const yaml = `
+name: barrier-test
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    params:
+      device: A
+      lock: sync-point
+      deviceCount: 2
+  - tool: barrier
+    params:
+      device: B
+      lock: sync-point
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier step missing required params", () => {
+      const yaml = `
+name: barrier-missing-devicecount
+steps:
+  - tool: barrier
+    params:
+      lock: sync-point
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
     });
 
     it("should validate expectations array", () => {

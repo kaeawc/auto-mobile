@@ -397,16 +397,46 @@ describe("PlanValidator", () => {
       );
     });
 
-    test("throws when the same device enters a barrier lock twice", () => {
+    test("accepts a barrier reused across two rounds with consistent per-round arrivals", () => {
+      // Unlike criticalSection, a barrier is meant to fire once per round: the
+      // same lock name recurs across phases, and each device arrives at it
+      // multiple times (the runtime coordinator clears arrival state once a
+      // round's deviceCount is reached). This must NOT be flagged as
+      // over-populating a single lock.
       const plan: Plan = {
-        name: "Double-entry barrier lock",
+        name: "Two-round barrier",
         devices: ["A", "B"],
         steps: [
-          { tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } },
-          { tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } },
+          { tool: "observe", params: { device: "A" } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "tapOn", params: { device: "A", text: "Continue" } },
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "observe", params: { device: "B" } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          { tool: "tapOn", params: { device: "B", text: "Continue" } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
         ],
       };
-      expect(() => PlanValidator.validate(plan)).toThrow('entered twice by device "A"');
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+
+    test("throws when a single round of a reused barrier lock has mismatched deviceCount", () => {
+      const plan: Plan = {
+        name: "Two-round barrier with one bad round",
+        devices: ["A", "B"],
+        steps: [
+          // Round 1: consistent.
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+          // Round 2: device B disagrees on deviceCount.
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 3 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        'barrier lock "sync1" round 2 has inconsistent deviceCount values',
+      );
     });
   });
 

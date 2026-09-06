@@ -154,6 +154,110 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects barrier missing lock`() {
+    val yaml =
+      """
+      name: barrier-missing-lock
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier missing 'lock' should be invalid")
+  }
+
+  @Test
+  fun `rejects barrier missing deviceCount`() {
+    val yaml =
+      """
+      name: barrier-missing-devicecount
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier missing 'deviceCount' should be invalid")
+  }
+
+  @Test
+  fun `rejects barrier with wrong-typed deviceCount`() {
+    val yaml =
+      """
+      name: barrier-bad-devicecount-type
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: "two"
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier with a non-numeric deviceCount should be invalid")
+  }
+
+  @Test
+  fun `rejects criticalSection missing lock`() {
+    val yaml =
+      """
+      name: critical-section-missing-lock
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            deviceCount: 2
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "criticalSection missing 'lock' should be invalid")
+  }
+
+  @Test
+  fun `rejects criticalSection missing deviceCount`() {
+    val yaml =
+      """
+      name: critical-section-missing-devicecount
+      devices:
+        - A
+      steps:
+        - tool: criticalSection
+          params:
+            lock: sync-point
+            steps:
+              - tool: tapOn
+                params:
+                  device: A
+                  text: Button
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "criticalSection missing 'deviceCount' should be invalid")
+  }
+
+  @Test
   fun `validates expectations array`() {
     val yaml =
       """

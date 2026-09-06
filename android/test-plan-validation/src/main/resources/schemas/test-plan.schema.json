@@ -759,6 +759,42 @@
               }
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "criticalSection"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/criticalSectionParams"
+              }
+            },
+            "required": ["params"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "barrier"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/barrierParams"
+              }
+            },
+            "required": ["params"]
+          }
         }
       ]
     },
@@ -1445,7 +1481,7 @@
     "criticalSectionParams": {
       "type": "object",
       "required": ["lock", "steps", "deviceCount"],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "lock": {
           "type": "string",
@@ -1472,7 +1508,31 @@
           "default": 30000
         }
       },
-      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices"
+      "description": "Parameters for criticalSection tool that provides barrier synchronization and mutex-based serial execution across multiple devices. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are not rejected."
+    },
+    "barrierParams": {
+      "type": "object",
+      "required": ["lock", "deviceCount"],
+      "additionalProperties": true,
+      "properties": {
+        "lock": {
+          "type": "string",
+          "description": "Shared barrier name; all devices using the same name synchronize together",
+          "minLength": 1
+        },
+        "deviceCount": {
+          "type": "integer",
+          "description": "Number of devices that must arrive before the barrier lifts",
+          "minimum": 1
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Barrier timeout in milliseconds (default: 30000ms)",
+          "minimum": 0,
+          "default": 30000
+        }
+      },
+      "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true so the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) and the internally-injected __lockNamespace are not rejected."
     }
   }
 }

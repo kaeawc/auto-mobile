@@ -11,6 +11,7 @@ import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 describe("DetectIntentChooser", () => {
   let detectIntentChooser: DetectIntentChooser;
@@ -18,6 +19,7 @@ describe("DetectIntentChooser", () => {
   let fakeObserveScreen: FakeObserveScreen;
   let fakeWindow: FakeWindow;
   let fakeAwaitIdle: FakeAwaitIdle;
+  let fakeAdb: FakeAdbExecutor;
 
   const mockObserveResult: ObserveResult = {
     timestamp: "2025-01-01T00:00:00.000Z",
@@ -59,6 +61,7 @@ describe("DetectIntentChooser", () => {
     fakeWindow = new FakeWindow();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeDeepLinkManager = new FakeDeepLinkManager();
+    fakeAdb = new FakeAdbExecutor();
 
     // Configure default responses
     fakeWindow.configureCachedActiveWindow(null);
@@ -69,11 +72,19 @@ describe("DetectIntentChooser", () => {
     });
     fakeObserveScreen.setObserveResult(mockObserveResult);
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
+    fakeAdb.setDeviceTimestampMs(1735689600000);
 
     // Create DetectIntentChooser instance
     detectIntentChooser = new DetectIntentChooser(testDevice);
 
-    // Replace the internal managers with our fakes
+    // Replace the internal managers with our fakes. `observedInteraction`
+    // (BaseVisualChange) reads `this.adb.getDeviceTimestampMs()` for the
+    // action-start timestamp; left unfaked, it goes through the real
+    // AdbClient BaseVisualChange's constructor creates by default and spawns
+    // a real `adb shell date` subprocess against the non-existent
+    // "emulator-5554" device, which is slow/hangs under load and was the
+    // root cause of the intermittent timeout in #6173/#6174.
+    detectIntentChooser.adb = fakeAdb;
     (detectIntentChooser as any).observeScreen = fakeObserveScreen;
     (detectIntentChooser as any).window = fakeWindow;
     (detectIntentChooser as any).awaitIdle = fakeAwaitIdle;

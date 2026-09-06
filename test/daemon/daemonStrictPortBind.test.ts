@@ -1,5 +1,6 @@
+import { EventEmitter } from "node:events";
+import type { Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, test } from "bun:test";
-import { createServer, type Server } from "node:http";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -13,28 +14,81 @@ import { ActionableError } from "../../src/models/ActionableError";
  * findAvailablePort() fallback to `port + 1..3`, and a genuine EADDRINUSE at
  * bind time must throw an actionable error instead of ever reporting success
  * on a different port.
+ *
+ * These tests fake the bind/port-availability seam (an injected
+ * `httpServerFactory`) instead of racing a real OS port: reclaiming an
+ * ephemeral port after releasing it is inherently non-deterministic under
+ * concurrent test runs (PRRT fuUIK), so the fake server's `listen()` decides
+ * synchronously-via-microtask whether the bind succeeds or reports
+ * EADDRINUSE, with no real socket involved.
  */
 
 interface DaemonHttpBindInternals {
   startHttpServer(): Promise<void>;
+  closeHttpListener(): Promise<void>;
 }
 
 function bindInternals(daemon: Daemon): DaemonHttpBindInternals {
   return daemon as unknown as DaemonHttpBindInternals;
 }
 
-async function listenOnEphemeralPort(): Promise<{ server: Server; port: number }> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("Expected an AddressInfo from an ephemeral port bind");
+/**
+ * Minimal fake standing in for `node:http`'s `Server` at the one seam
+ * `startHttpServer()` actually exercises: `listen()`, the `"error"` event,
+ * and `close()`. `outcome` decides deterministically whether the fake bind
+ * succeeds or reports the requested port as already in use — no real socket
+ * is ever opened, so there is nothing for a competing process to race.
+ */
+class FakeBindServer extends EventEmitter {
+  listening = false;
+  requestTimeout = 0;
+  headersTimeout = 0;
+  timeout = 0;
+
+  constructor(private readonly outcome: "bind-ok" | "bind-refused") {
+    super();
   }
-  return { server, port: address.port };
+
+  listen(_port: number, _host: string, callback: () => void): this {
+    queueMicrotask(() => {
+      if (this.outcome === "bind-ok") {
+        this.listening = true;
+        callback();
+      } else {
+        const error = new Error("bind EADDRINUSE") as NodeJS.ErrnoException;
+        error.code = "EADDRINUSE";
+        this.emit("error", error);
+      }
+    });
+    return this;
+  }
+
+  close(callback?: (error?: Error) => void): this {
+    this.listening = false;
+    callback?.();
+    return this;
+  }
 }
 
-function closeServer(server: Server): Promise<void> {
-  return new Promise((resolve) => server.close(() => resolve()));
+function daemonWithFakeHttpServer(
+  options: ConstructorParameters<typeof Daemon>[0],
+  outcome: "bind-ok" | "bind-refused",
+): Daemon {
+  return new Daemon(
+    options,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => new FakeBindServer(outcome) as unknown as HttpServer,
+  );
 }
 
 describe("Daemon strict-port bind (issue #6260)", () => {
@@ -44,46 +98,51 @@ describe("Daemon strict-port bind (issue #6260)", () => {
     }
   });
 
-  test("strictPort fails loudly with an actionable error when the requested port is taken at bind time", async () => {
-    const { server: competitor, port } = await listenOnEphemeralPort();
-    const daemon = new Daemon({ port, host: "127.0.0.1", strictPort: true });
+  test("strictPort fails loudly with an actionable error when the fake bind reports the port is taken", async () => {
+    const port = 54321;
+    const daemon = daemonWithFakeHttpServer(
+      { port, host: "127.0.0.1", strictPort: true },
+      "bind-refused",
+    );
 
-    try {
-      await expect(bindInternals(daemon).startHttpServer()).rejects.toThrow(ActionableError);
-      await expect(bindInternals(daemon).startHttpServer()).rejects.toThrow(
-        new RegExp(`Port ${port}.*already in use`),
-      );
-    } finally {
-      await closeServer(competitor);
-    }
+    await expect(bindInternals(daemon).startHttpServer()).rejects.toThrow(ActionableError);
+
+    const daemonAgain = daemonWithFakeHttpServer(
+      { port, host: "127.0.0.1", strictPort: true },
+      "bind-refused",
+    );
+    await expect(bindInternals(daemonAgain).startHttpServer()).rejects.toThrow(
+      new RegExp(`Port ${port}.*already in use`),
+    );
   });
 
-  test("without strictPort, the same EADDRINUSE surfaces the raw (non-actionable) HTTP server error", async () => {
-    const { server: competitor, port } = await listenOnEphemeralPort();
-    const daemon = new Daemon({ port, host: "127.0.0.1" });
+  test("without strictPort, the same fake EADDRINUSE surfaces the raw (non-actionable) HTTP server error", async () => {
+    const port = 54322;
+    const daemon = daemonWithFakeHttpServer({ port, host: "127.0.0.1" }, "bind-refused");
 
+    let caught: unknown;
     try {
-      let caught: unknown;
-      try {
-        await bindInternals(daemon).startHttpServer();
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught).toBeDefined();
-      expect(caught).not.toBeInstanceOf(ActionableError);
-    } finally {
-      await closeServer(competitor);
+      await bindInternals(daemon).startHttpServer();
+    } catch (error) {
+      caught = error;
     }
+    expect(caught).toBeDefined();
+    expect(caught).not.toBeInstanceOf(ActionableError);
   });
 
-  test("strictPort binds successfully when the requested port is actually free", async () => {
-    const { server: probe, port } = await listenOnEphemeralPort();
-    await closeServer(probe);
-    const daemon = new Daemon({ port, host: "127.0.0.1", strictPort: true });
+  test("strictPort binds using exactly the requested port when the fake bind succeeds", async () => {
+    const port = 54323;
+    const daemon = daemonWithFakeHttpServer(
+      { port, host: "127.0.0.1", strictPort: true },
+      "bind-ok",
+    );
 
     await bindInternals(daemon).startHttpServer();
 
-    // Clean up the real listener this test bound.
-    await (daemon as unknown as { closeHttpListener(): Promise<void> }).closeHttpListener();
+    // No port+1..3 fallback: the daemon must still be configured for the
+    // exact requested port, not a substitute one.
+    expect((daemon as unknown as { port: number }).port).toBe(port);
+
+    await bindInternals(daemon).closeHttpListener();
   });
 });

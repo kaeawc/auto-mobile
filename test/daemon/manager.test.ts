@@ -2461,7 +2461,23 @@ describe("Daemon manager process detection", () => {
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
     try {
-      await expect(manager.restart()).rejects.toThrow(`PID(s) ${orphanPid} still running`);
+      let caught: unknown;
+      try {
+        await manager.restart();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const message = (caught as Error).message;
+      expect(message).toContain(`PID(s) ${orphanPid} still running`);
+      // PRRT fuUIM (issue #6260): the remediation must not hand out a bare
+      // `kill <pid>` from this stale process-table snapshot — that PID can be
+      // recycled to an unrelated process by the time anyone acts on it. It
+      // must instead point at an identity re-check using the same
+      // `--daemon-mode` command-line pattern findLiveDaemonProcesses() itself
+      // matches on, so only a still-matching PID gets killed.
+      expect(message).toContain("--daemon-mode");
+      expect(message).not.toContain(`kill ${orphanPid}\``);
       expect(startSpy).not.toHaveBeenCalled();
       // The port must never even be consulted once a live survivor is found —
       // failing on the named PID is strictly more actionable.

@@ -302,6 +302,7 @@ export class Daemon {
     recoveryPolicyEnvironment: NodeJS.ProcessEnv = process.env,
     managedAdbServerShutdown: ManagedAdbServerShutdown = stopManagedAdbServer,
     toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader = defaultToolSelectionProfileRegistry,
+    private readonly httpServerFactory: () => HttpServer = () => createHttpServer(),
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -686,7 +687,7 @@ export class Daemon {
    * Start the HTTP MCP server (internal daemon transport, not exposed publicly)
    */
   private async startHttpServer(): Promise<void> {
-    this.httpServer = createHttpServer();
+    this.httpServer = this.httpServerFactory();
     this.httpServerClosePromise = null;
     this.acceptingHttpSessions = true;
 

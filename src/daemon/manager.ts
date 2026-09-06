@@ -1800,9 +1800,13 @@ export class DaemonManager implements DaemonManagerLike {
     if (survivors.length > 0) {
       throw new ActionableError(
         `Restart could not confirm the previous AutoMobile daemon process(es) stopped: ` +
-          `PID(s) ${survivors.join(", ")} still running. Refusing to start a second daemon on a ` +
-          `fallback port and split ownership of the device pool. Stop the orphan(s) yourself ` +
-          `(e.g. \`kill ${survivors.join(" ")}\`) and run \`--daemon restart\` again.`,
+          `PID(s) ${survivors.join(", ")} still running an AutoMobile daemon (matched by ` +
+          `\`--daemon-mode\` on its command line). Refusing to start a second daemon on a ` +
+          `fallback port and split ownership of the device pool. A PID can be recycled to an ` +
+          `unrelated process between this scan and when you act on it, so re-verify identity ` +
+          `before stopping anything — e.g. \`ps -p ${survivors.join(",")} -o pid=,command= | ` +
+          `grep -- --daemon-mode\` — and kill only the PID(s) that still match, then run ` +
+          `\`--daemon restart\` again.`,
       );
     }
 

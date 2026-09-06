@@ -39,6 +39,15 @@ export interface ElementSelector {
     },
   ): ElementSelectionResult;
 
+  selectClickable(
+    viewHierarchy: ViewHierarchyResult,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      strategy?: ElementSelectionStrategy;
+      scrollableContainer?: boolean;
+    },
+  ): ElementSelectionResult;
+
   selectClickableSiblingOfText(
     viewHierarchy: ViewHierarchyResult,
     text: string,

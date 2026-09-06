@@ -7,8 +7,16 @@ import {
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
+import {
+  TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
+  TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS,
+  TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
+  TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+  LONG_PRESS_TIMEOUT_HEADROOM_MS,
+} from "../features/action/TapAnyElement";
+import { MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
 
-export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS };
+export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS, MAX_SETTIMEOUT_DELAY_MS };
 
 export const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -78,6 +86,44 @@ export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
  * needs headroom to return the feature's own terminal result.
  */
 export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
+
+/**
+ * Headroom added to a `tapAny` longPress duration when sizing the OUTER MCP
+ * request deadline. `TapAnyElement` raises the CtrlProxy-level request
+ * timeout for a long press to `duration + LONG_PRESS_TIMEOUT_HEADROOM_MS`
+ * (src/features/action/TapAnyElement.ts) so CtrlProxy's reply isn't aborted
+ * before the on-device press finishes — but that only widens the INNER
+ * request. Without a matching floor here, the daemon's outer deadline still
+ * defaults to `DEFAULT_MCP_REQUEST_TIMEOUT_MS` (30s) and can kill a
+ * legitimately-running long press well before a longer inner timeout expires
+ * (issue #6248 review, P2). A direct re-export of `LONG_PRESS_TIMEOUT_HEADROOM_MS`
+ * (TapAnyElement.ts's own single source of truth) rather than a duplicated
+ * literal, so the two can never drift out of sync.
+ */
+export const TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS = LONG_PRESS_TIMEOUT_HEADROOM_MS;
+
+// `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` is now computed once, in
+// `TapAnyElement.ts`, alongside `TAP_ANY_LONG_PRESS_MAX_DURATION_MS` (which
+// `TapAnyElement.getLongPressDuration` uses to REJECT an absurd `duration` at
+// the source rather than merely clamping the derived timers -- issue #6248
+// review, P2, fuZRt/fuZRo). Re-exported here so existing importers of this
+// module are unaffected.
+export { TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS };
+
+/**
+ * Effective press duration budgeted when a `tapAny` longPress omits
+ * `duration` (or passes a non-positive value). `TapAnyElement.getLongPressDuration`
+ * substitutes a real on-device press length in that case rather than a no-op
+ * (`TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS`/`_ANDROID` in TapAnyElement.ts) --
+ * this module budgets the larger of the two platform defaults because a
+ * `DaemonRequest` does not carry which platform the target device is (issue
+ * #6248 review, P2). Using the larger default only ever over-budgets the
+ * outer deadline, never under-budgets it.
+ */
+const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS = Math.max(
+  TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS,
+  TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
+);
 
 const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
   crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
@@ -233,6 +279,60 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
   }
 }
 
+/**
+ * Floor for a `tapAny` longPress derived from its `duration` argument. A
+ * plain tap/doubleTap (no `action: "longPress"`) or a longPress with no
+ * positive `duration` still budgets the EFFECTIVE press duration --
+ * `TapAnyElement.getLongPressDuration` substitutes a real default press
+ * (`TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS`, the larger of the iOS/Android
+ * defaults) in that case rather than performing no press at all, so an
+ * omitted/zero `duration` must not budget zero press time either (issue
+ * #6248 review, P2). A plain tap/doubleTap (no `action: "longPress"`) keeps
+ * the standard floor/default -- only a longPress is raised.
+ *
+ * The outer MCP deadline must cover every phase of the call, not just the
+ * press itself (issue #6248 review, P2):
+ *   - The press itself, sized by the effective duration (the explicit
+ *     `duration` argument, or `TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS` when
+ *     omitted/zero).
+ *   - PRE-GESTURE element discovery, sized by the effective
+ *     `searchUntil.duration` -- when `searchUntil` is omitted entirely,
+ *     `TapAnyElement.getSearchUntilDuration` still defaults every call to
+ *     `TAP_ANY_SEARCH_UNTIL_DEFAULT_MS` (1500ms) of polling, so this budgets
+ *     that implicit default too rather than leaving it unaccounted for.
+ *   - The VoiceOver-detection probe and the final post-gesture observation,
+ *     both budgeted via the single consolidated
+ *     `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` constant (which also
+ *     includes the fixed headroom) rather than as separate itemized terms --
+ *     see that constant's doc for what it covers.
+ *
+ * So the floor is `effectivePressDuration + effectiveSearchWindow +
+ * nonPressOverhead`. The result is clamped to `MAX_SETTIMEOUT_DELAY_MS`
+ * because a large-enough `duration` (the schema permits an unbounded value)
+ * would otherwise push this past `setTimeout`'s 32-bit ceiling, which Bun/Node
+ * silently normalize to 1ms rather than honoring -- timing the request out
+ * almost immediately instead of running for the intended duration.
+ */
+function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
+    return undefined;
+  }
+  const argumentsRecord = asRecord(request.params?.arguments);
+  if (!argumentsRecord || argumentsRecord.action !== "longPress") {
+    return undefined;
+  }
+  const duration =
+    positiveFiniteNumber(argumentsRecord.duration) ?? TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS;
+  const searchUntilDuration =
+    positiveFiniteNumber(asRecord(argumentsRecord.searchUntil)?.duration) ??
+    TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
+  const budget =
+    Math.round(duration) +
+    Math.round(searchUntilDuration) +
+    TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS;
+  return Math.min(budget, MAX_SETTIMEOUT_DELAY_MS);
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
   const base =
@@ -242,7 +342,8 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const floor =
     request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
-  return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0);
+  const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
+  return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0, tapAnyLongPressBudget ?? 0);
 }
 
 /**

@@ -17,10 +17,24 @@ import {
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+  TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+  TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+  MAX_SETTIMEOUT_DELAY_MS,
   resolveMcpRequestTimeoutMs,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
+import {
+  TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
+  TAP_ANY_SEARCH_UNTIL_MAX_MS,
+  TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
+} from "../../src/features/action/TapAnyElement";
+import {
+  FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
+  FINAL_OBSERVATION_RETRY_BACKOFF_MS,
+} from "../../src/features/action/BaseVisualChange";
+import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../../src/features/observe/ios/CtrlProxyHierarchy";
+import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -427,6 +441,268 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
       300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("tapAny longPress with a large duration raises the outer deadline beyond duration + headroom", () => {
+    const duration = 60_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    // No `searchUntil` is given, so the floor must still budget the implicit
+    // default search window `TapAnyElement.getSearchUntilDuration` applies,
+    // plus the consolidated non-press overhead covering the VoiceOver probe,
+    // final observation, and headroom (#6248 review, P2) -- not just
+    // duration + headroom.
+    expect(resolved).toBe(
+      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+    // Must not fire before the CtrlProxy-level request timeout TapAnyElement
+    // sizes for the same call (duration + the same headroom, #6248 review).
+    expect(resolved).toBeGreaterThanOrEqual(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
+  });
+
+  test("tapAny longPress with no searchUntil budgets the implicit default search window (#6248 review)", () => {
+    const duration = 60_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      duration + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  test("tapAny longPress budgets pre-gesture searchUntil.duration ahead of the press (#6248 review)", () => {
+    const duration = 60_000;
+    const searchUntilDuration = 12_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: {
+          action: "longPress",
+          duration,
+          searchUntil: { duration: searchUntilDuration },
+        },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      duration + searchUntilDuration + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+    expect(resolved).toBeGreaterThanOrEqual(
+      duration + searchUntilDuration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
+  test("tapAny longPress budgets the non-press overhead to cover the VoiceOver probe and final observe (#6248 review)", () => {
+    // The consolidated overhead must be generous enough to cover BOTH the
+    // VoiceOver-detection probe (up to a 5s timeout) and
+    // BaseVisualChange.takeObservation's final hierarchy request (up to
+    // ~15s) on top of the existing fixed headroom -- not just the press
+    // itself. Regression guard for the #6248 review P2 finding that neither
+    // phase was budgeted at all.
+    expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
+      5000 + 15000 + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
+  test("tapAny longPress non-press overhead covers the REALISTIC worst case of the final-observation retry loop (#6248 review)", () => {
+    // `BaseVisualChange.takeObservation` retries the final observation up to
+    // `FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS` times after the initial attempt
+    // (5 attempts total), each an independent `CtrlProxyHierarchy` request
+    // bounded by `IOS_HIERARCHY_REQUEST_TIMEOUT_MS`, separated by
+    // `FINAL_OBSERVATION_RETRY_BACKOFF_MS` backoff delays. An earlier round
+    // of this constant reserved only one attempt's worth of timeout (~15s),
+    // which undersized the overhead against the real 5-attempt retry loop
+    // (issue #6248 review, P2) -- this asserts against the actual derived
+    // worst case rather than a guessed constant.
+    const observeAttempts = 1 + FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
+    const observeWorstCaseMs =
+      observeAttempts * IOS_HIERARCHY_REQUEST_TIMEOUT_MS +
+      FINAL_OBSERVATION_RETRY_BACKOFF_MS.reduce((sum, delayMs) => sum + delayMs, 0);
+
+    expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
+      5000 /* VoiceOver probe */ + observeWorstCaseMs + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
+  test("tapAny longPress non-press overhead covers the FULL final-observation pipeline: hierarchy AND a11y detection per attempt (#6248 review)", () => {
+    // `ObserveScreen.execute` spends up to `IOS_HIERARCHY_REQUEST_TIMEOUT_MS`
+    // (~15s) collecting the iOS hierarchy AND another
+    // `IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS` (~5s) in the unconditional
+    // accessibility-state-detection step (`AccessibilityStateDetector.run`),
+    // both serially, on EVERY final-observation attempt -- not just the
+    // hierarchy request. An earlier round of this constant budgeted only the
+    // hierarchy request per attempt, undersizing the overhead against the
+    // real per-attempt pipeline cost (issue #6248 review, P2, fuZRo).
+    const observeAttempts = 1 + FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
+    const perAttemptPipelineMs =
+      IOS_HIERARCHY_REQUEST_TIMEOUT_MS + IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS;
+    const observeWorstCaseMs =
+      observeAttempts * perAttemptPipelineMs +
+      FINAL_OBSERVATION_RETRY_BACKOFF_MS.reduce((sum, delayMs) => sum + delayMs, 0);
+
+    expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
+      IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS /* pre-gesture VoiceOver probe */ +
+        observeWorstCaseMs +
+        TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
+  test("tapAny longPress duration is bounded so the derived request deadline can never overflow MAX_SETTIMEOUT_DELAY_MS (#6248 review, terminal)", () => {
+    // `TapAnyElement.getLongPressDuration` now REJECTS a longPress duration
+    // above `TAP_ANY_LONG_PRESS_MAX_DURATION_MS` outright (fuZRt), so the
+    // maximum duration this resolver will ever actually see, combined with
+    // the largest possible `searchUntil.duration` and the full non-press
+    // overhead, must never require clamping.
+    const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: {
+          action: "longPress",
+          duration,
+          searchUntil: { duration: TAP_ANY_SEARCH_UNTIL_MAX_MS },
+        },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      duration + TAP_ANY_SEARCH_UNTIL_MAX_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+    expect(resolved).toBeLessThanOrEqual(MAX_SETTIMEOUT_DELAY_MS);
+  });
+
+  test("tapAny longPress with a duration near the setTimeout ceiling is clamped to MAX_SETTIMEOUT_DELAY_MS", () => {
+    // The public schema accepts an unbounded `duration`. Without a clamp, a
+    // duration near/above 2^31-1 pushes the derived deadline past
+    // setTimeout's 32-bit range, which Bun/Node silently normalize to 1ms --
+    // timing the daemon request out almost immediately instead of honoring
+    // the requested long press (#6248 review, P2).
+    const duration = MAX_SETTIMEOUT_DELAY_MS;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(MAX_SETTIMEOUT_DELAY_MS);
+    expect(resolved).toBeLessThanOrEqual(MAX_SETTIMEOUT_DELAY_MS);
+  });
+
+  test("tapAny longPress with an unbounded duration far past the setTimeout ceiling is still clamped", () => {
+    const duration = Number.MAX_SAFE_INTEGER;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(MAX_SETTIMEOUT_DELAY_MS);
+  });
+
+  test("tapAny longPress honours an outer timeoutMs already above the derived floor", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration: 60_000 },
+      },
+      // Must exceed the derived floor (duration + searchUntil default +
+      // the consolidated non-press overhead) for this test to actually
+      // exercise "an outer timeoutMs already above the floor" rather than
+      // being silently overridden by a larger floor.
+      timeoutMs: 300_000,
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(300_000);
+  });
+
+  test("a normal tapAny tap keeps the standard default timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "tap" },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("a tapAny longPress with omitted duration still budgets the effective default press (#6248 review)", () => {
+    // TapAnyElement.getLongPressDuration substitutes a real default press
+    // (1500ms on iOS, the larger of the iOS/Android defaults) when `duration`
+    // is omitted -- the outer floor must budget that effective press instead
+    // of assuming an omitted duration costs zero press time.
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress" },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    expect(resolved).toBeGreaterThanOrEqual(
+      1500 + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  test("a tapAny longPress with a zero duration still budgets the effective default press (#6248 review)", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "longPress", duration: 0 },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    expect(resolved).toBeGreaterThanOrEqual(
+      1500 + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
     );
   });
 

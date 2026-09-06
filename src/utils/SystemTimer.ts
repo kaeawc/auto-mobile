@@ -1,6 +1,18 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 /**
+ * Hard ceiling on any delay handed to `setTimeout` (Node/Bun and the browser
+ * platforms they track). Both silently clamp any delay >= 2^31 to 1ms rather
+ * than honoring it, so a derived delay anywhere near or above this value must
+ * be capped before it is scheduled -- otherwise the timer fires almost
+ * immediately instead of after the intended duration (issue #6248 review,
+ * P2). One shared constant so every caller that clamps a computed delay
+ * (`PlanValidator`, the daemon's MCP request-timeout budgeting, `TapAnyElement`'s
+ * inner CtrlProxy request timeout) agrees on the same ceiling.
+ */
+export const MAX_SETTIMEOUT_DELAY_MS = 2_147_483_647;
+
+/**
  * Interface for timer utilities
  * Provides sleep/delay functionality and timeout/interval management
  */

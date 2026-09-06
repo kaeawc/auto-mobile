@@ -11,6 +11,15 @@ import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult }
 import { sendCommand } from "../DeviceServiceUtils";
 
 /**
+ * Default timeout for `requestVoiceOverState`, shared with
+ * `IosVoiceOverDetector.isVoiceOverEnabled` (which calls this method without
+ * an explicit `timeoutMs`) so every caller -- including the daemon's
+ * `mcpRequestTimeout` budget arithmetic -- reads the same real constant
+ * instead of duplicating the literal (issue #6248 review, P2).
+ */
+export const IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS = 5000;
+
+/**
  * Delegate class for VoiceOver state detection via CtrlProxy WebSocket.
  */
 export class CtrlProxyVoiceOver {
@@ -28,7 +37,7 @@ export class CtrlProxyVoiceOver {
    * @returns VoiceOver state result with enabled boolean
    */
   async requestVoiceOverState(
-    timeoutMs: number = 5000,
+    timeoutMs: number = IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyVoiceOverResult> {
     return sendCommand<CtrlProxyVoiceOverResult>(this.context, {

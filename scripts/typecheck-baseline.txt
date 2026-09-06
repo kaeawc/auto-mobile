@@ -65,10 +65,6 @@ src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
-src/features/action/TapAnyElement.ts: error TS2339: Property 'doubleTap' does not exist on type 'IOSCtrlProxyClient'.
-src/features/action/TapAnyElement.ts: error TS2339: Property 'longPress' does not exist on type 'IOSCtrlProxyClient'.
-src/features/action/TapAnyElement.ts: error TS2339: Property 'selectClickable' does not exist on type 'ElementSelector'.
-src/features/action/TapAnyElement.ts: error TS2339: Property 'tap' does not exist on type 'IOSCtrlProxyClient'.
 src/features/action/TapAnyElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapAnyElement' is not assignable to the same property in base type 'BaseVisualChange'.
 src/features/action/TapOnElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapOnElement' is not assignable to the same property in base type 'BaseVisualChange'.
 src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'getUiAutomatorHierarchy' does not exist on type 'ViewHierarchy'.
@@ -215,9 +211,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 33 :: src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 # swap-fp: 34 :: src/db/migrator.ts: error TS7006: Parameter 'table' implicitly has an 'any' type.
 # swap-fp: 34 :: src/features/accessibility/ContrastChecker.ts: error TS2532: Object is possibly 'undefined'.
-# swap-fp: 36 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'doubleTap' does not exist on type 'IOSCtrlProxyClient'.
-# swap-fp: 36 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'longPress' does not exist on type 'IOSCtrlProxyClient'.
-# swap-fp: 36 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'tap' does not exist on type 'IOSCtrlProxyClient'.
 # swap-fp: 36 :: src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'mergeHierarchies' does not exist on type 'ViewHierarchy'.
 # swap-fp: 36 :: src/features/observe/ObserveScreen.ts: error TS2345: Argument of type 'ViewHierarchyResult | undefined' is not assignable to parameter of type 'ViewHierarchyResult'.
 # swap-fp: 36,61 :: src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
@@ -227,7 +220,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 41 :: src/features/utility/ElementParser.ts: error TS2339: Property 'hierarchy' does not exist on type '{ windowLayer: number; }'.
 # swap-fp: 44 :: src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups", "type">'.
 # swap-fp: 44 :: src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_notifications", "type">'.
-# swap-fp: 44 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'selectClickable' does not exist on type 'ElementSelector'.
 # swap-fp: 44 :: src/features/utility/ElementParser.ts: error TS2345: Argument of type 'ViewHierarchyWindowInfo[]' is not assignable to parameter of type '{ windowLayer: number; }[]'.
 # swap-fp: 44,47 :: src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
 # swap-fp: 45,46,46 :: src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.

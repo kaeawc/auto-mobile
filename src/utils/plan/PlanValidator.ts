@@ -35,10 +35,10 @@ export class PlanValidator {
       this.validateDeviceLabelsPresent(plan);
     }
 
-    // Validate cross-step consistency for criticalSection locks. Runs even
-    // when devices aren't declared so callers get a useful error rather than
-    // a deadlock at the barrier.
-    this.validateCriticalSectionLocks(plan);
+    // Validate cross-step consistency for criticalSection/barrier locks. Runs
+    // even when devices aren't declared so callers get a useful error rather
+    // than a deadlock at runtime.
+    this.validateCoordinationLocks(plan);
   }
 
   /**
@@ -219,18 +219,21 @@ export class PlanValidator {
   }
 
   /**
-   * Validates that every criticalSection lock has a consistent contract
-   * across the steps that share it:
+   * Validates that every criticalSection/barrier lock has a consistent
+   * contract across the steps that share it:
    *   - All steps sharing a lock declare the same deviceCount.
    *   - The number of steps sharing a lock equals that deviceCount (otherwise
    *     the barrier will deadlock waiting for a device that never arrives).
    *   - Each participating step targets a distinct device (no device can
    *     enter the same lock twice — it would re-acquire and deadlock).
    *
+   * barrier gets the same treatment as criticalSection here: both share the
+   * lock/deviceCount/device contract (barrier just has no nested steps).
+   *
    * These checks catch coordination bugs at validation time instead of
    * surfacing them as a 30-second barrier timeout at runtime.
    */
-  private static validateCriticalSectionLocks(plan: Plan): void {
+  private static validateCoordinationLocks(plan: Plan): void {
     interface LockOccurrence {
       stepIndex: number;
       device: unknown;
@@ -240,7 +243,7 @@ export class PlanValidator {
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
-      if (step.tool !== "criticalSection") {
+      if (step.tool !== "criticalSection" && step.tool !== "barrier") {
         continue;
       }
       const params = step.params;
@@ -273,7 +276,7 @@ export class PlanValidator {
           .map((o) => `step ${o.stepIndex} deviceCount=${String(o.deviceCount)}`)
           .join(", ");
         errors.push(
-          `criticalSection lock "${lock}" has inconsistent deviceCount values: ${detail}. All steps sharing a lock must declare the same deviceCount.`,
+          `lock "${lock}" has inconsistent deviceCount values: ${detail}. All steps sharing a lock must declare the same deviceCount.`,
         );
         continue;
       }
@@ -283,7 +286,7 @@ export class PlanValidator {
 
       if (declaredCount !== undefined && occurrences.length !== declaredCount) {
         errors.push(
-          `criticalSection lock "${lock}" declares deviceCount=${declaredCount} but ${occurrences.length} step${occurrences.length === 1 ? "" : "s"} reference${occurrences.length === 1 ? "s" : ""} it. Every participating device needs its own criticalSection step with this lock.`,
+          `lock "${lock}" declares deviceCount=${declaredCount} but ${occurrences.length} step${occurrences.length === 1 ? "" : "s"} reference${occurrences.length === 1 ? "s" : ""} it. Every participating device needs its own criticalSection/barrier step with this lock.`,
         );
       }
 
@@ -299,7 +302,7 @@ export class PlanValidator {
       for (const [device, indices] of devicesSeen.entries()) {
         if (indices.length > 1) {
           errors.push(
-            `criticalSection lock "${lock}" is entered twice by device "${device}" (steps ${indices.join(", ")}). Each device can participate in a given lock at most once.`,
+            `lock "${lock}" is entered twice by device "${device}" (steps ${indices.join(", ")}). Each device can participate in a given lock at most once.`,
           );
         }
       }
@@ -320,9 +323,9 @@ export class PlanValidator {
       return true;
     }
 
-    // Check if any step uses device parameter or criticalSection
+    // Check if any step uses device parameter or criticalSection/barrier
     for (const step of plan.steps) {
-      if (step.tool === "criticalSection") {
+      if (step.tool === "criticalSection" || step.tool === "barrier") {
         return true;
       }
       if (step.params?.device !== undefined) {
@@ -339,10 +342,10 @@ export class PlanValidator {
   static validateMultiDeviceRequirements(plan: Plan): void {
     const hasFeatures = this.hasMultiDeviceFeatures(plan);
 
-    // If plan uses device labels or criticalSection, it must declare devices
+    // If plan uses device labels or criticalSection/barrier, it must declare devices
     if (hasFeatures && (!plan.devices || plan.devices.length === 0)) {
       throw new ActionableError(
-        "Plan uses multi-device features (device labels or criticalSection) but does not declare 'devices' field. " +
+        "Plan uses multi-device features (device labels or criticalSection/barrier) but does not declare 'devices' field. " +
           "Add a 'devices' array at the top level of your plan.",
       );
     }

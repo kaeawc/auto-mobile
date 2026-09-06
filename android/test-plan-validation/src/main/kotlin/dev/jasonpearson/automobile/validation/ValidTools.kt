@@ -9,6 +9,7 @@ object ValidTools {
     setOf(
       "accessibility",
       "accessibilityFocus",
+      "barrier",
       "biometricAuth",
       "captureDeviceSnapshot",
       "changeLocalization",

@@ -360,6 +360,56 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("validateCoordinationLocks (barrier)", () => {
+    test("accepts a well-formed dual-device barrier sharing a lock", () => {
+      const plan: Plan = {
+        name: "Well-formed dual-device barrier",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "sync1", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "sync1", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+
+    test("throws when barrier steps sharing a lock disagree on deviceCount", () => {
+      const plan: Plan = {
+        name: "Inconsistent barrier deviceCount",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "B", lock: "shared", deviceCount: 3 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow("inconsistent deviceCount values");
+    });
+
+    test("throws when a barrier lock declares more devices than the steps that reference it", () => {
+      const plan: Plan = {
+        name: "Underpopulated barrier lock",
+        devices: ["A", "B"],
+        steps: [{ tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } }],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "declares deviceCount=2 but 1 step references it",
+      );
+    });
+
+    test("throws when the same device enters a barrier lock twice", () => {
+      const plan: Plan = {
+        name: "Double-entry barrier lock",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "A", lock: "shared", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow('entered twice by device "A"');
+    });
+  });
+
   describe("hasMultiDeviceFeatures", () => {
     test("returns false for a simple single-device plan", () => {
       const plan: Plan = {
@@ -390,6 +440,14 @@ describe("PlanValidator", () => {
       const plan: Plan = {
         name: "Test",
         steps: [{ tool: "criticalSection", params: {} }],
+      };
+      expect(PlanValidator.hasMultiDeviceFeatures(plan)).toBe(true);
+    });
+
+    test("returns true when barrier is used", () => {
+      const plan: Plan = {
+        name: "Test",
+        steps: [{ tool: "barrier", params: {} }],
       };
       expect(PlanValidator.hasMultiDeviceFeatures(plan)).toBe(true);
     });

@@ -128,6 +128,32 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `validates barrier parameters`() {
+    val yaml =
+      """
+      name: barrier-test
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Barrier plan should be valid")
+  }
+
+  @Test
   fun `validates expectations array`() {
     val yaml =
       """

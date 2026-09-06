@@ -86,8 +86,10 @@ self_referential_exclude_pattern() {
   run self_referential_exclude_pattern
   [ "$status" -eq 0 ]
   # Exactly one exclude entry mentions kaeawc/auto-mobile, and it covers both
-  # issues and pull, any number, on github.com/kaeawc/auto-mobile specifically.
-  [ "$output" = '^https://github\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+' ]
+  # issues and pull, any number, on github.com/kaeawc/auto-mobile specifically,
+  # anchored at the end so nothing but an optional fragment/query can follow
+  # the numeric ID.
+  [ "$output" = '^https://github\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$' ]
 
   # It must match our own repo's issue/pull links (the guaranteed-valid,
   # self-referential links #5622 recurred against)...
@@ -95,6 +97,27 @@ self_referential_exclude_pattern() {
   local own_pr="https://github.com/kaeawc/auto-mobile/pull/6000"
   [[ "$own_issue" =~ $output ]]
   [[ "$own_pr" =~ $output ]]
+
+  # ...and a clean link with a trailing fragment, e.g. a comment permalink.
+  local own_issue_anchored="https://github.com/kaeawc/auto-mobile/issues/50#issuecomment-123456"
+  [[ "$own_issue_anchored" =~ $output ]]
+}
+
+@test "self-referential exclude pattern does not match a malformed appended-ID link" {
+  requires_yq
+  run self_referential_exclude_pattern
+  [ "$status" -eq 0 ]
+  local pattern="$output"
+
+  # A typo'd/malformed link with characters appended directly after the
+  # numeric ID (no fragment/query separator) must NOT be excluded — it should
+  # still be checked and caught as broken, not silently skipped.
+  local malformed_suffix="https://github.com/kaeawc/auto-mobile/issues/123abc"
+  local malformed_hyphen="https://github.com/kaeawc/auto-mobile/issues/123-foo"
+  local malformed_pull="https://github.com/kaeawc/auto-mobile/pull/45x"
+  [[ ! "$malformed_suffix" =~ $pattern ]]
+  [[ ! "$malformed_hyphen" =~ $pattern ]]
+  [[ ! "$malformed_pull" =~ $pattern ]]
 }
 
 @test "self-referential exclude pattern does not over-exclude other repos' issue/pull links" {

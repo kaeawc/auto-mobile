@@ -34,7 +34,7 @@ exclude = [
   # round-tripping the network for them. Real (non-self-referential) links,
   # including links to other repos' issues/PRs, are unaffected and still
   # checked.
-  "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+",
+  "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$",
 ]
 
 # Exclude specific paths

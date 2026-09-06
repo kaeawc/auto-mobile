@@ -67,6 +67,26 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
   }
 
+  /**
+   * Fake tap-bias variant. Tests configure the desired resolved boolean via
+   * `setVoiceOverEnabled`/`enqueueVoiceOverEnabledResults` the same way as
+   * `isVoiceOverEnabled` — this fake models a resolved outcome, not the
+   * indeterminate/confirmed distinction the real detector's two methods
+   * diverge on (that distinction is covered at the DefaultIosVoiceOverDetector
+   * unit-test level).
+   */
+  async isVoiceOverActiveOrUnknown(
+    _deviceId: string,
+    _client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+  ): Promise<boolean> {
+    this.callCount++;
+    this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
+    this.isVoiceOverEnabledTimeoutMsArgs.push(timeoutMs);
+    return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
+  }
+
   invalidateCache(deviceId: string): void {
     this.invalidatedDevices.push(deviceId);
   }

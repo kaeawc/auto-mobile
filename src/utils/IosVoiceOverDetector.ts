@@ -26,18 +26,21 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   }
 
   /**
-   * Check if VoiceOver is enabled on the device
+   * Check if VoiceOver is enabled on the device.
+   *
+   * Honest result: only a confirmed-enabled probe resolves to `true`. An
+   * indeterminate probe (timeout, error, or an unsuccessful CtrlProxy
+   * response) resolves to `false` — same as confirmed-disabled — because
+   * this method's consumers (toggle confirmation, state query) must treat
+   * "unknown" as NOT-confirmed rather than assuming success. Tap consumers
+   * that need the opposite bias use {@link isVoiceOverActiveOrUnknown}
+   * (#6267 follow-up: the shared detector must not coerce indeterminate to
+   * `true` for every consumer — see that method's doc for why).
    *
    * @param deviceId - The device identifier (for caching)
    * @param client - CtrlProxy service for executing the detection command
    * @param featureFlags - Feature flag service for override support
-   * @returns Promise resolving to true if VoiceOver is enabled, or if the
-   *   probe's state is indeterminate (timeout, error, or an unsuccessful
-   *   CtrlProxy response). Fail-safe (#6267): an indeterminate result is
-   *   never coalesced to `false`, so callers never mistake a focus-only
-   *   coordinate touch for a successful VoiceOver activation. Only an
-   *   explicit `enabled: false` response, or the `accessibility-auto-detect`
-   *   feature flag being off, returns `false`.
+   * @returns Promise resolving to true only when VoiceOver is confirmed enabled
    */
   async isVoiceOverEnabled(
     deviceId: string,
@@ -45,6 +48,54 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
   ): Promise<boolean> {
+    const state = await this.resolveVoiceOverState(deviceId, client, featureFlags, timeoutMs);
+    return state === true;
+  }
+
+  /**
+   * Fail-safe variant for tapOn/tapAny: resolves to `true` for a
+   * confirmed-enabled probe AND for an indeterminate probe (timeout, error,
+   * or an unsuccessful CtrlProxy response). Those consumers branch on the
+   * result to choose between a plain coordinate touch and a VoiceOver
+   * activation gesture, so silently treating "unknown" as "off" would make a
+   * real VoiceOver-enabled device receive a focus-only coordinate touch that
+   * gets reported as a successful activation. Treating "unknown" as "on"
+   * instead means the worst case is an unnecessary (but harmless)
+   * accessibility-action path on a device where VoiceOver is actually off —
+   * never a false success (#6267).
+   *
+   * Do not use this for toggle-confirmation or state-query consumers — see
+   * {@link isVoiceOverEnabled}.
+   */
+  async isVoiceOverActiveOrUnknown(
+    deviceId: string,
+    client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+  ): Promise<boolean> {
+    const state = await this.resolveVoiceOverState(deviceId, client, featureFlags, timeoutMs);
+    if (state === null) {
+      logger.warn(
+        `[IosVoiceOverDetector] VoiceOver state for device ${deviceId} could not be determined; ` +
+          `treating as enabled (fail-safe) so the tap path takes the activation gesture instead of a plain touch`,
+      );
+      return true;
+    }
+    return state;
+  }
+
+  /**
+   * Resolves the current VoiceOver state, applying feature-flag overrides
+   * and the detection cache. Returns `null` when the underlying probe is
+   * indeterminate (timeout, error, or an unsuccessful CtrlProxy response) —
+   * callers decide how to coalesce that null themselves.
+   */
+  private async resolveVoiceOverState(
+    deviceId: string,
+    client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+  ): Promise<boolean | null> {
     // Check feature flag override first
     if (featureFlags?.isEnabled("force-accessibility-mode")) {
       logger.debug(`[IosVoiceOverDetector] Force-enabled via feature flag for device ${deviceId}`);
@@ -84,28 +135,13 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
       );
     }
 
-    // Only cache on successful detection — don't persist transient connection failures
+    // Only cache on successful detection — don't persist transient connection
+    // failures, so a subsequent call always retries rather than reusing a
+    // fail-safe/coalesced value.
     if (detected !== null) {
       this.cache.set(deviceId, detected);
     }
 
-    if (detected === null) {
-      // Fail-safe (#6267): an indeterminate probe (timeout, error, or an
-      // unsuccessful CtrlProxy response) must NOT be coalesced to "disabled".
-      // Callers (TapOnElement/TapAnyElement) branch on this boolean to choose
-      // between a plain coordinate touch and a VoiceOver activation gesture.
-      // Silently treating "unknown" as "off" makes a real device with
-      // VoiceOver on receive a focus-only coordinate touch that gets reported
-      // as a successful activation. Treating "unknown" as "on" instead means
-      // the worst case is an unnecessary (but harmless) accessibility-action
-      // path on a device where VoiceOver is actually off — never a false
-      // success.
-      logger.warn(
-        `[IosVoiceOverDetector] VoiceOver state for device ${deviceId} could not be determined; ` +
-          `treating as enabled (fail-safe) so callers take the activation path instead of a plain touch`,
-      );
-      return true;
-    }
     return detected;
   }
 

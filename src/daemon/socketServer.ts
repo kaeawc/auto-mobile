@@ -625,8 +625,20 @@ export class UnixSocketServer {
    * above, this targets exactly one socket rather than every subscriber — the
    * per-session request queue serializes `tools/call`s, so at most one call is
    * ever in flight per session and no correlation beyond the token is needed.
-   * Best-effort and gated on the opt-in subscription, matching the broadcast
-   * helpers: an unsubscribed or already-torn-down socket is silently skipped.
+   *
+   * Deliberately NOT gated on the opt-in general-notification subscription
+   * (unlike the broadcast helpers above). A progress tick is a directed reply
+   * to something THIS session explicitly asked for by putting a
+   * `progressToken` on its OWN in-flight request -- that is itself the
+   * opt-in, independent of whether `daemon/subscribe-notifications` was ever
+   * sent or whether it succeeded. `DaemonMcpProxy.doConnect` deliberately
+   * continues without a subscription when it fails (best-effort degradation),
+   * and gating progress on it too would silently strand a long-running
+   * progress-emitting call: the daemon keeps applying work under its own
+   * extended deadline while the client's independent local timer -- which
+   * only extends on a progress tick it actually receives -- times out
+   * underneath it, a split-brain where the daemon succeeds but the client
+   * reports failure (#6222 review, P2). Only a torn-down socket is skipped.
    */
   private pushProgressNotification(
     sessionId: string,
@@ -635,9 +647,6 @@ export class UnixSocketServer {
     total?: number,
     message?: string,
   ): void {
-    if (!this.notificationSubscribers.has(sessionId)) {
-      return;
-    }
     const socket = this.clientSockets.get(sessionId);
     if (!socket) {
       return;
@@ -1434,6 +1443,7 @@ export class UnixSocketServer {
         remainingTimeoutMs,
         context.socketSessionId,
         context.deadline,
+        context.totalTimeoutMs,
       );
     } catch (error) {
       const message = errorMessage(error);
@@ -1494,6 +1504,7 @@ export class UnixSocketServer {
         retryRemainingMs,
         context.socketSessionId,
         context.deadline,
+        context.totalTimeoutMs,
       );
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
@@ -2136,6 +2147,7 @@ export class UnixSocketServer {
         retryRemainingMs,
         input.socketSessionId,
         input.deadline,
+        input.totalTimeoutMs,
       );
       if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
         await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
@@ -3960,6 +3972,21 @@ export class UnixSocketServer {
     timeoutMs: number,
     socketSessionId: string,
     deadline: ProgressExtendableDeadline,
+    /**
+     * The FULL per-request timeout window this request was granted at
+     * receipt (`totalTimeoutMs` from `handleRequest`) -- UNLIKE `timeoutMs`
+     * above, which is the budget remaining for THIS specific forward
+     * attempt after time already spent waiting in the per-session queue
+     * (or reconnecting). A request that waited most of its budget in queue
+     * would otherwise have every progress-driven reset use that tiny
+     * queue-depleted remnant as its "how long is ordinary device work
+     * between ticks allowed to take" window -- collapsing a 30s tool to a
+     * ~1s one. Every progress-driven extension (the SDK's own
+     * `resetTimeoutOnProgress`, which reuses this SAME `timeout` value on
+     * every reset, and this daemon's own `deadline`) uses THIS value
+     * instead, independent of queue wait (#6222 review, P1).
+     */
+    originalTimeoutMs: number,
   ): Promise<any> {
     const requestOptions = { timeout: timeoutMs };
 
@@ -3987,27 +4014,32 @@ export class UnixSocketServer {
             // fixed timeout is exactly the unsafe-to-retry shape issue #6222
             // exists to close. `resetTimeoutOnProgress` makes the SDK's OWN
             // internal timeout for this call reset on each progress tick
-            // instead of firing at the original `timeout`, and
-            // `maxTotalTimeout` still caps it at this request's own bounded
-            // ceiling -- a tool that stops progressing is still killed there.
-            // Only set for a request that actually asked for progress
+            // instead of firing once at `timeout` -- but the SDK reuses the
+            // SAME `timeout` value on every reset (see its `_resetTimeout`),
+            // so this overrides `timeout` itself to the FULL original
+            // window (`originalTimeoutMs`), not the queue-depleted
+            // `timeoutMs` above (#6222 review, P1). `maxTotalTimeout` still
+            // caps the whole thing at this request's own bounded ceiling --
+            // a tool that stops progressing is still killed there. Only set
+            // for a request that actually asked for progress
             // (`progressToken !== undefined`, same gate as `onprogress`
-            // below): a tool with no progress relay keeps its exact original,
-            // non-extendable `timeout` (#6222 review, P1).
+            // below): a tool with no progress relay keeps its exact
+            // original, non-extendable, queue-adjusted `timeout` untouched.
             ...(progressToken !== undefined
               ? {
+                  timeout: originalTimeoutMs,
                   resetTimeoutOnProgress: true,
-                  maxTotalTimeout: Math.max(deadline.ceiling - this.timer.now(), timeoutMs),
+                  maxTotalTimeout: Math.max(deadline.ceiling - this.timer.now(), originalTimeoutMs),
                 }
               : {}),
             // Relay progress ticks back to the ORIGINATING socket session,
             // tagged with the client's own token — never a daemon-fabricated
             // one, and never sent when the client asked for none (#6205).
             // Also extends the DAEMON's OWN request deadline (the one
-            // `requireRemainingMcpForwardBudget` checks before a retry), so a
-            // budget check made after this tick sees the extended value
-            // rather than the original one (#6222 review, P1) -- bounded by
-            // the same ceiling as the SDK-side `maxTotalTimeout` above.
+            // `requireRemainingMcpForwardBudget` checks before a retry) by
+            // the FULL original window, same reasoning as `timeout` above
+            // (#6222 review, P1) -- bounded by the same ceiling as the
+            // SDK-side `maxTotalTimeout`.
             ...(progressToken !== undefined
               ? {
                   onprogress: (notification: {
@@ -4015,7 +4047,7 @@ export class UnixSocketServer {
                     total?: number;
                     message?: string;
                   }) => {
-                    deadline.extendOnProgress(this.timer.now(), timeoutMs);
+                    deadline.extendOnProgress(this.timer.now(), originalTimeoutMs);
                     this.pushProgressNotification(
                       socketSessionId,
                       progressToken,

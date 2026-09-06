@@ -9901,6 +9901,67 @@
                     "additionalProperties": {}
                   }
                 },
+                "activeWindow": {
+                  "description": "Same name/shape as a full observation's `activeWindow` (issue #6258): a diff-mode response otherwise carries no `activeWindow` at all, leaving a client no single accessor for 'what screen am I on' across full and diff modes. Populated from the post-transition observation, not by `diffObserveResult` itself.",
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string"
+                    },
+                    "activityName": {
+                      "type": "string"
+                    },
+                    "layoutSeqSum": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "systemOverlay": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "freshness": {
+                  "description": "Same name/shape as a full observation's `freshness` (issue #6258): a diff-mode response otherwise carries no `freshness` at all, leaving a client no single accessor for 'is this capture fresh' across full and diff modes. Populated from the post-transition observation, not by `diffObserveResult` itself.",
+                  "type": "object",
+                  "properties": {
+                    "requestedAfter": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "actualTimestamp": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ageMs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "isFresh": {
+                      "type": "boolean"
+                    },
+                    "staleDurationMs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "warning": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["isFresh"],
+                  "additionalProperties": {}
+                },
                 "added": {
                   "type": "array",
                   "items": {

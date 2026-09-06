@@ -1,5 +1,6 @@
 import type { ObserveResult, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import type { Element } from "../../models/Element";
+import { isTruthy } from "../../models/Element";
 import { isClickableElementProperties } from "../../utils/elementProperties";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -101,7 +102,16 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       ancestors.push({ depth, provenance });
 
       const nodeProperties = this.parser.extractNodeProperties(node);
-      if (isClickableElementProperties(nodeProperties)) {
+      // A `checkable` node (Android `Switch`/`SwitchCompat`/`CheckBox`) commonly
+      // sits inside a clickable preference row with `clickable="false"` on the
+      // switch itself — the parent row owns the tap, the switch only reflects
+      // state. Without this, such a node is invisible to every downstream
+      // collection and its `checked` state never reaches the skeleton
+      // projection's `toggle` affordance (issue #6257).
+      if (
+        isClickableElementProperties(nodeProperties) ||
+        isTruthy(nodeProperties.checkable as boolean | string | undefined)
+      ) {
         collections.clickable.push(parsedNode);
       }
       if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {

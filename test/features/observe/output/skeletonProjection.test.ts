@@ -241,6 +241,47 @@ describe("toSkeleton — acceptance criteria", () => {
       expect("checked" in (findById(skeleton, "plain") as SkeletonElement)).toBe(false);
     });
 
+    test("issue #6257: a switch's entry differs across a checked-state flip, and carries toggle", () => {
+      const wifiSwitch = (checked: boolean): Element => ({
+        bounds: bounds(0, 0, 10, 10),
+        "resource-id": "wifi_switch",
+        "content-desc": "Wi-Fi",
+        checkable: "true",
+        checked,
+      });
+
+      const before = toSkeleton(makeElements({ clickable: [wifiSwitch(true)] }));
+      const after = toSkeleton(makeElements({ clickable: [wifiSwitch(false)] }));
+
+      const beforeEntry = findById(before, "wifi_switch");
+      const afterEntry = findById(after, "wifi_switch");
+
+      expect(beforeEntry?.affordances).toContain("toggle");
+      expect(afterEntry?.affordances).toContain("toggle");
+      expect(beforeEntry?.checked).toBe(true);
+      expect(afterEntry?.checked).toBe(false);
+      // The entries must NOT be byte-identical (issue #6257) — a client can now
+      // read the state and verify a change.
+      expect(JSON.stringify(beforeEntry)).not.toEqual(JSON.stringify(afterEntry));
+    });
+
+    test("a non-checkable entry is unchanged by an unrelated checked flip elsewhere", () => {
+      const plainButton: Element = {
+        bounds: bounds(0, 40, 10, 50),
+        "resource-id": "plain",
+        clickable: "true",
+      };
+
+      const before = toSkeleton(makeElements({ clickable: [plainButton] }));
+      const after = toSkeleton(makeElements({ clickable: [{ ...plainButton } as Element] }));
+
+      expect(JSON.stringify(findById(before, "plain"))).toEqual(
+        JSON.stringify(findById(after, "plain")),
+      );
+      expect(findById(before, "plain")?.affordances).not.toContain("toggle");
+      expect("checked" in (findById(before, "plain") as SkeletonElement)).toBe(false);
+    });
+
     test("multiple affordances emit in canonical order tap,long-press,input,scroll,toggle", () => {
       const kitchenSink: Element = {
         bounds: bounds(0, 0, 10, 10),

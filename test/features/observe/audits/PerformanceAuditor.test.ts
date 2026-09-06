@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  collectHiddenRegionBounds,
   collectInteractiveObstacles,
   deriveTouchLatencyPoint,
   findAppWindowBounds,
@@ -382,6 +383,35 @@ describe("findInertTouchPoint (#6167)", () => {
       y < focusableField.bounds.bottom;
     expect(insideField).toBe(false);
   });
+
+  // Regression: a content-hidden region (e.g. a large Compose-interop area)
+  // exposes no interactive descendants in the accessibility hierarchy at
+  // all, so it can never appear in the obstacle list - but a candidate point
+  // landing inside it can still tap a real (hidden) control.
+  test("treats a content-hidden region as unsafe even with no accessibility obstacles", () => {
+    const hiddenRegion = { left: 0, top: 0, right: 1080, bottom: 1920 };
+
+    const result = findInertTouchPoint(appWindow, [], [hiddenRegion]);
+
+    // Every candidate falls inside the full-window hidden region - no
+    // verified-inert point exists.
+    expect(result.inert).toBe(false);
+  });
+
+  test("avoids a small content-hidden region while still picking an inert point", () => {
+    const hiddenRegion = { left: 440, top: 900, right: 640, bottom: 1020 };
+
+    const result = findInertTouchPoint(appWindow, [], [hiddenRegion]);
+
+    expect(result.inert).toBe(true);
+    const { x, y } = result.point;
+    const insideHiddenRegion =
+      x >= hiddenRegion.left &&
+      x < hiddenRegion.right &&
+      y >= hiddenRegion.top &&
+      y < hiddenRegion.bottom;
+    expect(insideHiddenRegion).toBe(false);
+  });
 });
 
 describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up)", () => {
@@ -506,5 +536,83 @@ describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up
       y >= focusableBounds.top &&
       y < focusableBounds.bottom;
     expect(insideField).toBe(false);
+  });
+});
+
+describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden regions (#6167 follow-up)", () => {
+  const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
+
+  test("collectHiddenRegionBounds returns the bounds of every content-hidden region", () => {
+    const region = {
+      bounds: { left: 100, top: 200, right: 900, bottom: 1800 },
+      reason: "compose-interop-no-hide-descendants" as const,
+      areaPercent: 60,
+    };
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, contentHiddenRegions: [region] } as any,
+    });
+
+    expect(collectHiddenRegionBounds(result)).toEqual([region.bounds]);
+  });
+
+  test("collectHiddenRegionBounds returns an empty array when there are none", () => {
+    const result = makeResult();
+    expect(collectHiddenRegionBounds(result)).toEqual([]);
+  });
+
+  // P1: a large Compose-interop content-hidden region exposes no
+  // interactive descendants in the accessibility hierarchy at all, so
+  // `collectInteractiveObstacles` sees nothing there - a candidate point
+  // inside it must still be rejected via the hidden-region check, and with
+  // no other candidate available the caller must skip touch-latency
+  // entirely rather than tap into the hidden content.
+  test("deriveTouchLatencyPoint skips when a full-window content-hidden region leaves no safe candidate", () => {
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        contentHiddenRegions: [
+          {
+            bounds: appWindow,
+            reason: "compose-interop-no-hide-descendants",
+            areaPercent: 100,
+          },
+        ],
+      } as any,
+      // The accessibility hierarchy is empty - no obstacle would be found
+      // without the hidden-region check.
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
+  test("deriveTouchLatencyPoint avoids a small content-hidden region via the production path", () => {
+    const hiddenBounds = { left: 440, top: 900, right: 640, bottom: 1020 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        contentHiddenRegions: [
+          {
+            bounds: hiddenBounds,
+            reason: "compose-interop-no-hide-descendants",
+            areaPercent: 10,
+          },
+        ],
+      } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+    const { x, y } = decision.touchPoint!;
+    const insideHiddenRegion =
+      x >= hiddenBounds.left &&
+      x < hiddenBounds.right &&
+      y >= hiddenBounds.top &&
+      y < hiddenBounds.bottom;
+    expect(insideHiddenRegion).toBe(false);
   });
 });

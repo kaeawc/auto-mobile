@@ -140,27 +140,29 @@ function isValidWindowBounds(bounds: ElementBounds): boolean {
 export interface InertTouchPointResult {
   point: { x: number; y: number };
   /**
-   * False when no scanned candidate avoided every interactive element - the
-   * returned point is the documented fallback default, not a verified-inert
-   * one (issue #6167).
+   * False when no scanned candidate avoided every interactive element AND
+   * every content-hidden region - the returned point is the documented
+   * fallback default, not a verified-inert one (issue #6167).
    */
   inert: boolean;
 }
 
 /**
  * Find a synthetic-touch point inside `windowBounds` that does not overlap
- * any clickable/focusable/long-clickable element, so a touch-latency probe
- * cannot activate a real control (tap a button, open a list item, follow a
- * link) during what is meant to be a read-only performance audit
- * (issue #6167). Scans a small set of candidate points (window center, then
- * quadrant centers, then edge midpoints) and returns the first that hits no
- * interactive element's bounds. Falls back to a documented default point
- * when every candidate is obstructed, with `inert: false` so the caller
- * knows the tap may still land on a control.
+ * any clickable/focusable/long-clickable element, and does not fall inside
+ * any content-hidden region, so a touch-latency probe cannot activate a real
+ * control (tap a button, open a list item, follow a link) during what is
+ * meant to be a read-only performance audit (issue #6167). Scans a small set
+ * of candidate points (window center, then quadrant centers, then edge
+ * midpoints) and returns the first that hits no interactive element's bounds
+ * and no hidden region. Falls back to a documented default point when every
+ * candidate is obstructed, with `inert: false` so the caller knows the tap
+ * may still land on a control or hidden content.
  */
 export function findInertTouchPoint(
   windowBounds: ElementBounds,
   interactiveElements: readonly Element[],
+  hiddenRegions: readonly ElementBounds[] = [],
 ): InertTouchPointResult {
   const obstacles = interactiveElements.filter((el) => el.bounds && isInteractiveElement(el));
   const width = windowBounds.right - windowBounds.left;
@@ -173,16 +175,21 @@ export function findInertTouchPoint(
 
   for (const fraction of INERT_POINT_CANDIDATE_FRACTIONS) {
     const point = pointFor(fraction);
-    const obstructed = obstacles.some((el) => isPointInsideBounds(point.x, point.y, el.bounds));
-    if (!obstructed) {
+    const obstructedByElement = obstacles.some((el) =>
+      isPointInsideBounds(point.x, point.y, el.bounds),
+    );
+    const obstructedByHiddenRegion = hiddenRegions.some((region) =>
+      isPointInsideBounds(point.x, point.y, region),
+    );
+    if (!obstructedByElement && !obstructedByHiddenRegion) {
       return { point, inert: true };
     }
   }
 
   logger.warn(
     "[PerformanceAudit] Could not find a fully inert touch point inside the app window " +
-      "(every scanned candidate overlapped an interactive element) - falling back to a " +
-      "default point that may still activate a control",
+      "(every scanned candidate overlapped an interactive element or content-hidden region) - " +
+      "falling back to a default point that may still activate a control",
   );
   return { point: pointFor(FALLBACK_TOUCH_POINT_FRACTION), inert: false };
 }
@@ -214,16 +221,32 @@ export function collectInteractiveObstacles(
     .map((entry) => entry.element);
 }
 
+/**
+ * Bounds of every content-hidden region on this observation - large
+ * Compose-interop (or similar) areas where platform accessibility APIs
+ * cannot expose the rendered content's real elements
+ * (`ViewHierarchyResult.contentHiddenRegions`). A candidate touch point can
+ * fall inside such a region while showing no obstacle in
+ * `collectInteractiveObstacles`, because the region's interactive
+ * descendants are never surfaced in the accessibility hierarchy at all - so
+ * these bounds must be checked as their own exclusion, not folded into the
+ * element-obstacle list (issue #6167 follow-up).
+ */
+export function collectHiddenRegionBounds(result: ObserveResult): ElementBounds[] {
+  return (result.viewHierarchy?.contentHiddenRegions ?? []).map((region) => region.bounds);
+}
+
 export interface TouchLatencyPointDecision {
   /** A verified-inert coordinate to tap, present only when one was found. */
   touchPoint?: { x: number; y: number };
   /**
    * True when there is no verified-inert point to tap - either `windowBounds`
    * was undefined (no app window found), or every scanned candidate
-   * overlapped an interactive element. The caller must skip the
-   * touch-latency measurement entirely in this case rather than fall
-   * through to `TouchLatencyTracker`'s own unverified default point, which
-   * risks activating a full-screen button, WebView, or map (issue #6167).
+   * overlapped an interactive element or a content-hidden region. The caller
+   * must skip the touch-latency measurement entirely in this case rather
+   * than fall through to `TouchLatencyTracker`'s own unverified default
+   * point, which risks activating a full-screen button, WebView, map, or a
+   * hidden control (issue #6167).
    */
   skipTouchLatency: boolean;
 }
@@ -252,7 +275,8 @@ export function deriveTouchLatencyPoint(
   }
 
   const obstacles = collectInteractiveObstacles(result, elementParser);
-  const { point, inert } = findInertTouchPoint(windowBounds, obstacles);
+  const hiddenRegions = collectHiddenRegionBounds(result);
+  const { point, inert } = findInertTouchPoint(windowBounds, obstacles, hiddenRegions);
   if (!inert) {
     return { skipTouchLatency: true };
   }

@@ -700,6 +700,63 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.latencyMs).toBeGreaterThan(0);
     });
 
+    // Regression: with only ~50ms between the two pre-tap snapshots, a slow
+    // continuous animation (e.g. 10fps, frames ~100ms apart) could read flat
+    // across both snapshots and then increment right after the tap - its
+    // next autonomous frame misreported as touch latency. The widened
+    // observation window (issue #6167 follow-up) must span at least one full
+    // period of a 10fps animation so growth is guaranteed to show up between
+    // the two snapshots regardless of phase. This fake ties frame counts to
+    // the FakeTimer's own elapsed time (frames at t=25ms, 125ms, 225ms, ...)
+    // rather than call count, so it genuinely exercises the widened window's
+    // real duration.
+    test("detects a slow (10fps-style) autonomous animation across the widened pre-tap window (#6167 follow-up)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      const FRAME_PERIOD_MS = 100;
+      const FIRST_FRAME_AT_MS = 25;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        const elapsed = fakeTimer.now();
+        const totalFrames =
+          elapsed < FIRST_FRAME_AT_MS
+            ? 0
+            : Math.floor((elapsed - FIRST_FRAME_AT_MS) / FRAME_PERIOD_MS) + 1;
+        return {
+          stdout: `
+            Total frames rendered: ${totalFrames}
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // Discounted as animating - not misreported as a real touch latency.
+      expect(result.animating).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.sampleCount).toBe(0);
+    });
+
     test("synthetic tap coordinate lands inside the app window, not the status-bar band", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
 

@@ -48,8 +48,22 @@ interface FrameStats {
  * `gfxinfo reset` - which lands inside the first window and is therefore
  * already baked into the first snapshot - doesn't by itself look like
  * ongoing animation.
+ *
+ * The gap BETWEEN the two snapshots (this constant) is what has to catch a
+ * still-animating app: growth is only visible if at least one frame of the
+ * animation renders somewhere in that gap, regardless of where the gap's
+ * phase falls relative to the animation's own period. To guarantee that for
+ * an unknown phase, the gap must be at least one full period long. 125ms
+ * covers down to ~10fps (a 100ms period) with margin, matching the slowest
+ * rendering rate worth flagging as "still animating" rather than "settled" -
+ * a further follow-up (#6167) can widen this again if a slower floor turns
+ * out to matter, at the cost of a longer pre-tap delay on every sample. An
+ * animation slower than that floor (a period at or beyond this window) is
+ * genuinely indistinguishable from a one-off settling frame within a bounded
+ * pre-tap observation - only a longer window (traded against audit latency)
+ * can pull that floor down further.
  */
-const PRE_TAP_SETTLE_WINDOW_MS = 50;
+const PRE_TAP_SETTLE_WINDOW_MS = 125;
 
 /**
  * True when a gfxinfo counter was parsed on both sides and grew. A `null` on

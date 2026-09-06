@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync } from "node:fs";
+import { platform } from "node:os";
 import { SOCKET_PATH, PID_FILE_PATH } from "./constants";
 import { DaemonClient } from "./client";
 import { readFile } from "node:fs/promises";
@@ -31,6 +32,14 @@ export interface DaemonHealthReport {
 export interface DaemonHealthReportOptions {
   socketPath?: string;
   pidFilePath?: string;
+  /**
+   * Injected so a test can simulate Windows named-pipe semantics without a real
+   * OS switch (issue #6140). Defaults to the real platform. A Windows named pipe
+   * has no filesystem entry, so the `existsSync`/`stat` gates below must be
+   * skipped there and the connectivity probe consulted directly — mirroring the
+   * platform branch already in {@link DaemonClient.isAvailable}.
+   */
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -42,6 +51,7 @@ export async function getDaemonHealthReport(
 ): Promise<DaemonHealthReport> {
   const socketPath = options.socketPath ?? SOCKET_PATH;
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
+  const isWin32 = (options.platform ?? platform()) === "win32";
   const report: DaemonHealthReport = {
     timestamp: new Date().toISOString(),
     daemonRunning: false,
@@ -53,8 +63,11 @@ export async function getDaemonHealthReport(
     recommendations: [],
   };
 
-  // Check socket file
-  report.socketExists = existsSync(socketPath);
+  // Check socket file. Windows named pipes have no filesystem entry (issue
+  // #6140), so this existsSync gate never applies there — treat the pipe as
+  // present and let the connectivity probe below determine reachability,
+  // rather than reporting "not found" for every live Windows daemon.
+  report.socketExists = isWin32 || existsSync(socketPath);
   if (!report.socketExists) {
     report.recommendations.push("Socket file not found. Daemon may not be running.");
   } else {
@@ -210,8 +223,12 @@ export async function runSocketDiagnostics(
   options: DaemonHealthReportOptions = {},
 ): Promise<SocketDiagnostics> {
   const socketPath = options.socketPath ?? SOCKET_PATH;
+  const isWin32 = (options.platform ?? platform()) === "win32";
   const diagnostics: SocketDiagnostics = {
-    socketExists: existsSync(socketPath),
+    // Windows named pipes have no filesystem entry (issue #6140) — treat the
+    // pipe as present rather than failing this gate for every live Windows
+    // daemon, mirroring the platform branch already in DaemonClient.isAvailable.
+    socketExists: isWin32 || existsSync(socketPath),
     socketReadable: false,
     socketWritable: false,
     socketConnectable: false,
@@ -224,14 +241,22 @@ export async function runSocketDiagnostics(
     return diagnostics;
   }
 
-  // Try to get file stats to check read/write permissions
-  try {
-    await (await import("node:fs/promises")).stat(socketPath);
+  if (isWin32) {
+    // A named pipe's read/write access isn't observable via `stat` (there is no
+    // filesystem entry to stat) — assume both until the connectivity probe
+    // below determines actual reachability.
     diagnostics.socketReadable = true;
     diagnostics.socketWritable = true;
-  } catch (error) {
-    diagnostics.issues.push(`Cannot access socket file: ${error}`);
-    return diagnostics;
+  } else {
+    // Try to get file stats to check read/write permissions
+    try {
+      await (await import("node:fs/promises")).stat(socketPath);
+      diagnostics.socketReadable = true;
+      diagnostics.socketWritable = true;
+    } catch (error) {
+      diagnostics.issues.push(`Cannot access socket file: ${error}`);
+      return diagnostics;
+    }
   }
 
   // Try to connect. Observation-only probe: never unlinks a live daemon's

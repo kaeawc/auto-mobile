@@ -265,6 +265,95 @@ describe("DaemonManager stop", () => {
   });
 });
 
+// #6140 P1 completion: status() must be purely observation-only. A transient
+// DaemonClient.isAvailable() probe failure routes into
+// DaemonMcpProxy.startDaemon() -> DaemonManager.status(), OUTSIDE the O_EXCL
+// startup lock — if status() unlinked the socket/PID file whenever the
+// recorded PID looked dead, it would delete a LIVE winner's socket during a
+// startup race, recreating the exact #6140 brick through a different actor.
+describe("DaemonManager status", () => {
+  function writeStatusPidFile(pidFilePath: string, pid: number, socketPath: string): void {
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({
+        pid,
+        socketPath,
+        port: 3000,
+        startedAt: 1,
+        version: "test",
+      }),
+    );
+  }
+
+  test("never unlinks the socket or PID file when the recorded PID is dead", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-dead-pid-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4245;
+    try {
+      writeStatusPidFile(pidFilePath, pid, socketPath);
+      // A stale socket inode is present but the recorded PID is confirmed dead —
+      // exactly the shape a concurrent startup winner's live socket + a stale
+      // loser PID file would present.
+      writeFileSync(socketPath, "socket");
+      const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      };
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        join(tmpdir(), "unused-daemon-lock"),
+        pidFilePath,
+        socketPath,
+        processFinder,
+      );
+
+      const status = await manager.status();
+
+      expect(status).toEqual({ running: false });
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("reports running without touching any files when the recorded PID is alive", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-live-pid-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4246;
+    try {
+      writeStatusPidFile(pidFilePath, pid, socketPath);
+      writeFileSync(socketPath, "socket");
+      const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => true,
+      };
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        join(tmpdir(), "unused-daemon-lock"),
+        pidFilePath,
+        socketPath,
+        processFinder,
+      );
+
+      const status = await manager.status();
+
+      expect(status.running).toBe(true);
+      expect(status.pid).toBe(pid);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 class FakeDaemonClient implements DaemonClientLike {
   readonly readResourceCalls: string[] = [];
   readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
@@ -474,6 +563,48 @@ describe("Daemon manager process detection", () => {
       },
     ]);
     expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
+  });
+
+  // #6140 review: execSync's `timeout: 0` means NO timeout (unbounded), not
+  // "expire immediately" — a computed remaining budget can legitimately be
+  // exactly 0, so it must never be forwarded to execSync as-is or the intended
+  // bound is silently lost.
+  test("clamps a zero requested timeout to a positive floor instead of forwarding execSync's unbounded 0", () => {
+    const calls: Array<{ options: { timeout: number } }> = [];
+    const finder = new PsDaemonProcessFinder((_command, options) => {
+      calls.push({ options: options as { timeout: number } });
+      return "";
+    });
+
+    finder.findDaemonProcesses(0);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].options.timeout).toBeGreaterThan(0);
+  });
+
+  test("clamps a negative requested timeout to a positive floor", () => {
+    const calls: Array<{ options: { timeout: number } }> = [];
+    const finder = new PsDaemonProcessFinder((_command, options) => {
+      calls.push({ options: options as { timeout: number } });
+      return "";
+    });
+
+    finder.findDaemonProcesses(-50);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].options.timeout).toBeGreaterThan(0);
+  });
+
+  test("still caps a requested timeout at the scan ceiling", () => {
+    const calls: Array<{ options: { timeout: number } }> = [];
+    const finder = new PsDaemonProcessFinder((_command, options) => {
+      calls.push({ options: options as { timeout: number } });
+      return "";
+    });
+
+    finder.findDaemonProcesses(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS * 10);
+
+    expect(calls[0].options.timeout).toBe(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS);
   });
 
   test("parses daemon processes from Windows PowerShell JSON output", () => {

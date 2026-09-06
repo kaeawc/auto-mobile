@@ -140,6 +140,19 @@ export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
  */
 export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5000;
 
+/**
+ * Floor the process-table scan timeout is clamped to (issue #6140 review). Node's
+ * (and Bun's) `execSync` treats `timeout: 0` as "no timeout" — i.e. UNBOUNDED, the
+ * opposite of "expire immediately" — not a short/immediate bound. A computed
+ * remaining budget can legitimately be exactly `0`, so `boundedProcessTableScanTimeout`
+ * must never forward that value as-is: doing so would silently remove the bound
+ * this scan exists to enforce. Callers with zero budget remaining should skip the
+ * scan entirely (as `tryJoinPeerDaemonAfterSpawnExit` already does); this floor is
+ * defense-in-depth for any other caller of `findDaemonProcesses`/
+ * `findLiveDaemonProcesses` that does not pre-check for a zero budget.
+ */
+const MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS = 1;
+
 type ProcessTableCommandRunner = (
   command: string,
   options: { encoding: "utf-8"; maxBuffer: number; timeout: number },
@@ -293,7 +306,7 @@ const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
 
 function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
   return Math.max(
-    0,
+    MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS,
     Math.min(
       timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
       DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
@@ -1496,7 +1509,23 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * Check daemon status
+   * Check daemon status.
+   *
+   * OBSERVATION-ONLY (issue #6140): this NEVER unlinks the socket or PID file,
+   * even when the recorded PID is dead. It used to call `cleanupDaemonFiles()`
+   * in that case — but `status()` is called from far more places than an
+   * explicit `--daemon stop`/`restart`, including `DaemonMcpProxy.startDaemon()`
+   * after a merely TRANSIENT `DaemonClient.isAvailable()` failure (a live
+   * winner's socket momentarily refusing a probe, e.g. under an accept
+   * backlog) and the plain `--daemon status` CLI command — neither of which is
+   * running under `DaemonManager`'s `O_EXCL` startup lock. Deleting the PID
+   * file's recorded socket pathname there could delete a LIVE winner's socket
+   * out from under it: the exact #6140 brick, just reached through status()
+   * instead of the client's now-removed recovery path. Legitimate stale-file
+   * reclamation already happens, correctly, at daemon bind time under the lock
+   * (`UnixSocketServer.start()`) and at explicit shutdown (`stop()`, gated on
+   * the caller's own confirmed PID) — status() itself must only report what it
+   * observes.
    */
   async status(): Promise<DaemonStatus> {
     // Check if PID file exists
@@ -1513,11 +1542,6 @@ export class DaemonManager implements DaemonManagerLike {
       const running = this.isProcessRunning(pidData.pid);
 
       if (!running) {
-        await cleanupDaemonFiles({
-          pidFilePath: this.pidFilePath,
-          socketPaths: this.cleanupSocketPaths(pidData.socketPath),
-          expectedPid: pidData.pid,
-        });
         return { running: false };
       }
 

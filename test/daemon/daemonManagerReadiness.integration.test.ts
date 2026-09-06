@@ -372,6 +372,14 @@ describe("DaemonManager readiness", () => {
     expect(existsSync(socketPath)).toBe(true);
   });
 
+  // Explicitly pinned off win32 (issue #6140): `socketPathObservable()` always
+  // reports observable on win32 (a named pipe has no filesystem entry to gate
+  // on), so this fs-gated "nothing to probe yet" scenario can only be exercised
+  // deterministically with a non-win32 platform override — mirroring the
+  // pattern already used by "waitForReady still gates on existsSync off win32"
+  // and "waitForReady probes the socket on win32" below. Without this override
+  // the test fails on the real Windows CI runner: the socket path is (falsely)
+  // observable, so a probe client is created before the abort ever lands.
   test("waitForReady cancels pending polling sleep when aborted", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
@@ -389,6 +397,14 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "linux",
     );
 
     const ready = manager.waitForReady(10_000, controller.signal);
@@ -698,6 +714,15 @@ describe("DaemonManager readiness", () => {
     expect(clients[0]?.connectionSignals[0]?.aborted).toBe(true);
   });
 
+  // Explicitly pinned off win32 (issue #6140): `socketPathObservable()` always
+  // reports observable on win32 (a named pipe has no filesystem entry to gate
+  // on), so the "socket not observed" diagnostic this test asserts can only be
+  // produced deterministically with a non-win32 platform override — mirroring
+  // "waitForReady still gates on existsSync off win32" below. Without this
+  // override the test fails on the real Windows CI runner: every poll reports
+  // "socket observed" and the whole 200ms budget is consumed by a single probe
+  // (retry/backoff against the nonexistent pipe), yielding "1 polls" instead
+  // of the two fs-gated polling iterations this test expects.
   test("reports elapsed readiness timing when no daemon socket appears", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
@@ -710,6 +735,14 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "linux",
     );
 
     try {

@@ -8,6 +8,7 @@ import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
 import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
 import { STABLE_VIEW_ID_PREFIX } from "../observe/android/StableNodeIdentity";
+import { ActionableError } from "../../models/ActionableError";
 
 /**
  * `resourceId`/`elementId` selectors carry an `s-<hash>` content-derived
@@ -20,6 +21,31 @@ import { STABLE_VIEW_ID_PREFIX } from "../observe/android/StableNodeIdentity";
  */
 function isStableViewId(id: string): boolean {
   return id.startsWith(STABLE_VIEW_ID_PREFIX);
+}
+
+/**
+ * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
+ * ordinal `-<k>` suffix (`s-<hash>-2`, `s-<hash>-3`, ...) assigned by document
+ * order AT CAPTURE TIME (`StableNodeIdentity.ts`). That ordinal is therefore
+ * capture-local: an insert or reorder between the capture an `s-<hash>-<k>` id
+ * was observed from and the fresh capture a later `tapOn`/`inputText` resolves
+ * it against can shift which node the k-th occurrence now lands on - silently
+ * resolving to the WRONG node rather than the one the caller meant (issue
+ * #6218 review thread PRRT_kwDOP-GF5M6foer0). This pattern detects that shape
+ * so it can be checked against the CURRENT capture's duplicate count before
+ * being trusted.
+ */
+const ORDINAL_STABLE_VIEW_ID_PATTERN = /^(s-[0-9a-f]+)-\d+$/;
+
+/** The un-suffixed base id an ordinal-suffixed stable id was derived from, or null. */
+function stableViewIdOrdinalBase(id: string): string | null {
+  const match = ORDINAL_STABLE_VIEW_ID_PATTERN.exec(id);
+  return match ? match[1] : null;
+}
+
+/** True when `viewId` is exactly `base`, or an ordinal-suffixed duplicate of it. */
+function sharesStableViewIdBase(viewId: string, base: string): boolean {
+  return viewId === base || stableViewIdOrdinalBase(viewId) === base;
 }
 
 function matchesResourceIdOrStableViewId(
@@ -122,6 +148,10 @@ export class DefaultElementFinder implements ElementFinder {
   ): ViewHierarchyNode | null {
     if (!viewHierarchy || !container) {
       return null;
+    }
+
+    if (container.elementId) {
+      this.assertStableViewIdSelectorNotAmbiguous(viewHierarchy, container.elementId);
     }
 
     const matchesContainerText = container.text
@@ -372,6 +402,67 @@ export class DefaultElementFinder implements ElementFinder {
     return isClickableElementProperties(props);
   }
 
+  /**
+   * Count nodes anywhere in the current capture (main hierarchy plus every
+   * window) whose `view-id` is `base` or an ordinal-suffixed duplicate of it.
+   * Used to decide whether an ordinal-suffixed `s-<hash>-<k>` selector is safe
+   * to trust in THIS capture (see `assertStableViewIdSelectorNotAmbiguous`).
+   */
+  private countNodesSharingStableViewIdBase(
+    viewHierarchy: ViewHierarchyResult,
+    base: string,
+  ): number {
+    let count = 0;
+    const countInRoots = (roots: ViewHierarchyNode[]): void => {
+      for (const root of roots) {
+        this.parser.traverseNode(root, (node: any) => {
+          const nodeProperties = this.parser.extractNodeProperties(node);
+          const viewId = nodeProperties["view-id"];
+          if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
+            count++;
+          }
+        });
+      }
+    };
+
+    countInRoots(this.parser.extractRootNodes(viewHierarchy));
+    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    for (const windowRoots of windowRootGroups) {
+      countInRoots(windowRoots);
+    }
+    return count;
+  }
+
+  /**
+   * Reject an ordinal-suffixed stable-view-id selector (`s-<hash>-<k>`) when
+   * MORE THAN ONE node in the current capture shares its base content hash —
+   * i.e. the ordinal is load-bearing / capture-local rather than moot. A
+   * plain (unsuffixed) selector, or one whose base hash is unique in this
+   * capture, is left alone (issue #6218 review thread
+   * PRRT_kwDOP-GF5M6foer0). Rejecting is correct here: a wrong tap is worse
+   * than a clear failure telling the caller to use a more specific selector.
+   */
+  private assertStableViewIdSelectorNotAmbiguous(
+    viewHierarchy: ViewHierarchyResult,
+    id: string,
+  ): void {
+    const base = stableViewIdOrdinalBase(id);
+    if (!base) {
+      return;
+    }
+    const duplicateCount = this.countNodesSharingStableViewIdBase(viewHierarchy, base);
+    if (duplicateCount > 1) {
+      throw new ActionableError(
+        `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
+          `content-identical elements share stable id "${base}", and its "-N" ordinal suffix is ` +
+          "assigned by document order at capture time. An element insert or reorder since this id " +
+          "was observed can shift which element the ordinal now points to, so resolving it here " +
+          "could silently act on the wrong element. Use a more specific selector (text, " +
+          "content-desc, or bounds) instead.",
+      );
+    }
+  }
+
   private rankTextMatches(matches: Element[]): Element[] {
     matches.sort((a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)));
     return matches;
@@ -529,6 +620,8 @@ export class DefaultElementFinder implements ElementFinder {
     if (!viewHierarchy || !resourceId) {
       return [];
     }
+
+    this.assertStableViewIdSelectorNotAmbiguous(viewHierarchy, resourceId);
 
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
@@ -1177,6 +1270,8 @@ export class DefaultElementFinder implements ElementFinder {
     if (!viewHierarchy || !resourceId) {
       return [];
     }
+
+    this.assertStableViewIdSelectorNotAmbiguous(viewHierarchy, resourceId);
 
     // See collectResourceIdMatchesInRoots: Compose testTag nodes report a bare
     // viewIdResourceName with no package qualifier, so a fully-qualified query must also

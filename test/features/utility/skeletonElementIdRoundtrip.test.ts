@@ -105,10 +105,16 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     }
   });
 
-  test("content-identical duplicate nodes get distinct ordinal-suffixed ids that each resolve to their own node, not the other's", () => {
+  test("content-identical duplicate nodes get distinct ordinal-suffixed ids, but the ordinal-suffixed id is rejected as capture-local rather than silently resolved", () => {
     // Two nodes with completely identical stable content (same class, no
     // text/content-desc/resource-id) — `assignStableViewIds` disambiguates them
-    // with a `-2` ordinal suffix rather than colliding on one hash.
+    // with a `-2` ordinal suffix rather than colliding on one hash. That
+    // ordinal is assigned by document order AT CAPTURE TIME (see
+    // `StableNodeIdentity.ts`), so it is capture-local: an insert or reorder
+    // before a later capture can shift which node the k-th occurrence lands
+    // on. Resolving `s-<hash>-2` here would therefore risk silently acting on
+    // the wrong element - worse than a clear failure (issue #6218 review
+    // thread PRRT_kwDOP-GF5M6foer0).
     const nodeA = {
       class: "android.view.View",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
@@ -134,15 +140,82 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(idA.startsWith("s-")).toBe(true);
     expect(idB).toBe(`${idA}-2`);
 
+    // The unsuffixed base id is the common case and still resolves normally -
+    // it is the only node with that EXACT (un-suffixed) view-id string.
     const resultA = selector.selectByResourceId(viewHierarchy, idA);
     expect(resultA.element).not.toBeNull();
     expect(resultA.totalMatches).toBe(1);
     expect(resultA.element!.bounds).toEqual({ left: 0, top: 0, right: 40, bottom: 40 });
 
-    const resultB = selector.selectByResourceId(viewHierarchy, idB);
-    expect(resultB.element).not.toBeNull();
-    expect(resultB.totalMatches).toBe(1);
-    expect(resultB.element!.bounds).toEqual({ left: 0, top: 50, right: 40, bottom: 90 });
+    // The ordinal-suffixed duplicate id is rejected outright, not resolved.
+    expect(() => selector.selectByResourceId(viewHierarchy, idB)).toThrow(/ambiguous/i);
+  });
+
+  test("an ordinal id from an earlier capture does not silently resolve to the wrong node after an insert shifts the ordinals", () => {
+    // The exact P1 scenario: content-identical controls [A, B] where B was
+    // observed as `s-<hash>-2`. Inserting an identical control before them in
+    // a later capture shifts the ordinals: A becomes `s-<hash>-2` and B
+    // becomes `s-<hash>-3`. Resolving the ORIGINAL `s-<hash>-2` id (which
+    // meant B) against the reordered capture must NOT silently act on A.
+    const original = {
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+          clickable: "true",
+          "view-id": generatedViewId("orig-a"),
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 50, right: 40, bottom: 90 },
+          clickable: "true",
+          "view-id": generatedViewId("orig-b"),
+        },
+      ],
+    };
+    assignStableViewIds(original);
+    const originalIdB = (original.node[1] as Record<string, unknown>)["view-id"] as string;
+    expect(originalIdB).toMatch(/^s-[0-9a-f]{16}-2$/);
+
+    const reordered = {
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: -50, right: 40, bottom: -10 },
+          clickable: "true",
+          "view-id": generatedViewId("inserted-c"),
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+          clickable: "true",
+          "view-id": generatedViewId("orig-a-2"),
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 50, right: 40, bottom: 90 },
+          clickable: "true",
+          "view-id": generatedViewId("orig-b-2"),
+        },
+      ],
+    };
+    assignStableViewIds(reordered);
+    const reorderedIds = (reordered.node as Record<string, unknown>[]).map(
+      (n) => n["view-id"] as string,
+    );
+    // Same base hash for all three (content-identical) - inserted node now
+    // owns the un-suffixed base id, and A/B ordinals both shifted by one.
+    expect(reorderedIds[0]).toBe(originalIdB.replace(/-2$/, ""));
+    expect(reorderedIds[1]).toBe(originalIdB);
+    expect(reorderedIds[2]).toBe(`${originalIdB.replace(/-2$/, "")}-3`);
+
+    const reorderedViewHierarchy: ViewHierarchyResult = { hierarchy: reordered };
+
+    // The id that used to mean "B" now happens to match "A" (the inserted
+    // node's document order) - this MUST be rejected, not silently tapped.
+    expect(() => selector.selectByResourceId(reorderedViewHierarchy, originalIdB)).toThrow(
+      /ambiguous/i,
+    );
   });
 
   test("recomputing the synthetic id over a fresh capture of the same hierarchy is deterministic", () => {

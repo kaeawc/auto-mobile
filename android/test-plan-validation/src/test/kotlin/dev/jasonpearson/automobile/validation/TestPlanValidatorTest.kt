@@ -287,17 +287,25 @@ class TestPlanValidatorTest {
   fun `accepts barrier with coordination fields split across inline and params`() {
     // PlanNormalizer merges inline fields and params together before
     // execution, so a field counts as present wherever it appears -- lock
-    // inline + deviceCount in params must validate.
+    // inline + deviceCount in params must validate. A second device's
+    // arrival is included so the lock's declared deviceCount=2 is
+    // satisfiable by 2 distinct devices.
     val yaml =
       """
       name: barrier-split-fields-test
       devices:
         - A
+        - B
       steps:
         - tool: barrier
           lock: sync-point
           params:
             device: A
+            deviceCount: 2
+        - tool: barrier
+          lock: sync-point
+          params:
+            device: B
             deviceCount: 2
       """
         .trimIndent()
@@ -372,6 +380,8 @@ class TestPlanValidatorTest {
 
   @Test
   fun `accepts barrier with a positive timeout`() {
+    // Both A and B arrive so the declared deviceCount=2 is satisfiable by 2
+    // distinct devices.
     val yaml =
       """
       name: barrier-positive-timeout
@@ -382,6 +392,12 @@ class TestPlanValidatorTest {
         - tool: barrier
           params:
             device: A
+            lock: sync-point
+            deviceCount: 2
+            timeout: 5000
+        - tool: barrier
+          params:
+            device: B
             lock: sync-point
             deviceCount: 2
             timeout: 5000
@@ -470,6 +486,60 @@ class TestPlanValidatorTest {
     assertFalse(
       result.valid,
       "Effective (params) deviceCount=0 should be rejected even though inline is valid",
+    )
+  }
+
+  @Test
+  fun `rejects a barrier plan with no top-level devices declaration`() {
+    // Mirrors the daemon's PlanValidator.validateMultiDeviceRequirements: a
+    // barrier step is a multi-device coordination primitive, so a plan using
+    // it must declare 'devices'. Without this check, IDE/JUnit validation
+    // would bless a plan the daemon rejects at load time (#6215 review).
+    val yaml =
+      """
+      name: barrier-no-devices-declared
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Barrier plan without a 'devices' declaration should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier lock reachable by fewer distinct devices than its declared deviceCount`() {
+    // Only device A ever arrives at this lock, so the declared
+    // deviceCount=2 can never be satisfied -- mirrors the daemon's
+    // PlanValidator.validateBarrierDistinctDeviceCounts.
+    val yaml =
+      """
+      name: barrier-underpopulated-lock
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Barrier lock reachable by only 1 distinct device but declaring deviceCount=2 should be invalid",
     )
   }
 

@@ -93,15 +93,32 @@ object TestPlanValidator {
     // Validate tool names
     val toolNameErrors = validateToolNames(parsedObject, yamlContent)
 
-    if (validationErrors.isEmpty() && toolNameErrors.isEmpty()) {
+    // Validate multi-device requirements (a plan using criticalSection/barrier
+    // or any step-level device label must declare top-level 'devices') and
+    // barrier-lock distinct-device-count feasibility -- mirrors the daemon's
+    // PlanValidator.validateMultiDeviceRequirements /
+    // validateBarrierDistinctDeviceCounts so a plan that validates here also
+    // survives daemon-side load instead of passing IDE/JUnit validation and
+    // then failing at execution (#6215 review).
+    val multiDeviceErrors = validateMultiDeviceRequirements(parsedObject)
+    val barrierDeviceCountErrors = validateBarrierDistinctDeviceCounts(parsedObject)
+
+    if (
+      validationErrors.isEmpty() &&
+        toolNameErrors.isEmpty() &&
+        multiDeviceErrors.isEmpty() &&
+        barrierDeviceCountErrors.isEmpty()
+    ) {
       return ValidationResult(valid = true)
     }
 
     // Format validation errors
     val errors = validationErrors.map { error -> formatError(error, yamlContent) }.toMutableList()
 
-    // Add tool name validation errors
+    // Add tool name and coordination validation errors
     errors.addAll(toolNameErrors)
+    errors.addAll(multiDeviceErrors)
+    errors.addAll(barrierDeviceCountErrors)
 
     return ValidationResult(valid = false, errors = errors)
   }
@@ -131,6 +148,144 @@ object TestPlanValidator {
               severity = ValidationSeverity.ERROR,
               line = lineInfo?.line,
               column = lineInfo?.column,
+            )
+          )
+        }
+      }
+    }
+
+    return errors
+  }
+
+  /**
+   * A plan uses multi-device features if it declares any criticalSection/barrier step (both are
+   * plan-only multi-device coordination primitives) or any step targets a device label -- mirrors
+   * the daemon's PlanValidator.hasMultiDeviceFeatures.
+   */
+  private fun hasMultiDeviceFeatures(parsedObject: Any?): Boolean {
+    if (parsedObject !is Map<*, *>) {
+      return false
+    }
+
+    val devices = parsedObject["devices"]
+    if (devices is List<*> && devices.isNotEmpty()) {
+      return true
+    }
+
+    val steps = parsedObject["steps"]
+    if (steps !is List<*>) {
+      return false
+    }
+
+    return steps.any { step ->
+      if (step !is Map<*, *>) {
+        false
+      } else {
+        val tool = step["tool"] as? String
+        tool == "criticalSection" ||
+          tool == "barrier" ||
+          step["device"] != null ||
+          (step["params"] as? Map<*, *>)?.get("device") != null
+      }
+    }
+  }
+
+  /**
+   * Validates that a plan using multi-device features (device labels, or a criticalSection/barrier
+   * step) declares a non-empty top-level 'devices' field -- mirrors the daemon's
+   * PlanValidator.validateMultiDeviceRequirements. Without this, a plan can pass IDE/JUnit
+   * validation here yet be rejected when the daemon loads it for execution (#6215 review).
+   */
+  private fun validateMultiDeviceRequirements(parsedObject: Any?): List<ValidationError> {
+    if (!hasMultiDeviceFeatures(parsedObject)) {
+      return emptyList()
+    }
+
+    val devices = (parsedObject as? Map<*, *>)?.get("devices")
+    val hasDevices = devices is List<*> && devices.isNotEmpty()
+    if (hasDevices) {
+      return emptyList()
+    }
+
+    return listOf(
+      ValidationError(
+        field = "devices",
+        message =
+          "Plan uses multi-device features (device labels or criticalSection/barrier) but does not declare 'devices' field. Add a 'devices' array at the top level of your plan.",
+        severity = ValidationSeverity.ERROR,
+      )
+    )
+  }
+
+  /**
+   * Resolves the effective value of a coordination field (lock/device/deviceCount) for a step,
+   * honoring PlanNormalizer's params-wins precedence: when the field is present under params, that
+   * value wins even if a different value also sits inline on the step -- mirrors the daemon's
+   * PlanValidator.effectiveField.
+   */
+  private fun effectiveCoordinationField(step: Map<*, *>, field: String): Any? {
+    val params = step["params"] as? Map<*, *>
+    if (params != null && params.containsKey(field)) {
+      return params[field]
+    }
+    return step[field]
+  }
+
+  private class BarrierLockUsage {
+    val devices = mutableSetOf<String>()
+    val deviceCounts = mutableSetOf<Int>()
+  }
+
+  /**
+   * Validates that every barrier lock is populated by enough distinct devices to ever satisfy its
+   * declared deviceCount -- mirrors the daemon's PlanValidator.validateBarrierDistinctDeviceCounts.
+   * Sound without reconstructing rounds: a single round needs deviceCount distinct arrivals, so if
+   * fewer distinct devices ever target a given lock across the whole plan, no round can ever
+   * complete.
+   */
+  private fun validateBarrierDistinctDeviceCounts(parsedObject: Any?): List<ValidationError> {
+    if (parsedObject !is Map<*, *>) {
+      return emptyList()
+    }
+    val steps = parsedObject["steps"]
+    if (steps !is List<*>) {
+      return emptyList()
+    }
+
+    val usageByLock = mutableMapOf<String, BarrierLockUsage>()
+    for (step in steps) {
+      if (step !is Map<*, *> || step["tool"] as? String != "barrier") {
+        continue
+      }
+
+      val lock = effectiveCoordinationField(step, "lock") as? String
+      if (lock.isNullOrEmpty()) {
+        continue
+      }
+      val usage = usageByLock.getOrPut(lock) { BarrierLockUsage() }
+
+      val device = effectiveCoordinationField(step, "device") as? String
+      if (!device.isNullOrEmpty()) {
+        usage.devices.add(device)
+      }
+
+      val deviceCount = (effectiveCoordinationField(step, "deviceCount") as? Number)?.toInt()
+      if (deviceCount != null && deviceCount >= 1) {
+        usage.deviceCounts.add(deviceCount)
+      }
+    }
+
+    val errors = mutableListOf<ValidationError>()
+    for ((lock, usage) in usageByLock) {
+      for (deviceCount in usage.deviceCounts) {
+        if (usage.devices.size < deviceCount) {
+          val deviceList = usage.devices.joinToString(", ").ifEmpty { "none" }
+          errors.add(
+            ValidationError(
+              field = "steps",
+              message =
+                "barrier lock \"$lock\" declares deviceCount=$deviceCount but only ${usage.devices.size} distinct device(s) ($deviceList) ever target it in this plan. No round can ever complete.",
+              severity = ValidationSeverity.ERROR,
             )
           )
         }

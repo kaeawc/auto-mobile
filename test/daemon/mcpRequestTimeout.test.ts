@@ -450,6 +450,32 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(resolved).toBeGreaterThanOrEqual(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
   });
 
+  test("tapAny longPress budgets pre-gesture searchUntil.duration ahead of the press (#6248 review)", () => {
+    const duration = 60_000;
+    const searchUntilDuration = 12_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: {
+          action: "longPress",
+          duration,
+          searchUntil: { duration: searchUntilDuration },
+        },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      duration + searchUntilDuration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+    expect(resolved).toBeGreaterThanOrEqual(
+      duration + searchUntilDuration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
   test("tapAny longPress honours an outer timeoutMs already above the derived floor", () => {
     const request: DaemonRequest = {
       id: "1",

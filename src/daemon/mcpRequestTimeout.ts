@@ -252,6 +252,15 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
  * `TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS`. A plain tap/doubleTap (no
  * `action: "longPress"`) or a longPress with no positive `duration` keeps the
  * standard floor/default; only a duration-bearing long press is raised.
+ *
+ * The outer MCP deadline must also cover PRE-GESTURE work that runs before
+ * the CtrlProxy press request even starts — element discovery and, in
+ * particular, `searchUntil.duration` (issue #6248 review, P2). Without it,
+ * a call like `tapAny({action:"longPress", duration:60000,
+ * searchUntil:{duration:12000}})` gets an outer budget sized only for the
+ * press itself, while up to `searchUntil.duration` of discovery time eats
+ * into that same budget before the press even begins — so the floor is
+ * `searchUntil.duration + duration + headroom`.
  */
 function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
@@ -265,7 +274,13 @@ function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefi
   if (duration === undefined) {
     return undefined;
   }
-  return Math.round(duration) + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS;
+  const searchUntilDuration =
+    positiveFiniteNumber(asRecord(argumentsRecord.searchUntil)?.duration) ?? 0;
+  return (
+    Math.round(duration) +
+    Math.round(searchUntilDuration) +
+    TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS
+  );
 }
 
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {

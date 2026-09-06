@@ -10750,6 +10750,42 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "freshness": {
+                  "type": "object",
+                  "properties": {
+                    "requestedAfter": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "actualTimestamp": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ageMs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "isFresh": {
+                      "type": "boolean"
+                    },
+                    "staleDurationMs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "warning": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["isFresh"],
+                  "additionalProperties": {}
                 }
               },
               "additionalProperties": {}

@@ -543,6 +543,20 @@ export class TapOnElement extends BaseVisualChange {
       return undefined;
     }
     const changed = previousHash !== currentHash;
+    if (changed && currentObservation.freshness?.isFresh === false) {
+      // Issue #6266 (review): a hierarchy diff against an EXPLICITLY-STALE
+      // capture (freshness.isFresh === false, e.g. retries exhausted on an
+      // unverified cache entry) is not trustworthy proof of a screen change —
+      // the lagging capture may simply not have caught up yet. Treat it as
+      // inconclusive (the pre-#6258 "unchanged" state) so the caller keeps
+      // polling/retrying instead of asserting a change from stale data. A
+      // fresh hierarchy diff (isFresh true, or absent) still falls through to
+      // "viewHierarchy changed" per #6258's dialog-window fix.
+      return {
+        screenChanged: false,
+        basis: "viewHierarchy unchanged",
+      };
+    }
     return {
       screenChanged: changed,
       basis: changed ? "viewHierarchy changed" : "viewHierarchy unchanged",

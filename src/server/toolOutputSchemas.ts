@@ -121,6 +121,20 @@ export const activeWindowSchema = z
   })
   .passthrough();
 
+export const freshnessSchema = z
+  .object({
+    requestedAfter: z.number().int().optional(),
+    actualTimestamp: z.number().int().optional(),
+    /** Wall-clock age of `actualTimestamp` at report time. */
+    ageMs: z.number().int().optional(),
+    /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
+    verified: z.boolean().optional(),
+    isFresh: z.boolean(),
+    staleDurationMs: z.number().int().optional(),
+    warning: z.string().optional(),
+  })
+  .passthrough();
+
 const screenIdentitySchema = z
   .object({
     platform: z.enum(["ios", "android"]),
@@ -173,6 +187,11 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    // Same name/shape as the diff arm's `freshness` (issue #6266 review): a
+    // full observation carries freshness metadata at runtime too, so the
+    // generated tool definition must advertise it on BOTH `observation` union
+    // arms rather than only on `observeDiffSchema`.
+    freshness: freshnessSchema.optional(),
   })
   .passthrough();
 
@@ -393,20 +412,6 @@ export const predictionsSchema = z
   .object({
     likelyActions: z.array(predictedActionSchema),
     interactableElements: z.array(interactablePredictionSchema),
-  })
-  .passthrough();
-
-export const freshnessSchema = z
-  .object({
-    requestedAfter: z.number().int().optional(),
-    actualTimestamp: z.number().int().optional(),
-    /** Wall-clock age of `actualTimestamp` at report time. */
-    ageMs: z.number().int().optional(),
-    /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
-    verified: z.boolean().optional(),
-    isFresh: z.boolean(),
-    staleDurationMs: z.number().int().optional(),
-    warning: z.string().optional(),
   })
   .passthrough();
 

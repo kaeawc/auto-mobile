@@ -72,6 +72,54 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
     expect(effect.basis).toBe("activeWindow unchanged");
   });
 
+  test("does NOT report screenChanged from a viewHierarchy diff when freshness.isFresh is false (#6266)", () => {
+    const tap = createTapOnElement();
+    const activeWindow = {
+      appId: "com.android.deskclock",
+      activityName: "com.android.deskclock.DeskClock",
+      layoutSeqSum: 42,
+    };
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("alarm-list"),
+    });
+    const current = makeObservation({
+      activeWindow, // unchanged
+      viewHierarchy: makeHierarchy("time-picker-dialog"), // changed, but...
+      freshness: { isFresh: false, warning: "retries exhausted, unverified cache entry" },
+    });
+
+    const effect = (tap as any).deriveTapEffect(previous, current);
+
+    // An explicitly-stale hierarchy diff is not trustworthy proof of a screen
+    // change — must NOT assert screenChanged:true from stale data.
+    expect(effect.screenChanged).toBe(false);
+    expect(effect.basis).toBe("activeWindow unchanged");
+  });
+
+  test("still trusts a viewHierarchy diff when freshness.isFresh is true (dialog case)", () => {
+    const tap = createTapOnElement();
+    const activeWindow = {
+      appId: "com.android.deskclock",
+      activityName: "com.android.deskclock.DeskClock",
+      layoutSeqSum: 42,
+    };
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("alarm-list"),
+    });
+    const current = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("time-picker-dialog"),
+      freshness: { isFresh: true },
+    });
+
+    const effect = (tap as any).deriveTapEffect(previous, current);
+
+    expect(effect.screenChanged).toBe(true);
+    expect(effect.basis).toBe("viewHierarchy changed");
+  });
+
   test("still reports true immediately when activeWindow itself changed", () => {
     const tap = createTapOnElement();
     const previous = makeObservation({

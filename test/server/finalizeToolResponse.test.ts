@@ -907,6 +907,43 @@ describe("finalizeToolResponse", () => {
       expect(parsed.observation.skeleton.length).toBe(obsSc.skeleton.length);
     });
 
+    test("a diffed observation carries `activeWindow` and `freshness` with the same shape as full mode (issue #6258)", () => {
+      const { store } = makeStore();
+      const freshness = {
+        actualTimestamp: 1000,
+        ageMs: 5,
+        isFresh: true,
+      };
+      const withFreshness = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        freshness,
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withFreshness()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withFreshness();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      // Same shape/name a full-mode observation carries these fields under.
+      expect(obsSc.activeWindow).toEqual(next.activeWindow);
+      expect(obsSc.freshness).toEqual(freshness);
+
+      // Text mirror agrees.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.activeWindow).toEqual(obsSc.activeWindow);
+      expect(parsed.observation.freshness).toEqual(obsSc.freshness);
+    });
+
     test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {
       const { store } = makeStore();
       const withSkeletonElements = (): ObserveResult => ({

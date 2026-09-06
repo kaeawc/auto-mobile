@@ -121,6 +121,20 @@ export const activeWindowSchema = z
   })
   .passthrough();
 
+export const freshnessSchema = z
+  .object({
+    requestedAfter: z.number().int().optional(),
+    actualTimestamp: z.number().int().optional(),
+    /** Wall-clock age of `actualTimestamp` at report time. */
+    ageMs: z.number().int().optional(),
+    /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
+    verified: z.boolean().optional(),
+    isFresh: z.boolean(),
+    staleDurationMs: z.number().int().optional(),
+    warning: z.string().optional(),
+  })
+  .passthrough();
+
 const screenIdentitySchema = z
   .object({
     platform: z.enum(["ios", "android"]),
@@ -173,6 +187,11 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    // Same name/shape as the diff arm's `freshness` (issue #6266 review): a
+    // full observation carries freshness metadata at runtime too, so the
+    // generated tool definition must advertise it on BOTH `observation` union
+    // arms rather than only on `observeDiffSchema`.
+    freshness: freshnessSchema.optional(),
   })
   .passthrough();
 
@@ -393,20 +412,6 @@ export const predictionsSchema = z
   .object({
     likelyActions: z.array(predictedActionSchema),
     interactableElements: z.array(interactablePredictionSchema),
-  })
-  .passthrough();
-
-export const freshnessSchema = z
-  .object({
-    requestedAfter: z.number().int().optional(),
-    actualTimestamp: z.number().int().optional(),
-    /** Wall-clock age of `actualTimestamp` at report time. */
-    ageMs: z.number().int().optional(),
-    /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
-    verified: z.boolean().optional(),
-    isFresh: z.boolean(),
-    staleDurationMs: z.number().int().optional(),
-    warning: z.string().optional(),
   })
   .passthrough();
 
@@ -695,6 +700,24 @@ export const observeDiffSchema = z
           "text — present only when at least one such row survived. Populated " +
           "alongside `skeleton` so a diff-mode response never silently drops the " +
           "readout a client needs to tell a failed input from a successful one.",
+      ),
+    activeWindow: activeWindowSchema
+      .optional()
+      .describe(
+        "Same name/shape as a full observation's `activeWindow` (issue #6258): a " +
+          "diff-mode response otherwise carries no `activeWindow` at all, leaving a " +
+          "client no single accessor for 'what screen am I on' across full and diff " +
+          "modes. Populated from the post-transition observation, not by " +
+          "`diffObserveResult` itself.",
+      ),
+    freshness: freshnessSchema
+      .optional()
+      .describe(
+        "Same name/shape as a full observation's `freshness` (issue #6258): a " +
+          "diff-mode response otherwise carries no `freshness` at all, leaving a " +
+          "client no single accessor for 'is this capture fresh' across full and " +
+          "diff modes. Populated from the post-transition observation, not by " +
+          "`diffObserveResult` itself.",
       ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),

@@ -611,4 +611,55 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       });
     });
   });
+
+  // Regression for #6266 (review): the successful sync refresh in `execute()`
+  // replaces a cached (possibly-stale) pre-tap observation's hierarchy via
+  // `updateObservationHierarchy`, but previously left the OLD `freshness`
+  // (isFresh:false) stamped on it. `compareViewHierarchy` treats an
+  // `isFresh:false` side as inconclusive, so every later hierarchy diff
+  // against that baseline was rejected forever — a same-window dialog could
+  // never satisfy `waitForPostTapChange`. `markObservationFreshAfterSyncRefresh`
+  // is the pure seam that fixes this: it promotes an explicitly-stale
+  // observation to fresh using the refresh's own capture time.
+  describe("markObservationFreshAfterSyncRefresh (#6266 review)", () => {
+    test("marks a previously-stale observation fresh, stamped with the refresh's capture time", () => {
+      const { tap, timer } = createTapOnElement();
+      timer.setCurrentTime(123456);
+      const observeResult = {
+        screenSize: { width: 1080, height: 1920 },
+        freshness: {
+          isFresh: false,
+          staleDurationMs: 5000,
+          warning: "cache entry unverified",
+        },
+      } as any;
+
+      (tap as any).markObservationFreshAfterSyncRefresh(observeResult);
+
+      expect(observeResult.freshness.isFresh).toBe(true);
+      expect(observeResult.freshness.verified).toBe(true);
+      expect(observeResult.freshness.actualTimestamp).toBe(123456);
+      expect(observeResult.freshness.staleDurationMs).toBeUndefined();
+      expect(observeResult.freshness.warning).toBeUndefined();
+    });
+
+    test("leaves an already-fresh observation's freshness untouched", () => {
+      const { tap } = createTapOnElement();
+      const freshness = { isFresh: true, verified: true, actualTimestamp: 1 };
+      const observeResult = { screenSize: { width: 1080, height: 1920 }, freshness } as any;
+
+      (tap as any).markObservationFreshAfterSyncRefresh(observeResult);
+
+      expect(observeResult.freshness).toBe(freshness);
+    });
+
+    test("is a no-op when there is no freshness metadata at all", () => {
+      const { tap } = createTapOnElement();
+      const observeResult = { screenSize: { width: 1080, height: 1920 } } as any;
+
+      (tap as any).markObservationFreshAfterSyncRefresh(observeResult);
+
+      expect(observeResult.freshness).toBeUndefined();
+    });
+  });
 });

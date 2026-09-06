@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
   elementSchema,
+  observationSummarySchema,
+  observeDiffSchema,
   observeResultSchema,
   observeToolResultSchema,
   viewHierarchyNodeSchema,
@@ -607,6 +609,47 @@ describe("observe tool registration advertises the schema (#3025)", () => {
       // Hoisted secondary state text (#5869) is advertised like its siblings.
       expect(json).toContain('"sublabel"');
     });
+  });
+});
+
+describe("observation union arms: freshness/activeWindow declared consistently (issue #6266 review)", () => {
+  // Both arms of the `observation` discriminated union must advertise the
+  // same runtime-carried fields with the same shape, so the generated
+  // tool-definitions schema doesn't wrongly imply `freshness`/`activeWindow`
+  // are diff-only.
+  const freshness = { actualTimestamp: 1000, ageMs: 5, isFresh: true };
+  const activeWindow = { appId: "com.example", activityName: "Main", layoutSeqSum: 1 };
+
+  test("observationSummarySchema (full arm) accepts freshness and activeWindow", () => {
+    const parsed = observationSummarySchema.parse({ freshness, activeWindow }) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed.freshness).toEqual(freshness);
+    expect(parsed.activeWindow).toEqual(activeWindow);
+  });
+
+  test("observeDiffSchema (diff arm) accepts freshness and activeWindow with the same shape", () => {
+    const parsed = observeDiffSchema.parse({
+      isDiff: true,
+      skeleton: [],
+      added: [],
+      removed: [],
+      changed: [],
+      freshness,
+      activeWindow,
+    }) as Record<string, unknown>;
+    expect(parsed.freshness).toEqual(freshness);
+    expect(parsed.activeWindow).toEqual(activeWindow);
+  });
+
+  test("both arms advertise freshness and activeWindow in the generated JSON schema", () => {
+    const fullJson = JSON.stringify(toJSONSchema(observationSummarySchema));
+    const diffJson = JSON.stringify(toJSONSchema(observeDiffSchema));
+    expect(fullJson).toContain('"freshness"');
+    expect(fullJson).toContain('"activeWindow"');
+    expect(diffJson).toContain('"freshness"');
+    expect(diffJson).toContain('"activeWindow"');
   });
 });
 

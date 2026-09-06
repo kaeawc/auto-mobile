@@ -52,6 +52,53 @@ describe("compareVersions", () => {
     expect(Number.isNaN(compareVersions("Tiramisu", "Tiramisu"))).toBe(false);
     expect(compareVersions("Tiramisu", "Tiramisu")).toBe(0);
   });
+
+  it("orders a lettered release between its neighboring numeric majors (#6182)", () => {
+    // 11 < 12 < 12L < 13
+    expect(compareVersions("11", "12")).toBeLessThan(0);
+    expect(compareVersions("12", "12L")).toBeLessThan(0);
+    expect(compareVersions("12L", "13")).toBeLessThan(0);
+    expect(compareVersions("11", "13")).toBeLessThan(0);
+    // and the reverse direction
+    expect(compareVersions("12L", "12")).toBeGreaterThan(0);
+    expect(compareVersions("13", "12L")).toBeGreaterThan(0);
+  });
+
+  it("orders letters alphabetically at the same numeric components (#6182)", () => {
+    expect(compareVersions("12A", "12B")).toBeLessThan(0);
+    expect(compareVersions("12Z", "12A")).toBeGreaterThan(0);
+    expect(compareVersions("12", "12A")).toBeLessThan(0);
+  });
+
+  it("orders QPR builds of the same major strictly by QPR number (#6182)", () => {
+    expect(compareVersions("14-QPR0", "14-QPR1")).toBeLessThan(0);
+    expect(compareVersions("14-QPR1", "14-QPR2")).toBeLessThan(0);
+    expect(compareVersions("14-QPR2", "14-QPR1")).toBeGreaterThan(0);
+    // QPR0 is equal to the bare release: absent QPR defaults to 0.
+    expect(compareVersions("14", "14-QPR0")).toBe(0);
+    expect(compareVersions("14", "14-QPR1")).toBeLessThan(0);
+  });
+
+  it("treats equal (components, letter, qpr) triples as equal regardless of formatting (#6182)", () => {
+    expect(compareVersions("12L", "12L")).toBe(0);
+    expect(compareVersions("14-QPR1", "14-QPR1")).toBe(0);
+    expect(compareVersions("12.0L", "12L")).toBe(0);
+    expect(compareVersions("14.0-QPR1", "14-QPR1")).toBe(0);
+  });
+
+  it("ranks the letter qualifier above a QPR qualifier of the same major (#6182)", () => {
+    // Out-of-scope per the tracking issue as a claim about Android's actual
+    // release calendar, but the comparator must still return a well-defined,
+    // total, transitive answer for every input it accepts.
+    expect(compareVersions("12L", "12-QPR1")).toBeGreaterThan(0);
+    expect(compareVersions("12-QPR1", "12L")).toBeLessThan(0);
+  });
+
+  it("combines a letter and a QPR suffix on the same version (#6182)", () => {
+    expect(compareVersions("12L-QPR1", "12L-QPR2")).toBeLessThan(0);
+    expect(compareVersions("12L-QPR1", "12L")).toBeGreaterThan(0);
+    expect(compareVersions("12L-QPR1", "12")).toBeGreaterThan(0);
+  });
 });
 
 describe("DefaultDeviceMatcher.matchBootedDevice", () => {

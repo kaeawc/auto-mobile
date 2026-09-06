@@ -20,7 +20,7 @@ export interface DeviceMatcher {
   ): DeviceInfo | null;
 }
 
-interface ParsedDeviceVersion {
+export interface ParsedDeviceVersion {
   components: number[];
   /** A trailing single-letter release qualifier, e.g. Android 12L's "L" (#6132 follow-up). */
   letter?: string;
@@ -81,19 +81,56 @@ export function compareStrictNumericVersions(a: string, b: string): number {
   return compareParsedVersions(a.split(".").map(Number), b.split(".").map(Number));
 }
 
+/**
+ * Orders the numeric-components-then-letter prefix shared by `compareVersions`
+ * (a strict total order used to pick LATEST/MINIMUM) and `compareVersionToBound`
+ * (bound semantics, which may separately widen or ignore a QPR suffix
+ * depending on the bound's own precision). Extracted so the two QPR-handling
+ * call sites can't drift out of sync on how components and the letter
+ * qualifier order against each other (#6182).
+ */
+function compareComponentsThenLetter(
+  componentsA: number[],
+  letterA: string | undefined,
+  componentsB: number[],
+  letterB: string | undefined,
+): number {
+  const componentsDelta = compareParsedVersions(componentsA, componentsB);
+  if (componentsDelta !== 0) {
+    return componentsDelta;
+  }
+  return compareLetterQualifier(letterA, letterB);
+}
+
+/**
+ * Total ordering over a parsed Android release qualifier's (components,
+ * letter, qpr) triple: numeric dotted components take precedence, then the
+ * trailing letter qualifier (Android 12L), then the QPR suffix. A missing
+ * letter or QPR sorts before any present value, so `11 < 12 < 12L < 13` and
+ * `14 < 14-QPR1 < 14-QPR2` (#6182).
+ *
+ * This is a general total order over the triple -- it does NOT claim to
+ * encode Android's actual release calendar for comparing a letter release
+ * against a QPR release of the same major (e.g. `12L` vs `12-QPR1`); that
+ * relationship is undocumented and explicitly out of scope (see the tracking
+ * issue). The rule adopted here -- the letter qualifier outranks the QPR
+ * qualifier -- exists only to keep the relation total, reflexive, antisymmetric
+ * and transitive over every input this parser accepts, not to assert calendar
+ * accuracy for that specific pairing.
+ */
+export function compareReleaseQualifiers(a: ParsedDeviceVersion, b: ParsedDeviceVersion): number {
+  const delta = compareComponentsThenLetter(a.components, a.letter, b.components, b.letter);
+  if (delta !== 0) {
+    return delta;
+  }
+  return (a.qpr ?? 0) - (b.qpr ?? 0);
+}
+
 export function compareVersions(a: string, b: string): number {
   const parsedA = parseDeviceVersion(a);
   const parsedB = parseDeviceVersion(b);
   if (parsedA && parsedB) {
-    const delta = compareParsedVersions(parsedA.components, parsedB.components);
-    if (delta !== 0) {
-      return delta;
-    }
-    const letterDelta = compareLetterQualifier(parsedA.letter, parsedB.letter);
-    if (letterDelta !== 0) {
-      return letterDelta;
-    }
-    return (parsedA.qpr ?? 0) - (parsedB.qpr ?? 0);
+    return compareReleaseQualifiers(parsedA, parsedB);
   }
   if (parsedA || parsedB) {
     return Number.NaN;
@@ -172,9 +209,8 @@ function compareVersionToBound(version: string, bound: string, platform: Platfor
     // bound (e.g. "14-QPR1") must be excluded from widening too, even though
     // it also has exactly one numeric component: without this guard "14.1"
     // would slice down to "14" and false-match a "14-QPR1" bound it has
-    // nothing to do with (review follow-up; full QPR/letter ordering between
-    // arbitrary numeric versions is out of scope here -- see the tracking
-    // issue linked from the PR body).
+    // nothing to do with (review follow-up, generalized into
+    // compareReleaseQualifiers by #6182).
     const isMajorOnlyBound =
       platform === "android" &&
       parsedBound.components.length === 1 &&
@@ -183,17 +219,21 @@ function compareVersionToBound(version: string, bound: string, platform: Platfor
     const comparableVersion = isMajorOnlyBound
       ? parsedVersion.components.slice(0, 1)
       : parsedVersion.components;
-    const delta = compareParsedVersions(comparableVersion, parsedBound.components);
+    // Components and the letter qualifier always compare the same way here as
+    // in compareVersions/compareReleaseQualifiers (Android 12L must still
+    // sort above a plain "12" bound and below "13" -- #6132 follow-up --
+    // rather than being swallowed as equal to every unlettered point release
+    // of major 12); only the QPR handling below diverges, because a bound
+    // that doesn't name a QPR is deliberately QPR-agnostic rather than
+    // treating "no QPR" as QPR 0 (#6182).
+    const delta = compareComponentsThenLetter(
+      comparableVersion,
+      parsedVersion.letter,
+      parsedBound.components,
+      parsedBound.letter,
+    );
     if (delta !== 0) {
       return delta;
-    }
-    // Always compare the letter qualifier, even under major-only widening:
-    // Android 12L (letter "L") must still sort above a plain "12" bound and
-    // below "13" (#6132 follow-up) rather than being swallowed as equal to
-    // every unlettered point release of major 12.
-    const letterDelta = compareLetterQualifier(parsedVersion.letter, parsedBound.letter);
-    if (letterDelta !== 0) {
-      return letterDelta;
     }
     if (parsedBound.qpr === undefined) {
       return 0;

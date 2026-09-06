@@ -284,22 +284,29 @@ export class DaemonClient {
       await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       return;
     } catch (error) {
-      if (
-        !signal?.aborted &&
+      if (!signal?.aborted) {
         // Never fall through to the dead-PID unlink while something is still
         // actually bound to this socket path (issue #6140): a startup race can
         // leave the PID file naming the just-exited losing child while a live
         // winner already owns the path but hasn't published its own PID record
         // yet. This observation-only probe never itself unlinks anything — it
         // only decides whether the existing dead-PID cleanup below is safe to run.
-        !(await this.staleSocketRecoveryReachability().isReachable(
+        const reachable = await this.staleSocketRecoveryReachability().isReachable(
           this.socketPath,
           STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS,
-        )) &&
-        DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
-      ) {
-        await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
-        return;
+        );
+        // Recheck after the await: the caller can abort WHILE this probe is
+        // in flight, and the pre-await check above cannot see that. Proceeding
+        // to cleanup/retry on a now-aborted call would ignore the caller's
+        // cancellation, so bail out with the original failure instead.
+        if (
+          !signal?.aborted &&
+          !reachable &&
+          DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
+        ) {
+          await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
+          return;
+        }
       }
       throw error;
     }

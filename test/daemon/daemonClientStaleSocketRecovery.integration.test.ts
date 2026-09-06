@@ -200,6 +200,65 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
       expect(existsSync(pidFilePath)).toBe(false);
     },
   );
+
+  // The caller can abort WHILE the reachability probe from the fix above is
+  // in flight. The pre-await `!signal?.aborted` check cannot see an abort that
+  // happens during the awaited call, so the abort must be rechecked immediately
+  // after it resolves — otherwise connect() would ignore the cancellation and
+  // proceed to the dead-PID cleanup/retry anyway.
+  (isWindows ? test.skip : test)(
+    "bails without stale-socket cleanup when aborted while the reachability probe is pending",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      // No listener: connectOnce's real attempt fails quickly (ENOENT/ECONNREFUSED).
+      writePidFile(pidFilePath, socketPath);
+
+      class PendingReachability implements DaemonSocketReachabilityLike {
+        calls = 0;
+        private resolvers: Array<(value: boolean) => void> = [];
+        isReachable(): Promise<boolean> {
+          this.calls++;
+          return new Promise((resolve) => {
+            this.resolvers.push(resolve);
+          });
+        }
+        resolveNext(value: boolean): void {
+          this.resolvers.shift()?.(value);
+        }
+      }
+      const reachability = new PendingReachability();
+
+      let cleanupCalls = 0;
+      const controller = new AbortController();
+      const client = new DaemonClient(socketPath, 500, undefined, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability,
+      });
+
+      const connectPromise = client.connect(500, controller.signal);
+
+      // Wait until connect() has entered the recovery probe (deterministic:
+      // poll the fake's call counter rather than a fixed sleep).
+      while (reachability.calls === 0) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      // Abort WHILE the probe is still pending, then let it resolve.
+      controller.abort();
+      reachability.resolveNext(false);
+
+      await expect(connectPromise).rejects.toThrow();
+      // The abort must be rechecked after the probe settles: cleanup (and any
+      // retried connectOnce) must never run once the caller has cancelled.
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+    },
+  );
 });
 
 describe("DaemonClient platform-aware connect (#6140)", () => {
@@ -248,18 +307,26 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
     expect((error as Error).message).not.toContain("Daemon socket not found");
   });
 
-  test("still throws the existsSync short-circuit off win32", async () => {
-    const nonExistentSocketPath = join(
-      tmpdir(),
-      `daemon-client-posix-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
-    );
-    const pidFilePath = createTempPidPath();
+  // Asserts the DEFAULT (unoverridden) platform still gates on existsSync, which
+  // only holds when this host's real platform is not win32 — on the Windows
+  // host-integration runner `platform()` genuinely IS "win32", so the gate this
+  // test checks for would not apply and connectOnce would instead attempt (and
+  // fail) a real connection rather than short-circuiting on the missing path.
+  (isWindows ? test.skip : test)(
+    "still throws the existsSync short-circuit off win32",
+    async () => {
+      const nonExistentSocketPath = join(
+        tmpdir(),
+        `daemon-client-posix-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
+      );
+      const pidFilePath = createTempPidPath();
 
-    const client = new DaemonClient(nonExistentSocketPath, 100, undefined, {
-      pidFilePath,
-      socketPaths: [nonExistentSocketPath],
-    });
+      const client = new DaemonClient(nonExistentSocketPath, 100, undefined, {
+        pidFilePath,
+        socketPaths: [nonExistentSocketPath],
+      });
 
-    await expect(client.connect()).rejects.toThrow("Daemon socket not found");
-  });
+      await expect(client.connect()).rejects.toThrow("Daemon socket not found");
+    },
+  );
 });

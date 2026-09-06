@@ -1240,31 +1240,37 @@ describe("DaemonManager readiness", () => {
   });
 
   // Regression companion: the default (non-win32) platform must keep requiring an
-  // observable socket path before probing.
-  test("waitForReady still gates on existsSync off win32", async () => {
-    const { lockPath, pidPath, socketPath } = createPaths();
-    const fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
-    const clients: ProbeClient[] = [];
-    // No file at socketPath and no explicit platform override (defaults to the
-    // real, non-win32 test platform).
+  // observable socket path before probing. Relies on the DEFAULT (unoverridden)
+  // platform being non-win32, which only holds on this repo's Unix host-
+  // integration runners — on the Windows matrix, `process.platform` genuinely
+  // IS "win32", so the gate this test checks for would not apply.
+  test.skipIf(process.platform === "win32")(
+    "waitForReady still gates on existsSync off win32",
+    async () => {
+      const { lockPath, pidPath, socketPath } = createPaths();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const clients: ProbeClient[] = [];
+      // No file at socketPath and no explicit platform override (defaults to the
+      // real, non-win32 test platform).
 
-    const manager = new DaemonManager(
-      () => {
-        const client = new ProbeClient(true);
-        clients.push(client);
-        return client;
-      },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
-      socketPath,
-    );
+      const manager = new DaemonManager(
+        () => {
+          const client = new ProbeClient(true);
+          clients.push(client);
+          return client;
+        },
+        undefined,
+        fakeTimer,
+        lockPath,
+        pidPath,
+        socketPath,
+      );
 
-    await expect(manager.waitForReady(100)).resolves.toBe(false);
-    expect(clients).toHaveLength(0);
-  });
+      await expect(manager.waitForReady(100)).resolves.toBe(false);
+      expect(clients).toHaveLength(0);
+    },
+  );
 
   // #6109-folded fix (a): the process-table scan is a synchronous, uncancellable
   // `ps`/PowerShell call with no timeout of its own. Once the rejoin budget is

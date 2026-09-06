@@ -338,4 +338,86 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       basis: "viewHierarchy changed",
     });
   });
+
+  test("requires a real stability interval: baseline -> A -> A -> B must reach B, not settle on the second A (PR6266 P2 follow-up)", async () => {
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("baseline"),
+    });
+    // First post-tap frame: transient state "A".
+    const transientA1 = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("transient-A"),
+    });
+    // `pollObserveUntil` takes its first capture immediately, before any
+    // `pollMs` sleep — so a single equal-hash comparison against the pre-loop
+    // seed (`transientA1`) proves no real time elapsed. This second "A" must
+    // NOT be trusted as settle evidence on its own.
+    const transientA2 = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("transient-A"),
+    });
+    // The real destination, reached only on the poll AFTER the repeated A.
+    const destinationB = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("destination-B"),
+    });
+
+    const waitForCondition = makeSequencedWaitForCondition([transientA2, destinationB]);
+    const { tap } = createTapOnElement(waitForCondition);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(
+      previous,
+      transientA1,
+    );
+
+    // Must NOT have stopped at the repeated transient A.
+    expect(postTap.observation).not.toEqual(transientA1);
+    // Must have reached the real destination.
+    expect(postTap.observation).toEqual(destinationB);
+    expect(postTap.effect).toEqual({
+      screenChanged: true,
+      basis: "viewHierarchy changed",
+    });
+  });
+
+  test("on settle timeout, preserves the trusted fresh changed observation over an untrustworthy stale final poll (PR6266 P2 follow-up)", async () => {
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("baseline"),
+    });
+    // The initial post-tap observation is FRESH and already shows a real
+    // hierarchy change (e.g. a dialog opening) against the baseline.
+    const freshChange = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("time-picker-dialog"),
+      freshness: { isFresh: true } as any,
+    });
+    // Every settle poll after it comes back explicitly stale until timeout —
+    // none of them is trustworthy evidence of anything.
+    const stalePoll1 = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("stale-poll-1"),
+      freshness: { isFresh: false } as any,
+    });
+    const stalePoll2 = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("stale-poll-2"),
+      freshness: { isFresh: false } as any,
+    });
+
+    const waitForCondition = makeSequencedWaitForCondition([stalePoll1, stalePoll2]);
+    const { tap } = createTapOnElement(waitForCondition);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(
+      previous,
+      freshChange,
+    );
+
+    // The untrustworthy final poll must NOT clobber the already-trusted fresh
+    // change — the derived effect must still report the change.
+    expect(postTap.effect?.screenChanged).toBe(true);
+    expect(postTap.effect?.basis).toBe("viewHierarchy changed");
+    expect(postTap.observation.viewHierarchy).toEqual(freshChange.viewHierarchy);
+  });
 });

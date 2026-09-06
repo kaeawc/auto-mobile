@@ -700,6 +700,16 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     let lastObservation = currentObservation;
+    // Issue #6266 (review): `pollObserveUntil` takes its FIRST capture
+    // immediately, before any `pollMs` sleep — so a single equal-hash
+    // comparison against the pre-loop seed (`currentObservation`) proves
+    // nothing about elapsed time and is not real settle evidence. Require the
+    // hash to hold across at least two consecutive poll comparisons (i.e. a
+    // real `pollMs` interval genuinely elapsed between the two matching
+    // captures) before treating the hierarchy as settled. Otherwise
+    // `baseline → transient A → transient A → destination B` would settle on
+    // the second `A` and never reach the real destination `B`.
+    let consecutiveStablePolls = 0;
     const settled = await this.waitForCondition.execute(
       (observation) => {
         const activeWindowChanged =
@@ -719,8 +729,10 @@ export class TapOnElement extends BaseVisualChange {
         // later FRESH destination that never gets polled for.
         const bothFresh =
           observation.freshness?.isFresh !== false && lastObservation.freshness?.isFresh !== false;
-        const hierarchyStableSincePriorPoll =
+        const hierarchyEqualToPriorPoll =
           currentHash !== null && priorHash !== null && currentHash === priorHash && bothFresh;
+        consecutiveStablePolls = hierarchyEqualToPriorPoll ? consecutiveStablePolls + 1 : 0;
+        const hierarchyStableSincePriorPoll = consecutiveStablePolls >= 2;
         lastObservation = observation;
         return { matched: activeWindowChanged || hierarchyStableSincePriorPoll };
       },
@@ -731,14 +743,36 @@ export class TapOnElement extends BaseVisualChange {
       },
     );
 
-    const settledObservation = settled.observation;
-    const effect = this.deriveTapEffect(previousObservation, settledObservation);
+    // Issue #6266 (review): on timeout, do not let an untrustworthy final poll
+    // (explicitly stale, or hierarchy-less) clobber an already-trusted result.
+    // `currentObservation` arrived here BECAUSE it was fresh and already
+    // showed `viewHierarchy changed` against `previousObservation` — if every
+    // settle poll after it came back stale or hierarchy-less until the
+    // timeout, the trustworthy evidence is still `currentObservation`, not the
+    // final unusable poll. Untrustworthiness is judged on the final poll's OWN
+    // freshness/hierarchy, never on whether it happens to derive "unchanged"
+    // — a poll that genuinely reverted to the baseline (fresh, real
+    // hierarchy) is a legitimate "no change" verdict, not untrustworthy data.
+    let effectObservation = settled.observation;
+    if (settled.timedOut) {
+      const currentObservationIsTrustedChange =
+        currentObservation.freshness?.isFresh !== false &&
+        this.deriveTapEffect(previousObservation, currentObservation)?.screenChanged === true;
+      const finalPollIsUntrustworthy =
+        effectObservation.freshness?.isFresh === false ||
+        this.hashViewHierarchy(effectObservation.viewHierarchy ?? null) === null;
+      if (currentObservationIsTrustedChange && finalPollIsUntrustworthy) {
+        effectObservation = currentObservation;
+      }
+    }
+
+    const effect = this.deriveTapEffect(previousObservation, effectObservation);
     return {
       effect,
       observation: {
-        ...settledObservation,
-        gfxMetrics: settledObservation.gfxMetrics ?? currentObservation.gfxMetrics,
-        perfTiming: settledObservation.perfTiming ?? currentObservation.perfTiming,
+        ...effectObservation,
+        gfxMetrics: effectObservation.gfxMetrics ?? currentObservation.gfxMetrics,
+        perfTiming: effectObservation.perfTiming ?? currentObservation.perfTiming,
       },
     };
   }
@@ -816,6 +850,35 @@ export class TapOnElement extends BaseVisualChange {
     const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
     if (screenSize) {
       observeResult.screenSize = screenSize;
+    }
+  }
+
+  /**
+   * Issue #6266 (review): after a successful `resolveAndroidStableTapTargetAfterRefreshes`
+   * sync refresh replaces a cached observation's hierarchy via
+   * `updateObservationHierarchy`, the observation's OLD `freshness` (possibly
+   * `isFresh: false` from the pre-tap cache) is left stamped on the NEW,
+   * just-verified hierarchy. `compareViewHierarchy` treats any `isFresh: false`
+   * side as inconclusive, so a stale baseline permanently blocks every future
+   * hierarchy diff against it — a same-window dialog can never satisfy
+   * `waitForPostTapChange`, and the tap is reported as `screenChanged: false`
+   * even though the dialog is plainly visible. The refresh that produced
+   * `viewHierarchy` just verified it against the device on THIS call, so mark
+   * it fresh with the refresh's own capture timestamp rather than leaving a
+   * pre-refresh staleness verdict attached to post-refresh data.
+   */
+  private markObservationFreshAfterSyncRefresh(observeResult: ObserveResult): void {
+    if (observeResult.freshness?.isFresh === false) {
+      const actualTimestamp = this.timer.now();
+      observeResult.freshness = {
+        ...observeResult.freshness,
+        isFresh: true,
+        verified: true,
+        actualTimestamp,
+        ageMs: 0,
+        staleDurationMs: undefined,
+        warning: undefined,
+      };
     }
   }
 
@@ -1799,6 +1862,7 @@ export class TapOnElement extends BaseVisualChange {
               return { success: false, error: stable.error };
             }
             this.updateObservationHierarchy(observeResult, stable.viewHierarchy);
+            this.markObservationFreshAfterSyncRefresh(observeResult);
             viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             usedParent = stable.usedParent;

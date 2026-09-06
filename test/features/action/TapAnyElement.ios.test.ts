@@ -163,17 +163,22 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
 
-  test("VoiceOver enabled but VoiceOver action fails falls back to a coordinate tap", async () => {
+  // Thread PRRT_kwDOP-GF5M6ftlb7: under VoiceOver a bare coordinate press only
+  // FOCUSES an element rather than activating it, so a coordinate-press
+  // fallback after a failed VoiceOver activation would mask a real failure.
+  // tapAny must propagate the activation failure instead of reporting success.
+  test("VoiceOver enabled but VoiceOver action fails propagates the failure (does not fall back to a coordinate tap)", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(true);
     fakeIosClient.setVoiceOverActivateResult({ success: false, error: "no such label" });
 
     const result = await tapAny.execute({ action: "tap" });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no such label");
     expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       { label: "Target Button", action: "activate" },
     ]);
-    expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 50 }]);
+    expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
 
   // Thread PRRT_kwDOP-GF5M6ftbHR: CtrlProxy blocks its reply until the on-device

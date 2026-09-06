@@ -311,8 +311,15 @@ export class TapAnyElement extends BaseVisualChange {
 
   /**
    * Execute iOS tap using VoiceOver accessibility actions.
-   * Falls back to coordinate-based tap if no label is resolvable or if the action fails.
-   * Mirrors `TapOnElement.executeIOSTapWithVoiceOver`.
+   *
+   * Falls back to a coordinate-based tap only when no label is resolvable at all
+   * (there is nothing to activate semantically). Once a label IS resolved and
+   * `requestVoiceOverActivate` is actually attempted, a failure is propagated
+   * instead of falling back to a coordinate press: under VoiceOver a bare
+   * coordinate press only *focuses* an element rather than activating it, so
+   * reporting success after that fallback would mask a real activation failure
+   * (issue #6248 review). This mirrors the non-fallback-on-failure behavior
+   * `TapOnElement` should also have for the same reason.
    */
   private async executeIosTapWithVoiceOver(
     xcTestClient: IOSCtrlProxyClient,
@@ -344,11 +351,9 @@ export class TapAnyElement extends BaseVisualChange {
     const result = await xcTestClient.requestVoiceOverActivate(label, voiceOverAction, timeoutMs);
 
     if (!result.success) {
-      logger.warn(
-        `[TapAnyElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
-          `falling back to coordinate tap at (${x}, ${y})`,
+      throw new ActionableError(
+        `VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}`,
       );
-      await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
     }
   }
 

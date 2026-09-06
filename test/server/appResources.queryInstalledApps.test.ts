@@ -125,6 +125,18 @@ describe("queryInstalledApps rejects an unsupported type filter on a physical iO
     const content = await queryInstalledApps({ deviceId: physicalIosDevice.deviceId });
     expect(content.totalCount).toBe(2);
   });
+
+  test('an omitted type filter reports query.type as "all", not the misleading "user" default (#6216 review, round 6)', async () => {
+    // devicectl's --include-all-apps listing (DeviceAppManager) already
+    // includes system records, and every unclassified app defaults to type
+    // "user" (round 4) — so applying the normal "user" default filter here
+    // would let system apps straight through while the response still
+    // claimed `query.type: "user"`. That is the over-inclusive-but-mislabeled
+    // result Codex flagged: report the effective type honestly as "all".
+    const content = await queryInstalledApps({ deviceId: physicalIosDevice.deviceId });
+    expect(content.query.type).toBe("all");
+    expect(content.totalCount).toBe(2);
+  });
 });
 
 describe("queryInstalledApps still honors type filters on the iOS simulator (#6216 review, round 5)", () => {
@@ -166,6 +178,15 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
       deviceId: simulatorDevice.deviceId,
       type: "system",
     });
+    expect(content.totalCount).toBe(1);
+  });
+
+  test('an omitted type filter still reports and applies the documented "user" default (#6216 review, round 6)', async () => {
+    // Control case: reliable classification (simulator ApplicationType) must
+    // keep the existing "user" default behavior — only the physical-device,
+    // unreliable-classification case reports "all".
+    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    expect(content.query.type).toBe("user");
     expect(content.totalCount).toBe(1);
   });
 });

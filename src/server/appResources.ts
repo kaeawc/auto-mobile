@@ -738,9 +738,7 @@ export async function queryInstalledApps(
   // An EXPLICIT type=system/type=user filter on a physical iOS device with no
   // reliable classification signal must not silently return an empty (or
   // over-inclusive) result — that reads as "no system apps exist" rather than
-  // "we can't tell". type=all (or an omitted filter, which only ever widens
-  // to "everything" here since every unclassified app already defaults to
-  // "user") is unaffected (#6216 review, round 5).
+  // "we can't tell". type=all is unaffected (#6216 review, round 5).
   if (
     options.type !== undefined &&
     options.type !== "all" &&
@@ -752,8 +750,24 @@ export async function queryInstalledApps(
         "Use type=all (or omit type) to list every app.",
     );
   }
+  // An OMITTED type on such a device is the more common case, and must not be
+  // silently defaulted to "user" either: `--include-all-apps` is passed
+  // unconditionally when listing a physical device (DeviceAppManager), so the
+  // cached apps already include system records, and every unclassified one
+  // was defaulted to "user" (extractIosApplicationType). Applying the normal
+  // "user" default filter here would therefore let system apps straight
+  // through while the response still claimed `query.type: "user"` — exactly
+  // the over-inclusive-but-mislabeled result Codex flagged (#6216 review,
+  // round 6). Report the effective type as "all" (the truthful description
+  // of what this transport can actually filter) and skip the "user" default
+  // filter, rather than rejecting the common omitted-type call outright.
+  const effectiveType: AppsQueryType =
+    options.type === undefined && cacheEntry.iosTypeClassificationUnreliable
+      ? "all"
+      : (options.type ?? "user");
+  const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
 
-  const apps = filterAppsByQuery(cacheEntry.queryApps, options);
+  const apps = filterAppsByQuery(cacheEntry.queryApps, effectiveOptions);
   const deviceEntries: AppsQueryDeviceContent[] = [
     {
       deviceId: device.deviceId,
@@ -770,7 +784,7 @@ export async function queryInstalledApps(
     : new Date(parsed).toISOString();
 
   return {
-    query: { ...options, type: options.type ?? "user" },
+    query: effectiveOptions,
     observationComplete: cacheEntry.content.observationComplete,
     totalCount: apps.length,
     deviceCount: 1,

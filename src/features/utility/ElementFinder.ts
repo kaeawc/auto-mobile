@@ -14,19 +14,6 @@ import {
 import { ActionableError } from "../../models/ActionableError";
 
 /**
- * `resourceId`/`elementId` selectors carry an `s-<hash>` content-derived
- * stable id (`assignStableViewIds`, issue #3228) for nodes with no real
- * `resource-id` — the skeleton projection emits exactly that value as
- * `elementId` (`SkeletonProjection.deriveId`). Resolve it against the node's
- * `view-id` field, not `resource-id`, so a skeleton id round-trips back to
- * its element (issue #6218). Exact match only: the hash carries no partial-
- * or bare-suffix semantics the way a `pkg:id/name` resource-id does.
- */
-function isStableViewId(id: string): boolean {
-  return id.startsWith(STABLE_VIEW_ID_PREFIX);
-}
-
-/**
  * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
  * ordinal `-<k>` suffix (`s-<hash>-2`, `s-<hash>-3`, ...) assigned by document
  * order AT CAPTURE TIME (`StableNodeIdentity.ts`) - the FIRST occurrence gets
@@ -65,23 +52,59 @@ function sharesStableViewIdBase(viewId: string, base: string): boolean {
   return syntheticStableViewIdBase(viewId) === base;
 }
 
-function matchesResourceIdOrStableViewId(
+/**
+ * Match a selector against a node's REAL `resource-id` field only - never
+ * `view-id`. Callers use this alone (instead of
+ * `matchesResourceIdOrStableViewId`) once they have established that a real
+ * resource-id match exists somewhere in the active search scope, so the
+ * synthetic view-id fallback can be disabled entirely for that selector
+ * rather than unioned with it (review threads PRRT_kwDOP-GF5M6fo13g,
+ * PRRT_kwDOP-GF5M6fo2Iq).
+ */
+function matchesResourceIdFieldOnly(
   nodeProperties: Record<string, unknown>,
   resourceId: string,
   bareResourceId: string | null,
   partialMatch: boolean,
 ): boolean {
   const nodeResourceId = nodeProperties["resource-id"];
-  if (typeof nodeResourceId === "string") {
-    if (
-      nodeResourceId === resourceId ||
-      (bareResourceId !== null && nodeResourceId === bareResourceId) ||
-      (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
-    ) {
-      return true;
-    }
+  if (typeof nodeResourceId !== "string") {
+    return false;
   }
-  if (isStableViewId(resourceId)) {
+  return (
+    nodeResourceId === resourceId ||
+    (bareResourceId !== null && nodeResourceId === bareResourceId) ||
+    (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
+  );
+}
+
+/**
+ * `resourceId`/`elementId` selectors carry an `s-<hash>` content-derived
+ * stable id (`assignStableViewIds`, issue #3228) for nodes with no real
+ * `resource-id` — the skeleton projection emits exactly that value as
+ * `elementId` (`SkeletonProjection.deriveId`). Resolve it against the node's
+ * `view-id` field, not `resource-id`, so a skeleton id round-trips back to
+ * its element (issue #6218). Exact match only: the hash carries no partial-
+ * or bare-suffix semantics the way a `pkg:id/name` resource-id does. The
+ * view-id fallback is gated on the selector matching the producer's strict
+ * synthetic shape (`syntheticStableViewIdBase`), not merely the `s-` prefix,
+ * so a real id like `view-id: "s-a"` is treated as a plain resource-id, never
+ * as a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip). Callers that
+ * have already established a real resource-id match exists in scope should
+ * use `matchesResourceIdFieldOnly` instead of this function, which unions
+ * both kinds of match and is therefore only safe to use when no such
+ * precedence question is in play.
+ */
+function matchesResourceIdOrStableViewId(
+  nodeProperties: Record<string, unknown>,
+  resourceId: string,
+  bareResourceId: string | null,
+  partialMatch: boolean,
+): boolean {
+  if (matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)) {
+    return true;
+  }
+  if (syntheticStableViewIdBase(resourceId) !== null) {
     const nodeViewId = nodeProperties["view-id"];
     if (typeof nodeViewId === "string" && nodeViewId === resourceId) {
       return true;
@@ -120,6 +143,7 @@ export class DefaultElementFinder implements ElementFinder {
     rootNodes: ViewHierarchyNode[],
     container: { elementId?: string; text?: string },
     matchesContainerText: ((input?: string) => boolean) | null,
+    preferResourceIdOnly: boolean = false,
   ): ViewHierarchyNode | null {
     for (const rootNode of rootNodes) {
       let containerNode: ViewHierarchyNode | null = null;
@@ -133,10 +157,13 @@ export class DefaultElementFinder implements ElementFinder {
         const nodeContentDesc = nodeProperties["content-desc"];
         const nodeIosLabel = nodeProperties["ios-accessibility-label"];
 
-        if (
+        const elementIdMatches =
           container.elementId &&
-          matchesResourceIdOrStableViewId(nodeProperties, container.elementId, null, false)
-        ) {
+          (preferResourceIdOnly
+            ? matchesResourceIdFieldOnly(nodeProperties, container.elementId, null, false)
+            : matchesResourceIdOrStableViewId(nodeProperties, container.elementId, null, false));
+
+        if (elementIdMatches) {
           containerNode = node;
           return;
         }
@@ -167,11 +194,18 @@ export class DefaultElementFinder implements ElementFinder {
       return null;
     }
 
+    let preferResourceIdOnly = false;
     if (container.elementId) {
       // A container selector has no enclosing scope of its own to resolve
       // first, so it is always checked against the whole capture.
-      this.assertStableViewIdSelectorNotAmbiguous(
-        this.collectFullCaptureSearchRoots(viewHierarchy),
+      const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
+      this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, container.elementId);
+      // A real resource-id match anywhere in the capture always wins over a
+      // synthetic view-id match - never unioned with one, and never shadowed
+      // by a stable-id match found in an earlier-priority scope (review
+      // threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq).
+      preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
+        fullCaptureRoots,
         container.elementId,
       );
     }
@@ -184,6 +218,7 @@ export class DefaultElementFinder implements ElementFinder {
       rootNodes,
       container,
       matchesContainerText,
+      preferResourceIdOnly,
     );
     if (containerInMain) {
       return containerInMain;
@@ -195,6 +230,7 @@ export class DefaultElementFinder implements ElementFinder {
         windowRoots,
         container,
         matchesContainerText,
+        preferResourceIdOnly,
       );
       if (containerInWindow) {
         return containerInWindow;
@@ -305,6 +341,7 @@ export class DefaultElementFinder implements ElementFinder {
     resourceId: string,
     partialMatch: boolean,
     sortByArea: boolean = true,
+    resourceIdFieldOnly: boolean = false,
   ): Element[] {
     const matches: Element[] = [];
     // Compose semantics (Modifier.testTag) surface via AccessibilityNodeInfo.viewIdResourceName
@@ -319,9 +356,20 @@ export class DefaultElementFinder implements ElementFinder {
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        if (
-          matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch)
-        ) {
+        // `resourceIdFieldOnly` disables the synthetic view-id fallback
+        // entirely once a real resource-id match has been established
+        // elsewhere in the active scope (review threads
+        // PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq) - a real match must
+        // never be unioned with, or out-competed by, a synthetic one.
+        const isMatch = resourceIdFieldOnly
+          ? matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)
+          : matchesResourceIdOrStableViewId(
+              nodeProperties,
+              resourceId,
+              bareResourceId,
+              partialMatch,
+            );
+        if (isMatch) {
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
             matches.push(parsedNode);
@@ -722,18 +770,26 @@ export class DefaultElementFinder implements ElementFinder {
 
     if (containerNode) {
       this.assertStableViewIdSelectorNotAmbiguous([containerNode], resourceId);
+      // A real resource-id match anywhere in the container's subtree always
+      // wins over a synthetic view-id match, never unioned with one (review
+      // thread PRRT_kwDOP-GF5M6fo13g).
+      const preferResourceIdOnly = this.hasExactResourceIdFieldMatch([containerNode], resourceId);
       return this.collectResourceIdMatchesInRoots(
         [containerNode],
         resourceId,
         partialMatch,
         !preserveTraversalOrder,
+        preferResourceIdOnly,
       );
     }
 
-    this.assertStableViewIdSelectorNotAmbiguous(
-      this.collectFullCaptureSearchRoots(viewHierarchy),
-      resourceId,
-    );
+    const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
+    this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, resourceId);
+    // Computed against the WHOLE capture (main + every window) so a real
+    // resource-id match in one root is never shadowed by a stable-id match
+    // encountered earlier in search order (review thread
+    // PRRT_kwDOP-GF5M6fo2Iq).
+    const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(fullCaptureRoots, resourceId);
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectResourceIdMatchesInRoots(
@@ -741,6 +797,7 @@ export class DefaultElementFinder implements ElementFinder {
       resourceId,
       partialMatch,
       !preserveTraversalOrder,
+      preferResourceIdOnly,
     );
     if (mainMatches.length > 0) {
       return mainMatches;
@@ -753,6 +810,7 @@ export class DefaultElementFinder implements ElementFinder {
         resourceId,
         partialMatch,
         !preserveTraversalOrder,
+        preferResourceIdOnly,
       );
       if (windowMatches.length > 0) {
         return windowMatches;
@@ -1372,9 +1430,6 @@ export class DefaultElementFinder implements ElementFinder {
     const idSeparatorIndex = resourceId.lastIndexOf("/");
     const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
 
-    const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
-      matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch);
-
     // Resolve the container FIRST (same ordering fix as findElementsByResourceId)
     // so the ambiguity check can be scoped to just its subtree.
     const containerNode = container
@@ -1389,10 +1444,20 @@ export class DefaultElementFinder implements ElementFinder {
       ? [containerNode]
       : this.parser.extractRootNodes(viewHierarchy);
 
-    this.assertStableViewIdSelectorNotAmbiguous(
-      containerNode ? searchRoots : this.collectFullCaptureSearchRoots(viewHierarchy),
-      resourceId,
-    );
+    // Computed against the container's subtree, or the WHOLE capture when
+    // there is no container, so a real resource-id match is never unioned
+    // with, or shadowed in window-search order by, a synthetic view-id match
+    // (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq).
+    const ambiguityScopeRoots = containerNode
+      ? searchRoots
+      : this.collectFullCaptureSearchRoots(viewHierarchy);
+    this.assertStableViewIdSelectorNotAmbiguous(ambiguityScopeRoots, resourceId);
+    const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(ambiguityScopeRoots, resourceId);
+
+    const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
+      preferResourceIdOnly
+        ? matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)
+        : matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch);
 
     const siblings = this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId);
 

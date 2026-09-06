@@ -411,4 +411,172 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(result.element).not.toBeNull();
     expect(result.element!.text).toBe("Submit");
   });
+
+  describe("real resource-id takes precedence over a colliding synthetic view-id (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq, PRRT_kwDOP-GF5M6fo2Ip)", () => {
+    // A resource-id shaped exactly like a synthetic hash - so it also matches
+    // `syntheticStableViewIdBase` - is the sharpest test of precedence: a real
+    // field match must win even when it superficially resembles the
+    // synthetic shape.
+    const collidingId = "s-9fb4b913ae97b1c1";
+
+    test("a real resource-id control is selected over a smaller id-less node sharing the same synthetic view-id, regardless of relative area", () => {
+      // Previously the matcher UNIONED resource-id matches and synthetic
+      // view-id matches, then area-sorted ascending - so the SMALLER
+      // synthetic node would win over the explicitly-named resource
+      // control. The real control here is deliberately much LARGER, so the
+      // old area-sort would have picked the wrong (smaller) node first.
+      const rawRoot = {
+        node: [
+          {
+            class: "android.view.View",
+            bounds: { left: 10, top: 10, right: 20, bottom: 20 }, // small
+            clickable: "true",
+            "view-id": collidingId,
+          },
+          {
+            class: "android.widget.Button",
+            bounds: { left: 0, top: 100, right: 200, bottom: 300 }, // large
+            clickable: "true",
+            "resource-id": collidingId,
+            text: "Real Control",
+          },
+        ],
+      };
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+      const result = selector.selectByResourceId(viewHierarchy, collidingId);
+      expect(result.element).not.toBeNull();
+      expect(result.totalMatches).toBe(1);
+      expect(result.element!.text).toBe("Real Control");
+      expect(result.element!.bounds).toEqual({ left: 0, top: 100, right: 200, bottom: 300 });
+    });
+
+    test("cross-window: a window's real resource-id match wins over a main-root stable-id match", () => {
+      const rawRoot = {
+        node: [
+          {
+            class: "android.view.View",
+            bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+            clickable: "true",
+            "view-id": collidingId,
+          },
+        ],
+      };
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: rawRoot,
+        windows: [
+          {
+            windowLayer: 1,
+            hierarchy: {
+              node: [
+                {
+                  class: "android.widget.Button",
+                  bounds: { left: 0, top: 0, right: 80, bottom: 80 },
+                  clickable: "true",
+                  "resource-id": collidingId,
+                  text: "Window Control",
+                },
+              ],
+            },
+          },
+        ],
+      } as ViewHierarchyResult;
+
+      const result = selector.selectByResourceId(viewHierarchy, collidingId);
+      expect(result.element).not.toBeNull();
+      expect(result.totalMatches).toBe(1);
+      expect(result.element!.text).toBe("Window Control");
+    });
+
+    test("findClickableSiblingsOfResourceId does not exclude a decoy synthetic-view-id sibling as if it were the real resource-id match", () => {
+      // The real anchor (non-clickable) carries the resource-id; a separate,
+      // CLICKABLE decoy node merely shares that string as its `view-id`.
+      // Precedence means the decoy is NOT the id match, so it must surface as
+      // a clickable sibling of the real anchor - previously it was unioned in
+      // as a (false) match and silently excluded from the sibling results.
+      const rawRoot = {
+        node: [
+          {
+            class: "android.view.ViewGroup",
+            bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+            node: [
+              {
+                class: "android.widget.ImageButton",
+                bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+                clickable: "true",
+                "view-id": collidingId, // decoy - not a real resource-id
+              },
+              {
+                class: "android.view.View",
+                bounds: { left: 60, top: 0, right: 110, bottom: 50 },
+                "resource-id": collidingId, // real match, not clickable
+              },
+            ],
+          },
+        ],
+      };
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+      const siblings = finder.findClickableSiblingsOfResourceId(viewHierarchy, collidingId);
+      expect(siblings).toHaveLength(1);
+      expect(siblings[0].bounds).toEqual({ left: 0, top: 0, right: 50, bottom: 50 });
+    });
+
+    test("the container path (findContainerNode) selects the real resource-id container, not a decoy sharing its view-id", () => {
+      const rawRoot = {
+        node: [
+          {
+            class: "android.view.ViewGroup",
+            bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+            "view-id": collidingId, // decoy container - not a real resource-id
+          },
+          {
+            class: "android.view.ViewGroup",
+            bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+            "resource-id": collidingId, // the real, intended container
+          },
+        ],
+      };
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+      const containerNode = finder.findContainerNode(viewHierarchy, { elementId: collidingId });
+      expect(containerNode).not.toBeNull();
+      const parsed = parser.parseNodeBounds(containerNode as never);
+      expect(parsed!.bounds).toEqual({ left: 100, top: 100, right: 300, bottom: 300 });
+    });
+  });
+
+  test("a real bare id (view-id: 's-a') that does not match the strict synthetic shape is treated as a plain resource-id, not a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip)", () => {
+    // Review thread PRRT_kwDOP-GF5M6fo2Ip: recognition of a synthetic id must
+    // be gated on the STRICT producer shape (`syntheticStableViewIdBase`)
+    // everywhere a selector is matched against `view-id`, not merely on an
+    // `s-` prefix. "s-a" is far short of the producer's 16-hex-character
+    // hash, so it must never trigger the synthetic view-id fallback: a
+    // separate node whose `view-id` merely happens to equal "s-a" (with no
+    // matching `resource-id` of its own) must NOT be treated as a match.
+    const rawRoot = {
+      node: [
+        {
+          class: "android.widget.Button",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          "resource-id": "s-a",
+          text: "Real Short Id",
+          clickable: "true",
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 100, right: 300, bottom: 300 }, // much larger
+          clickable: "true",
+          "view-id": "s-a", // superficially resembles the prefix, wrong shape
+        },
+      ],
+    };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    const result = selector.selectByResourceId(viewHierarchy, "s-a");
+    expect(result.element).not.toBeNull();
+    expect(result.totalMatches).toBe(1);
+    expect(result.element!.text).toBe("Real Short Id");
+    expect(result.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
+  });
 });

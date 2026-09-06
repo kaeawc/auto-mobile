@@ -46,7 +46,11 @@ export class IosTapStrategy implements TapStrategy {
     const ctrlProxy = IOSCtrlProxyClient.getInstance(this.device);
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
     // apply to tap detection uniformly with the observe path (#3925).
-    return this.iosVoiceOverDetector.isVoiceOverEnabled(
+    // Use the fail-safe tap-bias variant (#6267): an indeterminate probe must
+    // route through the VoiceOver activation gesture rather than a plain
+    // coordinate touch, unlike the honest `isVoiceOverEnabled` used by
+    // toggle-confirmation/state-query consumers.
+    return this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
       this.device.deviceId,
       ctrlProxy,
       this.featureFlags,

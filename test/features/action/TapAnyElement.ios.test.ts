@@ -9,6 +9,7 @@ import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
+import { DefaultIosVoiceOverDetector } from "../../../src/utils/IosVoiceOverDetector";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -144,6 +145,33 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   // TapOnElement.executeiOSTap's VoiceOver-detection + activation path.
   test("VoiceOver enabled + tap routes through requestVoiceOverActivate, not a coordinate tap", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(true);
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(true);
+    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+      { label: "Target Button", action: "activate" },
+    ]);
+    expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
+
+  // #6267 follow-up (P1 regression fix): an indeterminate probe must still
+  // route the real DefaultIosVoiceOverDetector -> isVoiceOverActiveOrUnknown
+  // -> tap-bias path, not the honest isVoiceOverEnabled a toggle/query
+  // consumer would use. Wires the real detector (not the boolean-only Fake)
+  // against a CtrlProxy client whose requestVoiceOverState throws, so this
+  // exercises the actual fail-safe bias rather than a hand-set boolean.
+  test("VoiceOver probe indeterminate (CtrlProxy failure) + tap still routes through requestVoiceOverActivate", async () => {
+    const realDetector = new DefaultIosVoiceOverDetector(fakeTimer);
+    fakeIosClient.setFailureMode("voiceOverState", new Error("CtrlProxy timeout"));
+    tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient() as any, {
+      timer: fakeTimer,
+      elementSelector: fakeElementSelector,
+      iosVoiceOverDetector: realDetector,
+    });
+    (tapAny as any).observeScreen = fakeObserveScreen;
+    (tapAny as any).awaitIdle = fakeAwaitIdle;
+    (tapAny as any).window = fakeWindow;
 
     const result = await tapAny.execute({ action: "tap" });
 

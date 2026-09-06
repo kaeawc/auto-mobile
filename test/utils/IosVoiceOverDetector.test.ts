@@ -106,7 +106,12 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       expect(fakeClient.timeoutMsArgs).toEqual([1_250]);
     });
 
-    test("returns false when CtrlProxy reports failure", async () => {
+    test("resolves honestly to false (NOT true) when CtrlProxy reports failure — #6267 follow-up", async () => {
+      // An unsuccessful CtrlProxy response is an UNKNOWN state. isVoiceOverEnabled
+      // is the honest, non-tap-biased method used by toggle-confirmation and
+      // state-query consumers: they must treat "unknown" as NOT-confirmed
+      // rather than assuming VoiceOver came on. Only isVoiceOverActiveOrUnknown
+      // (used by tapOn/tapAny) biases an indeterminate probe to true.
       fakeClient.shouldFail = true;
 
       const enabled = await detector.isVoiceOverEnabled(
@@ -117,7 +122,9 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       expect(enabled).toBe(false);
     });
 
-    test("returns false when CtrlProxy throws", async () => {
+    test("resolves honestly to false (NOT true) when CtrlProxy throws — #6267 follow-up", async () => {
+      // A thrown error (e.g. a probe timeout) is also an UNKNOWN state; the
+      // honest isVoiceOverEnabled must not report it as confirmed-enabled.
       const throwingClient = {
         async requestVoiceOverState(): Promise<CtrlProxyVoiceOverResult> {
           throw new Error("Connection refused");
@@ -130,6 +137,129 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       );
 
       expect(enabled).toBe(false);
+    });
+
+    test("does not cache the indeterminate probe result", async () => {
+      fakeClient.shouldFail = true;
+
+      const first = await detector.isVoiceOverEnabled(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+      expect(first).toBe(false);
+      expect(fakeClient.callCount).toBe(1);
+
+      // A confirmed-enabled response on the next probe must not be masked by
+      // a cached value from the earlier indeterminate probe.
+      fakeClient.shouldFail = false;
+      fakeClient.voiceOverEnabled = true;
+      const second = await detector.isVoiceOverEnabled(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+      expect(second).toBe(true);
+      expect(fakeClient.callCount).toBe(2);
+    });
+  });
+
+  describe("isVoiceOverActiveOrUnknown (tapOn/tapAny fail-safe bias) — #6267", () => {
+    test("returns true when VoiceOver is confirmed enabled", async () => {
+      fakeClient.voiceOverEnabled = true;
+
+      const active = await detector.isVoiceOverActiveOrUnknown(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+
+      expect(active).toBe(true);
+    });
+
+    test("returns false when VoiceOver is confirmed disabled", async () => {
+      fakeClient.voiceOverEnabled = false;
+
+      const active = await detector.isVoiceOverActiveOrUnknown(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+
+      expect(active).toBe(false);
+    });
+
+    test("fails safe to true (not false) when CtrlProxy reports failure", async () => {
+      // An unsuccessful CtrlProxy response is an UNKNOWN state, not a confirmed
+      // "disabled". Coalescing it to false would make tapOn/tapAny perform a
+      // plain coordinate touch and report it as a successful VoiceOver
+      // activation on a device where VoiceOver is actually on.
+      fakeClient.shouldFail = true;
+
+      const active = await detector.isVoiceOverActiveOrUnknown(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+
+      expect(active).toBe(true);
+    });
+
+    test("fails safe to true (not false) when CtrlProxy throws", async () => {
+      // A thrown error (e.g. a probe timeout) is also an UNKNOWN state and
+      // must not be silently treated as "VoiceOver is off".
+      const throwingClient = {
+        async requestVoiceOverState(): Promise<CtrlProxyVoiceOverResult> {
+          throw new Error("Connection refused");
+        },
+      };
+
+      const active = await detector.isVoiceOverActiveOrUnknown(
+        "device123",
+        throwingClient as unknown as IOSCtrlProxy,
+      );
+
+      expect(active).toBe(true);
+    });
+
+    test("does not cache the fail-safe true result on an indeterminate probe", async () => {
+      fakeClient.shouldFail = true;
+
+      const first = await detector.isVoiceOverActiveOrUnknown(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+      expect(first).toBe(true);
+      expect(fakeClient.callCount).toBe(1);
+
+      // A confirmed-disabled response on the next probe must not be masked by
+      // a cached fail-safe value from the earlier indeterminate probe.
+      fakeClient.shouldFail = false;
+      fakeClient.voiceOverEnabled = false;
+      const second = await detector.isVoiceOverActiveOrUnknown(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+      );
+      expect(second).toBe(false);
+      expect(fakeClient.callCount).toBe(2);
+    });
+
+    test("an indeterminate probe on isVoiceOverEnabled does not poison a later isVoiceOverActiveOrUnknown call, and vice versa", async () => {
+      // Both methods share the same cache keyed by deviceId; an indeterminate
+      // probe is never cached regardless of which method triggered it.
+      fakeClient.shouldFail = true;
+      expect(
+        await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy),
+      ).toBe(false);
+      expect(
+        await detector.isVoiceOverActiveOrUnknown(
+          "device123",
+          fakeClient as unknown as IOSCtrlProxy,
+        ),
+      ).toBe(true);
+      expect(fakeClient.callCount).toBe(2);
+
+      fakeClient.shouldFail = false;
+      fakeClient.voiceOverEnabled = true;
+      expect(
+        await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy),
+      ).toBe(true);
+      expect(fakeClient.callCount).toBe(3);
     });
   });
 

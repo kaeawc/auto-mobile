@@ -453,7 +453,10 @@ export class TapAnyElement extends BaseVisualChange {
     element?: Element,
   ): Promise<void> {
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-    const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverEnabled(
+    // Fail-safe tap-bias variant (#6267): an indeterminate probe must route
+    // through the VoiceOver activation gesture rather than a plain
+    // coordinate touch that would get reported as a successful activation.
+    const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
       this.device.deviceId,
       xcTestClient,
       this.featureFlags,

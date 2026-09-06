@@ -4,6 +4,7 @@ import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { DefaultIosVoiceOverDetector } from "../../../src/utils/IosVoiceOverDetector";
 import type { BootedDevice } from "../../../src/models";
 
 const SIMULATOR_DEVICE: BootedDevice = {
@@ -206,6 +207,33 @@ describe("VoiceOverToggle", () => {
       expect(result.supported).toBe(true);
       expect(result.applied).toBe(false);
       expect(result.reason).toContain("No process to signal.");
+    });
+
+    // P1 regression fix (#6267 follow-up, PRRT_kwDOP-GF5M6fvDz7): the shared
+    // detector must NOT coerce an indeterminate post-enable probe to
+    // confirmed-true for a toggle-confirmation consumer. Wires the real
+    // DefaultIosVoiceOverDetector (not the boolean-only Fake) against a
+    // CtrlProxy client whose requestVoiceOverState always throws, so
+    // waitForState's honest isVoiceOverEnabled never confirms the toggle
+    // despite simctl reporting success.
+    test("does not report applied:true when the post-enable confirmation probe is indeterminate", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const realDetector = new DefaultIosVoiceOverDetector(timer);
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setFailureMode("voiceOverState", new Error("CtrlProxy timeout"));
+
+      const toggle = new VoiceOverToggle(
+        SIMULATOR_DEVICE,
+        realDetector,
+        fakeExec,
+        timer,
+        () => fakeClient,
+      );
+      const result = await toggle.toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).not.toBe(true);
     });
 
     test("always applies even when detection would report already-enabled (CtrlProxy-safe)", async () => {

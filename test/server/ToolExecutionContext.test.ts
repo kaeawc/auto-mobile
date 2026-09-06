@@ -363,6 +363,82 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("session-race-window")).toBe("automationReady");
   });
 
+  // #6227 P1 review follow-up: two `automationReady` calls that reach a
+  // freshly-published session (readiness still undefined) *concurrently* must
+  // NOT both run `runDeviceReadinessSetup` — the second observing the first
+  // mid-setup would call `resetSetupState()` on the shared per-device
+  // CtrlProxy manager while the first's `setup()` is still in flight. Setup
+  // must run exactly once (single-flight), and both callers must observe the
+  // upgraded readiness once it resolves.
+  test("serializes concurrent automationReady upgrades on the same session so setup runs exactly once (#6227)", async () => {
+    let setupCalls = 0;
+    let resetCalls = 0;
+    let releaseSetup!: () => void;
+    const setupGate = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    let setupEnteredResolve!: () => void;
+    const setupEntered = new Promise<void>((resolve) => {
+      setupEnteredResolve = resolve;
+    });
+
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {
+          resetCalls += 1;
+        },
+        setup: async () => {
+          setupCalls += 1;
+          setupEnteredResolve();
+          await setupGate;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // Publish the session with readiness NOT YET recorded — the same window
+    // a recovered/newly-published session sits in before this module's own
+    // setup pass records a level.
+    await sessionManager.createSession("session-race-concurrent", "device-1", "android");
+    expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBeUndefined();
+
+    const call1 = createToolExecutionContext(
+      "session-race-concurrent",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+
+    // Let call1 run until it has actually entered `setup()` (i.e. it has
+    // already registered itself as the in-flight upgrade for this session)
+    // before starting the second, concurrent caller.
+    await setupEntered;
+
+    const call2 = createToolExecutionContext(
+      "session-race-concurrent",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+
+    // Give call2 a chance to observe the in-flight upgrade and start
+    // awaiting it, then let the single in-flight setup complete.
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseSetup();
+
+    const [context1, context2] = await Promise.all([call1, call2]);
+
+    expect(context1.deviceId).toBe("device-1");
+    expect(context2.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(resetCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBe("automationReady");
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

@@ -168,6 +168,59 @@ function isReadinessSatisfied(
   return required === "booted" || achieved === "automationReady";
 }
 
+/**
+ * Per-session in-flight readiness upgrade (#6227 P1 follow-up: single-flight).
+ *
+ * A recovered/newly-published session can be observed by two concurrent
+ * `automationReady` calls (e.g. reaching the daemon through different
+ * queues) before either has recorded a readiness level. Without
+ * serialization both calls would see the same insufficient
+ * `getDeviceReadiness` result and both invoke `runDeviceReadinessSetup`,
+ * which calls `AndroidCtrlProxyManager.resetSetupState()` on the *shared*
+ * per-device manager — the second caller's reset can land mid-setup for the
+ * first, corrupting both. Keying by session UUID and having a concurrent
+ * caller await the same in-flight promise (rather than starting its own)
+ * closes that race; each waiter re-checks the achieved readiness once the
+ * in-flight setup settles, upgrading further only if still insufficient.
+ */
+const readinessUpgradeInFlight = new Map<string, Promise<void>>();
+
+async function ensureReadinessUpgraded(
+  session: Session,
+  sessionManager: SessionManager,
+  requiredReadiness: DeviceReadinessLevel,
+): Promise<void> {
+  for (;;) {
+    if (
+      isReadinessSatisfied(sessionManager.getDeviceReadiness(session.sessionId), requiredReadiness)
+    ) {
+      return;
+    }
+
+    const inFlight = readinessUpgradeInFlight.get(session.sessionId);
+    if (inFlight) {
+      // Another caller is already upgrading this session's readiness — wait
+      // for it rather than racing a second `runDeviceReadinessSetup` call,
+      // then loop back to re-check whether it reached the level we need.
+      await inFlight;
+      continue;
+    }
+
+    const setupPromise = runDeviceReadinessSetup(
+      session,
+      sessionManager,
+      requiredReadiness,
+    ).finally(() => {
+      if (readinessUpgradeInFlight.get(session.sessionId) === setupPromise) {
+        readinessUpgradeInFlight.delete(session.sessionId);
+      }
+    });
+    readinessUpgradeInFlight.set(session.sessionId, setupPromise);
+    await setupPromise;
+    return;
+  }
+}
+
 async function setupSession(
   session: Session,
   existingSession: boolean,
@@ -185,12 +238,10 @@ async function setupSession(
     // tool leaves CtrlProxy/accessibility-service setup unprepared; a later
     // call on the same UUID that needs `automationReady` must run that setup
     // now rather than trusting the fast path and returning early against a
-    // disconnected/unprepared device.
-    if (
-      !isReadinessSatisfied(sessionManager.getDeviceReadiness(session.sessionId), requiredReadiness)
-    ) {
-      await runDeviceReadinessSetup(session, sessionManager, requiredReadiness);
-    }
+    // disconnected/unprepared device. `ensureReadinessUpgraded` serializes
+    // concurrent upgrades for the same session (single-flight, #6227 P1
+    // follow-up) so two racing callers can't both trigger setup.
+    await ensureReadinessUpgraded(session, sessionManager, requiredReadiness);
     return;
   }
 

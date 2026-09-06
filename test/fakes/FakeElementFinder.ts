@@ -13,6 +13,10 @@ export class FakeElementFinder implements ElementFinder {
   nextScrollableElements: Element[] = [];
   nextScrollableContainer: Element | null = null;
   nextClickableElements: Element[] = [];
+  nextClickableElementsInContainer: Element[] = [];
+  nextClickableParentsContainingText: Element[] = [];
+  nextClickableSiblingsOfText: Element[] = [];
+  nextClickableSiblingsOfResourceId: Element[] = [];
   nextChildElements: Element[] = [];
   nextSpannables: Element[] | null = null;
   nextFocusedTextInput: any = null;
@@ -100,6 +104,43 @@ export class FakeElementFinder implements ElementFinder {
 
   findClickableElements(_viewHierarchy: ViewHierarchyResult): Element[] {
     return this.nextClickableElements;
+  }
+
+  findClickableElementsInContainer(
+    _viewHierarchy: ViewHierarchyResult,
+    _container?: { elementId?: string; text?: string } | null,
+    _scrollableContainer?: boolean,
+  ): Element[] {
+    return this.nextClickableElementsInContainer;
+  }
+
+  findClickableParentsContainingText(
+    _viewHierarchy: ViewHierarchyResult,
+    _text: string,
+    _container?: { elementId?: string; text?: string } | null,
+    _fuzzyMatch?: boolean,
+    _caseSensitive?: boolean,
+  ): Element[] {
+    return this.nextClickableParentsContainingText;
+  }
+
+  findClickableSiblingsOfText(
+    _viewHierarchy: ViewHierarchyResult,
+    _text: string,
+    _container?: { elementId?: string; text?: string } | null,
+    _fuzzyMatch?: boolean,
+    _caseSensitive?: boolean,
+  ): Element[] {
+    return this.nextClickableSiblingsOfText;
+  }
+
+  findClickableSiblingsOfResourceId(
+    _viewHierarchy: ViewHierarchyResult,
+    _resourceId: string,
+    _container?: { elementId?: string; text?: string } | null,
+    _partialMatch?: boolean,
+  ): Element[] {
+    return this.nextClickableSiblingsOfResourceId;
   }
 
   findChildElements(_viewHierarchy: ViewHierarchyResult, _parentElement: Element): Element[] {

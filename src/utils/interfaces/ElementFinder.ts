@@ -63,6 +63,45 @@ export interface ElementFinder {
 
   findClickableElements(viewHierarchy: ViewHierarchyResult): Element[];
 
+  /**
+   * Find clickable elements, optionally restricted to a container.
+   * Used by `DefaultElementSelector.selectClickable` (the tapAny selection
+   * path) — was implemented on `DefaultElementFinder` but missing from this
+   * interface (issue #6252), so callers typed against `ElementFinder` (rather
+   * than the concrete class) could not see it.
+   */
+  findClickableElementsInContainer(
+    viewHierarchy: ViewHierarchyResult,
+    container?: { elementId?: string; text?: string } | null,
+    scrollableContainer?: boolean,
+  ): Element[];
+
+  /** Find clickable ancestors of elements containing the given text. */
+  findClickableParentsContainingText(
+    viewHierarchy: ViewHierarchyResult,
+    text: string,
+    container?: { elementId?: string; text?: string } | null,
+    fuzzyMatch?: boolean,
+    caseSensitive?: boolean,
+  ): Element[];
+
+  /** Find clickable siblings of elements matching the given text. */
+  findClickableSiblingsOfText(
+    viewHierarchy: ViewHierarchyResult,
+    text: string,
+    container?: { elementId?: string; text?: string } | null,
+    fuzzyMatch?: boolean,
+    caseSensitive?: boolean,
+  ): Element[];
+
+  /** Find clickable siblings of the element matching the given resource id. */
+  findClickableSiblingsOfResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    container?: { elementId?: string; text?: string } | null,
+    partialMatch?: boolean,
+  ): Element[];
+
   findChildElements(viewHierarchy: ViewHierarchyResult, parentElement: Element): Element[];
 
   findSpannables(element: Element): Element[] | null;

@@ -466,7 +466,7 @@ export class PerformanceAudit {
 
       // Get refresh rate from device capabilities for accurate FPS calculation
       const capabilities = await this.capabilitiesDetector.getCapabilities();
-      const refreshRate = capabilities.refreshRateHz || 60;
+      const refreshRate = capabilities.refreshRate || 60;
 
       // Parse frame histogram to estimate duration
       // Look for "Number HISTOGRAM..." or "janky frames" section

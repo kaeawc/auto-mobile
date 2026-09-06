@@ -344,7 +344,6 @@ export class DragAndDrop extends BaseVisualChange {
   private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
     const rawHierarchy = await refreshAndroidViewHierarchy(
       this.accessibilityService,
-      this.viewHierarchy,
       HIERARCHY_REFRESH_TIMEOUT_MS,
       signal,
     );

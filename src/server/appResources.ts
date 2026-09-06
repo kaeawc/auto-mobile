@@ -15,6 +15,7 @@ import { logger } from "../utils/logger";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
   getIosInstalledAppBundleId,
   getIosInstalledAppPath,
@@ -93,7 +94,7 @@ interface AndroidInstalledAppInfo {
   recent: boolean;
 }
 
-interface IosInstalledAppInfo {
+export interface IosInstalledAppInfo {
   bundleId: string;
   type: InstalledAppType;
   displayName?: string;
@@ -238,14 +239,23 @@ function extractIosPath(app: Record<string, unknown>): string | undefined {
  * excludes them on Android.
  *
  * `simctl listapps` reports an explicit `ApplicationType` ("System"/"Hidden"
- * vs "User"); devicectl's physical-device listing carries no equivalent field,
- * so this falls back to Apple's own `com.apple.` bundle-id namespace, which
- * every first-party system app uses.
+ * vs "User") — when present it always wins. When it's absent:
+ *  - On the simulator, an unexpected/incomplete record still falls back to
+ *    Apple's `com.apple.` bundle-id namespace, which only first-party system
+ *    apps use there.
+ *  - On a PHYSICAL device, `devicectl device info apps --json-output` exposes
+ *    no equivalent field at all (only bundleIdentifier/name/version/
+ *    bundleVersion/url/appClip, per Apple's devicectl output), so the
+ *    `com.apple.` heuristic would misclassify a user's own Apple-published
+ *    apps (Pages, Numbers, Keynote, TestFlight, ...) as hidden system apps and
+ *    silently drop them from `type=user`. Without a reliable signal there,
+ *    default to "user" rather than guessing "system" (#6216 review).
  */
 // Exported for tests: pure classification, no device/cache I/O (#6155).
 export function extractIosApplicationType(
   app: Record<string, unknown>,
   bundleId: string,
+  isPhysicalDevice: boolean,
 ): InstalledAppType {
   const raw = readIosAppField(app, ["ApplicationType", "applicationType", "type", "Type"]);
   if (raw) {
@@ -257,14 +267,24 @@ export function extractIosApplicationType(
       return "user";
     }
   }
+  if (isPhysicalDevice) {
+    return "user";
+  }
   return bundleId.startsWith("com.apple.") ? "system" : "user";
 }
 
-function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
+// Exported for tests: pure conversion, no device/cache I/O (#6216 review).
+export function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
   return {
     packageName: app.bundleId,
     type: app.type,
     userId: 0,
+    // iOS has no Android-style multi-user profiles — every app belongs to the
+    // single (profile 0) user. filterAppsByQuery's profile check only reads
+    // `userIds` for non-"user" apps; without this, any profile filter (e.g.
+    // the common profile:0 case) would silently drop every iOS system app
+    // because `userIds` was left undefined (#6216 review).
+    userIds: [0],
     userProfile: "personal",
     foreground: false,
     recent: false,
@@ -439,6 +459,7 @@ async function fetchAppsForDevice(
   const result = await listInstalledApps.executeIosDetailedResult();
   const apps: IosInstalledAppInfo[] = [];
   const queryApps: AppsQueryAppInfo[] = [];
+  const isPhysicalDevice = isIosPhysicalUdid(device.deviceId);
 
   for (const app of result.apps) {
     const bundleId = getIosInstalledAppBundleId(app);
@@ -448,7 +469,11 @@ async function fetchAppsForDevice(
     const displayName = extractIosDisplayName(app as Record<string, unknown>);
     const version = extractIosVersion(app as Record<string, unknown>);
     const path = extractIosPath(app as Record<string, unknown>);
-    const type = extractIosApplicationType(app as Record<string, unknown>, bundleId);
+    const type = extractIosApplicationType(
+      app as Record<string, unknown>,
+      bundleId,
+      isPhysicalDevice,
+    );
     const info: IosInstalledAppInfo = {
       bundleId,
       type,

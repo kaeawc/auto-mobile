@@ -66,6 +66,22 @@ describe("listApps tool", () => {
     expect(() => tool!.schema.parse({ type: "bogus" })).toThrow();
   });
 
+  test("the device-targeting param the docs advertise (device) is actually accepted, and actually advertised (#6216 review)", () => {
+    const tool = ToolRegistry.getTool("listApps");
+    expect(tool).toBeDefined();
+    expect(() => tool!.schema.parse({ device: "Pixel 8" })).not.toThrow();
+
+    const definition = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
+      (candidate) => candidate.name === "listApps",
+    );
+    const properties = definition!.inputSchema.properties as Record<string, unknown>;
+    // deviceId is deliberately stripped from the advertised schema for every
+    // device-aware tool (see isInjectedDeviceIdSchema) — docs must not promise
+    // it. `device` (the device label) is the field MCP clients actually see.
+    expect(properties.device).toBeDefined();
+    expect(properties.deviceId).toBeUndefined();
+  });
+
   test("returns structured app data (not prose) for the resolved device", async () => {
     const tool = ToolRegistry.getTool("listApps");
     expect(tool).toBeDefined();

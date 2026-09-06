@@ -7,6 +7,7 @@ import { ActionableError } from "../models";
 import { DaemonRequest, DaemonResponse, DaemonNotification, isDaemonNotification } from "./types";
 import {
   SOCKET_PATH,
+  PID_FILE_PATH,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
@@ -21,11 +22,7 @@ import {
   DeviceControlTransportError,
   sanitizeDeviceControlTransportFailure,
 } from "./deviceControlTransportFailure";
-import {
-  cleanupStaleDaemonFilesForDeadPidSync,
-  getDaemonSocketPathList,
-  type StaleDaemonFileCleanupOptions,
-} from "./daemonFiles";
+import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -59,14 +56,31 @@ export function toDaemonTransportError(error: Error): DaemonUnavailableError {
   return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`);
 }
 
-export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptions {
+/**
+ * Options consulted ONLY to produce a helpful diagnostic hint on a failed
+ * `connect()` — never to unlink anything (issue #6140 design change).
+ *
+ * `DaemonClient` used to perform client-side stale-socket recovery: on a failed
+ * connect with the PID file's recorded owner confirmed dead, it would unlink the
+ * socket/PID files and retry. That unlink had no lock to coordinate against —
+ * `UnixSocketServer.start()` (`socketServer.ts`) already unconditionally unlinks
+ * the socket path before `listen()`, and that runs under `DaemonManager`'s
+ * `O_EXCL` startup lock (`manager.ts`) — so a client-side unlink outside that
+ * lock could only ever race a concurrent startup winner and delete ITS live
+ * socket: the exact brick #6140 is about. Recovery already happens, correctly,
+ * at daemon bind time under a lock; the client now never touches the
+ * filesystem, only reads the PID file to decide whether a hint is warranted.
+ */
+export interface DaemonClientRecoveryOptions {
+  /** PID-file path consulted for the stale-socket diagnostic hint. Defaults to `PID_FILE_PATH`. */
+  pidFilePath?: string;
+
   /**
-   * When true, `isAvailable()` performs an observation-only probe and never
-   * unlinks socket/PID files, even if the recorded PID is dead. Used by
-   * doctor/debug diagnostics so a momentary refusal or timeout from a loaded
-   * daemon cannot delete its live socket (issue #2658).
+   * Injectable liveness check for the diagnostic hint, so tests can drive a
+   * "recorded PID confirmed dead" outcome without a real dead/live PID. Defaults
+   * to a real `process.kill(pid, 0)` probe ({@link isProcessRunning}).
    */
-  skipStaleCleanup?: boolean;
+  isProcessRunning?: (pid: number) => boolean;
 }
 
 /**
@@ -99,6 +113,13 @@ export class DaemonClient {
   private recoveryOptions: DaemonClientRecoveryOptions;
   private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
   private readonly idGenerator: IdGenerator;
+  /**
+   * Injected so a test can simulate Windows named-pipe semantics without a real
+   * OS switch (issue #6140). Defaults to the real platform. A Windows named pipe
+   * has no filesystem entry, so `connectOnce`'s `existsSync` precheck must be
+   * skipped there, mirroring the platform branch already in {@link isAvailable}.
+   */
+  private readonly platform: NodeJS.Platform;
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -113,6 +134,7 @@ export class DaemonClient {
       build: getCurrentBuildIdentity(),
     },
     idGenerator: IdGenerator = defaultIdGenerator,
+    platformOverride: NodeJS.Platform = platform(),
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
@@ -120,6 +142,7 @@ export class DaemonClient {
     this.recoveryOptions = recoveryOptions;
     this.clientIdentity = clientIdentity;
     this.idGenerator = idGenerator;
+    this.platform = platformOverride;
   }
 
   /**
@@ -169,22 +192,23 @@ export class DaemonClient {
   /**
    * Check if daemon is available (socket file exists and is connectable).
    * Uses a lightweight raw socket probe — no logging, no DaemonClient overhead.
+   *
+   * Purely observation-only (issue #6140 design change): this NEVER unlinks the
+   * socket or PID file, even when the path is a stale non-socket file or the
+   * connect attempt fails. Stale-socket recovery already happens, correctly, at
+   * daemon bind time under `DaemonManager`'s startup lock (`UnixSocketServer.start()`
+   * unconditionally unlinks before `listen()`); a client-side unlink here had no
+   * lock to coordinate against and could only ever delete a concurrent startup
+   * winner's live socket.
    */
-  static async isAvailable(
-    socketPath: string = SOCKET_PATH,
-    recoveryOptions: DaemonClientRecoveryOptions = {},
-  ): Promise<boolean> {
+  static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
     // and let createConnection determine reachability.
-    const skipCleanup = recoveryOptions.skipStaleCleanup === true;
     if (platform() !== "win32") {
       try {
         const stats = statSync(socketPath);
         if (!stats.isSocket()) {
-          if (!skipCleanup) {
-            DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
-          }
           return false;
         }
       } catch (error) {
@@ -212,23 +236,26 @@ export class DaemonClient {
       socket.on("error", () => {
         defaultTimer.clearTimeout(timeout);
         socket.destroy();
-        if (!skipCleanup) {
-          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
-        }
         settle(false);
       });
       const timeout = defaultTimer.setTimeout(() => {
         socket.destroy();
-        if (!skipCleanup) {
-          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
-        }
         settle(false);
       }, 1000);
     });
   }
 
   /**
-   * Connect to the daemon
+   * Connect to the daemon.
+   *
+   * Never performs client-side stale-socket recovery (issue #6140 design
+   * change): a failed connect is rethrown as-is, annotated with a diagnostic
+   * hint when the PID file names a confirmed-dead process ({@link
+   * annotateStaleSocketHint}), but the socket and PID file are never touched.
+   * Recovery is the daemon's own job — `UnixSocketServer.start()` unconditionally
+   * unlinks a stale socket path before `listen()`, under `DaemonManager`'s
+   * `O_EXCL` startup lock — so the next daemon start reclaims a stale socket
+   * regardless of anything this client does.
    */
   async connect(timeoutMs: number = this.connectionTimeout, signal?: AbortSignal): Promise<void> {
     if (this.connected) {
@@ -240,15 +267,33 @@ export class DaemonClient {
       await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       return;
     } catch (error) {
-      if (
-        !signal?.aborted &&
-        DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
-      ) {
-        await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
-        return;
-      }
-      throw error;
+      throw this.annotateStaleSocketHint(error);
     }
+  }
+
+  /**
+   * Adds a diagnostic hint to a failed connect's error when the PID file names a
+   * PID that is confirmed dead — otherwise returns the error unchanged. NEVER
+   * touches the filesystem (issue #6140): this only reads the PID file to decide
+   * whether the hint applies.
+   */
+  private annotateStaleSocketHint(error: unknown): Error {
+    const originalError =
+      error instanceof Error ? error : new DaemonUnavailableError(String(error));
+    const pidFilePath = this.recoveryOptions.pidFilePath ?? PID_FILE_PATH;
+    const pidData = readPidFileDataSync(pidFilePath);
+    if (!pidData || typeof pidData.pid !== "number") {
+      return originalError;
+    }
+    const processRunning = this.recoveryOptions.isProcessRunning ?? isProcessRunning;
+    if (processRunning(pidData.pid)) {
+      return originalError;
+    }
+    return new DaemonUnavailableError(
+      `${originalError.message} — the recorded daemon PID ${pidData.pid} is not running; ` +
+        "the socket may be stale and will be reclaimed automatically the next time the daemon " +
+        "starts (run `--daemon restart` if this persists)",
+    );
   }
 
   private remainingConnectTimeout(deadline: number, timeoutMs: number): number {
@@ -257,6 +302,18 @@ export class DaemonClient {
       throw new DaemonUnavailableError(`Failed to connect to daemon within ${timeoutMs}ms`);
     }
     return remaining;
+  }
+
+  /**
+   * Whether the daemon socket/pipe is observable at the filesystem layer before
+   * attempting a connect. A Unix domain socket has a filesystem entry, so a
+   * missing path means nothing is listening; a Windows named pipe has none, so
+   * this gate must be skipped there entirely and the connect attempted
+   * regardless (issue #6140) — mirroring {@link DaemonManager}'s identical
+   * `socketPathObservable()` helper.
+   */
+  private socketPathObservable(): boolean {
+    return this.platform === "win32" || existsSync(this.socketPath);
   }
 
   private async connectOnce(connectionTimeout: number, signal?: AbortSignal): Promise<void> {
@@ -268,7 +325,7 @@ export class DaemonClient {
       throw new DaemonUnavailableError("Daemon connection attempt aborted");
     }
 
-    if (!existsSync(this.socketPath)) {
+    if (!this.socketPathObservable()) {
       throw new DaemonUnavailableError(`Daemon socket not found: ${this.socketPath}`);
     }
 
@@ -355,20 +412,6 @@ export class DaemonClient {
           );
         }
       });
-    });
-  }
-
-  private static cleanupStaleSocketIfDaemonDead(
-    socketPath: string,
-    recoveryOptions: DaemonClientRecoveryOptions,
-  ): boolean {
-    const socketPaths =
-      recoveryOptions.socketPaths ??
-      (socketPath === SOCKET_PATH ? getDaemonSocketPathList() : [socketPath]);
-
-    return cleanupStaleDaemonFilesForDeadPidSync({
-      ...recoveryOptions,
-      socketPaths,
     });
   }
 

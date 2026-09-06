@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
@@ -129,6 +130,7 @@ describe("DaemonManager stop", () => {
     pidFilePath: string,
     socketPath: string,
     onLivenessCheck?: () => void,
+    lockFilePath: string = join(tmpdir(), "unused-daemon-lock"),
   ): DaemonManager {
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses: () => [],
@@ -141,7 +143,7 @@ describe("DaemonManager stop", () => {
       undefined,
       undefined,
       timer,
-      join(tmpdir(), "unused-daemon-lock"),
+      lockFilePath,
       pidFilePath,
       socketPath,
       processFinder,
@@ -259,6 +261,317 @@ describe("DaemonManager stop", () => {
       expect(existsSync(socketPath)).toBe(false);
     } finally {
       killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // #6140 P2 reconciliation: status() becoming observation-only must not lose
+  // the LEGITIMATE cleanup for a well-formed PID file naming an already-exited
+  // daemon. stop() is a deliberate, explicit user action (`--daemon stop`),
+  // not a passive probe a live startup winner could race, so it is safe (and
+  // expected) to reclaim a CONFIRMED-DEAD recorded daemon's files here even
+  // though status() itself no longer does.
+  // #6140 P1 reconciliation: a daemon publishes its control socket BEFORE
+  // writing its final PID record (daemon.ts), so a live startup winner can
+  // already own the socket while the PID file still names a just-exited
+  // loser. stop()'s confirmed-dead cleanup must remove ONLY the stale PID
+  // file — never the socket by pathname, which it cannot prove is still the
+  // loser's (no lock held, no cheap ownership-proof mechanism, by design). A
+  // leftover socket file is harmless: the next daemon start reclaims it under
+  // the O_EXCL lock.
+  test("removes only the stale PID file for a well-formed PID file naming an already-exited daemon; the socket is left for the next locked bind to reclaim", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-already-exited-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
+    const pid = 4247;
+    // The recorded PID is already dead when stop() is invoked — no live process
+    // to signal at all (unlike the SIGTERM/SIGKILL cases above).
+    const livePids = new Set<number>();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "socket");
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      lockFilePath,
+    );
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      // No SIGTERM/SIGKILL was ever needed — status() already reported the
+      // daemon as not running, so stop() never entered the kill path.
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(existsSync(pidFilePath)).toBe(false);
+      // The socket is NOT unlinked by stop() — only the O_EXCL-locked bind may
+      // do that, at the next daemon start.
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // Regression for the exact race the reviewer described: the PID file names a
+  // dead startup loser, but a LIVE winner has already bound the same socket
+  // path (a daemon publishes its socket before its final PID record). stop()
+  // must still remove the stale PID file (safe: that PID is confirmed dead,
+  // and the winner will write its own fresh PID record before it is done
+  // starting) but must NEVER unlink the socket the winner currently owns.
+  test("removes the stale PID file but never unlinks the socket when a live winner already holds it (dead-loser-PID race)", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-live-winner-race-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
+    const deadLoserPid = 4248;
+    // The recorded (loser) PID is confirmed dead, but a DIFFERENT, live winner
+    // process now holds the socket path — stop() has no way to know this from
+    // the PID file alone, which is exactly why it must never touch the socket.
+    const livePids = new Set<number>();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, deadLoserPid, socketPath);
+    // The winner's live socket — indistinguishable, by pathname alone, from an
+    // ordinary stale socket inode.
+    writeFileSync(socketPath, "live winner socket");
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      lockFilePath,
+    );
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(existsSync(pidFilePath)).toBe(false);
+      // The live winner's socket must survive — this is the brick #6140 exists
+      // to prevent.
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // #6140 P2 reconciliation: restricting removeConfirmedDeadPidFile to the PID
+  // file protected the socket, but left the SAME check/use race on the PID
+  // FILE itself — a concurrent daemon start could rewrite it with its own LIVE
+  // record between this method's liveness check and cleanupDaemonFiles's
+  // unlink. Fixed by acquiring the same O_EXCL namespace startup lock a
+  // concurrent start holds while binding, then RE-READING under the lock
+  // before deleting.
+  test("does not delete the PID file when a concurrent start rewrites it with a live record before the under-lock recheck", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-concurrent-start-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
+    const deadLoserPid = 4249;
+    const winnerPid = 4250;
+    const livePids = new Set<number>([winnerPid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, deadLoserPid, socketPath);
+    writeFileSync(socketPath, "socket");
+
+    let livenessChecks = 0;
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      () => {
+        livenessChecks++;
+        // The 2nd liveness check is removeConfirmedDeadPidFile's PRE-LOCK
+        // pre-check (the 1st is status()'s own check). Simulate a concurrent
+        // daemon start winning the race right after that pre-check: it
+        // rewrites the PID file with its own live record before this
+        // method's UNDER-LOCK re-read (the 3rd liveness check) runs.
+        if (livenessChecks === 2) {
+          writeStopPidFile(pidFilePath, winnerPid, socketPath);
+        }
+      },
+      lockFilePath,
+    );
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      // The winner's live PID record must survive intact.
+      expect(existsSync(pidFilePath)).toBe(true);
+      const survivingPidData = JSON.parse(readFileSync(pidFilePath, "utf-8")) as { pid: number };
+      expect(survivingPidData.pid).toBe(winnerPid);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("skips PID-file deletion without hanging when the startup lock cannot be acquired within the bound", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-lock-unavailable-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const lockFilePath = join(directory, "daemon.lock");
+    const deadLoserPid = 4251;
+    const lockHolderPid = 4252;
+    // The lock holder is alive for the whole test — every acquire attempt
+    // inside the bounded retry loop must see it as genuinely held.
+    const livePids = new Set<number>([lockHolderPid]);
+    writeStopPidFile(pidFilePath, deadLoserPid, socketPath);
+    writeFileSync(socketPath, "socket");
+    // A live process already holds the namespace startup lock (e.g. a
+    // concurrent daemon start in progress).
+    writeFileSync(lockFilePath, String(lockHolderPid));
+
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      lockFilePath,
+    );
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      const start = timer.getCurrentTime();
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+      // Bounded: stop() must give up within its own acquire bound rather than
+      // hang waiting for the lock.
+      expect(timer.getCurrentTime() - start).toBeLessThan(5_000);
+
+      expect(killSpy).not.toHaveBeenCalled();
+      // Deletion was skipped — the stale PID file survives for the next
+      // locked bind to reclaim, exactly like the socket already does.
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("leaves files intact when stop() finds no PID file at all", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-no-pidfile-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createManagerForStop(new Set<number>(), timer, pidFilePath, socketPath);
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+// #6140 P1 completion: status() must be purely observation-only. A transient
+// DaemonClient.isAvailable() probe failure routes into
+// DaemonMcpProxy.startDaemon() -> DaemonManager.status(), OUTSIDE the O_EXCL
+// startup lock — if status() unlinked the socket/PID file whenever the
+// recorded PID looked dead, it would delete a LIVE winner's socket during a
+// startup race, recreating the exact #6140 brick through a different actor.
+describe("DaemonManager status", () => {
+  function writeStatusPidFile(pidFilePath: string, pid: number, socketPath: string): void {
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({
+        pid,
+        socketPath,
+        port: 3000,
+        startedAt: 1,
+        version: "test",
+      }),
+    );
+  }
+
+  test("never unlinks the socket or PID file when the recorded PID is dead", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-dead-pid-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4245;
+    try {
+      writeStatusPidFile(pidFilePath, pid, socketPath);
+      // A stale socket inode is present but the recorded PID is confirmed dead —
+      // exactly the shape a concurrent startup winner's live socket + a stale
+      // loser PID file would present.
+      writeFileSync(socketPath, "socket");
+      const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      };
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        join(tmpdir(), "unused-daemon-lock"),
+        pidFilePath,
+        socketPath,
+        processFinder,
+      );
+
+      const status = await manager.status();
+
+      expect(status).toEqual({ running: false });
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("reports running without touching any files when the recorded PID is alive", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-live-pid-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4246;
+    try {
+      writeStatusPidFile(pidFilePath, pid, socketPath);
+      writeFileSync(socketPath, "socket");
+      const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => true,
+      };
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        join(tmpdir(), "unused-daemon-lock"),
+        pidFilePath,
+        socketPath,
+        processFinder,
+      );
+
+      const status = await manager.status();
+
+      expect(status.running).toBe(true);
+      expect(status.pid).toBe(pid);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -445,10 +758,10 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("uses an expanded buffer when reading the full process table", () => {
+  test("uses an expanded buffer and a bounded timeout when reading the full process table", () => {
     const calls: Array<{
       command: string;
-      options: { encoding: "utf-8"; maxBuffer: number };
+      options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
     }> = [];
     const finder = new PsDaemonProcessFinder((command, options) => {
       calls.push({ command, options });
@@ -468,10 +781,53 @@ describe("Daemon manager process detection", () => {
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
         },
       },
     ]);
     expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
+  });
+
+  // #6140 review: execSync's `timeout: 0` means NO timeout (unbounded), not
+  // "expire immediately" — a computed remaining budget can legitimately be
+  // exactly 0, so it must never be forwarded to execSync as-is or the intended
+  // bound is silently lost.
+  test("clamps a zero requested timeout to a positive floor instead of forwarding execSync's unbounded 0", () => {
+    const calls: Array<{ options: { timeout: number } }> = [];
+    const finder = new PsDaemonProcessFinder((_command, options) => {
+      calls.push({ options: options as { timeout: number } });
+      return "";
+    });
+
+    finder.findDaemonProcesses(0);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].options.timeout).toBeGreaterThan(0);
+  });
+
+  test("clamps a negative requested timeout to a positive floor", () => {
+    const calls: Array<{ options: { timeout: number } }> = [];
+    const finder = new PsDaemonProcessFinder((_command, options) => {
+      calls.push({ options: options as { timeout: number } });
+      return "";
+    });
+
+    finder.findDaemonProcesses(-50);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].options.timeout).toBeGreaterThan(0);
+  });
+
+  test("still caps a requested timeout at the scan ceiling", () => {
+    const calls: Array<{ options: { timeout: number } }> = [];
+    const finder = new PsDaemonProcessFinder((_command, options) => {
+      calls.push({ options: options as { timeout: number } });
+      return "";
+    });
+
+    finder.findDaemonProcesses(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS * 10);
+
+    expect(calls[0].options.timeout).toBe(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS);
   });
 
   test("parses daemon processes from Windows PowerShell JSON output", () => {
@@ -516,10 +872,10 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("uses a Windows-native process table command with the expanded buffer", () => {
+  test("uses a Windows-native process table command with the expanded buffer and a bounded timeout", () => {
     const calls: Array<{
       command: string;
-      options: { encoding: "utf-8"; maxBuffer: number };
+      options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
     }> = [];
     const finder = new WindowsDaemonProcessFinder((command, options) => {
       calls.push({ command, options });
@@ -544,6 +900,7 @@ describe("Daemon manager process detection", () => {
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
         },
       },
     ]);

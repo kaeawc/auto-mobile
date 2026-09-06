@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync } from "node:fs";
+import { platform } from "node:os";
 import { SOCKET_PATH, PID_FILE_PATH } from "./constants";
 import { DaemonClient } from "./client";
 import { readFile } from "node:fs/promises";
@@ -31,6 +32,14 @@ export interface DaemonHealthReport {
 export interface DaemonHealthReportOptions {
   socketPath?: string;
   pidFilePath?: string;
+  /**
+   * Injected so a test can simulate Windows named-pipe semantics without a real
+   * OS switch (issue #6140). Defaults to the real platform. A Windows named pipe
+   * has no filesystem entry, so the `existsSync`/`stat` gates below must be
+   * skipped there and the connectivity probe consulted directly — mirroring the
+   * platform branch already in {@link DaemonClient.isAvailable}.
+   */
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -42,6 +51,7 @@ export async function getDaemonHealthReport(
 ): Promise<DaemonHealthReport> {
   const socketPath = options.socketPath ?? SOCKET_PATH;
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
+  const isWin32 = (options.platform ?? platform()) === "win32";
   const report: DaemonHealthReport = {
     timestamp: new Date().toISOString(),
     daemonRunning: false,
@@ -53,12 +63,18 @@ export async function getDaemonHealthReport(
     recommendations: [],
   };
 
-  // Check socket file
-  report.socketExists = existsSync(socketPath);
-  if (!report.socketExists) {
-    report.recommendations.push("Socket file not found. Daemon may not be running.");
-  } else {
-    report.socketAccessible = true; // If it exists and we can read it, we assume accessible
+  // Check socket file. Windows named pipes have no filesystem entry (issue
+  // #6140), so this existsSync gate is UNOBSERVABLE there — rather than assume
+  // the pipe is always present (which would report a healthy-looking socket
+  // even when no daemon exists), leave socketExists/socketAccessible false for
+  // now and DERIVE them from the connectivity probe result below.
+  if (!isWin32) {
+    report.socketExists = existsSync(socketPath);
+    if (!report.socketExists) {
+      report.recommendations.push("Socket file not found. Daemon may not be running.");
+    } else {
+      report.socketAccessible = true; // If it exists and we can read it, we assume accessible
+    }
   }
 
   // Check PID file
@@ -98,17 +114,25 @@ export async function getDaemonHealthReport(
   }
 
   // Try to connect to socket to verify daemon responsiveness. A daemon can be
-  // serving via socket even when PID bookkeeping is stale or missing.
-  if (report.socketExists) {
+  // serving via socket even when PID bookkeeping is stale or missing. On POSIX
+  // this is gated on the file existing; on win32 there is nothing to gate on
+  // (a named pipe has no filesystem entry), so the probe always runs there and
+  // its result is what DETERMINES socketExists/socketAccessible — never assumed.
+  if (isWin32 || report.socketExists) {
     try {
-      // Observation-only probe: never unlink a live daemon's socket if PID
-      // bookkeeping is momentarily stale (issue #2658).
-      const available = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
+      // Observation-only probe: never unlinks a live daemon's socket, even if
+      // PID bookkeeping is momentarily stale (issue #2658, #6140).
+      const available = await DaemonClient.isAvailable(socketPath);
       report.socketConnectable = available;
+      if (isWin32) {
+        report.socketExists = available;
+        report.socketAccessible = available;
+      }
       if (!available) {
         report.recommendations.push(
-          "Socket file exists, but socket is not responding. " +
-            "Daemon may be stuck or unresponsive.",
+          isWin32
+            ? "Named pipe not found or not responding. Daemon may not be running."
+            : "Socket file exists, but socket is not responding. Daemon may be stuck or unresponsive.",
         );
       } else if (!report.daemonRunning) {
         report.daemonRunning = true;
@@ -203,6 +227,63 @@ export interface SocketDiagnostics {
 }
 
 /**
+ * Try to get file stats to check read/write permissions. A named pipe has no
+ * filesystem entry to stat, so callers skip this entirely on win32.
+ */
+async function checkSocketFileAccess(
+  socketPath: string,
+  diagnostics: SocketDiagnostics,
+): Promise<boolean> {
+  try {
+    await (await import("node:fs/promises")).stat(socketPath);
+    diagnostics.socketReadable = true;
+    diagnostics.socketWritable = true;
+    return true;
+  } catch (error) {
+    diagnostics.issues.push(`Cannot access socket file: ${error}`);
+    return false;
+  }
+}
+
+/**
+ * Observation-only connectivity probe: never unlinks a live daemon's socket,
+ * even if PID bookkeeping is momentarily stale (issue #2658, #6140). On win32
+ * this probe is the ONLY signal — its result DETERMINES
+ * socketExists/socketReadable/socketWritable, never assumed beforehand.
+ */
+async function probeSocketConnectivity(
+  socketPath: string,
+  timer: Timer,
+  isWin32: boolean,
+  diagnostics: SocketDiagnostics,
+): Promise<void> {
+  try {
+    const startTime = timer.now();
+    const available = await DaemonClient.isAvailable(socketPath);
+    const latency = timer.now() - startTime;
+
+    if (isWin32) {
+      diagnostics.socketExists = available;
+      diagnostics.socketReadable = available;
+      diagnostics.socketWritable = available;
+    }
+
+    if (available) {
+      diagnostics.socketConnectable = true;
+      diagnostics.connectionLatency = latency;
+    } else {
+      diagnostics.issues.push(
+        isWin32
+          ? "Named pipe not found or not responding"
+          : "Socket connection test returned false",
+      );
+    }
+  } catch (error) {
+    diagnostics.issues.push(`Connection failed: ${error}`);
+  }
+}
+
+/**
  * Run socket diagnostics
  */
 export async function runSocketDiagnostics(
@@ -210,8 +291,14 @@ export async function runSocketDiagnostics(
   options: DaemonHealthReportOptions = {},
 ): Promise<SocketDiagnostics> {
   const socketPath = options.socketPath ?? SOCKET_PATH;
+  const isWin32 = (options.platform ?? platform()) === "win32";
   const diagnostics: SocketDiagnostics = {
-    socketExists: existsSync(socketPath),
+    // Windows named pipes have no filesystem entry (issue #6140) — UNOBSERVABLE
+    // via existsSync there. Rather than assume the pipe is always present
+    // (which would report a healthy-looking socket even when no daemon
+    // exists), leave this false for now and DERIVE it from the connectivity
+    // probe result below.
+    socketExists: !isWin32 && existsSync(socketPath),
     socketReadable: false,
     socketWritable: false,
     socketConnectable: false,
@@ -219,37 +306,16 @@ export async function runSocketDiagnostics(
     lastTestTime: new Date().toISOString(),
   };
 
-  if (!diagnostics.socketExists) {
+  if (!isWin32 && !diagnostics.socketExists) {
     diagnostics.issues.push("Socket file does not exist");
     return diagnostics;
   }
 
-  // Try to get file stats to check read/write permissions
-  try {
-    await (await import("node:fs/promises")).stat(socketPath);
-    diagnostics.socketReadable = true;
-    diagnostics.socketWritable = true;
-  } catch (error) {
-    diagnostics.issues.push(`Cannot access socket file: ${error}`);
+  if (!isWin32 && !(await checkSocketFileAccess(socketPath, diagnostics))) {
     return diagnostics;
   }
 
-  // Try to connect. Observation-only probe: never unlink a live daemon's
-  // socket if PID bookkeeping is momentarily stale (issue #2658).
-  try {
-    const startTime = timer.now();
-    const available = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
-    const latency = timer.now() - startTime;
-
-    if (available) {
-      diagnostics.socketConnectable = true;
-      diagnostics.connectionLatency = latency;
-    } else {
-      diagnostics.issues.push("Socket connection test returned false");
-    }
-  } catch (error) {
-    diagnostics.issues.push(`Connection failed: ${error}`);
-  }
+  await probeSocketConnectivity(socketPath, timer, isWin32, diagnostics);
 
   return diagnostics;
 }

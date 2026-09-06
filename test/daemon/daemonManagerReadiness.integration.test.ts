@@ -5,9 +5,15 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import {
+  DaemonManager,
+  type DaemonProcessFinder,
+  type DaemonProcessSpawner,
+} from "../../src/daemon/manager";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
+  DEFAULT_PID_FILE_PATH,
+  DEFAULT_SOCKET_PATH,
   READINESS_PROBE_MAX_ATTEMPTS,
 } from "../../src/daemon/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
@@ -240,7 +246,17 @@ describe("DaemonManager readiness", () => {
     expect(existsSync(socketPath)).toBe(true);
   });
 
-  test("removes an invalid non-socket path and keeps waiting when the PID is alive", async () => {
+  // BRICK regression guard (issue #6140, field-confirmed dogfood repro): a LIVE
+  // daemon under load (busy accept queue, a concurrent heavy operation) can fail
+  // every readiness probe attempt within budget while still genuinely owning the
+  // socket. The prior behavior unlinked the socket whenever `status()` reported
+  // the recorded PID alive after every probe attempt failed — which is exactly
+  // this scenario, not just the rare "SIGKILL + PID reuse" case it was meant for.
+  // Deleting a live daemon's socket, combined with the #5253 guard (which then
+  // refuses to replace a daemon it believes is alive), permanently bricks every
+  // later client until an explicit `--daemon restart`. This test fails on `main`
+  // and passes after the fix: the socket must survive.
+  test("never unlinks the socket when the readiness probe fails but the PID is alive (#6140)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -262,24 +278,26 @@ describe("DaemonManager readiness", () => {
     );
 
     await expect(manager.waitForReady(250)).resolves.toBe(false);
-    // The probe is retried before the socket is treated as dead, bounded by the
-    // remaining readiness deadline. A slow probe can consume the remaining budget
-    // before every retry runs.
+    // The probe is retried before giving up, bounded by the remaining readiness
+    // deadline. A slow probe can consume the remaining budget before every retry
+    // runs.
     expect(clients.length).toBeGreaterThan(0);
     expect(clients.length).toBeLessThanOrEqual(READINESS_PROBE_MAX_ATTEMPTS);
     expect(clients[0].connectCallCount).toBe(1);
     expect(clients[0].closeCallCount).toBe(1);
-    expect(existsSync(socketPath)).toBe(false);
+    // The live daemon's socket must NOT be unlinked (issue #6140).
+    expect(existsSync(socketPath)).toBe(true);
   });
 
-  // A daemon killed with SIGKILL leaves its Unix socket pathname behind as a
-  // socket inode. If the PID is later reused, status() reports running, but the
-  // readiness probe still cannot connect. The stale socket inode must be removed
-  // so the loop does not spin until timeout (and so a fresh daemon can bind it).
+  // Same BRICK regression (#6140), against a genuine Unix socket inode rather than
+  // a placeholder file — the case the removed `isSocket()`-bypassing cleanup used
+  // to specifically target. The probe still cannot complete the daemon handshake,
+  // but the recorded PID is alive, so the inode must be preserved rather than
+  // unlinked out from under the live process bound to it.
   // Gated off Windows: net.Server.listen(path) there means a named pipe, not a
   // filesystem socket inode, so a real socket inode cannot be created this way.
   test.skipIf(process.platform === "win32")(
-    "removes a stale socket inode when the readiness probe cannot connect",
+    "never unlinks a live socket inode when the readiness probe cannot connect (#6140)",
     async () => {
       const { lockPath, pidPath, socketPath } = createPaths();
       const fakeTimer = new FakeTimer();
@@ -287,11 +305,11 @@ describe("DaemonManager readiness", () => {
       const clients: ProbeClient[] = [];
       writePidFile(pidPath, socketPath);
 
-      // Bind a real Unix socket so the path is a genuine socket inode (the case
-      // the previous isSocket() guard wrongly preserved). The probe still fails
-      // because it cannot complete the daemon handshake, so the inode is stale
-      // from the client's perspective and must be removed. Left listening for
-      // afterEach cleanup; closing here would unlink the inode itself.
+      // Bind a real Unix socket so the path is a genuine socket inode. The probe
+      // still fails because it cannot complete the daemon handshake, but the
+      // recorded PID is genuinely alive throughout, so the inode must survive.
+      // Left listening for afterEach cleanup; closing here would unlink the inode
+      // itself.
       const server = createServer();
       servers.push(server);
       await new Promise<void>((resolve) => server.listen(socketPath, resolve));
@@ -315,7 +333,7 @@ describe("DaemonManager readiness", () => {
       expect(clients.length).toBeLessThanOrEqual(READINESS_PROBE_MAX_ATTEMPTS);
       expect(clients[0].connectCallCount).toBe(1);
       expect(clients[0].closeCallCount).toBe(1);
-      expect(existsSync(socketPath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(true);
     },
   );
 
@@ -1186,6 +1204,282 @@ describe("DaemonManager readiness", () => {
     } finally {
       readySpy.mockRestore();
       findSpy.mockRestore();
+    }
+  });
+
+  // Platform-aware readiness (issue #6140): a Windows named pipe has no
+  // filesystem entry, so gating on `existsSync(this.socketPath)` before probing
+  // means a joined (or normally-started) Windows daemon can never be observed and
+  // `waitForReady` always times out. Simulate win32 via the injected platform
+  // override rather than a real OS switch.
+  test("waitForReady probes the socket on win32 even though it has no filesystem entry (#6140)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const clients: ProbeClient[] = [];
+    // Deliberately do NOT create a file at socketPath: a named pipe has none.
+
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(true);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "win32",
+    );
+
+    await expect(manager.waitForReady(100)).resolves.toBe(true);
+    expect(clients).toHaveLength(1);
+    expect(existsSync(socketPath)).toBe(false);
+  });
+
+  // Regression companion: the default (non-win32) platform must keep requiring an
+  // observable socket path before probing. Relies on the DEFAULT (unoverridden)
+  // platform being non-win32, which only holds on this repo's Unix host-
+  // integration runners — on the Windows matrix, `process.platform` genuinely
+  // IS "win32", so the gate this test checks for would not apply.
+  test.skipIf(process.platform === "win32")(
+    "waitForReady still gates on existsSync off win32",
+    async () => {
+      const { lockPath, pidPath, socketPath } = createPaths();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const clients: ProbeClient[] = [];
+      // No file at socketPath and no explicit platform override (defaults to the
+      // real, non-win32 test platform).
+
+      const manager = new DaemonManager(
+        () => {
+          const client = new ProbeClient(true);
+          clients.push(client);
+          return client;
+        },
+        undefined,
+        fakeTimer,
+        lockPath,
+        pidPath,
+        socketPath,
+      );
+
+      await expect(manager.waitForReady(100)).resolves.toBe(false);
+      expect(clients).toHaveLength(0);
+    },
+  );
+
+  // #6109-folded fix (a): the process-table scan is a synchronous, uncancellable
+  // `ps`/PowerShell call with no timeout of its own. Once the rejoin budget is
+  // exhausted, the loop must return rather than start that scan.
+  test("recheck the deadline before scanning the process table so an exhausted budget skips it (#6140, folded from PR #6109)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    // Consumes the ENTIRE probe budget handed to it before reporting a miss, so
+    // the rejoin deadline is exactly exhausted right as the process-table scan
+    // would otherwise run.
+    class BudgetExhaustingReachability implements DaemonSocketReachabilityLike {
+      calls = 0;
+      constructor(private readonly timer: FakeTimer) {}
+      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+        this.calls++;
+        await this.timer.sleep(timeoutMs);
+        return false;
+      }
+    }
+    const reachability = new BudgetExhaustingReachability(fakeTimer);
+    const manager = createRejoinManager({
+      timer: fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner: new FakeDaemonSpawner(),
+      reachability,
+    });
+
+    let scanCalls = 0;
+    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
+      scanCalls++;
+      return [];
+    });
+
+    try {
+      const internals = manager as unknown as {
+        tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
+      };
+      // Budget equals the single-probe cap, so the first probe alone exhausts it.
+      await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
+      expect(reachability.calls).toBe(1);
+      // The scan must never run: the deadline was already exhausted by the probe.
+      expect(scanCalls).toBe(0);
+    } finally {
+      liveSpy.mockRestore();
+    }
+  });
+
+  // #6109-folded fix (b): findLiveDaemonProcesses() scans the WHOLE process table
+  // and cannot tell a daemon bound to THIS namespace's socket apart from an
+  // unrelated one (another worktree, another isolated test socket). For a manager
+  // using an isolated (non-default) PID/socket path, the rejoin must not trust
+  // that unscoped "a live daemon process exists somewhere" signal for the full
+  // budget — an unrelated daemon being alive must not poll an unreachable socket
+  // for the whole rejoin window.
+  test("bounds the rejoin to a short grace for an isolated socket namespace, ignoring an unrelated daemon (#6140, folded from PR #6109)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    const reachability = new FakePeerSocketReachability(); // never reachable
+    const manager = createRejoinManager({
+      timer: fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner: new FakeDaemonSpawner(),
+      reachability,
+    });
+    // An unrelated auto-mobile daemon (a different worktree/namespace) is always
+    // "live" per the unscoped process-table scan.
+    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockReturnValue([424242]);
+
+    try {
+      const internals = manager as unknown as {
+        tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
+      };
+      const start = fakeTimer.getCurrentTime();
+      // A generous budget that would, on the default namespace, poll for a long
+      // time on the strength of the (unrelated) live-process signal alone.
+      await expect(internals.tryJoinPeerDaemonAfterSpawnExit(30_000)).resolves.toBe(false);
+      // Bounded to the short isolated-namespace grace, not the full 30s budget.
+      expect(fakeTimer.getCurrentTime() - start).toBeLessThan(5_000);
+    } finally {
+      liveSpy.mockRestore();
+    }
+  });
+
+  // #6140 P2 review finding: comparing against `PID_FILE_PATH`/`SOCKET_PATH` is a
+  // no-op once an env override (AUTOMOBILE_DAEMON_PID_FILE_PATH or the socket
+  // equivalent) is what INITIALIZED those constants in the first place — an
+  // unoverridden manager's constructor-default `pidFilePath`/`socketPath` then
+  // equals the very same overridden constant. `isIsolatedSocketNamespace` must
+  // compare against the built-in `DEFAULT_PID_FILE_PATH`/`DEFAULT_SOCKET_PATH`
+  // instead, which stays fixed regardless of any env override.
+  describe("isolated-namespace detection (#6140)", () => {
+    function internalsOf(manager: DaemonManager) {
+      return manager as unknown as { isIsolatedSocketNamespace(): boolean };
+    }
+
+    test("is false for the built-in default PID file and socket paths", () => {
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        DEFAULT_PID_FILE_PATH,
+        DEFAULT_SOCKET_PATH,
+      );
+
+      expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(false);
+    });
+
+    test("is true for a PID-file-only override, matching AUTOMOBILE_DAEMON_PID_FILE_PATH production isolation", () => {
+      const { pidPath } = createPaths();
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        pidPath,
+        DEFAULT_SOCKET_PATH,
+      );
+
+      expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(true);
+    });
+
+    test("is true for a socket-only custom path even when the PID file path is the default", () => {
+      const { socketPath } = createPaths();
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        DEFAULT_PID_FILE_PATH,
+        socketPath,
+      );
+
+      expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(true);
+    });
+  });
+
+  // #6140 P2 review finding: checking only for EXACTLY zero remaining time before
+  // the process-table scan is insufficient — a small-but-nonzero remainder still
+  // lets the scan run to its full DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS ceiling
+  // (5000ms), which can blow past both the isolated-namespace grace and the outer
+  // start-deadline delivery headroom before the actionable launch error is ever
+  // delivered. The scan must be bounded by whatever remains of the loop's own
+  // deadline instead.
+  test("bounds the process-table scan by the remaining rejoin budget, not just an exact-zero check (#6140)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    // Consumes all but a small sliver of whatever budget it is given before
+    // reporting a miss, simulating a probe that burns most of the remaining time.
+    class NearBudgetExhaustingReachability implements DaemonSocketReachabilityLike {
+      constructor(private readonly timer: FakeTimer) {}
+      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+        await this.timer.sleep(Math.max(0, timeoutMs - 40));
+        return false;
+      }
+    }
+    const reachability = new NearBudgetExhaustingReachability(fakeTimer);
+
+    const scanTimeouts: Array<number | undefined> = [];
+    const processFinder: DaemonProcessFinder = {
+      findDaemonProcesses(timeoutMs?: number) {
+        scanTimeouts.push(timeoutMs);
+        return [];
+      },
+    };
+
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      reachability,
+    );
+
+    const internals = manager as unknown as {
+      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
+    };
+
+    await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
+    expect(scanTimeouts.length).toBeGreaterThan(0);
+    // Bounded to what remained of the loop's own deadline (~40ms here), nowhere
+    // near the 5000ms DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS ceiling.
+    for (const timeoutMs of scanTimeouts) {
+      expect(timeoutMs).toBeDefined();
+      expect(timeoutMs as number).toBeLessThan(100);
     }
   });
 });

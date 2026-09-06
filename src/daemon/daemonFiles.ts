@@ -95,10 +95,6 @@ export interface DaemonFileCleanupOptions {
   expectedPid?: number;
 }
 
-export interface StaleDaemonFileCleanupOptions extends DaemonFileCleanupOptions {
-  isProcessRunning?: (pid: number) => boolean;
-}
-
 /**
  * Default on-disk paths of every daemon socket, for unlink-on-cleanup.
  *
@@ -207,25 +203,4 @@ function shouldCleanupForExpectedPid(
   }
   const pidData = readPidFileDataSync(pidFilePath);
   return pidData?.pid === expectedPid;
-}
-
-export function cleanupStaleDaemonFilesForDeadPidSync(
-  options: StaleDaemonFileCleanupOptions = {},
-): boolean {
-  const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
-  const pidData = readPidFileDataSync(pidFilePath);
-  if (!pidData || typeof pidData.pid !== "number") {
-    return false;
-  }
-
-  const processRunning = options.isProcessRunning ?? isProcessRunning;
-  if (processRunning(pidData.pid)) {
-    return false;
-  }
-
-  return cleanupDaemonFilesSync({
-    pidFilePath,
-    socketPaths: options.socketPaths,
-    expectedPid: pidData.pid,
-  });
 }

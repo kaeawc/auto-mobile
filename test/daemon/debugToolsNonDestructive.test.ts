@@ -43,7 +43,10 @@ describe("daemon health probes are non-destructive", () => {
     tempDirs.length = 0;
   });
 
-  test("isAvailable skips stale-socket cleanup when skipStaleCleanup is set", async () => {
+  // #6140 design change: `isAvailable` no longer takes recovery options at all —
+  // it NEVER unlinks anything, unconditionally, so there is nothing left to
+  // "disable".
+  test("isAvailable never unlinks the stale socket or PID file", async () => {
     if (isWindows) {
       return;
     }
@@ -52,30 +55,21 @@ describe("daemon health probes are non-destructive", () => {
     writeFileSync(socketPath, "stale socket placeholder");
     writeDeadPidFile(pidFilePath, socketPath);
 
-    const available = await DaemonClient.isAvailable(socketPath, {
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => false,
-      skipStaleCleanup: true,
-    });
+    const available = await DaemonClient.isAvailable(socketPath);
 
     expect(available).toBe(false);
-    // Files must survive: cleanup was explicitly disabled.
     expect(existsSync(socketPath)).toBe(true);
     expect(existsSync(pidFilePath)).toBe(true);
   });
 
-  test("getDaemonHealthReport invokes isAvailable with stale-cleanup disabled", async () => {
+  test("getDaemonHealthReport invokes isAvailable with just the socket path", async () => {
     const { socketPath, pidFilePath } = createTempPaths();
     writeFileSync(socketPath, "");
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     try {
       await getDaemonHealthReport(undefined, { socketPath, pidFilePath });
-      expect(isAvailable).toHaveBeenCalledWith(
-        socketPath,
-        expect.objectContaining({ skipStaleCleanup: true }),
-      );
+      expect(isAvailable).toHaveBeenCalledWith(socketPath);
     } finally {
       isAvailable.mockRestore();
     }
@@ -98,17 +92,14 @@ describe("daemon health probes are non-destructive", () => {
     expect(existsSync(pidFilePath)).toBe(true);
   });
 
-  test("runSocketDiagnostics invokes isAvailable with stale-cleanup disabled", async () => {
+  test("runSocketDiagnostics invokes isAvailable with just the socket path", async () => {
     const { socketPath } = createTempPaths();
     writeFileSync(socketPath, "");
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     try {
       await runSocketDiagnostics(undefined, { socketPath });
-      expect(isAvailable).toHaveBeenCalledWith(
-        socketPath,
-        expect.objectContaining({ skipStaleCleanup: true }),
-      );
+      expect(isAvailable).toHaveBeenCalledWith(socketPath);
     } finally {
       isAvailable.mockRestore();
     }

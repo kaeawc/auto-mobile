@@ -7,7 +7,6 @@ import {
   DaemonSocketReachability,
   type DaemonSocketConnectAttempt,
 } from "../../src/daemon/daemonSocketReachability";
-import { cleanupStaleDaemonFilesForDeadPidSync } from "../../src/daemon/daemonFiles";
 import type { PidFileData } from "../../src/daemon/types";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -113,7 +112,15 @@ describe("DaemonSocketReachability", () => {
     expect(connectCalls).toBe(0);
   });
 
-  test("never unlinks the socket file on a refused connection, unlike the cleanup-capable primitive it replaced (#6103 #2)", async () => {
+  // #6140 design change: client-side stale-socket recovery (the destructive,
+  // cleanup-capable primitive this test used to contrast against) has been
+  // removed from DaemonClient entirely — recovery is now exclusively the
+  // daemon's own lock-guarded bind-time unlink (UnixSocketServer.start(), under
+  // DaemonManager's O_EXCL startup lock). This probe remains observation-only:
+  // it has no filesystem-mutating code path at all, which is what keeps the
+  // rejoin path in manager.ts safe to use even against a stale, dead-PID-owned
+  // socket inode.
+  test("never unlinks the socket file on a refused connection (#6103)", async () => {
     const dir = createTempDir();
     const socketPath = join(dir, "peer.sock");
     const pidPath = join(dir, "daemon.pid");
@@ -138,18 +145,6 @@ describe("DaemonSocketReachability", () => {
     });
     await expect(reachability.isReachable(socketPath, 500)).resolves.toBe(false);
     expect(existsSync(socketPath)).toBe(true);
-
-    // Contrast — the danger this replaces: the cleanup-capable recovery primitive the
-    // rejoin used to reach (via DaemonClient.connect) DELETES that same live-race
-    // endpoint on a dead-PID record. If the probe were implemented via that path, the
-    // assertion above would go red.
-    const unlinked = cleanupStaleDaemonFilesForDeadPidSync({
-      pidFilePath: pidPath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => false,
-    });
-    expect(unlinked).toBe(true);
-    expect(existsSync(socketPath)).toBe(false);
   });
 
   // Gated off Windows: net.Server.listen(path) there is a named pipe, not a filesystem

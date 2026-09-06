@@ -15,16 +15,24 @@
 #     host (the prior narrow `/?$` + `/translations/?$` patterns let `/faq`
 #     through, which is exactly the URL that reset the connection).
 #
-# github.com `issues/*` links are deliberately NOT excluded: they are legitimate
-# references we want validated, routed through the authenticated GitHub API
-# (GITHUB_TOKEN, #5405) rather than throttled HTTP scraping; the backoff above is
-# the correct lever for their transient timeouts.
+# #5622 recurred TWICE after the retry/backoff hardening above landed (runs
+# 33010560252 and 33032939183) — both still exited 2 with 20 [TIMEOUT]s, 0 real
+# errors, 100% against self-referential `github.com/kaeawc/auto-mobile/issues/*`
+# and `pull/*` links (GITHUB_TOKEN routing, #5405, was already in effect too).
+# Client-side retries cannot outrun GitHub's own rate limit under bulk lookups,
+# so those self-referential links (we created the issue/PR, so the link is
+# guaranteed valid) are now excluded from network validation entirely. Links to
+# OTHER repos' issues/PRs are unaffected and still checked.
 #
 # TOML is parsed with yq (the repo's canonical config/workflow parser), not
-# grepped, so a value in a comment cannot satisfy these assertions. The
-# behavioral exclusion check drives the real lychee binary; the bats CI job does
-# not install lychee, so that test skips there and runs in local pre-PR
-# validation where lychee is present.
+# grepped, so a value in a comment cannot satisfy these assertions. All
+# assertions here are config-level (parsing `.lycherc.toml` with yq) rather
+# than invoking the real `lychee` binary: the required BATS lane in
+# `pull_request.yml` does not install lychee, and a test gated behind
+# "skip if lychee is missing" never actually runs there — it would guard
+# nothing pre-merge (the exact gap this test exists to close). yq ships on
+# the GitHub-hosted macOS runner image the BATS lane uses, so no new install
+# step is needed.
 
 CONFIG=".lycherc.toml"
 
@@ -37,11 +45,10 @@ requires_yq() {
   skip "yq not installed"
 }
 
-requires_lychee() {
-  command -v lychee >/dev/null 2>&1 && return 0
-  # The bats CI job does not install lychee (only the dedicated doc-links job
-  # does), so skip rather than fail when the binary is absent.
-  skip "lychee not installed"
+# Extracts the single exclude pattern that mentions kaeawc/auto-mobile, as a
+# raw (non-JSON-escaped) string usable directly as a bash =~ regex.
+self_referential_exclude_pattern() {
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile"))' "$CONFIG"
 }
 
 @test "lychee retries failed requests with a backoff (retry_wait_time)" {
@@ -65,28 +72,71 @@ requires_lychee() {
 }
 
 @test "contributor-covenant.org is excluded for all paths, not just the root" {
-  requires_lychee
-
-  local fixture
-  # Plain mktemp (no -t template) for GNU/BSD portability; lychee parses markdown
-  # link syntax from the file content, so no .md extension is required.
-  fixture="$(mktemp)"
-  cat > "$fixture" <<'EOF'
-# fixture
-[faq](https://www.contributor-covenant.org/faq)
-[root](https://www.contributor-covenant.org/)
-[issue](https://github.com/kaeawc/auto-mobile/issues/50)
-EOF
-
-  # `--dump` extracts and filters links through the config WITHOUT hitting the
-  # network, so this is fast and deterministic.
-  run lychee --config "$CONFIG" --dump "$fixture"
-  rm -f "$fixture"
-
+  requires_yq
+  run yq -p toml -o json '.exclude[] | select(test("contributor-covenant"))' "$CONFIG"
   [ "$status" -eq 0 ]
-  # The connection-reset URL from the flake must now be excluded.
-  [[ "$output" != *"contributor-covenant.org/faq"* ]]
-  # Sanity: github issue links are still checked (not over-excluded), so we keep
-  # validating real references.
-  [[ "$output" == *"github.com/kaeawc/auto-mobile/issues/50"* ]]
+  [ -n "$output" ]
+  # Must cover the whole host, not the old narrow `/?$` + `/translations/?$`
+  # patterns that let `/faq` (the URL that reset the connection) through.
+  [[ "$output" == *'contributor-covenant\\.org/"'* ]]
+}
+
+@test "self-referential auto-mobile issue/pull exclude pattern is present in .lycherc.toml" {
+  requires_yq
+  run self_referential_exclude_pattern
+  [ "$status" -eq 0 ]
+  # Exactly one exclude entry mentions kaeawc/auto-mobile, and it covers both
+  # issues and pull, any number, on github.com/kaeawc/auto-mobile specifically,
+  # anchored at the end so nothing but an optional fragment/query can follow
+  # the numeric ID.
+  [ "$output" = '^https://github\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$' ]
+
+  # It must match our own repo's issue/pull links (the guaranteed-valid,
+  # self-referential links #5622 recurred against)...
+  local own_issue="https://github.com/kaeawc/auto-mobile/issues/50"
+  local own_pr="https://github.com/kaeawc/auto-mobile/pull/6000"
+  [[ "$own_issue" =~ $output ]]
+  [[ "$own_pr" =~ $output ]]
+
+  # ...and a clean link with a trailing fragment, e.g. a comment permalink.
+  local own_issue_anchored="https://github.com/kaeawc/auto-mobile/issues/50#issuecomment-123456"
+  [[ "$own_issue_anchored" =~ $output ]]
+}
+
+@test "self-referential exclude pattern does not match a malformed appended-ID link" {
+  requires_yq
+  run self_referential_exclude_pattern
+  [ "$status" -eq 0 ]
+  local pattern="$output"
+
+  # A typo'd/malformed link with characters appended directly after the
+  # numeric ID (no fragment/query separator) must NOT be excluded — it should
+  # still be checked and caught as broken, not silently skipped.
+  local malformed_suffix="https://github.com/kaeawc/auto-mobile/issues/123abc"
+  local malformed_hyphen="https://github.com/kaeawc/auto-mobile/issues/123-foo"
+  local malformed_pull="https://github.com/kaeawc/auto-mobile/pull/45x"
+  [[ ! "$malformed_suffix" =~ $pattern ]]
+  [[ ! "$malformed_hyphen" =~ $pattern ]]
+  [[ ! "$malformed_pull" =~ $pattern ]]
+}
+
+@test "self-referential exclude pattern does not over-exclude other repos' issue/pull links" {
+  requires_yq
+  run self_referential_exclude_pattern
+  [ "$status" -eq 0 ]
+  local pattern="$output"
+
+  # A different repo's issue/PR link must still be checked (not swallowed by
+  # an over-broad pattern) — otherwise this exclusion would silently stop
+  # validating real, non-self-referential references.
+  local other_repo_issue="https://github.com/lycheeverse/lychee/issues/50"
+  local other_repo_pr="https://github.com/lycheeverse/lychee/pull/50"
+  [[ ! "$other_repo_issue" =~ $pattern ]]
+  [[ ! "$other_repo_pr" =~ $pattern ]]
+
+  # A lookalike repo name sharing the "auto-mobile" prefix must not slip
+  # through either — the pattern is scoped to the exact
+  # kaeawc/auto-mobile path segment, not a prefix match.
+  local lookalike="https://github.com/kaeawc/auto-mobile-extra/issues/50"
+  [[ ! "$lookalike" =~ $pattern ]]
 }

@@ -22,6 +22,19 @@ exclude = [
   # not just the root and /translations pages that the old narrow patterns
   # covered.
   "^https://www\\.contributor-covenant\\.org/",
+  # Self-referential github.com/kaeawc/auto-mobile issue and PR links (mostly
+  # cited in CHANGELOG.md, in the hundreds) are internal references we fully
+  # control — the issue/PR number only ever exists because we created it.
+  # #5622 recurred TWICE after retry/backoff (max_retries + retry_wait_time,
+  # below) were already in effect: runs 33010560252 and 33032939183, both on
+  # commits after the first hardening pass merged, each still exited 2 with
+  # 20 [TIMEOUT]s (0 real errors), all against this exact URL shape — GitHub's
+  # API/HTTP rate limit under bulk lookups is not something client-side
+  # retries can outrun. Treat these as guaranteed-valid instead of
+  # round-tripping the network for them. Real (non-self-referential) links,
+  # including links to other repos' issues/PRs, are unaffected and still
+  # checked.
+  "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$",
 ]
 
 # Exclude specific paths

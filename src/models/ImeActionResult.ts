@@ -14,4 +14,12 @@ export interface ImeActionResult {
   action: string;
   error?: string;
   observation?: any;
+  /**
+   * Set when the action itself completed (mutating the UI) but a later,
+   * best-effort step — e.g. the post-action observation — did not finish
+   * within its deadline. The result is still the real outcome of the
+   * action; this only flags that the accompanying observation may be
+   * missing or stale. Never set alongside `success: false` (#6249).
+   */
+  warning?: string;
 }

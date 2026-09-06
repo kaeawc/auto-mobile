@@ -61,22 +61,36 @@ export class ImeAction extends BaseVisualChange {
     const isIos = this.device.platform === "ios";
     const iosAbortController = isIos ? new AbortController() : undefined;
 
+    // Captures the action outcome the instant `block` resolves (#6249 P1
+    // follow-up) — independent of whatever `observedInteraction` does
+    // afterwards (post-action observation, retries). Once this is set with
+    // `success: true`, the underlying UI mutation has already happened, so a
+    // subsequently-stalled observation must never be allowed to turn the
+    // call into a thrown timeout — that would invite a caller retry to
+    // dispatch the same action a second time (double-submit/double-nav).
+    let capturedActionResult: ImeActionResult | undefined;
+
     const block = async (observeResult: ObserveResult): Promise<ImeActionResult> => {
       try {
         // Platform-specific IME action execution
+        let result: ImeActionResult;
         switch (this.device.platform) {
           case "android":
-            return await perf.track("androidImeAction", () =>
+            result = await perf.track("androidImeAction", () =>
               this.executeAndroidImeAction(action, observeResult),
             );
+            break;
           case "ios":
-            return await perf.track("iOSImeAction", () =>
+            result = await perf.track("iOSImeAction", () =>
               this.executeiOSImeAction(action, observeResult, iosAbortController?.signal),
             );
+            break;
           default:
             perf.end();
             throw new Error(`Unsupported platform: ${this.device.platform}`);
         }
+        capturedActionResult = result;
+        return result;
       } catch (error) {
         perf.end();
         const errorMsg = errorMessage(error);
@@ -102,7 +116,13 @@ export class ImeAction extends BaseVisualChange {
       return this.observedInteraction(block, options);
     }
 
-    return this.boundIosInteractionToDeadline(block, options, action, iosAbortController);
+    return this.boundIosInteractionToDeadline(
+      block,
+      options,
+      action,
+      iosAbortController,
+      () => capturedActionResult,
+    );
   }
 
   /**
@@ -122,12 +142,26 @@ export class ImeAction extends BaseVisualChange {
    * promise is left to settle in the background (logged, never thrown) so
    * the underlying client's own reconnect/health-check state can recover
    * normally for the next call instead of being torn down mid-flight.
+   *
+   * P1 fix (#6249 review): the deadline only covers the outcome of the
+   * action ITSELF, not whatever `observedInteraction` does once that outcome
+   * is known. `getActionResult` reports whether `block` (which invokes
+   * `requestImeAction`) has already resolved by the time the deadline fires.
+   * If it resolved successfully, the UI mutation already happened — throwing
+   * here would tell the caller the action never took effect, inviting a
+   * retry that dispatches it a second time (double-submit/double-nav). In
+   * that case we return the completed result with a `warning` instead of
+   * throwing; the abandoned post-action observation is still aborted and
+   * left to settle in the background exactly as before. Only a deadline
+   * that fires before the action result is known (pre-action observation
+   * stall, or the request itself stalling) still throws.
    */
   private async boundIosInteractionToDeadline(
     block: (observeResult: ObserveResult) => Promise<ImeActionResult>,
     options: Parameters<BaseVisualChange["observedInteraction"]>[1],
     action: ImeActionType,
     controller: AbortController,
+    getActionResult: () => ImeActionResult | undefined,
   ): Promise<ImeActionResult> {
     const timeoutMs = ImeAction.IOS_IME_ACTION_TIMEOUT_MS;
     let deadlineHandle: ReturnType<Timer["setTimeout"]> | undefined;
@@ -148,6 +182,21 @@ export class ImeAction extends BaseVisualChange {
             `[ImeAction] iOS execute() pipeline for action '${action}' settled after the local ${timeoutMs}ms deadline: ${errorMessage(error)}`,
           );
         });
+
+        const completedAction = getActionResult();
+        if (completedAction?.success) {
+          // The action already mutated the UI — only the post-action
+          // observation stalled. Preserve the real outcome instead of
+          // throwing a timeout that would invite a double-submit.
+          logger.warn(
+            `[ImeAction] iOS IME action '${action}' completed successfully, but the post-action observation did not settle within ${timeoutMs}ms; returning the action result without waiting further`,
+          );
+          return {
+            ...completedAction,
+            warning: `Post-action observation did not complete within ${timeoutMs}ms; the '${action}' action was already applied to the device.`,
+          };
+        }
+
         logger.warn(
           `[ImeAction] iOS IME action '${action}' exceeded its ${timeoutMs}ms deadline before the pre-action observation or request settled; failing without waiting further`,
         );

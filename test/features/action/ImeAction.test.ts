@@ -669,6 +669,43 @@ describe("ImeAction", () => {
       expect(result.action).toBe("next");
     });
 
+    test("preserves a successful action result when the post-action observation stalls past the deadline (#6249 P1)", async () => {
+      // The action itself (`requestImeAction`) succeeds promptly — the UI
+      // mutation already happened. Only the SUBSEQUENT post-action
+      // observation (`takeObservation`'s `observeScreen.execute()`) stalls
+      // past the deadline. This must NOT throw a timeout: a caller retry on
+      // a thrown timeout would resubmit/re-navigate a second time even
+      // though the action already completed.
+      const stallingObserveScreen = new FakeObserveScreen();
+      // A valid cached hierarchy so the pre-action observation is served
+      // from cache and never calls `execute()` — isolating the stall to the
+      // post-action step.
+      (stallingObserveScreen as any).getMostRecentCachedObserveResult = async () =>
+        createObserveResult();
+      (stallingObserveScreen as any).execute = () =>
+        new Promise(() => {
+          /* the post-action observation never settles */
+        });
+
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => ({ success: true, action, totalTimeMs: 5 }),
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      (ios as any).observeScreen = stallingObserveScreen;
+      (ios as any).window = fakeWindow;
+      (ios as any).awaitIdle = fakeAwaitIdle;
+
+      const result = await ios.execute("done");
+
+      expect(result.success).toBe(true);
+      expect(result.action).toBe("done");
+      expect(result.warning).toBeDefined();
+      expect(result.warning).toContain("done");
+      // Bounded by the deadline, not a hang.
+      expect(fakeTimer.getCurrentTime()).toBe(5000);
+    });
+
     test("a stalled iOS imeAction request does not corrupt a subsequent call against the same client (#6249)", async () => {
       // First call: the CtrlProxy request stalls forever (wedged runner).
       const stalledRequest = new Promise(() => {

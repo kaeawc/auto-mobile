@@ -3,12 +3,431 @@ import { PerformanceAudit } from "../../performance/PerformanceAudit";
 import { ThresholdManager } from "../../performance/ThresholdManager";
 import { isPerformanceAuditEnabled } from "../../performance/performanceAuditConfig";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
-import type { BootedDevice, ObserveResult } from "../../../models";
+import type {
+  BootedDevice,
+  ElementBounds,
+  Element,
+  ObserveResult,
+  ViewHierarchyWindowInfo,
+} from "../../../models";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
+import type { ElementParser } from "../../../utils/interfaces/ElementParser";
+import { DefaultElementParser } from "../../utility/ElementParser";
+import { SYSTEM_TRAY_PACKAGE } from "../../../server/system-tray/notificationHints";
+
+/**
+ * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1): the
+ * only window type that represents genuine app content. The wire `WindowInfo`
+ * CtrlProxy actually emits (`android/control-proxy/.../models/WindowInfo.kt`,
+ * mapped from `AccessibilityWindowInfo.type` in `ViewHierarchyExtractor.kt`)
+ * carries only `id`/`type`/`isActive`/`isFocused`/`bounds` - critically, no
+ * per-window `packageName` (see the real fixture,
+ * `test/fixtures/observe/android-home.json`, whose `viewHierarchy.windows`
+ * has this exact shape).
+ *
+ * Every other type is chrome, not app content, and must be excluded even
+ * when it is the focused window - most importantly `TYPE_INPUT_METHOD` (2):
+ * the soft keyboard can hold focus while it's open, and its bounds are not
+ * inside the audited app's window. Also excluded by not being
+ * TYPE_APPLICATION: `TYPE_SYSTEM` (3, status/nav bar and other SystemUI),
+ * `TYPE_ACCESSIBILITY_OVERLAY` (4), `TYPE_SPLIT_SCREEN_DIVIDER` (5), and
+ * `TYPE_MAGNIFICATION_OVERLAY` (6).
+ */
+const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
+
+/**
+ * `ActiveWindowInfo.type` value `ObserveScreen` stamps when a
+ * notification-permission prompt owns the window (see
+ * `ObserveScreen.reconcileActiveWindowAttribution` and the other call sites
+ * of this literal in `ObserveScreen.ts` / `LaunchApp.ts`; not otherwise
+ * exported as a shared constant there, so this mirrors the literal).
+ */
+const NOTIFICATION_PERMISSION_DIALOG_WINDOW_TYPE = "notification_permission_dialog";
+
+function isCandidateAppWindow(window: ViewHierarchyWindowInfo, appId: string): boolean {
+  if (!window.bounds || window.type !== ACCESSIBILITY_WINDOW_TYPE_APPLICATION) {
+    return false;
+  }
+  // packageName is never populated by the real Android accessibility window
+  // list, but keep the check for forward-compat with a future/other source
+  // that does populate it (e.g. a merged uiautomator window list).
+  return window.packageName === undefined || window.packageName === appId;
+}
+
+/**
+ * Find the audited app's own window bounds from the accessibility service's
+ * window list, so the touch-latency synthetic tap can be placed inside the
+ * app's actual window rather than a fixed screen fraction - correct under
+ * split-screen/freeform where the app doesn't occupy the full screen
+ * (issue #6167). Prefers the focused APPLICATION-type window; if no
+ * APPLICATION window is focused (e.g. the soft keyboard holds focus instead)
+ * falls back to any other APPLICATION window. Returns undefined when no
+ * APPLICATION window bounds are available at all - the caller then falls
+ * back to a fixed-fraction default point.
+ */
+export function findAppWindowBounds(
+  result: ObserveResult,
+  appId: string,
+): ElementBounds | undefined {
+  const windows = result.viewHierarchy?.windows;
+  if (!windows || windows.length === 0) {
+    return undefined;
+  }
+
+  const candidates = windows.filter((w) => isCandidateAppWindow(w, appId));
+  const focused = candidates.find((w) => w.isFocused);
+  return (focused ?? candidates[0])?.bounds;
+}
+
+/**
+ * Candidate tap points as fractions of the app window's width/height,
+ * ordered by preference: window center first (most representative of "the
+ * app"), then the four quadrant centers, then a point near each edge.
+ * Deliberately avoids corners closest to a typical top app bar's
+ * overflow-menu icon.
+ */
+const INERT_POINT_CANDIDATE_FRACTIONS: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 0.5, y: 0.5 }, // center
+  { x: 0.25, y: 0.25 },
+  { x: 0.75, y: 0.25 },
+  { x: 0.25, y: 0.75 },
+  { x: 0.75, y: 0.75 },
+  { x: 0.5, y: 0.08 }, // near top edge
+  { x: 0.5, y: 0.92 }, // near bottom edge
+  { x: 0.08, y: 0.5 }, // near left edge
+  { x: 0.92, y: 0.5 }, // near right edge
+];
+
+/**
+ * Least-interactive default when every scanned candidate overlapped an
+ * interactive element: near the bottom edge, away from a typical top app
+ * bar. Not guaranteed inert (a hierarchy that is a control everywhere has no
+ * inert point to offer) - callers must check `inert` on the result rather
+ * than treat this point as safe by construction.
+ */
+const FALLBACK_TOUCH_POINT_FRACTION = { x: 0.5, y: 0.95 };
+
+function isInteractiveElement(element: Element): boolean {
+  return (
+    isTruthyFlag(element.clickable) ||
+    isTruthyFlag(element.focusable) ||
+    isTruthyFlag(element["long-clickable"]) ||
+    hasAccessibilityAction(element.actions, "click") ||
+    hasAccessibilityAction(element.actions, "long_click")
+  );
+}
+
+function isPointInsideBounds(x: number, y: number, bounds: ElementBounds): boolean {
+  return x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom;
+}
+
+/**
+ * True only for finite bounds with strictly positive width and height.
+ * Android can transiently report zero-area or inverted window bounds (e.g.
+ * mid-transition, or a window in the process of being torn down) - a naive
+ * center calculation on those still produces a defined-looking point (e.g.
+ * `{left:100, top:100, right:100, bottom:100}` -> `(100, 100)`), which is
+ * not actually inside any real content. Rejecting malformed bounds here,
+ * before a point is derived, keeps a transient bad reading from producing a
+ * touch point that gets reported inert and tapped (issue #6167 follow-up).
+ */
+function isValidWindowBounds(bounds: ElementBounds): boolean {
+  return (
+    Number.isFinite(bounds.left) &&
+    Number.isFinite(bounds.top) &&
+    Number.isFinite(bounds.right) &&
+    Number.isFinite(bounds.bottom) &&
+    bounds.right - bounds.left > 0 &&
+    bounds.bottom - bounds.top > 0
+  );
+}
+
+export interface InertTouchPointResult {
+  point: { x: number; y: number };
+  /**
+   * False when no scanned candidate avoided every interactive element AND
+   * every content-hidden region - the returned point is the documented
+   * fallback default, not a verified-inert one (issue #6167).
+   */
+  inert: boolean;
+}
+
+/**
+ * Find a synthetic-touch point inside `windowBounds` that does not overlap
+ * any clickable/focusable/long-clickable element, and does not fall inside
+ * any content-hidden region, so a touch-latency probe cannot activate a real
+ * control (tap a button, open a list item, follow a link) during what is
+ * meant to be a read-only performance audit (issue #6167). Scans a small set
+ * of candidate points (window center, then quadrant centers, then edge
+ * midpoints) and returns the first that hits no interactive element's bounds
+ * and no hidden region. Falls back to a documented default point when every
+ * candidate is obstructed, with `inert: false` so the caller knows the tap
+ * may still land on a control or hidden content.
+ */
+export function findInertTouchPoint(
+  windowBounds: ElementBounds,
+  interactiveElements: readonly Element[],
+  hiddenRegions: readonly ElementBounds[] = [],
+): InertTouchPointResult {
+  const obstacles = interactiveElements.filter((el) => el.bounds && isInteractiveElement(el));
+  const width = windowBounds.right - windowBounds.left;
+  const height = windowBounds.bottom - windowBounds.top;
+
+  const pointFor = (fraction: { x: number; y: number }): { x: number; y: number } => ({
+    x: Math.floor(windowBounds.left + width * fraction.x),
+    y: Math.floor(windowBounds.top + height * fraction.y),
+  });
+
+  for (const fraction of INERT_POINT_CANDIDATE_FRACTIONS) {
+    const point = pointFor(fraction);
+    const obstructedByElement = obstacles.some((el) =>
+      isPointInsideBounds(point.x, point.y, el.bounds),
+    );
+    const obstructedByHiddenRegion = hiddenRegions.some((region) =>
+      isPointInsideBounds(point.x, point.y, region),
+    );
+    if (!obstructedByElement && !obstructedByHiddenRegion) {
+      return { point, inert: true };
+    }
+  }
+
+  logger.warn(
+    "[PerformanceAudit] Could not find a fully inert touch point inside the app window " +
+      "(every scanned candidate overlapped an interactive element or content-hidden region) - " +
+      "falling back to a default point that may still activate a control",
+  );
+  return { point: pointFor(FALLBACK_TOUCH_POINT_FRACTION), inert: false };
+}
+
+/**
+ * Collect every hierarchy element that could be an obstacle for
+ * `findInertTouchPoint` - i.e. everything `isInteractiveElement` would flag,
+ * across the main hierarchy and any secondary windows (dialogs, sheets).
+ *
+ * Deliberately NOT `result.elements.clickable`: `DefaultObserveElementCollector`
+ * populates that list only for `clickable`/`click`-action nodes, but
+ * `isInteractiveElement` (and therefore the inert-point scan) also treats
+ * `focusable`, `long-clickable`, and `long_click` nodes as obstacles. A
+ * focusable-only or long-clickable-only control covering a candidate point
+ * would otherwise never be supplied as an obstacle, and the scan could land
+ * on (and activate/focus) it (issue #6167 follow-up). Walking the raw
+ * hierarchy with the same `isInteractiveElement` predicate the scan itself
+ * applies keeps the two from drifting apart.
+ */
+export function collectInteractiveObstacles(
+  result: ObserveResult,
+  elementParser: ElementParser = new DefaultElementParser(),
+): Element[] {
+  if (!result.viewHierarchy) {
+    return result.elements?.clickable ?? [];
+  }
+  return elementParser
+    .flattenViewHierarchy(result.viewHierarchy, { includeWindows: true })
+    .map((entry) => entry.element);
+}
+
+/**
+ * Bounds of every content-hidden region on this observation - large
+ * Compose-interop (or similar) areas where platform accessibility APIs
+ * cannot expose the rendered content's real elements
+ * (`ViewHierarchyResult.contentHiddenRegions`). A candidate touch point can
+ * fall inside such a region while showing no obstacle in
+ * `collectInteractiveObstacles`, because the region's interactive
+ * descendants are never surfaced in the accessibility hierarchy at all - so
+ * these bounds must be checked as their own exclusion, not folded into the
+ * element-obstacle list (issue #6167 follow-up).
+ */
+export function collectHiddenRegionBounds(result: ObserveResult): ElementBounds[] {
+  return (result.viewHierarchy?.contentHiddenRegions ?? []).map((region) => region.bounds);
+}
+
+export interface TouchLatencyPointDecision {
+  /** A verified-inert coordinate to tap, present only when one was found. */
+  touchPoint?: { x: number; y: number };
+  /**
+   * True when there is no verified-inert point to tap - the capture wasn't
+   * reliable enough to trust (see `isHierarchyReliableForTapProbe`), or
+   * every scanned candidate overlapped an interactive element or a
+   * content-hidden region. The caller must skip the touch-latency
+   * measurement entirely in this case rather than fall through to
+   * `TouchLatencyTracker`'s own unverified default point, which risks
+   * activating a full-screen button, WebView, map, or a hidden or unemitted
+   * control (issue #6167).
+   */
+  skipTouchLatency: boolean;
+}
+
+/**
+ * Reasons `isHierarchyReliableForTapProbe` can reject a capture, in check
+ * order. Kept as an explicit reason (rather than a bare boolean) so the one
+ * `deriveTouchLatencyPoint` log line can say *why* - useful when triaging a
+ * report of touch-latency going unexpectedly missing.
+ */
+/**
+ * One reliability check, run in order by `unreliableHierarchyReason`.
+ * Returns the rejection reason, or `null` when this particular check passes.
+ * Modeled as a list (rather than a chain of `if`s in one function) so adding
+ * a future signal is a one-line addition here instead of growing a single
+ * function's complexity indefinitely (issue #6167 follow-up).
+ */
+type ReliabilityCheck = (
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+) => string | null;
+
+const RELIABILITY_CHECKS: readonly ReliabilityCheck[] = [
+  (windowBounds) => (windowBounds ? null : "no app window bounds were found"),
+
+  (windowBounds) =>
+    windowBounds && !isValidWindowBounds(windowBounds)
+      ? "window bounds are malformed (zero-area, inverted, or non-finite): " +
+        JSON.stringify(windowBounds)
+      : null,
+
+  // A stale cached tree was never verified against the device on this call -
+  // an element it reports as absent (or present) may no longer reflect
+  // what's actually on screen (issue #6167 follow-up).
+  (_windowBounds, result) =>
+    result.viewHierarchy?.fresh === false
+      ? "the view hierarchy is a stale cached snapshot (fresh: false), not verified against the device on this call"
+      : null,
+
+  // CtrlProxy can withhold the focused app's own root entirely (observed in
+  // split-screen) while still returning windows/elements from a DIFFERENT
+  // app - certifying a point here can tap the wrong app, not just an
+  // unemitted node of the right one (issue #6167 follow-up).
+  (_windowBounds, result) =>
+    result.viewHierarchy?.ctrlProxyIncomplete
+      ? "CtrlProxy reported an incomplete capture (ctrlProxyIncomplete) - the focused app's own root may have been withheld"
+      : null,
+
+  // CtrlProxy stops emitting descendants once it hits a hard limit
+  // (`max_nodes`, `max_depth`) or is cancelled mid-walk - the resulting
+  // hierarchy is silently PARTIAL, not "no obstacles here". Certifying a
+  // point inert against an incomplete obstacle map risks tapping a real
+  // control whose node was simply never emitted (issue #6167 follow-up).
+  (_windowBounds, result) => {
+    const truncationReasons = result.viewHierarchy?.truncationReasons;
+    return truncationReasons && truncationReasons.length > 0
+      ? `view hierarchy is truncated (${truncationReasons.join(", ")}) - the obstacle map may be incomplete`
+      : null;
+  },
+
+  // When a SystemUI surface (status bar, notification shade, keyguard) owns
+  // focus, `ObserveScreen.reconcileActiveWindowAttribution` rewrites
+  // `activeWindow.appId` to `com.android.systemui` - but the real
+  // accessibility window entries never carry a `packageName`
+  // (`isCandidateAppWindow` above), so `findAppWindowBounds` still happily
+  // accepts the underlying type-1 APPLICATION window as "SystemUI's" window.
+  // A point certified inert there would tap the occluded app underneath
+  // while `gfxinfo` samples `com.android.systemui`, measuring the wrong
+  // surface's response entirely (issue #6167 follow-up).
+  (_windowBounds, result) =>
+    result.activeWindow?.appId === SYSTEM_TRAY_PACKAGE
+      ? `a SystemUI overlay owns focus (activeWindow.appId === "${SYSTEM_TRAY_PACKAGE}") - the app window beneath it cannot be safely probed`
+      : null,
+
+  // A notification-permission prompt is a special case: unlike the SystemUI
+  // overlay above, `ObserveScreen` deliberately keeps `activeWindow.appId` on
+  // the underlying app (only tagging `activeWindow.type`), while CtrlProxy
+  // reports the permission-controller prompt itself as a package-less type-1
+  // APPLICATION window - so `findAppWindowBounds` derives the PROMPT's
+  // bounds while `gfxinfo` samples the underlying app's package, producing
+  // garbage latency, AND a synthetic tap can land on the live prompt and
+  // grant/deny it (issue #6167 follow-up). `result.notificationPermissionDetected`
+  // is the primary source `ObserveScreen.reconcileActiveWindowAttribution`
+  // reads to set `activeWindow.type`; checking both covers a capture where
+  // the flag was set but the reconciliation step that stamps `type` didn't
+  // run on this particular result.
+  (_windowBounds, result) =>
+    result.notificationPermissionDetected ||
+    result.activeWindow?.type === NOTIFICATION_PERMISSION_DIALOG_WINDOW_TYPE
+      ? "a notification-permission dialog owns the window - the underlying app's bounds/gfxinfo don't correspond to the same surface"
+      : null,
+];
+
+function unreliableHierarchyReason(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+): string | null {
+  for (const check of RELIABILITY_CHECKS) {
+    const reason = check(windowBounds, result);
+    if (reason !== null) {
+      return reason;
+    }
+  }
+  return null;
+}
+
+/**
+ * Single gate for every known way a capture can be too unreliable to trust
+ * for a synthetic touch-latency tap: absent/malformed app window bounds, a
+ * stale cached tree (`fresh: false`), an incomplete CtrlProxy capture
+ * (`ctrlProxyIncomplete`), a truncated hierarchy (`truncationReasons`), a
+ * SystemUI overlay owning focus (`activeWindow.appId ===
+ * "com.android.systemui"`, which can pass through a real but occluded app
+ * window as if it belonged to the overlay), or a notification-permission
+ * dialog owning the window (`notificationPermissionDetected` /
+ * `activeWindow.type === "notification_permission_dialog"` - here
+ * `activeWindow.appId` stays on the underlying app while the derived window
+ * bounds are actually the live permission prompt's). Consolidated into one
+ * predicate (issue #6167 follow-up) so a future reliability signal has
+ * exactly one place to live and can't be missed by only patching one of
+ * several scattered checks.
+ *
+ * An inverted "positive confirmation" design (require a matching window
+ * entry with a real `packageName`, a plain application type, and no dialog
+ * flag) was considered instead of enumerating bad cases, but rejected: the
+ * real accessibility window wire format never populates `packageName` at all
+ * (see `isCandidateAppWindow` above) - requiring it would reject every
+ * normal capture, not just the unreliable ones.
+ *
+ * Content-hidden regions (`contentHiddenRegions`) are deliberately NOT a
+ * blanket-reject signal here: unlike the checks above, the reliable part of
+ * the hierarchy elsewhere in the window is still trustworthy, so
+ * `findInertTouchPoint` continues to exclude those regions per-candidate
+ * (via `collectHiddenRegionBounds`) rather than discarding a window that
+ * still has a genuinely safe spot to tap.
+ */
+export function isHierarchyReliableForTapProbe(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+): boolean {
+  return unreliableHierarchyReason(windowBounds, result) === null;
+}
+
+/**
+ * Derive the synthetic touch-latency tap point exactly as
+ * `PerformanceAuditor.run` does, so tests can exercise this decision through
+ * the real production obstacle-collection path rather than hand-building an
+ * obstacle list for `findInertTouchPoint` directly.
+ */
+export function deriveTouchLatencyPoint(
+  windowBounds: ElementBounds | undefined,
+  result: ObserveResult,
+  elementParser: ElementParser = new DefaultElementParser(),
+): TouchLatencyPointDecision {
+  const unreliableReason = unreliableHierarchyReason(windowBounds, result);
+  if (unreliableReason !== null || !windowBounds) {
+    if (unreliableReason !== null) {
+      logger.warn(`[PerformanceAudit] Skipping touch-latency measurement: ${unreliableReason}`);
+    }
+    return { skipTouchLatency: true };
+  }
+
+  const obstacles = collectInteractiveObstacles(result, elementParser);
+  const hiddenRegions = collectHiddenRegionBounds(result);
+  const { point, inert } = findInertTouchPoint(windowBounds, obstacles, hiddenRegions);
+  if (!inert) {
+    return { skipTouchLatency: true };
+  }
+  return { touchPoint: point, skipTouchLatency: false };
+}
 
 export interface PerformanceAuditorOptions {
   device: BootedDevice;
@@ -77,12 +496,21 @@ export class PerformanceAuditor {
           capabilities,
         );
 
+        // Derive a touch point inside the app's own window that avoids
+        // activating a real control - a read-only performance audit must
+        // not tap a button, list item, or link as a side effect (#6167).
+        const windowBounds = findAppWindowBounds(result, result.activeWindow!.appId);
+        const { touchPoint, skipTouchLatency } = deriveTouchLatencyPoint(windowBounds, result);
+
         // Run the audit
         const auditResult = await performanceAudit.runAudit(
           result.activeWindow!.appId,
           thresholds,
           result.screenSize,
           perf,
+          windowBounds,
+          touchPoint,
+          skipTouchLatency,
         );
 
         // Attach audit result to observe result

@@ -4,7 +4,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { BootedDevice, ScreenSize } from "../../models";
+import { BootedDevice, ElementBounds, ScreenSize } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Idle } from "../observe/Idle";
 import { DeviceCapabilitiesDetector, DeviceCapabilities } from "../../utils/DeviceCapabilities";
@@ -79,6 +79,33 @@ interface PerformanceViolation {
 interface CollectMetricsOptions {
   measureTtff?: boolean;
   measureTti?: boolean;
+  /**
+   * The audited app's actual focused-window rect (e.g. from the accessibility
+   * service's window list), used to place the synthetic touch inside the
+   * real app window rather than a fixed screen fraction - correct under
+   * split-screen/freeform where the app doesn't occupy the full screen
+   * (issue #6167).
+   */
+  windowBounds?: ElementBounds;
+  /**
+   * A specific in-window coordinate known not to overlap an interactive
+   * element (e.g. from `PerformanceAuditor`'s hierarchy scan), used in place
+   * of `windowBounds`' plain center. Takes precedence over `windowBounds`
+   * when both are given - moving the tap into the app window must not let it
+   * land on a real control and activate it during a read-only audit
+   * (issue #6167).
+   */
+  touchPoint?: { x: number; y: number };
+  /**
+   * Skip the touch-latency measurement entirely rather than fall through to
+   * `TouchLatencyTracker`'s own unverified default point. Set by the caller
+   * when it could not find a point known not to overlap an interactive
+   * element (e.g. `PerformanceAuditor`'s hierarchy scan found no app window,
+   * or every scanned candidate was obstructed) - injecting real taps in that
+   * case risks activating a full-screen button, WebView, or map during what
+   * is meant to be a read-only audit (issue #6167).
+   */
+  skipTouchLatency?: boolean;
 }
 
 /**
@@ -121,7 +148,14 @@ export class PerformanceAudit {
     ]);
 
     // Touch latency requires sequential execution after other metrics
-    const touchLatency = await this.measureTouchLatency(packageName, screenSize, perf);
+    const touchLatency = await this.measureTouchLatency(
+      packageName,
+      screenSize,
+      perf,
+      opts.windowBounds,
+      opts.touchPoint,
+      opts.skipTouchLatency,
+    );
 
     // Optional TTFF/TTI measurement (these are heavier operations)
     let ttffMs: number | null = null;
@@ -311,7 +345,21 @@ export class PerformanceAudit {
     packageName: string,
     screenSize: ScreenSize | undefined,
     perf: PerformanceTracker,
+    windowBounds?: ElementBounds,
+    touchPoint?: { x: number; y: number },
+    skipTouchLatency?: boolean,
   ): Promise<number | null> {
+    // The caller found no point known not to overlap an interactive element
+    // (no app window bounds, or every scanned candidate was obstructed) -
+    // skip the measurement entirely rather than let a synthetic tap land on
+    // an unverified default point and activate a real control (#6167).
+    if (skipTouchLatency) {
+      logger.info(
+        "[PerformanceAudit] Touch latency measurement skipped (no verified-inert touch point available)",
+      );
+      return null;
+    }
+
     // Only measure touch latency when UI performance mode is enabled
     if (!serverConfig.isUiPerfModeEnabled()) {
       logger.debug(
@@ -337,22 +385,59 @@ export class PerformanceAudit {
           {
             sampleCount: 3,
             maxWaitMs: 200,
+            windowBounds,
+            touchPoint,
           },
           perf,
         ),
       );
 
-      if (result.success) {
-        logger.info(`[PerformanceAudit] Touch latency measured: ${result.latencyMs}ms`);
-        return result.latencyMs;
-      } else {
-        logger.warn(`[PerformanceAudit] Touch latency measurement failed: ${result.error}`);
-        return null;
-      }
+      return this.resolveTouchLatency(result);
     } catch (error) {
       logger.warn(`[PerformanceAudit] Failed to measure touch latency: ${error}`);
       return null;
     }
+  }
+
+  /**
+   * Decide what latency (if any) to report from a `TouchLatencyTracker`
+   * result. A run can be a *mix* of animating and valid samples - a single
+   * animating sample must not null out a run that also produced a real
+   * measurement (issue #6167). Only report `null` when there is no valid
+   * measurement at all.
+   */
+  private resolveTouchLatency(result: {
+    success: boolean;
+    latencyMs: number;
+    animating?: boolean;
+    error?: string;
+  }): number | null {
+    if (result.success) {
+      if (result.animating) {
+        // A mixed run: at least one sample was discounted as animating, but
+        // others still produced a real latency - report it rather than
+        // throwing away a valid measurement.
+        logger.warn(
+          `[PerformanceAudit] Touch latency measured: ${result.latencyMs}ms ` +
+            "(some samples were discounted as animating)",
+        );
+      } else {
+        logger.info(`[PerformanceAudit] Touch latency measured: ${result.latencyMs}ms`);
+      }
+      return result.latencyMs;
+    }
+
+    if (result.animating) {
+      // Every sample was discounted for animating - no valid measurement to
+      // fall back on.
+      logger.warn(
+        "[PerformanceAudit] Touch latency measurement discarded: app is rendering frames " +
+          "on its own (animating) - latency cannot be attributed to the synthetic touch",
+      );
+    } else {
+      logger.warn(`[PerformanceAudit] Touch latency measurement failed: ${result.error}`);
+    }
+    return null;
   }
 
   /**
@@ -706,6 +791,9 @@ export class PerformanceAudit {
     },
     screenSize?: ScreenSize,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    windowBounds?: ElementBounds,
+    touchPoint?: { x: number; y: number },
+    skipTouchLatency?: boolean,
   ): Promise<PerformanceAuditResult> {
     logger.info(`[PerformanceAudit] Running audit for ${packageName}`);
 
@@ -713,7 +801,11 @@ export class PerformanceAudit {
     const deviceCapabilities = await this.capabilitiesDetector.getCapabilities();
 
     // Collect metrics
-    const metrics = await this.collectMetrics(packageName, screenSize, perf);
+    const metrics = await this.collectMetrics(packageName, screenSize, perf, {
+      windowBounds,
+      touchPoint,
+      skipTouchLatency,
+    });
 
     // Validate against thresholds
     const violations = this.validateMetrics(metrics, thresholds);

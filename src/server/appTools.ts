@@ -138,6 +138,26 @@ export function resetCrashAppToolDependencies(): void {
   crashAppToolDependencies = null;
 }
 
+/**
+ * Extract the package name from `viewHierarchy.foregroundActivity` (issue
+ * #6220 follow-up): the raw accessibility signal, in the standard
+ * `package/activity` (or `package/.RelativeActivity`) wire format. Mirrors
+ * `LaunchApp.packageFromForegroundActivity` — kept as a matching one-liner
+ * here (not a shared import) the same way `ObserveScreen.ts` already inlines
+ * this exact parse at each of its own call sites — so the attribution driving
+ * `observedAppId` here and the match/mismatch decision in `LaunchApp.execute`
+ * can never disagree about which app a `foregroundActivity` names.
+ */
+function packageFromForegroundActivity(
+  observation: LaunchAppResult["observation"],
+): string | undefined {
+  const foregroundActivity = observation?.viewHierarchy?.foregroundActivity;
+  if (!foregroundActivity) {
+    return undefined;
+  }
+  return foregroundActivity.split("/")[0] || undefined;
+}
+
 function isVerifiedLaunchObservation(
   appId: string,
   observedAppId: string | undefined,
@@ -212,6 +232,26 @@ function buildLaunchMessage(
  * which `LaunchApp.execute` already accepted as success) or a matching-but-stale
  * observation, where asserting `false` would contradict the tool's own success.
  */
+/**
+ * Mirror `LaunchApp`'s own reconciliation, which accepts the active window's
+ * appId, the view hierarchy's packageName, OR the package parsed out of
+ * `viewHierarchy.foregroundActivity` — the one remaining app-identity signal
+ * on a hierarchy with no screen dimensions (so `ObserveScreen` never derives
+ * `activeWindow`) and no `packageName` (issue #6220 follow-up). `||` (not
+ * `??`) throughout so an empty-string appId (no foreground window
+ * identified, issue #6220) falls through each fallback rather than being
+ * treated as a real observed app.
+ */
+function resolveLaunchObservedAppId(
+  observation: LaunchAppResult["observation"],
+): string | undefined {
+  return (
+    observation?.activeWindow?.appId ||
+    observation?.viewHierarchy?.packageName ||
+    packageFromForegroundActivity(observation)
+  );
+}
+
 export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   if (!result.success) {
     // `||` not `??`: an empty-string error must still yield the non-empty
@@ -219,14 +259,7 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
     throw new ActionableError(result.error || `Failed to launch app ${appId}`);
   }
 
-  // Mirror `LaunchApp`'s own reconciliation, which accepts either the active
-  // window's appId or the view hierarchy's packageName — so a launch verified via
-  // the hierarchy (active window absent) still reports the observed app. `||`
-  // (not `??`) so an empty-string appId (no foreground window identified, issue
-  // #6220) also falls back to the hierarchy's package rather than being treated
-  // as a real observed app.
-  const observedAppId =
-    result.observation?.activeWindow?.appId || result.observation?.viewHierarchy?.packageName;
+  const observedAppId = resolveLaunchObservedAppId(result.observation);
   // Only assert verification on an exact foreground match with a fresh, verified
   // observation. `LaunchApp.execute` retries an unverified observation, but this
   // response-level guard preserves the true-or-undefined contract for any direct

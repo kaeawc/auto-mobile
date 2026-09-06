@@ -90,7 +90,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     expect(result.activeWindow?.appId).toBe("");
     expect(result.freshness?.verified).toBe(false);
     expect(result.freshness?.isFresh).toBe(false);
-    expect(result.freshness?.warning).toContain("no foreground application window");
+    expect(result.freshness?.warning).toContain("foreground application window");
   });
 
   test("does not retract freshness for a normal capture with a real foreground app", async () => {
@@ -303,6 +303,119 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
 
     expect(result.freshness?.verified).toBe(false);
     expect(result.freshness?.isFresh).toBe(false);
-    expect(result.freshness?.warning).toContain("no foreground application window");
+    expect(result.freshness?.warning).toContain("foreground application window");
+  });
+
+  // Regression (P1 review finding on #6239): status-bar-ONLY geometry must
+  // dominate any lingering `packageName`/`foregroundActivity` metadata. A
+  // hierarchy confined to the status-bar strip can still carry attribution
+  // stamped from a PRIOR resumed app even once the tree itself has collapsed
+  // to chrome-only content — that identity must not rescue the verdict when
+  // both ADB foreground reads (the async, device-confirmed gate) come back
+  // empty and there is no ground truth to confirm or refute the staleness.
+  test("status-bar-only geometry with stale packageName/foregroundActivity is still UNVERIFIED", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      // Stale identity metadata from a previously-resumed app, left over even
+      // though the tree itself is now confined to the status-bar strip.
+      packageName: "com.android.settings",
+      foregroundActivity: "com.android.settings/.SubSettings",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          node: [
+            {
+              "resource-id": "com.android.systemui:id/clock",
+              text: "8:33",
+              bounds: { left: 21, top: 0, right: 107, bottom: 63 },
+            },
+          ],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    // Both ADB foreground reads come back empty: no ground truth to confirm
+    // or refute the stale attribution, so the async gate cannot fire either.
+    fakeAdb.setForegroundApp(null);
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("status-bar content");
+  });
+
+  // The counterpart: a legitimate FULL-height SystemUI shade capture (the
+  // notification shade IS a valid full SystemUI window) must stay verified —
+  // `isStatusBarOnlyHierarchy` only fires when EVERY node is confined to the
+  // status-bar strip, so a full-height shade never trips the geometry check.
+  test("a full-height SystemUI shade capture stays verified/isFresh:true", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      packageName: "com.android.systemui",
+      foregroundActivity: "com.android.systemui/.shade.NotificationPanelView",
+      hierarchy: {
+        node: {
+          // The expanded shade extends well past the status-bar strip.
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1400 },
+          node: [{ text: "Silent", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp(null);
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
   });
 });

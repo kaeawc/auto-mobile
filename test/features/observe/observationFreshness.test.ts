@@ -292,7 +292,7 @@ describe("computeFreshness", () => {
       expect(v.verified).toBe(false);
       expect(v.isFresh).toBe(false);
       expect(v.warning).toContain("status-bar content");
-      expect(v.warning).toContain("no foreground application window");
+      expect(v.warning).toContain("foreground application window");
     });
 
     test("an empty activeWindow.appId with a non-status-bar hierarchy is still NOT verified or fresh", () => {

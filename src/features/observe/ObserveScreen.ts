@@ -253,6 +253,23 @@ function hasForegroundAppIdentity(result: ObserveResult): boolean {
 function resolveMissingForegroundWindow(
   result: ObserveResult,
 ): { reason: "status_bar_only" | "empty_active_window" } | undefined {
+  if (!result.viewHierarchy?.hierarchy?.node) {
+    return undefined;
+  }
+  // Status-bar-ONLY geometry is checked FIRST and dominates any lingering
+  // identity metadata. `packageName`/`foregroundActivity` can survive on the
+  // wire from a PRIOR resumed app even once the tree itself has collapsed to
+  // chrome-only content (both ADB foreground reads coming back empty means
+  // there is no ground truth to confirm or refute that staleness against) —
+  // the geometry is the one signal that cannot lie about what actually came
+  // back. `isStatusBarOnlyHierarchy` already distinguishes this incomplete,
+  // chrome-only strip from a legitimate FULL-height SystemUI shade capture
+  // (it returns `false` the moment any node extends below the status-bar
+  // height), so a genuine expanded shade is never caught here — only the
+  // provably-incomplete case is (issue #6239 review follow-up).
+  if (isStatusBarOnlyHierarchy(result)) {
+    return { reason: "status_bar_only" };
+  }
   // `hasForegroundAppIdentity` is checked directly (not only via
   // `activeWindow.appId`, which the package-attribution fallback above should
   // already have backfilled from `viewHierarchy.packageName`): later stages
@@ -260,11 +277,11 @@ function resolveMissingForegroundWindow(
   // can still re-derive `activeWindow` after this point, and a
   // package/activity-attributed capture must never be reported as having no
   // foreground window regardless of what runs afterward (issue #6220
-  // false-positive).
-  if (hasForegroundAppIdentity(result) || !result.viewHierarchy?.hierarchy?.node) {
+  // false-positive) — UNLESS the geometry above already proved it incomplete.
+  if (hasForegroundAppIdentity(result)) {
     return undefined;
   }
-  return { reason: isStatusBarOnlyHierarchy(result) ? "status_bar_only" : "empty_active_window" };
+  return { reason: "empty_active_window" };
 }
 
 /**

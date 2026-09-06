@@ -297,7 +297,7 @@ function resolveIdentityMismatch(
       isFresh: false,
       warning:
         reason === "status_bar_only"
-          ? "Observed hierarchy contains only Android status-bar content and reports no foreground application window (activeWindow.appId is empty). This capture cannot be trusted to reflect any app's screen; call observe again."
+          ? "Observed hierarchy contains only Android status-bar content — every extracted node lies within the status-bar strip, not a full foreground application window. Any package/activity attribution on this capture may be stale from a previous app; this capture cannot be trusted to reflect any app's screen. Call observe again."
           : "Observed hierarchy reports no foreground application window (activeWindow.appId is empty), so this capture cannot be trusted to reflect the current screen; call observe again.",
     };
   }

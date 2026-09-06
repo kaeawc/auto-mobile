@@ -632,6 +632,37 @@ describe("LaunchApp", () => {
     expect(result.observationOmitted).toBeUndefined();
   });
 
+  // P2 review finding on #6239: a hierarchy naming a DIFFERENT app only via
+  // `viewHierarchy.foregroundActivity` (no `activeWindow.appId`, no
+  // `viewHierarchy.packageName`) must be a detected wrong-app mismatch, not
+  // an empty-package vacuous accept — the omission previously let a genuine
+  // wrong-app landing through as if no app were observed at all.
+  test("detects a wrong-app landing named only by foregroundActivity, instead of an empty-package accept", async () => {
+    fakeTimer.enableAutoAdvance();
+    const wrongAppPackageName = "com.example.other";
+    const wrongAppObservation: ObserveResult = {
+      ...createObserveResult(undefined),
+      viewHierarchy: {
+        node: {},
+        foregroundActivity: `${wrongAppPackageName}/.MainActivity`,
+      } as any,
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(wrongAppObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      `Timed out waiting for launch observation to show ${packageName}`,
+    );
+    expect(result.error).toContain(wrongAppPackageName);
+    expect(result.observation).toBeUndefined();
+    expect(result.observationOmitted).toBeDefined();
+  });
+
   test("treats Android notification permission dialogs as valid launch observations", async () => {
     fakeTimer.enableAutoAdvance();
     const permissionControllerPackageName = "com.google.android.permissioncontroller";

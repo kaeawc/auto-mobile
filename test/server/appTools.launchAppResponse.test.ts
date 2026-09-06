@@ -164,4 +164,46 @@ describe("buildLaunchAppResponse", () => {
       "Launched app com.android.settings (verification failed: no foreground application window could be observed after launch)",
     );
   });
+
+  // P2 review finding on #6239: when neither `activeWindow.appId` nor
+  // `viewHierarchy.packageName` name an app, `viewHierarchy.foregroundActivity`
+  // is the one remaining identity signal — it must drive `observedAppId` (and
+  // `verified`) the same way it drives `LaunchApp`'s own match decision.
+  test("reports the foregroundActivity-derived package as observedAppId when nothing else names an app", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        viewHierarchy: {
+          node: {},
+          foregroundActivity: "com.android.settings/.SubSettings",
+        },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.android.settings");
+    expect(payload.verified).toBe(true);
+    expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
+  });
+
+  test("reports the foregroundActivity-derived package even when it names a different app", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        viewHierarchy: {
+          node: {},
+          foregroundActivity: "com.google.android.permissioncontroller/.GrantPermissionsActivity",
+        },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.google.android.permissioncontroller");
+    expect(payload.verified).toBeUndefined();
+    expect(payload.message).toBe("Launched app com.android.settings");
+  });
 });

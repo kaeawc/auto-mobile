@@ -1119,10 +1119,30 @@ export class LaunchApp extends BaseVisualChange {
     return packageNames.length > 0 ? packageNames.join(", ") : "unknown app";
   }
 
+  /**
+   * Extract the package name from `viewHierarchy.foregroundActivity` (issue
+   * #6220 follow-up): the raw accessibility signal, in the standard
+   * `package/activity` (or `package/.RelativeActivity`) wire format. This is
+   * the ONE remaining app-identity signal on a hierarchy that carries neither
+   * `activeWindow.appId` nor `viewHierarchy.packageName` — e.g. no screen
+   * dimensions, so `ObserveScreen` never derives `activeWindow` from it — and
+   * it must feed the SAME match/mismatch decision this identity drives
+   * elsewhere, so a `foregroundActivity` naming a different app is a
+   * detected mismatch rather than an empty-package vacuous accept.
+   */
+  private packageFromForegroundActivity(observation: ObserveResult): string | undefined {
+    const foregroundActivity = observation.viewHierarchy?.foregroundActivity;
+    if (!foregroundActivity) {
+      return undefined;
+    }
+    return foregroundActivity.split("/")[0] || undefined;
+  }
+
   private getLaunchObservationPackageNames(observation: ObserveResult): string[] {
     const packageNames = [
       observation.activeWindow?.appId,
       observation.viewHierarchy?.packageName,
+      this.packageFromForegroundActivity(observation),
     ].filter((packageName): packageName is string => !!packageName);
 
     return [...new Set(packageNames)];

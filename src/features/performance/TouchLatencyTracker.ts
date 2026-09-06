@@ -5,7 +5,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { BootedDevice, ScreenSize } from "../../models";
+import { BootedDevice, ElementBounds, ScreenSize } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Idle } from "../observe/Idle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -35,10 +35,13 @@ interface TouchLatencyResult {
 
 /**
  * A baseline `Total frames rendered` above this during the pre-tap idle
- * window is treated as the app animating on its own rather than a single
- * post-reset redraw settling.
+ * window is treated as the app animating on its own. Any frame rendered
+ * with zero input is evidence of animation, including a slow/low-frame-rate
+ * one that only manages a frame or two in the 50ms window — so this is 0,
+ * not a tolerance band. A genuinely static app reports 0 frames in the
+ * window and is unaffected.
  */
-const ANIMATING_BASELINE_FRAME_THRESHOLD = 2;
+const ANIMATING_BASELINE_FRAME_THRESHOLD = 0;
 
 /**
  * True when a gfxinfo counter was parsed on both sides and grew. A `null` on
@@ -71,14 +74,20 @@ export class TouchLatencyTracker {
   }
 
   /**
-   * Select a safe touch location that's unlikely to trigger UI interactions
-   * Uses screen edges or status bar area
+   * Select a safe touch location that's unlikely to trigger UI interactions.
+   * Prefers the center of the audited app's actual window bounds (correct
+   * under split-screen/freeform, where the app doesn't occupy the full
+   * screen) and falls back to a fixed-fraction default only when window
+   * geometry isn't available (issue #6167).
    * @param screenSize - Device screen dimensions
+   * @param touchPoint - Caller-provided override, takes precedence over everything
+   * @param windowBounds - The audited app's actual window rect, if known
    * @returns Touch coordinates (x, y)
    */
   private selectSafeTouchLocation(
     screenSize: ScreenSize,
     touchPoint?: { x: number; y: number },
+    windowBounds?: ElementBounds,
   ): { x: number; y: number } {
     if (touchPoint) {
       logger.debug(
@@ -87,17 +96,31 @@ export class TouchLatencyTracker {
       return touchPoint;
     }
 
-    // A point at y = 2% of screen height lands inside the SystemUI status bar
-    // on most devices, not the audited app's own window (issue #6167) — a tap
-    // there never reaches the app, so a static-but-responsive app would
-    // falsely read as frozen. Target a point horizontally centered (avoiding
-    // corner overflow-menu / navigation icons) and vertically just below the
-    // status bar and a typical top app bar, which is still content that is
-    // unlikely to be interactive.
+    if (
+      windowBounds &&
+      windowBounds.right > windowBounds.left &&
+      windowBounds.bottom > windowBounds.top
+    ) {
+      const x = Math.floor((windowBounds.left + windowBounds.right) / 2);
+      const y = Math.floor((windowBounds.top + windowBounds.bottom) / 2);
+      logger.debug(
+        `[TouchLatency] Selected touch location from app window bounds ` +
+          `${JSON.stringify(windowBounds)}: (${x}, ${y})`,
+      );
+      return { x, y };
+    }
+
+    // No window geometry available. A point at y = 2% of screen height lands
+    // inside the SystemUI status bar on most devices, not the audited app's
+    // own window — a tap there never reaches the app, so a static-but-
+    // responsive app would falsely read as frozen. Target a point
+    // horizontally centered (avoiding corner overflow-menu / navigation
+    // icons) and vertically just below the status bar and a typical top app
+    // bar, which is still content that is unlikely to be interactive.
     const x = Math.floor(screenSize.width * 0.5); // horizontally centered
     const y = Math.floor(screenSize.height * 0.12); // below status bar + app bar
 
-    logger.debug(`[TouchLatency] Selected safe touch location: (${x}, ${y})`);
+    logger.debug(`[TouchLatency] Selected safe touch location (no window bounds): (${x}, ${y})`);
     return { x, y };
   }
 
@@ -272,6 +295,8 @@ export class TouchLatencyTracker {
       maxWaitMs?: number;
       /** Override the synthetic-tap coordinate (e.g. a known-inert point inside the app window). */
       touchPoint?: { x: number; y: number };
+      /** The audited app's actual window rect, used to derive a safe in-window tap when touchPoint isn't given. */
+      windowBounds?: ElementBounds;
     } = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<TouchLatencyResult> {
@@ -282,7 +307,11 @@ export class TouchLatencyTracker {
       `[TouchLatency] Measuring touch latency for ${packageName} (${sampleCount} samples)`,
     );
 
-    const touchLocation = this.selectSafeTouchLocation(screenSize, options.touchPoint);
+    const touchLocation = this.selectSafeTouchLocation(
+      screenSize,
+      options.touchPoint,
+      options.windowBounds,
+    );
     const measurements: number[] = [];
     let animatingDetected = false;
 

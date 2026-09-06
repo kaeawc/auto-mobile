@@ -184,3 +184,41 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function () 
     expect(generate(baseMetrics(), [])).toBe("No performance issues detected");
   });
 });
+
+describe("PerformanceAudit.resolveTouchLatency (#6167)", function () {
+  let audit: PerformanceAudit;
+
+  beforeEach(function () {
+    audit = new PerformanceAudit(
+      { deviceId: "test-device", name: "test", platform: "android" },
+      new FakeAdbClientFactory(),
+    );
+  });
+
+  const resolve = (result: {
+    success: boolean;
+    latencyMs: number;
+    animating?: boolean;
+    error?: string;
+  }) => (audit as any).resolveTouchLatency(result);
+
+  test("reports the latency from a clean (non-animating) successful run", function () {
+    expect(resolve({ success: true, latencyMs: 42 })).toBe(42);
+  });
+
+  test("preserves a valid latency from a mixed run instead of discarding it", function () {
+    // At least one sample was discounted as animating, but the run still
+    // produced a real latency from a clean sample - it must not be nulled out.
+    expect(resolve({ success: true, latencyMs: 37, animating: true })).toBe(37);
+  });
+
+  test("returns null only when every sample was animating (no valid measurement)", function () {
+    expect(resolve({ success: false, latencyMs: 0, animating: true, error: "animating" })).toBe(
+      null,
+    );
+  });
+
+  test("returns null on an ordinary measurement failure", function () {
+    expect(resolve({ success: false, latencyMs: 0, error: "timeout" })).toBe(null);
+  });
+});

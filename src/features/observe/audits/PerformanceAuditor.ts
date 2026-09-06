@@ -3,12 +3,35 @@ import { PerformanceAudit } from "../../performance/PerformanceAudit";
 import { ThresholdManager } from "../../performance/ThresholdManager";
 import { isPerformanceAuditEnabled } from "../../performance/performanceAuditConfig";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
-import type { BootedDevice, ObserveResult } from "../../../models";
+import type { BootedDevice, ElementBounds, ObserveResult } from "../../../models";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+
+/**
+ * Find the audited app's own window bounds from the accessibility service's
+ * window list, so the touch-latency synthetic tap can be placed inside the
+ * app's actual window rather than a fixed screen fraction - correct under
+ * split-screen/freeform where the app doesn't occupy the full screen
+ * (issue #6167). Prefers the window marked focused; falls back to any window
+ * for the package if none is marked focused. Returns undefined when no
+ * matching window bounds are available.
+ */
+export function findAppWindowBounds(
+  result: ObserveResult,
+  appId: string,
+): ElementBounds | undefined {
+  const windows = result.viewHierarchy?.windows;
+  if (!windows || windows.length === 0) {
+    return undefined;
+  }
+
+  const forApp = windows.filter((w) => w.packageName === appId && w.bounds);
+  const focused = forApp.find((w) => w.isFocused);
+  return (focused ?? forApp[0])?.bounds;
+}
 
 export interface PerformanceAuditorOptions {
   device: BootedDevice;
@@ -83,6 +106,7 @@ export class PerformanceAuditor {
           thresholds,
           result.screenSize,
           perf,
+          findAppWindowBounds(result, result.activeWindow!.appId),
         );
 
         // Attach audit result to observe result

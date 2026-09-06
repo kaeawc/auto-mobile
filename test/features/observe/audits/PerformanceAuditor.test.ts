@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PerformanceAuditor } from "../../../../src/features/observe/audits/PerformanceAuditor";
+import {
+  findAppWindowBounds,
+  PerformanceAuditor,
+} from "../../../../src/features/observe/audits/PerformanceAuditor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import {
   NoOpPerformanceTracker,
@@ -147,5 +150,61 @@ describe("PerformanceAuditor", () => {
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(factory.wasCalledForDevice(androidDevice.deviceId)).toBe(true);
+  });
+});
+
+describe("findAppWindowBounds (#6167)", () => {
+  test("returns undefined when the result has no window list", () => {
+    const result = makeResult();
+    expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
+  });
+
+  test("prefers the focused window for the app over an unfocused one", () => {
+    const focusedBounds = { left: 0, top: 960, right: 1080, bottom: 1920 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        windows: [
+          {
+            packageName: "com.example",
+            isFocused: false,
+            bounds: { left: 0, top: 0, right: 1080, bottom: 960 },
+          },
+          { packageName: "com.example", isFocused: true, bounds: focusedBounds },
+          {
+            packageName: "com.other",
+            isFocused: true,
+            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          },
+        ],
+      } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toEqual(focusedBounds);
+  });
+
+  test("falls back to any matching window when none is marked focused", () => {
+    // Split-screen: the audited app occupies the lower half, no window
+    // explicitly marked focused in this hierarchy snapshot.
+    const lowerHalf = { left: 0, top: 960, right: 1080, bottom: 1920 };
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        windows: [{ packageName: "com.example", bounds: lowerHalf }],
+      } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toEqual(lowerHalf);
+  });
+
+  test("returns undefined when no window matches the app id", () => {
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        windows: [{ packageName: "com.other", bounds: { left: 0, top: 0, right: 10, bottom: 10 } }],
+      } as any,
+    });
+
+    expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
   });
 });

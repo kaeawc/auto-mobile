@@ -165,6 +165,37 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       expect(location).toEqual({ x: 42, y: 84 });
     });
+
+    test("should derive the location from the app window bounds when given (split-screen)", function () {
+      const fakeAdb = new FakeAdbExecutor();
+      const factory: AdbClientFactory = { create: () => fakeAdb };
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      // App occupies only the lower half of the screen.
+      const windowBounds = { left: 0, top: 960, right: 1080, bottom: 1920 };
+      const location = (tracker as any).selectSafeTouchLocation(
+        screenSize,
+        undefined,
+        windowBounds,
+      );
+
+      expect(location).toEqual({ x: 540, y: 1440 });
+    });
+
+    test("should ignore malformed window bounds and fall back to the default", function () {
+      const fakeAdb = new FakeAdbExecutor();
+      const factory: AdbClientFactory = { create: () => fakeAdb };
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const invalidBounds = { left: 100, top: 100, right: 100, bottom: 100 };
+      const location = (tracker as any).selectSafeTouchLocation(
+        screenSize,
+        undefined,
+        invalidBounds,
+      );
+
+      expect(location).toEqual({ x: Math.floor(1080 * 0.5), y: Math.floor(1920 * 0.12) });
+    });
   });
 
   describe("measureLatency", function () {
@@ -482,12 +513,13 @@ describe("TouchLatencyTracker - Unit Tests", function () {
           return { stdout: "", stderr: "" };
         }
 
-        // Frame counter present but flat, jank flat: no frame was rendered.
-        // Stays below the animating-detection threshold so this exercises
-        // the "no increase" timeout path, not the animating path (#6167).
+        // Frame counter present but flat at zero: no frame was rendered
+        // during the pre-tap idle window (not animating) and none after the
+        // tap either (frozen), so this exercises the "no increase" timeout
+        // path rather than the animating path (#6167).
         return {
           stdout: `
-            Total frames rendered: 1
+            Total frames rendered: 0
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
@@ -645,6 +677,162 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.touchCoordinates.y).toBeLessThan(screenSize.height);
       expect(result.touchCoordinates.x).toBeGreaterThan(0);
       expect(result.touchCoordinates.x).toBeLessThan(screenSize.width);
+    });
+
+    test("should flag even a low-frame-rate (slow) animation, not just a fast one (#6167)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        // A slow animation only manages a single frame in the 50ms pre-tap
+        // idle window - still evidence the app is rendering with no input.
+        return {
+          stdout: `
+            Total frames rendered: 1
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.animating).toBe(true);
+      expect(result.success).toBe(false);
+    });
+
+    test("should not flag a genuinely static app (0 frames in the idle window)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let pollCount = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          pollCount = 0;
+          return { stdout: "", stderr: "" };
+        }
+        pollCount++;
+        const totalFrames = pollCount === 1 ? 0 : 5;
+        return {
+          stdout: `Total frames rendered: ${totalFrames}`,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.animating).toBeFalsy();
+      expect(result.success).toBe(true);
+    });
+
+    test("preserves a valid measurement from a mixed run (one animating sample, one clean)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let sampleIndex = 0;
+      let pollInSample = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          sampleIndex++;
+          pollInSample = 0;
+          return { stdout: "", stderr: "" };
+        }
+
+        pollInSample++;
+        if (sampleIndex === 1) {
+          // Sample 1: animating - frames already present at the baseline read.
+          return { stdout: `Total frames rendered: 4`, stderr: "" };
+        }
+        // Sample 2: static baseline, then a real post-tap frame.
+        const totalFrames = pollInSample === 1 ? 0 : 3;
+        return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 2, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // The animating sample must not null out the run: the clean sample's
+      // latency is still reported, annotated with the animating flag.
+      expect(result.success).toBe(true);
+      expect(result.sampleCount).toBe(1);
+      expect(result.latencyMs).toBeGreaterThan(0);
+      expect(result.animating).toBe(true);
+    });
+
+    test("derives the synthetic tap from the app's actual window bounds (split-screen lower half, #6167)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+        return { stdout: `Total frames rendered: 0`, stderr: "" };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      // App occupies only the lower half of a 1920-tall screen in split-screen.
+      const lowerHalfWindow = { left: 0, top: 960, right: 1080, bottom: 1920 };
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 50, windowBounds: lowerHalfWindow },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // Not the full-screen 12% default (y=230) - inside the lower-half window.
+      expect(result.touchCoordinates.y).toBeGreaterThanOrEqual(lowerHalfWindow.top);
+      expect(result.touchCoordinates.y).toBeLessThanOrEqual(lowerHalfWindow.bottom);
+      expect(result.touchCoordinates.x).toBeGreaterThanOrEqual(lowerHalfWindow.left);
+      expect(result.touchCoordinates.x).toBeLessThanOrEqual(lowerHalfWindow.right);
     });
 
     test("should handle errors gracefully and return error result", async function () {

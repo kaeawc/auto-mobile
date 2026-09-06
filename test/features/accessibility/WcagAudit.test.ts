@@ -815,11 +815,19 @@ describe("WcagAudit", function () {
     ): Promise<string> {
       const recorder = new RecordingBaselineManager();
       const withRecorder = new WcagAudit(new FakeTimer(), recorder);
-      await withRecorder.audit([], hierarchy, undefined, packageName, {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: true,
-      });
+      await withRecorder.audit(
+        [],
+        hierarchy,
+        undefined,
+        packageName,
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: true,
+        },
+        undefined,
+        windows,
+      );
       return recorder.lastScreenId!;
     }
 
@@ -899,6 +907,34 @@ describe("WcagAudit", function () {
       expect(homeScreenId).not.toContain(":unknown:");
       expect(scrollScreenId).not.toContain(":unknown:");
       expect(homeScreenId).not.toBe(scrollScreenId);
+    });
+
+    it("picks the focused TYPE_APPLICATION root over a larger, focused IME window (#6274 PRRT_kwDOP-GF5M6fvMbS)", async function () {
+      // The app root is deliberately SMALLER than the IME root and NOT the
+      // focused window, so this only passes if selection actually restricts
+      // to TYPE_APPLICATION (type === 1) rather than "focused, non-SystemUI":
+      // a soft keyboard (TYPE_INPUT_METHOD = 2) is not SystemUI and can hold
+      // focus while open, so a fix that only excludes SystemUI would still
+      // pick the keyboard root here, and the largest-bounds fallback would
+      // also land on it since it covers more of the screen.
+      const appRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 800 },
+        className: "com.example.AppContentRoot",
+      } as unknown as ViewHierarchyNode;
+      const imeRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 800, right: 1080, bottom: 2400 },
+        className: "com.example.KeyboardRoot",
+      } as unknown as ViewHierarchyNode;
+      const hierarchy: ViewHierarchyNode = { node: [appRoot, imeRoot] };
+      const windows: ViewHierarchyResult["windows"] = [
+        { isFocused: true, isActive: true, type: 2, bounds: imeRoot.bounds },
+        { isFocused: false, isActive: true, type: 1, bounds: appRoot.bounds },
+      ];
+
+      const screenId = await screenIdFor(hierarchy, "com.test", windows);
+
+      expect(screenId).toBe("com.test:com.example.AppContentRoot:");
+      expect(screenId).not.toBe("com.test:com.example.KeyboardRoot:");
     });
   });
 

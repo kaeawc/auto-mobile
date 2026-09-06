@@ -423,8 +423,14 @@ export class WcagAudit {
     // tracking. `getNodeClass`/`getNodeResourceId` check both.
     const activeRoot = this.resolveRootNode(hierarchy, windows);
     const rootNode = this.descendToMeaningfulNode(activeRoot);
-    const rootClass = this.getNodeClass(rootNode) || "unknown";
     const rootId = this.getNodeResourceId(rootNode) || "";
+    // A resource-id alone is already a real, screen-distinguishing signal
+    // (issue #6274 — e.g. Compose semantics nodes carry a destination-specific
+    // resource-id but never a `class`). Only fall back to the literal
+    // "unknown" when NEITHER signal was found, so a resource-id-only stop
+    // doesn't get mislabeled as "unknown" and spuriously collide across
+    // screens that share nothing but that literal string.
+    const rootClass = this.getNodeClass(rootNode) || (rootId ? "" : "unknown");
 
     return `${packageName}:${rootClass}:${rootId}`;
   }
@@ -467,11 +473,58 @@ export class WcagAudit {
   }
 
   /**
+   * Generic layout-container classes that carry no resource-id in the
+   * committed Android fixtures (e.g. `test/fixtures/observe/android-home.json`)
+   * — window decor/content frames sit inside a chain of these before reaching
+   * a screen-specific node. Treated as non-meaningful even though they carry a
+   * `class` value, so `descendToMeaningfulNode` keeps descending past them
+   * instead of stopping at the first one it meets: two distinct screens in the
+   * same package both reach a bare `android.widget.LinearLayout` before their
+   * screen-specific `resource-id` (e.g. `tap_screen_content`), so stopping
+   * there produces an identical baseline key for both and suppresses one
+   * screen's violations using the other's baseline.
+   */
+  private static readonly GENERIC_DECOR_CLASSES = new Set([
+    "android.widget.FrameLayout",
+    "android.widget.LinearLayout",
+    "android.widget.RelativeLayout",
+    "android.view.ViewGroup",
+    // Every Compose screen in the same package mounts its whole UI under one
+    // of these (see test/fixtures/observe/diff/scroll-before.json) — a real
+    // class, but no more screen-specific than a plain layout wrapper, so it
+    // must be skipped too or Compose apps re-collapse to a single baseline id.
+    "androidx.compose.ui.platform.ComposeView",
+  ]);
+
+  /** Android's own reserved id namespace (`android:id/...`) — framework chrome present on every screen, never app/screen-specific. */
+  private static readonly FRAMEWORK_RESOURCE_ID_PREFIX = "android:id/";
+
+  /**
+   * Whether `node` carries a screen-distinguishing signal: a resource-id
+   * outside Android's reserved `android:id/` namespace (framework chrome, e.g.
+   * `android:id/content`, present identically on every screen), or a class not
+   * in `GENERIC_DECOR_CLASSES`.
+   */
+  private hasScreenSignal(node: ViewHierarchyNode): boolean {
+    const resourceId = this.getNodeResourceId(node);
+    if (
+      resourceId !== undefined &&
+      !resourceId.startsWith(WcagAudit.FRAMEWORK_RESOURCE_ID_PREFIX)
+    ) {
+      return true;
+    }
+    const className = this.getNodeClass(node);
+    return className !== undefined && !WcagAudit.GENERIC_DECOR_CLASSES.has(className);
+  }
+
+  /**
    * Descend through attribute-less pass-through wrappers (window decor, content
-   * frame) to the first descendant that actually carries a class or
-   * resource-id, so the baseline id reflects real screen content instead of
-   * generic window chrome. Stops at a branch point (multiple children) or a
-   * leaf so it never silently jumps to an unrelated subtree.
+   * frame) and generic decor/container nodes (see `hasScreenSignal`) to the
+   * first descendant that actually carries a screen-distinguishing signal — a
+   * resource-id, or a non-generic class — so the baseline id reflects real
+   * screen content instead of generic window chrome. Stops at a branch point
+   * (multiple children) or a leaf so it never silently jumps to an unrelated
+   * subtree.
    */
   private descendToMeaningfulNode(
     node: ViewHierarchyNode,
@@ -479,7 +532,7 @@ export class WcagAudit {
   ): ViewHierarchyNode {
     let current = node;
     for (let depth = 0; depth < maxDepth; depth++) {
-      if (this.getNodeClass(current) || this.getNodeResourceId(current)) {
+      if (this.hasScreenSignal(current)) {
         return current;
       }
       const child = current.node;
@@ -500,6 +553,17 @@ export class WcagAudit {
   /** `AccessibilityWindowInfo.TYPE_SYSTEM` — the window type CtrlProxy reports for SystemUI. */
   private static readonly ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
   private static readonly SYSTEM_UI_PACKAGE = "com.android.systemui";
+  /**
+   * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1) — the
+   * only window type that represents genuine app content (see the identical
+   * predicate and rationale in
+   * `src/features/observe/audits/PerformanceAuditor.ts`). Excluding every
+   * other type — not just SystemUI (`TYPE_SYSTEM` = 3) — matters because
+   * `TYPE_INPUT_METHOD` (2), the soft keyboard, can hold focus while open and
+   * would otherwise win the "focused, non-SystemUI" window selection below,
+   * combining the app's package with the keyboard root's class/resource-id.
+   */
+  private static readonly ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
 
   /** Same window/package signal `ObserveScreen` uses to distinguish app vs SystemUI windows. */
   private isSystemUiWindow(window: ViewHierarchyWindowInfo): boolean {
@@ -507,6 +571,11 @@ export class WcagAudit {
       window.packageName === WcagAudit.SYSTEM_UI_PACKAGE ||
       window.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_SYSTEM
     );
+  }
+
+  /** Same `TYPE_APPLICATION` signal `PerformanceAuditor.isCandidateAppWindow` uses. */
+  private isApplicationWindow(window: ViewHierarchyWindowInfo): boolean {
+    return window.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_APPLICATION;
   }
 
   private boundsEqual(a: ElementBounds | undefined, b: ElementBounds | undefined): boolean {
@@ -533,12 +602,16 @@ export class WcagAudit {
    * another screen's violations.
    *
    * Prefer the ACTIVE APP window root: the focused (falling back to active),
-   * non-SystemUI window from the accessibility `windows[]` metadata — the same
-   * signal `ObserveScreen`'s `classifyFocusedSystemUiWindow` uses to
-   * distinguish app vs SystemUI windows — matched to its root node by bounds.
-   * When no `windows[]` metadata is available, fall back to the largest root by
-   * bounds area: the SystemUI status/navigation bar is always a thin sliver
-   * next to the full-screen app content root.
+   * `TYPE_APPLICATION` window from the accessibility `windows[]` metadata —
+   * the same signal `PerformanceAuditor.isCandidateAppWindow` uses to isolate
+   * app content — matched to its root node by bounds. Requiring
+   * `TYPE_APPLICATION` (not just non-SystemUI) excludes `TYPE_INPUT_METHOD`
+   * (the soft keyboard), which can hold focus while open and would otherwise
+   * win selection, combining the app's package with the keyboard root's
+   * class/resource-id and suppressing findings across unrelated screens that
+   * share the same IME. When no `windows[]` metadata is available, fall back
+   * to the largest root by bounds area: the SystemUI status/navigation bar is
+   * always a thin sliver next to the full-screen app content root.
    */
   private resolveRootNode(
     hierarchy: ViewHierarchyNode,
@@ -560,8 +633,12 @@ export class WcagAudit {
 
     if (windows && windows.length > 0) {
       const activeWindow =
-        windows.find((w) => w.isFocused === true && !this.isSystemUiWindow(w)) ??
-        windows.find((w) => w.isActive === true && !this.isSystemUiWindow(w));
+        windows.find(
+          (w) => w.isFocused === true && !this.isSystemUiWindow(w) && this.isApplicationWindow(w),
+        ) ??
+        windows.find(
+          (w) => w.isActive === true && !this.isSystemUiWindow(w) && this.isApplicationWindow(w),
+        );
       if (activeWindow?.bounds) {
         const matched = node.find((candidate) =>
           this.boundsEqual((candidate as ViewHierarchyNode).bounds, activeWindow.bounds),

@@ -418,6 +418,62 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `accepts barrier with invalid inline deviceCount overridden by a valid params deviceCount`() {
+    // PlanNormalizer's params-wins merge discards the inline sibling, so the
+    // effective (params) value is what must be validated.
+    val yaml =
+      """
+      name: barrier-inline-invalid-params-valid
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: not-a-number
+          params:
+            deviceCount: 2
+        - tool: barrier
+          device: B
+          lock: sync-point
+          params:
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "Effective (params) deviceCount should be validated, not the discarded inline value",
+    )
+  }
+
+  @Test
+  fun `rejects barrier with a valid inline deviceCount overridden by an invalid params deviceCount`() {
+    val yaml =
+      """
+      name: barrier-inline-valid-params-invalid
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync-point
+          deviceCount: 2
+          params:
+            deviceCount: 0
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "Effective (params) deviceCount=0 should be rejected even though inline is valid",
+    )
+  }
+
+  @Test
   fun `validates expectations array`() {
     val yaml =
       """

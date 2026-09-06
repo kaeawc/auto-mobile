@@ -465,6 +465,69 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("params-wins precedence for split inline/params coordination fields", () => {
+    // PlanNormalizer merges a step's inline fields and its nested `params`
+    // object as `{ ...inlineParams, ...paramsFromStep }`, so when the same
+    // field appears in both places, the params value wins and the inline
+    // value is discarded -- the same precedence #6090/#6107 established for
+    // networkCondition/doNotDisturb (#6215 review). These exercise the real
+    // YAML -> normalize -> validate pipeline so the effective (post-merge)
+    // value is what gets checked, not a hand-built already-merged Plan.
+    test("validates a barrier's effective (params) deviceCount, not its overridden inline value", async () => {
+      // Inline deviceCount=2 would pass the distinct-device-count check on
+      // its own (2 distinct devices), but params.deviceCount=3 wins at
+      // normalization -- 3 distinct devices are required and only 2 exist,
+      // so this must be REJECTED using the effective value of 3, not 2.
+      const yaml = `
+name: barrier-params-override-devicecount
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: 2
+    params:
+      deviceCount: 3
+  - tool: barrier
+    device: B
+    lock: sync1
+    params:
+      deviceCount: 3
+`;
+      const serializer = new YamlPlanSerializer();
+      expect(() => serializer.importPlanFromYaml(yaml)).toThrow(
+        'barrier lock "sync1" declares deviceCount=3 but only 2 distinct devices',
+      );
+    });
+
+    test("accepts a barrier whose effective (params) deviceCount matches distinct devices, ignoring a smaller inline value", async () => {
+      // Inline deviceCount=2 is irrelevant here -- params.deviceCount=2 wins
+      // and matches the 2 distinct devices, so this is valid.
+      const yaml = `
+name: barrier-params-override-devicecount-valid
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: 999
+    params:
+      deviceCount: 2
+  - tool: barrier
+    device: B
+    lock: sync1
+    params:
+      deviceCount: 2
+`;
+      const serializer = new YamlPlanSerializer();
+      expect(() => serializer.importPlanFromYaml(yaml)).not.toThrow();
+    });
+  });
+
   describe("hasMultiDeviceFeatures", () => {
     test("returns false for a simple single-device plan", () => {
       const plan: Plan = {

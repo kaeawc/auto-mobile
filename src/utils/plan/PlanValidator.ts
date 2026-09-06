@@ -1,4 +1,4 @@
-import { Plan } from "../../models/Plan";
+import { Plan, PlanStep } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
 
@@ -219,6 +219,34 @@ export class PlanValidator {
   }
 
   /**
+   * Resolves the effective value of a coordination field (`lock`/`device`/
+   * `deviceCount`) for a step, honoring PlanNormalizer's params-wins
+   * precedence: when a field is present under `params`, that value wins even
+   * if a different value also sits inline on the step — PlanNormalizer's
+   * `{ ...inlineParams, ...paramsFromStep }` merge discards the inline one at
+   * normalization, the same precedence the #6090/#6107 networkCondition/
+   * doNotDisturb inline-vs-params handling established. Falling back to the
+   * inline value only when `params` doesn't declare the field also keeps this
+   * correct for a step that reaches this validator before normalization.
+   */
+  private static effectiveField(step: PlanStep, field: string): unknown {
+    const params = step.params;
+    if (
+      params &&
+      typeof params === "object" &&
+      Object.prototype.hasOwnProperty.call(params, field)
+    ) {
+      return (params as Record<string, unknown>)[field];
+    }
+    // A step reaching this validator before PlanNormalizer runs may carry
+    // coordination fields as plain siblings of `tool`/`params` -- outside
+    // PlanStep's declared shape, but present on the underlying object.
+    // oxlint-disable-next-line auto-mobile/no-unknown-cast
+    const inlineFields = step as unknown as Record<string, unknown>;
+    return inlineFields[field];
+  }
+
+  /**
    * Validates coordination-tool params: criticalSection's cross-step lock
    * consistency (a lock is entered at most once per plan), and barrier's
    * own per-step params.
@@ -257,11 +285,7 @@ export class PlanValidator {
       if (step.tool !== "criticalSection") {
         continue;
       }
-      const params = step.params;
-      if (!params || typeof params !== "object") {
-        continue;
-      }
-      const lock = (params as { lock?: unknown }).lock;
+      const lock = this.effectiveField(step, "lock");
       if (typeof lock !== "string" || lock.length === 0) {
         // Schema-level requirements are validated elsewhere; skip silently.
         continue;
@@ -269,8 +293,8 @@ export class PlanValidator {
       const occurrences = lockUsage.get(lock) ?? [];
       occurrences.push({
         stepIndex: i,
-        device: (params as { device?: unknown }).device,
-        deviceCount: (params as { deviceCount?: unknown }).deviceCount,
+        device: this.effectiveField(step, "device"),
+        deviceCount: this.effectiveField(step, "deviceCount"),
       });
       lockUsage.set(lock, occurrences);
     }
@@ -348,18 +372,13 @@ export class PlanValidator {
       if (step.tool !== "barrier") {
         continue;
       }
-      const params = step.params;
-      if (!params || typeof params !== "object") {
-        errors.push(`barrier step ${i} is missing its params object.`);
-        continue;
-      }
 
-      const lock = (params as { lock?: unknown }).lock;
+      const lock = this.effectiveField(step, "lock");
       if (typeof lock !== "string" || lock.length === 0) {
         errors.push(`barrier step ${i} is missing a non-empty 'lock' parameter.`);
       }
 
-      const deviceCount = (params as { deviceCount?: unknown }).deviceCount;
+      const deviceCount = this.effectiveField(step, "deviceCount");
       if (typeof deviceCount !== "number" || !Number.isInteger(deviceCount) || deviceCount < 1) {
         errors.push(
           `barrier step ${i} must declare a positive integer 'deviceCount', got ${JSON.stringify(deviceCount)}.`,
@@ -410,7 +429,7 @@ export class PlanValidator {
 
     for (const step of plan.steps) {
       if (step.tool === "barrier") {
-        this.recordBarrierLockUsage(usageByLock, step.params);
+        this.recordBarrierLockUsage(usageByLock, step);
       }
     }
 
@@ -419,12 +438,9 @@ export class PlanValidator {
 
   private static recordBarrierLockUsage(
     usageByLock: Map<string, { devices: Set<string>; deviceCounts: Set<number> }>,
-    params: Record<string, unknown> | undefined,
+    step: PlanStep,
   ): void {
-    if (!params || typeof params !== "object") {
-      return;
-    }
-    const lock = (params as { lock?: unknown }).lock;
+    const lock = this.effectiveField(step, "lock");
     if (typeof lock !== "string" || lock.length === 0) {
       return;
     }
@@ -434,12 +450,12 @@ export class PlanValidator {
       deviceCounts: new Set<number>(),
     };
 
-    const device = (params as { device?: unknown }).device;
+    const device = this.effectiveField(step, "device");
     if (typeof device === "string" && device.length > 0) {
       usage.devices.add(device);
     }
 
-    const deviceCount = (params as { deviceCount?: unknown }).deviceCount;
+    const deviceCount = this.effectiveField(step, "deviceCount");
     if (typeof deviceCount === "number" && Number.isInteger(deviceCount) && deviceCount >= 1) {
       usage.deviceCounts.add(deviceCount);
     }

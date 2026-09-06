@@ -1039,6 +1039,51 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should accept a barrier whose inline deviceCount is invalid but params.deviceCount (the effective, params-wins value) is valid", () => {
+      // PlanNormalizer's { ...inlineParams, ...paramsFromStep } merge means
+      // params.deviceCount overrides the inline sibling at normalization, so
+      // the discarded inline value must NOT be schema-validated (#6215
+      // review, mirroring the #6090/#6107 networkCondition/doNotDisturb
+      // override precedence).
+      const yaml = `
+name: barrier-inline-invalid-params-valid
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: not-a-number
+    params:
+      deviceCount: 2
+  - tool: barrier
+    device: B
+    lock: sync-point
+    params:
+      deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject a barrier whose inline deviceCount is valid but params.deviceCount (the effective, params-wins value) is invalid", () => {
+      const yaml = `
+name: barrier-inline-valid-params-invalid
+devices:
+  - A
+steps:
+  - tool: barrier
+    device: A
+    lock: sync-point
+    deviceCount: 2
+    params:
+      deviceCount: 0
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should validate expectations array", () => {
       const yaml = `
 name: expectations-test

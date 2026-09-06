@@ -761,7 +761,7 @@
           }
         },
         {
-          "$comment": "criticalSection accepts lock/deviceCount/steps/timeout either inline on the step (like dragAndDrop's source/target), nested under params, or SPLIT across both (e.g. lock inline, deviceCount in params) -- PlanNormalizer merges inline fields and params together before execution, so a field counts as present wherever it appears. Each required field is validated against that merged union independently, not as an all-inline-or-all-params choice (#6215 review).",
+          "$comment": "criticalSection accepts lock/deviceCount/steps/timeout either inline on the step (like dragAndDrop's source/target), nested under params, or SPLIT across both (e.g. lock inline, deviceCount in params) -- PlanNormalizer merges inline fields and params together before execution, so a field counts as present wherever it appears. Each required field is validated against that merged union independently, not as an all-inline-or-all-params choice. Additionally, when params declares a field, params WINS at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, same precedence #6090/#6107 established for networkCondition/doNotDisturb) -- so the inline sibling is discarded and must NOT be type-checked in that case, or a plan with an invalid-but-overridden inline value would be false-rejected (#6215 review).",
           "if": {
             "properties": {
               "tool": {
@@ -774,30 +774,6 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/criticalSectionParams"
-              },
-              "lock": {
-                "type": "string",
-                "description": "Global lock identifier for synchronization across devices",
-                "minLength": 1
-              },
-              "steps": {
-                "type": "array",
-                "description": "Steps to execute serially within the critical section",
-                "minItems": 1,
-                "items": {
-                  "$ref": "#/$defs/planStep"
-                }
-              },
-              "deviceCount": {
-                "type": "integer",
-                "description": "Expected number of devices that must reach the barrier before execution proceeds",
-                "minimum": 1
-              },
-              "timeout": {
-                "type": "integer",
-                "description": "Barrier timeout in milliseconds (default: 30000ms)",
-                "exclusiveMinimum": 0,
-                "default": 30000
               }
             },
             "allOf": [
@@ -821,12 +797,84 @@
                   { "required": ["steps"] },
                   { "required": ["params"], "properties": { "params": { "required": ["steps"] } } }
                 ]
+              },
+              {
+                "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["lock"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "lock": {
+                      "type": "string",
+                      "description": "Global lock identifier for synchronization across devices",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceCount override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["deviceCount"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceCount": {
+                      "type": "integer",
+                      "description": "Expected number of devices that must reach the barrier before execution proceeds",
+                      "minimum": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.steps override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["steps"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "steps": {
+                      "type": "array",
+                      "description": "Steps to execute serially within the critical section",
+                      "minItems": 1,
+                      "items": {
+                        "$ref": "#/$defs/planStep"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.timeout override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["timeout"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "timeout": {
+                      "type": "integer",
+                      "description": "Barrier timeout in milliseconds (default: 30000ms)",
+                      "exclusiveMinimum": 0,
+                      "default": 30000
+                    }
+                  }
+                }
               }
             ]
           }
         },
         {
-          "$comment": "barrier accepts lock/deviceCount/timeout either inline on the step, nested under params, or split across both, same union-of-locations rule as criticalSection (#6215 review).",
+          "$comment": "barrier accepts lock/deviceCount/timeout either inline on the step, nested under params, or split across both, same union-of-locations and params-wins-override rules as criticalSection (#6215 review).",
           "if": {
             "properties": {
               "tool": {
@@ -839,22 +887,6 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/barrierParams"
-              },
-              "lock": {
-                "type": "string",
-                "description": "Shared barrier name; all devices using the same name synchronize together",
-                "minLength": 1
-              },
-              "deviceCount": {
-                "type": "integer",
-                "description": "Number of devices that must arrive before the barrier lifts",
-                "minimum": 1
-              },
-              "timeout": {
-                "type": "integer",
-                "description": "Barrier timeout in milliseconds (default: 30000ms)",
-                "exclusiveMinimum": 0,
-                "default": 30000
               }
             },
             "allOf": [
@@ -872,6 +904,58 @@
                     "properties": { "params": { "required": ["deviceCount"] } }
                   }
                 ]
+              },
+              {
+                "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["lock"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "lock": {
+                      "type": "string",
+                      "description": "Shared barrier name; all devices using the same name synchronize together",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.deviceCount override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["deviceCount"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "deviceCount": {
+                      "type": "integer",
+                      "description": "Number of devices that must arrive before the barrier lifts",
+                      "minimum": 1
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.timeout override, same rule as lock above.",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "required": ["timeout"] } }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "timeout": {
+                      "type": "integer",
+                      "description": "Barrier timeout in milliseconds (default: 30000ms)",
+                      "exclusiveMinimum": 0,
+                      "default": 30000
+                    }
+                  }
+                }
               }
             ]
           }

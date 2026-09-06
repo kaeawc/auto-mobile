@@ -120,6 +120,56 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
     expect(effect.basis).toBe("viewHierarchy changed");
   });
 
+  test("does NOT report screenChanged when the PRE-tap baseline is stale even though the post-tap capture is fresh (#6266)", () => {
+    const tap = createTapOnElement();
+    const activeWindow = {
+      appId: "com.android.deskclock",
+      activityName: "com.android.deskclock.DeskClock",
+      layoutSeqSum: 42,
+    };
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("alarm-list"),
+      // The cached PRE-tap baseline is explicitly stale — a mismatch against
+      // it may predate the tap entirely, not be caused by it.
+      freshness: { isFresh: false, warning: "cached baseline, unverified" },
+    });
+    const current = makeObservation({
+      activeWindow, // unchanged
+      viewHierarchy: makeHierarchy("time-picker-dialog"), // changed, but baseline is stale
+      freshness: { isFresh: true },
+    });
+
+    const effect = (tap as any).deriveTapEffect(previous, current);
+
+    expect(effect.screenChanged).toBe(false);
+    expect(effect.basis).toBe("activeWindow unchanged");
+  });
+
+  test("trusts a viewHierarchy diff when BOTH baseline and post-tap capture are fresh", () => {
+    const tap = createTapOnElement();
+    const activeWindow = {
+      appId: "com.android.deskclock",
+      activityName: "com.android.deskclock.DeskClock",
+      layoutSeqSum: 42,
+    };
+    const previous = makeObservation({
+      activeWindow,
+      viewHierarchy: makeHierarchy("alarm-list"),
+      freshness: { isFresh: true },
+    });
+    const current = makeObservation({
+      activeWindow, // unchanged
+      viewHierarchy: makeHierarchy("time-picker-dialog"), // changed
+      freshness: { isFresh: true },
+    });
+
+    const effect = (tap as any).deriveTapEffect(previous, current);
+
+    expect(effect.screenChanged).toBe(true);
+    expect(effect.basis).toBe("viewHierarchy changed");
+  });
+
   test("still reports true immediately when activeWindow itself changed", () => {
     const tap = createTapOnElement();
     const previous = makeObservation({

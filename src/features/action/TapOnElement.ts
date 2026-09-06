@@ -543,15 +543,24 @@ export class TapOnElement extends BaseVisualChange {
       return undefined;
     }
     const changed = previousHash !== currentHash;
-    if (changed && currentObservation.freshness?.isFresh === false) {
-      // Issue #6266 (review): a hierarchy diff against an EXPLICITLY-STALE
-      // capture (freshness.isFresh === false, e.g. retries exhausted on an
-      // unverified cache entry) is not trustworthy proof of a screen change —
-      // the lagging capture may simply not have caught up yet. Treat it as
-      // inconclusive (the pre-#6258 "unchanged" state) so the caller keeps
-      // polling/retrying instead of asserting a change from stale data. A
-      // fresh hierarchy diff (isFresh true, or absent) still falls through to
-      // "viewHierarchy changed" per #6258's dialog-window fix.
+    if (
+      changed &&
+      (previousObservation.freshness?.isFresh === false ||
+        currentObservation.freshness?.isFresh === false)
+    ) {
+      // Issue #6266 (review): a hierarchy diff is only trustworthy proof of a
+      // tap-caused change when BOTH sides of the comparison are fresh. If the
+      // POST-tap capture is explicitly stale (freshness.isFresh === false,
+      // e.g. retries exhausted on an unverified cache entry), the lagging
+      // capture may simply not have caught up yet. Symmetrically, if the
+      // cached PRE-tap BASELINE is explicitly stale while the post-tap
+      // capture is fresh, the mismatch may PREDATE the tap (stale-baseline vs
+      // fresh-current) rather than being caused by it. Either way, treat the
+      // diff as inconclusive (the pre-#6258 "unchanged" state) so the caller
+      // keeps polling/retrying instead of asserting a change from stale data.
+      // Only when NEITHER side is explicitly stale (isFresh true, or absent,
+      // on both) does a hierarchy diff fall through to "viewHierarchy
+      // changed" per #6258's dialog-window fix.
       return {
         screenChanged: false,
         basis: "viewHierarchy unchanged",

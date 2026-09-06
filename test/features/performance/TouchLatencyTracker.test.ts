@@ -209,10 +209,11 @@ describe("TouchLatencyTracker - Unit Tests", function () {
           return { stdout: "", stderr: "" };
         }
 
-        // Return baseline stats first, then show increased jank on subsequent calls
+        // Two identical no-input snapshots first (no growth between them),
+        // then show increased jank once the touch is injected.
         gfxinfoCallCount++;
-        if (gfxinfoCallCount === 1) {
-          // Baseline
+        if (gfxinfoCallCount <= 2) {
+          // Pre-tap snapshots
           return {
             stdout: `
               50th percentile: 8.5ms
@@ -275,8 +276,9 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         callCount++;
-        // Return baseline first, then activity on second call for each sample
-        if (callCount % 2 === 1) {
+        // Two identical pre-tap snapshots (no growth), then activity once
+        // polling for the post-tap response begins.
+        if (callCount <= 2) {
           return {
             stdout: `
               Number Missed Vsync: 0
@@ -366,7 +368,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         callCount++;
-        if (callCount === 1) {
+        if (callCount <= 2) {
           return {
             stdout: `
               Number Missed Vsync: 0
@@ -416,7 +418,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         callCount++;
-        if (callCount === 1) {
+        if (callCount <= 2) {
           return {
             stdout: `
               Number Missed Vsync: 0
@@ -468,8 +470,9 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         callCount++;
-        // Baseline on the first call, then +3 frames per poll, jank flat.
-        const totalFrames = callCount === 1 ? 0 : (callCount - 1) * 3;
+        // Two identical pre-tap snapshots at zero, then +3 frames per poll
+        // once the touch is injected, jank flat throughout.
+        const totalFrames = callCount <= 2 ? 0 : (callCount - 2) * 3;
         return {
           stdout: `
             Total frames rendered: ${totalFrames}
@@ -551,17 +554,20 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
     test("should flag an app as animating when frames render during the pre-tap idle window (#6167)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
+      let callCount = 0;
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           return { stdout: "", stderr: "" };
         }
 
-        // The app keeps rendering (spinner/video) with no input at all -
-        // every read, including the pre-tap baseline, sees frame growth.
+        // The app keeps rendering (spinner/video) with no input at all - the
+        // counter keeps growing across the two consecutive no-input
+        // snapshots, not just showing a single one-off frame.
+        callCount++;
         return {
           stdout: `
-            Total frames rendered: 12
+            Total frames rendered: ${12 + callCount * 3}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
@@ -604,9 +610,10 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         pollCount++;
-        // Baseline (first read after reset) is idle: no frames. Only after
-        // the synthetic tap does the frame counter move.
-        const totalFrames = pollCount === 1 ? 0 : 5;
+        // Both pre-tap snapshots (reads 1 and 2, after reset) are idle: no
+        // frames, no growth between them. Only after the synthetic tap does
+        // the frame counter move.
+        const totalFrames = pollCount <= 2 ? 0 : 5;
         return {
           stdout: `
             Total frames rendered: ${totalFrames}
@@ -633,6 +640,60 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         fakeTimer,
       );
 
+      expect(result.animating).toBeFalsy();
+      expect(result.success).toBe(true);
+      expect(result.sampleCount).toBe(1);
+      expect(result.latencyMs).toBeGreaterThan(0);
+    });
+
+    // Regression: a naive baseline-vs-zero comparison classified a static
+    // app that emits one delayed settling/layout frame right after
+    // `gfxinfo reset` as "animating", discounting every sample even though
+    // the app never renders again with no input. Confirming growth BETWEEN
+    // two consecutive no-input snapshots (rather than comparing the first
+    // one to zero) absorbs that lone frame into the first snapshot instead.
+    test("a single settling frame right after reset is not treated as animating (#6167 follow-up)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let callCount = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+
+        callCount++;
+        // One settling frame lands before the FIRST post-reset read (both
+        // pre-tap snapshots see the same non-zero count - no growth between
+        // them), then a real frame only after the synthetic tap.
+        const totalFrames = callCount <= 2 ? 1 : 4;
+        return {
+          stdout: `
+            Total frames rendered: ${totalFrames}
+            Number Missed Vsync: 0
+            Number Slow UI thread: 0
+            Number Frame deadline missed: 0
+          `,
+          stderr: "",
+        };
+      });
+
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // The sample proceeds - the tap is injected and a real latency is
+      // measured - rather than being discounted as animating.
       expect(result.animating).toBeFalsy();
       expect(result.success).toBe(true);
       expect(result.sampleCount).toBe(1);
@@ -681,17 +742,22 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
     test("should flag even a low-frame-rate (slow) animation, not just a fast one (#6167)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
+      let callCount = 0;
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           return { stdout: "", stderr: "" };
         }
 
-        // A slow animation only manages a single frame in the 50ms pre-tap
-        // idle window - still evidence the app is rendering with no input.
+        // A slow animation manages only a single extra frame between the two
+        // consecutive no-input snapshots (growth, unlike a one-off settling
+        // frame baked into the first snapshot alone) - still evidence the
+        // app is rendering with no input.
+        callCount++;
+        const totalFrames = callCount === 1 ? 0 : 1;
         return {
           stdout: `
-            Total frames rendered: 1
+            Total frames rendered: ${totalFrames}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
@@ -721,6 +787,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
     test("flags animating via the jank-counter fallback when Total frames rendered is absent (#6167)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
+      let callCount = 0;
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
@@ -728,11 +795,14 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
 
         // Some gfxinfo variants omit "Total frames rendered" entirely, but
-        // still report jank counters. A nonzero jank counter right after a
-        // reset is still evidence the app rendered with no input.
+        // still report jank counters. A jank counter that keeps growing
+        // between the two consecutive no-input snapshots is still evidence
+        // the app rendered with no input.
+        callCount++;
+        const missedVsync = 2 * callCount;
         return {
           stdout: `
-            Number Missed Vsync: 2
+            Number Missed Vsync: ${missedVsync}
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
@@ -770,9 +840,9 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         }
         pollCount++;
         // No "Total frames rendered" line at all in this gfxinfo variant.
-        // Baseline (first read) is a true zero on every counter; only after
-        // the tap does a jank counter move.
-        const missedVsync = pollCount === 1 ? 0 : 1;
+        // Both pre-tap snapshots are a true zero on every counter (no
+        // growth); only after the tap does a jank counter move.
+        const missedVsync = pollCount <= 2 ? 0 : 1;
         return {
           stdout: `
             Number Missed Vsync: ${missedVsync}
@@ -813,7 +883,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
           return { stdout: "", stderr: "" };
         }
         pollCount++;
-        const totalFrames = pollCount === 1 ? 0 : 5;
+        const totalFrames = pollCount <= 2 ? 0 : 5;
         return {
           stdout: `Total frames rendered: ${totalFrames}`,
           stderr: "",
@@ -853,11 +923,13 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
         pollInSample++;
         if (sampleIndex === 1) {
-          // Sample 1: animating - frames already present at the baseline read.
-          return { stdout: `Total frames rendered: 4`, stderr: "" };
+          // Sample 1: animating - the counter keeps growing across the two
+          // consecutive pre-tap snapshots.
+          return { stdout: `Total frames rendered: ${4 * pollInSample}`, stderr: "" };
         }
-        // Sample 2: static baseline, then a real post-tap frame.
-        const totalFrames = pollInSample === 1 ? 0 : 3;
+        // Sample 2: static across both pre-tap snapshots, then a real
+        // post-tap frame.
+        const totalFrames = pollInSample <= 2 ? 0 : 3;
         return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
       });
 
@@ -887,19 +959,24 @@ describe("TouchLatencyTracker - Unit Tests", function () {
     test("does not report animating when a run fails for mixed reasons (one animating, one genuine timeout)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
       let sampleIndex = 0;
+      let pollInSample = 0;
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           sampleIndex++;
+          pollInSample = 0;
           return { stdout: "", stderr: "" };
         }
 
+        pollInSample++;
         if (sampleIndex === 1) {
-          // Sample 1: animating - frames already present at the baseline read.
-          return { stdout: `Total frames rendered: 4`, stderr: "" };
+          // Sample 1: animating - the counter keeps growing across the two
+          // consecutive pre-tap snapshots.
+          return { stdout: `Total frames rendered: ${4 * pollInSample}`, stderr: "" };
         }
-        // Sample 2: a genuinely frozen app - flat at zero baseline and
-        // after the tap, no frame activity ever, times out.
+        // Sample 2: a genuinely frozen app - flat at zero across both
+        // pre-tap snapshots and after the tap, no frame activity ever, times
+        // out.
         return { stdout: `Total frames rendered: 0`, stderr: "" };
       });
 

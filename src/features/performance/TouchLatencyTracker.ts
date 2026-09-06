@@ -41,13 +41,15 @@ interface FrameStats {
   frameDeadlineMissed: number | null;
 }
 
-/** A `FrameStats` reading representing "nothing has rendered yet". */
-const ZERO_FRAME_STATS: FrameStats = {
-  totalFrames: 0,
-  missedVsync: 0,
-  slowUiThread: 0,
-  frameDeadlineMissed: 0,
-};
+/**
+ * Length of each no-input observation window used to detect autonomous
+ * rendering before the synthetic tap. Two of these are taken back to back
+ * (issue #6167 follow-up) so a one-off settling/layout frame right after
+ * `gfxinfo reset` - which lands inside the first window and is therefore
+ * already baked into the first snapshot - doesn't by itself look like
+ * ongoing animation.
+ */
+const PRE_TAP_SETTLE_WINDOW_MS = 50;
 
 /**
  * True when a gfxinfo counter was parsed on both sides and grew. A `null` on
@@ -200,10 +202,21 @@ export class TouchLatencyTracker {
   }
 
   /**
-   * Take a single touch-latency sample: reset gfxinfo, wait out a no-input
-   * idle window to read the baseline, then either flag the app as animating
-   * (baseline already accumulated frames on its own, #6167) or inject the
-   * synthetic touch and measure the frame response.
+   * Take a single touch-latency sample: reset gfxinfo, then read two
+   * consecutive no-input frame-counter snapshots to confirm the app is
+   * actually quiescent before tapping, then either flag it as animating or
+   * inject the synthetic touch and measure the frame response.
+   *
+   * Comparing the first snapshot against zero (the original #6167 fix) let a
+   * single delayed settling/layout frame - which lands inside that first
+   * no-input window on an otherwise-static app - misclassify the whole
+   * sample as "animating" (a false positive in the opposite direction).
+   * Requiring growth BETWEEN two consecutive snapshots instead confirms
+   * *continuous* autonomous rendering: a one-off settling frame is already
+   * folded into the first snapshot and produces no further growth in the
+   * second, so it no longer discards the sample, while an app genuinely
+   * still rendering with no input keeps growing across both reads
+   * (issue #6167 follow-up).
    */
   private async takeSample(
     packageName: string,
@@ -212,32 +225,32 @@ export class TouchLatencyTracker {
     perf: PerformanceTracker,
     sampleIndex: number,
   ): Promise<{ latencyMs: number | null; animating: boolean }> {
-    // Reset gfxinfo to get clean baseline
+    // Reset gfxinfo to get a clean counter baseline.
     await perf.track("adbGfxinfoReset", () =>
       this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
     );
 
-    // Small delay to ensure reset is processed - this is also the no-input
-    // idle window the animating check reads the baseline over.
-    await this.timer.sleep(50);
+    // First no-input snapshot. Any one-off settling/layout frame that occurs
+    // right after reset is absorbed here rather than compared to zero.
+    await this.timer.sleep(PRE_TAP_SETTLE_WINDOW_MS);
+    const { stdout: firstStdout } = await perf.track("adbGfxinfoBaselineFirst", () =>
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+    );
+    const firstStats = this.idle.parseMetrics(firstStdout);
 
-    // Get baseline frame stats
-    const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaseline", () =>
+    // Second no-input snapshot, one settle window later. Real autonomous
+    // rendering shows up as continued growth here; a one-off settling frame
+    // already counted in `firstStats` does not grow further.
+    await this.timer.sleep(PRE_TAP_SETTLE_WINDOW_MS);
+    const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaselineSecond", () =>
       this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
     );
     const baselineStats = this.idle.parseMetrics(baselineStdout);
 
-    // `dumpsys gfxinfo <pkg> reset` above zeroes these counters, so any
-    // activity in this baseline reading is activity that happened during the
-    // no-input idle window itself — the app is rendering on its own
-    // (spinner/video/ongoing transition) and any frame delta seen after the
-    // tap can't be attributed to it. Mirrors the post-tap detection
-    // (`hasFrameActivity`) so a gfxinfo variant that omits `Total frames
-    // rendered` still gets caught via the jank counters (#6167).
-    if (hasFrameActivity(ZERO_FRAME_STATS, baselineStats)) {
+    if (hasFrameActivity(firstStats, baselineStats)) {
       logger.warn(
-        `[TouchLatency] Sample ${sampleIndex + 1}: frame activity detected during the ` +
-          "pre-tap idle window - app is animating, skipping this sample",
+        `[TouchLatency] Sample ${sampleIndex + 1}: frame activity detected across two ` +
+          "consecutive no-input snapshots - app is animating, skipping this sample",
       );
       return { latencyMs: null, animating: true };
     }

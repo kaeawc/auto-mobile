@@ -292,7 +292,13 @@ const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
 };
 
 function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
-  return Math.max(0, Math.min(timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS, DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS));
+  return Math.max(
+    0,
+    Math.min(
+      timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+      DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+    ),
+  );
 }
 
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {

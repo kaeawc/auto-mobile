@@ -3,9 +3,10 @@ import { createServer, type Server } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS } from "../../src/daemon/client";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
 import type { PidFileData } from "../../src/daemon/types";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
 
@@ -214,6 +215,62 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
       expect(calls).toBeGreaterThanOrEqual(2);
       // The dead-PID cleanup must never run once ANY probe in the sequence reports
       // a live winner.
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    },
+  );
+
+  // #6140 P2 review finding: the multi-probe confirmation rechecks ABORT after
+  // each await but must also recheck the DEADLINE after the FINAL probe. When
+  // that last probe is capped to the last remaining milliseconds and resolves
+  // exactly AT the deadline, the loop must not fall through to an unconditional
+  // "confirmed unreachable" — that would let connect() run the dead-PID unlink
+  // AFTER its own advertised timeout, potentially deleting a live winner's
+  // socket a slower, still-in-flight retry would have found reachable.
+  (isWindows ? test.skip : test)(
+    "does not confirm unreachable when the final probe consumes the entire remaining deadline",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "live winner socket placeholder");
+      writePidFile(pidFilePath, socketPath);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      class ExactBudgetOnFinalAttempt implements DaemonSocketReachabilityLike {
+        calls = 0;
+        constructor(private readonly timer: FakeTimer) {}
+        async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+          this.calls++;
+          if (this.calls < STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS) {
+            // Earlier attempts resolve instantly, leaving the full budget for the
+            // final attempt below.
+            return false;
+          }
+          // Final attempt: consume the ENTIRE supplied (deadline-capped) timeout,
+          // landing this.timer.now() exactly AT the deadline.
+          await this.timer.sleep(timeoutMs);
+          return false;
+        }
+      }
+      const reachability = new ExactBudgetOnFinalAttempt(fakeTimer);
+
+      let cleanupCalls = 0;
+      const client = new DaemonClient(socketPath, 300, fakeTimer, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability,
+      });
+
+      await expect(client.connect()).rejects.toThrow();
+      expect(reachability.calls).toBe(STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS);
+      // Running out of budget exactly as the last probe resolves must NEVER be
+      // treated as confirmation — the dead-PID cleanup must not run.
       expect(cleanupCalls).toBe(0);
       expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);

@@ -41,7 +41,7 @@ import {
  * probe can never itself make `connect(timeoutMs)` overrun its advertised
  * timeout.
  */
-const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
+export const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
 
 /**
  * Number of consecutive failed reachability probes required before
@@ -58,7 +58,7 @@ const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
  * would eat into callers with a tight overall `connect(timeoutMs)` budget for no
  * benefit.
  */
-const STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS = 3;
+export const STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS = 3;
 
 /**
  * A single lazily-constructed default probe, shared across instances that don't
@@ -375,8 +375,21 @@ export class DaemonClient {
         // regardless of how many attempts remain.
         return false;
       }
+      // Recheck the deadline immediately after this probe's await, including after
+      // the FINAL attempt: a probe capped to the last remaining milliseconds can
+      // itself consume the whole remainder and resolve exactly AT (or past) the
+      // deadline. Without this recheck, that attempt's negative result would fall
+      // through the loop unconditionally to "confirmed unreachable" — letting
+      // `connect()` run the dead-PID unlink AFTER its own advertised timeout, which
+      // could delete a live winner's socket that a slower, still-in-flight retry
+      // would have found reachable. Budget exhaustion must never itself confirm
+      // unreachable.
+      if (this.timer.now() >= deadline) {
+        return false;
+      }
     }
-    // Every attempt within budget failed: treat as confirmed unreachable.
+    // Every attempt within budget failed, with time still remaining after the
+    // last one: treat as confirmed unreachable.
     return true;
   }
 

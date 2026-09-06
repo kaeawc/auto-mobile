@@ -18,6 +18,7 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
+import { PortManager } from "../../../src/utils/PortManager";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -56,6 +57,8 @@ describe("LaunchApp", () => {
       );
 
   beforeEach(() => {
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     device = { name: "test-device", platform: "android", deviceId: "device-123" };
     fakeAdb = new FakeAdbExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -77,6 +80,11 @@ describe("LaunchApp", () => {
     (launchApp as any).window = fakeWindow;
 
     configureInstalledApp();
+  });
+
+  afterEach(() => {
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   test("returns observation when app is already in foreground", async () => {
@@ -576,6 +584,43 @@ describe("LaunchApp", () => {
         .getExecuteOptions()
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
+  });
+
+  test("captures only the final launch observation after package reconciliation", async () => {
+    fakeTimer.enableAutoAdvance();
+    const previousPackageName = "com.example.previous";
+    const observations = [
+      createObserveResult(previousPackageName),
+      createObserveResult(packageName),
+    ];
+    const originalPolicy = process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = "false";
+
+    try {
+      fakeAdb.setForegroundApp({ packageName, userId: 0 });
+      fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+      fakeObserveScreen.setObserveResult(
+        () => observations.shift() ?? createObserveResult(packageName),
+      );
+
+      const result = await launchApp.execute(packageName, false, false);
+
+      expect(result.observation?.activeWindow?.appId).toBe(packageName);
+      expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+        true,
+      );
+      expect(
+        fakeObserveScreen.getExecuteOptions().every((options) => options.skipAccessibilityAudit),
+      ).toBe(true);
+      expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+      expect(fakeObserveScreen.getCapturedScreenshotObservations()).toEqual([result.observation]);
+    } finally {
+      if (originalPolicy === undefined) {
+        delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+      } else {
+        process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = originalPolicy;
+      }
+    }
   });
 
   test("re-observes when a matching launch observation is marked unverified", async () => {

@@ -1,11 +1,17 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult } from "../../../src/models";
+import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import {
+  ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV,
+  shouldSkipActionObservationScreenshot,
+} from "../../../src/features/observe/automaticScreenshotPolicy";
 
 /**
  * Post-action observation contract for BaseVisualChange (issue #4169 items 1-3).
@@ -20,6 +26,7 @@ describe("BaseVisualChange post-action observation", () => {
   let fakeObserveScreen: FakeObserveScreen;
   let fakeTimer: FakeTimer;
   let fakeWindow: FakeWindow;
+  let originalActionScreenshotPolicy: string | undefined;
 
   const makeObserve = (overrides: Record<string, unknown> = {}): ObserveResult =>
     ({
@@ -40,6 +47,11 @@ describe("BaseVisualChange post-action observation", () => {
   }
 
   beforeEach(() => {
+    originalActionScreenshotPolicy = process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
+    delete process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
+    serverConfig.setAccessibilityAuditConfig(null);
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     fakeAdb = new FakeAdbExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeObserveScreen = new FakeObserveScreen();
@@ -47,6 +59,17 @@ describe("BaseVisualChange post-action observation", () => {
     fakeTimer.enableAutoAdvance();
     fakeWindow = new FakeWindow();
     fakeWindow.configureCachedActiveWindow(null);
+  });
+
+  afterEach(() => {
+    if (originalActionScreenshotPolicy === undefined) {
+      delete process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
+    } else {
+      process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = originalActionScreenshotPolicy;
+    }
+    serverConfig.setAccessibilityAuditConfig(null);
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   test("retries a stale observation on the [50,100,200,400] backoff and caps at four attempts", async () => {
@@ -95,12 +118,10 @@ describe("BaseVisualChange post-action observation", () => {
     expect(fakeTimer.getSleepHistory()).toEqual([]);
   });
 
-  test("defaults the post-action re-observe to skipScreenshot when no live-view subscriber (#5472)", async () => {
+  test("skips automatic post-action screenshots by default", async () => {
     const instance = createVisualChange("ios");
     fakeObserveScreen.setObserveResult(makeObserve());
 
-    // No DeviceDataStream server/subscriber is wired in this unit context, so the
-    // internal re-observe must skip the device PNG capture.
     await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,
       skipPreviousObserve: true,
@@ -109,6 +130,50 @@ describe("BaseVisualChange post-action observation", () => {
     const options = fakeObserveScreen.getExecuteOptions();
     expect(options).toHaveLength(1);
     expect(options[0].skipScreenshot).toBe(true);
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
+    expect(fakeObserveScreen.getAccessibilityAuditCallCount()).toBe(1);
+    expect(shouldSkipActionObservationScreenshot()).toBe(true);
+  });
+
+  test("opt-in captures exactly one screenshot after the final post-action retry", async () => {
+    process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "false";
+    const instance = createVisualChange("ios");
+    fakeObserveScreen.setObserveResult((index) =>
+      makeObserve({ freshness: { isFresh: false }, updatedAt: index }),
+    );
+
+    await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      skipPreviousObserve: true,
+      overrideMinTimestamp: 1000,
+    });
+
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(5);
+    expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+      true,
+    );
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+    expect(shouldSkipActionObservationScreenshot()).toBe(false);
+  });
+
+  test("captures one fresh terminal screenshot when the accessibility audit is enabled", async () => {
+    const instance = createVisualChange("android");
+    serverConfig.setAccessibilityAuditConfig({
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    });
+    fakeObserveScreen.setObserveResult(makeObserve({ activeWindow: { appId: "com.example.app" } }));
+
+    await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      skipPreviousObserve: true,
+    });
+
+    expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+      true,
+    );
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
   });
 
   test("takes the cached fast path with a single execute when the cache is valid", async () => {

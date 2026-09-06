@@ -10,6 +10,8 @@ export interface ObserveScreenExecuteOptions {
   signal?: AbortSignal;
   skipBackStack?: boolean;
   skipScreenshot?: boolean;
+  /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
+  skipAccessibilityAudit?: boolean;
 }
 
 /**
@@ -21,6 +23,24 @@ export interface ObserveScreen {
    * Collects view hierarchy, screen size, system insets, and other device state.
    */
   execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
+
+  /**
+   * Capture a screenshot without taking another hierarchy observation.
+   *
+   * Optional while fakes and narrow test doubles migrate. The production
+   * implementation supplies it for automatic action/waitFor evidence capture.
+   */
+  captureScreenshot?(
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void>;
+
+  /**
+   * Run the configured accessibility audit for an already-collected observation
+   * without capturing a screenshot.
+   */
+  runAccessibilityAudit?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 
   /**
    * Fetch raw (unfiltered) view hierarchy from the device and attach it to an existing

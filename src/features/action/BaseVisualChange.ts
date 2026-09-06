@@ -25,6 +25,8 @@ import { PredictionAnalyzer, PredictionActionContext } from "../observe/Predicti
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { shouldSkipActionObservationScreenshot } from "../observe/automaticScreenshotPolicy";
+import { serverConfig } from "../../utils/ServerConfig";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -44,6 +46,7 @@ interface ObservedChangeOptions {
   overrideMinTimestamp?: number;
   signal?: AbortSignal;
   deferPredictionOutcome?: boolean;
+  deferPostActionScreenshot?: boolean;
   predictionContext?: {
     toolName: string;
     toolArgs: Record<string, any>;
@@ -63,6 +66,15 @@ export class BaseVisualChange {
     (observation: ObserveResult) => Promise<void>
   >();
   protected timer: Timer;
+
+  protected shouldCapturePostActionScreenshot(): boolean {
+    // Preserve the pre-existing live-view behavior, while allowing other
+    // clients to opt in with AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT=0.
+    return (
+      !shouldSkipActionObservationScreenshot() ||
+      (getDeviceDataStreamServer()?.hasSubscriberForDevice(this.device.deviceId) ?? false)
+    );
+  }
 
   /**
    * Create an BaseVisualChange instance
@@ -261,6 +273,7 @@ export class BaseVisualChange {
       actionStartTime: options.overrideMinTimestamp ?? observationStartTime,
       predictionContext: options.deferPredictionOutcome ? undefined : predictionContext,
       signal: options.signal,
+      deferPostActionScreenshot: options.deferPostActionScreenshot,
     });
     if (options.deferPredictionOutcome && predictionContext && typeof observed === "object") {
       this.deferredPredictionOutcomes.set(observed, async (finalObservation) => {
@@ -316,6 +329,25 @@ export class BaseVisualChange {
     await recordOutcome(finalObservation);
   }
 
+  /**
+   * Capture exactly one fresh screenshot after any subclass-specific
+   * observation reconciliation has selected the result returned to the caller.
+   */
+  protected async captureTerminalObservationScreenshot(
+    observation: ObserveResult | undefined,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!observation) {
+      return;
+    }
+    if (this.shouldCapturePostActionScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
+      await this.observeScreen.captureScreenshot?.(perf, signal, observation);
+      return;
+    }
+    await this.observeScreen.runAccessibilityAudit?.(observation, perf);
+  }
+
   private static buildDeviceLockWarning(lock: DeviceLockState): string {
     const preamble = "Device is locked; this interaction likely did not reach the app under test.";
     if (lock.secure === true) {
@@ -325,14 +357,6 @@ export class BaseVisualChange {
       return `${preamble} The lock is a swipe lock — dismiss the keyguard (e.g. swipe up) before continuing.`;
     }
     return `${preamble} Unlock or dismiss the keyguard before continuing.`;
-  }
-
-  /**
-   * True when a live-view IDE subscriber is attached for this device, meaning a
-   * device screenshot is still worth capturing on internal re-observes.
-   */
-  private hasLiveViewSubscriber(): boolean {
-    return getDeviceDataStreamServer()?.hasSubscriberForDevice(this.device.deviceId) ?? false;
   }
 
   private async takeObservation(
@@ -347,6 +371,7 @@ export class BaseVisualChange {
       actionStartTime?: number;
       predictionContext?: PredictionActionContext;
       signal?: AbortSignal;
+      deferPostActionScreenshot?: boolean;
     },
   ): Promise<any> {
     const perf = options.perf ?? new NoOpPerformanceTracker();
@@ -358,13 +383,6 @@ export class BaseVisualChange {
     const maxRetryAttempts = 4;
     const previousHash = this.hashViewHierarchy(previousObserveResult?.viewHierarchy);
 
-    // Internal post-action re-observes don't need a device screenshot: the PNG is
-    // only consumed by a live-view subscriber (fed separately by the
-    // subscriber-gated screenshot stream) or by tools that return the image.
-    // Skipping the capture here avoids a device round-trip per action, but stays
-    // enabled while a live view is attached (#5472, AC#3).
-    const skipScreenshot = !this.hasLiveViewSubscriber();
-
     perf.serial("finalObserve");
     // Wait for fresh data from accessibility service (skipWaitForFresh=false)
     // This ensures we get observation data that reflects the action that just completed
@@ -374,7 +392,10 @@ export class BaseVisualChange {
       skipWaitForFresh: false,
       minTimestamp,
       signal: options.signal,
-      skipScreenshot,
+      // Retries collect hierarchy only. If enabled, visual evidence is captured
+      // once from the final observation below.
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
     });
     perf.end();
 
@@ -409,7 +430,8 @@ export class BaseVisualChange {
         skipWaitForFresh: false,
         minTimestamp,
         signal: options.signal,
-        skipScreenshot,
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
       });
       perf.end();
     }
@@ -427,6 +449,10 @@ export class BaseVisualChange {
         ? { ...latestObservation.freshness, warning }
         : { isFresh: false, warning };
       logger.warn(`[BaseVisualChange] ${warning}`);
+    }
+
+    if (!options.deferPostActionScreenshot) {
+      await this.captureTerminalObservationScreenshot(latestObservation, perf, options.signal);
     }
 
     if (

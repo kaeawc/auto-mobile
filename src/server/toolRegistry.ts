@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
 import { DeviceSessionManager, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
-import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -34,7 +34,11 @@ import {
 } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
-import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
+import {
+  getStructuredField,
+  getStructuredPayload,
+  StructuredToolResponse,
+} from "../utils/toolUtils";
 import { applyJsonSchemaOverride, isInjectedDeviceIdSchema } from "./toolSchemaHelpers";
 import {
   InternalToolName,
@@ -306,6 +310,39 @@ interface AfterToolCallResult {
 
 interface AfterToolCallHandler {
   handle(input: AfterToolCallInput): Promise<AfterToolCallResult>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
+  return isRecord(value) && isRecord(value.hierarchy);
+}
+
+/**
+ * Read an unprojected observation hierarchy from a completed tool envelope.
+ *
+ * `observe` returns the ObserveResult as its top-level structured payload,
+ * while action tools nest the same snapshot under `.observation`. This runs
+ * before `finalizeToolResponse`, so it preserves the raw hierarchy even when
+ * the client-facing response uses the compact skeleton projection.
+ */
+function getObservedHierarchy(
+  name: string,
+  response: { structuredContent?: unknown; content?: unknown } | undefined,
+): ViewHierarchyResult | undefined {
+  const structuredPayload = getStructuredPayload<Record<string, unknown>>(response);
+  const payload = structuredPayload ?? unwrapToolResponse(response);
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+
+  const observation = name === "observe" ? payload : payload.observation;
+  if (!isRecord(observation) || !isViewHierarchyResult(observation.viewHierarchy)) {
+    return undefined;
+  }
+  return observation.viewHierarchy;
 }
 
 type ObservationArtifactWriterFactory = (
@@ -904,11 +941,9 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
-      const observeEnvelope = narrowInternalToolEnvelope("observe", response);
-      const observeHierarchy =
-        name === "observe" ? getStructuredField(observeEnvelope, "viewHierarchy") : undefined;
-      if (observeHierarchy) {
-        sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
+      const observedHierarchy = getObservedHierarchy(name, response);
+      if (observedHierarchy) {
+        sessionManager.setLastHierarchy(sessionUuid, observedHierarchy);
       }
       // NOTE: there is deliberately no `screenshot` read here. Production
       // `observe` never emitted a `screenshot` payload field and the session

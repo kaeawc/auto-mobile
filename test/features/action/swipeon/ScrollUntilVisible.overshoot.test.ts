@@ -53,6 +53,9 @@ function makeScrollUntilVisible({
   talkBackExecutor,
   getDuration,
   overlayDetector,
+  observeOptions,
+  observedInteractionOptions,
+  terminalEvidence,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -62,11 +65,17 @@ function makeScrollUntilVisible({
   talkBackExecutor: FakeTalkBackSwipeExecutor;
   getDuration?: (options: SwipeOnResolvedOptions) => number;
   overlayDetector?: FakeOverlayDetector;
+  observeOptions?: Array<Record<string, unknown> | undefined>;
+  observedInteractionOptions?: Array<Record<string, unknown>>;
+  terminalEvidence?: ObserveResult[];
 }): ScrollUntilVisible {
   let callIdx = 0;
 
   const fakeObserveScreen = {
-    execute: async () => observeResults[Math.min(callIdx, observeResults.length - 1)],
+    execute: async (options?: Record<string, unknown>) => {
+      observeOptions?.push(options);
+      return observeResults[Math.min(callIdx, observeResults.length - 1)];
+    },
     getMostRecentCachedObserveResult: async () =>
       observeResults[Math.min(callIdx, observeResults.length - 1)],
   };
@@ -75,7 +84,8 @@ function makeScrollUntilVisible({
 
   const fakeOverlayDetector = overlayDetector ?? new FakeOverlayDetector();
 
-  const observedInteraction = async (action: (obs: ObserveResult) => Promise<any>, _opts: any) => {
+  const observedInteraction = async (action: (obs: ObserveResult) => Promise<any>, opts: any) => {
+    observedInteractionOptions?.push(opts);
     const obs = observeResults[Math.min(callIdx, observeResults.length - 1)];
     const result = await action(obs);
     callIdx++;
@@ -98,6 +108,11 @@ function makeScrollUntilVisible({
     resolveBoomerangConfig: () => undefined,
     buildPredictionArgs: () => ({}),
     observedInteraction,
+    captureTerminalObservationScreenshot: async (observation) => {
+      if (observation) {
+        terminalEvidence?.push(observation);
+      }
+    },
   });
 }
 
@@ -202,6 +217,39 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     // Verify that executeSwipeGesture was never called with the reversed direction ("down")
     const allDirections = talkBackExecutor.getDirections();
     expect(allDirections.every((d) => d === "up")).toBe(true);
+  });
+
+  test("suppresses intermediate evidence and captures only the terminal observation", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    let findCount = 0;
+    finder.findElementByText = (_h: any, _t: any) => {
+      findCount++;
+      return findCount >= 2 ? TARGET_ELEMENT : null;
+    };
+    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const observedInteractionOptions: Array<Record<string, unknown>> = [];
+    const terminalEvidence: ObserveResult[] = [];
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult(0), makeObserveResult(1)],
+      talkBackExecutor,
+      observeOptions,
+      observedInteractionOptions,
+      terminalEvidence,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(observeOptions).not.toHaveLength(0);
+    expect(observeOptions.every((options) => options?.skipScreenshot === true)).toBe(true);
+    expect(observeOptions.every((options) => options?.skipAccessibilityAudit === true)).toBe(true);
+    expect(
+      observedInteractionOptions.every((options) => options.deferPostActionScreenshot === true),
+    ).toBe(true);
+    expect(terminalEvidence).toEqual([result.observation]);
   });
 
   test("switches to opposite direction after forward end-of-list", async () => {

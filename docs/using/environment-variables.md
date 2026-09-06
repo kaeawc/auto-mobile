@@ -70,6 +70,21 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 `--disable-tool` flags override these environment values; persisted
 `setToolEnabled` choices override startup defaults.
 
+## Automatic observation screenshots
+
+Explicit `observe` calls retain their existing screenshot behavior. Automatic
+observations taken after an action or while resolving `observe.waitFor` skip
+screenshots by default. Opt in to one screenshot from the final result by
+setting either skip flag to `false` (or `0`):
+
+```bash
+export AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT=false
+export AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT=false
+```
+
+`observe.waitFor` suppresses screenshots for all intermediate polls; enabling
+its flag captures only once, after the condition resolves or times out.
+
 ## Device behavior
 
 AutoMobile does not create an emulator or simulator by default. The legacy

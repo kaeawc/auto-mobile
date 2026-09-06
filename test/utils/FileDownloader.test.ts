@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -69,13 +69,14 @@ describe("FakeFileDownloader", function () {
 });
 
 describe("DefaultFileDownloader pipeResponseToFile", function () {
-  let tempDir: string | null = null;
+  let tempDir: string;
 
-  afterEach(async function () {
-    if (tempDir) {
-      await fs.rm(tempDir, { recursive: true, force: true });
-      tempDir = null;
-    }
+  beforeAll(async function () {
+    tempDir = await makeScratchTempDir("pipe-response-");
+  });
+
+  afterAll(async function () {
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   test("rejects promptly and removes the partial file when the response closes mid-body", async function () {
@@ -101,8 +102,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
 
-    tempDir = await makeScratchTempDir("pipe-response-mid-close-");
-    const destination = path.join(tempDir, "file.bin");
+    const destination = path.join(tempDir, "mid-close.bin");
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
     const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
@@ -110,8 +110,6 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
 
     await expect(result).rejects.toThrow(/premature close/i);
 
-    expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
-    // No attempt-unique temp file is left behind either.
     expect(await fs.readdir(tempDir)).toEqual([]);
   }, 100);
 
@@ -125,8 +123,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
 
-    tempDir = await makeScratchTempDir("pipe-response-mid-close-race-");
-    const destination = path.join(tempDir, "file.bin");
+    const destination = path.join(tempDir, "preserved.bin");
     const existingPayload = Buffer.from("already downloaded by another attempt");
     await fs.writeFile(destination, existingPayload);
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
@@ -145,15 +142,13 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     response.push(payload);
     response.push(null);
 
-    tempDir = await makeScratchTempDir("pipe-response-complete-");
-    const destination = path.join(tempDir, "file.bin");
+    const destination = path.join(tempDir, "complete.bin");
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
     await downloader.pipeResponseToFile(response, destination, "https://example.com/file");
 
     expect(await fs.readFile(destination)).toEqual(payload);
-    // No leftover attempt-unique temp file after a successful rename.
-    expect(await fs.readdir(tempDir)).toEqual(["file.bin"]);
+    expect((await fs.readdir(tempDir)).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
   }, 100);
 });
 

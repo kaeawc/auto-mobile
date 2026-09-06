@@ -553,18 +553,21 @@ export class LaunchApp extends BaseVisualChange {
         // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
         // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
         overrideMinTimestamp: 0,
+        deferPostActionScreenshot: true,
         signal,
       },
     );
 
     signal?.throwIfAborted();
-    return this.ensureLaunchObservationMatchesPackage(
+    const settledResult = await this.ensureLaunchObservationMatchesPackage(
       result,
       bundleId,
       undefined,
       undefined,
       signal,
     );
+    await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
+    return settledResult;
   }
 
   private async waitForIosHierarchyReady(
@@ -891,6 +894,7 @@ export class LaunchApp extends BaseVisualChange {
         skipUiStability: skipUiStability ?? false,
         packageName,
         observationTimestampProvider: () => observationTimestampMs,
+        deferPostActionScreenshot: true,
         signal,
       },
     );
@@ -903,6 +907,7 @@ export class LaunchApp extends BaseVisualChange {
       undefined,
       signal,
     );
+    await this.captureTerminalObservationScreenshot(settledLaunchResult.observation, perf, signal);
 
     logger.info(
       `[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`,
@@ -1009,6 +1014,8 @@ export class LaunchApp extends BaseVisualChange {
       latestObservation = await this.observeScreen.execute({
         skipWaitForFresh: false,
         signal,
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
       });
       signal?.throwIfAborted();
       if (this.launchObservationMatchesPackage(latestObservation, expectedPackageName)) {

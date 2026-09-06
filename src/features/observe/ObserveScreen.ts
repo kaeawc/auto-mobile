@@ -631,7 +631,9 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Audits + accessibility state detection (each is config-gated; failures don't propagate)
       await this.performanceAuditor.run(result, perf);
-      await this.accessibilityAuditor.run(result, perf);
+      if (!options?.skipAccessibilityAudit) {
+        await this.accessibilityAuditor.run(result, perf);
+      }
       await this.accessibilityStateDetector.run(result, perf, signal);
 
       // Predictive UI (opt-in via config)
@@ -745,6 +747,29 @@ export class RealObserveScreen implements ObserveScreen {
       });
       return fallback;
     }
+  }
+
+  /**
+   * Capture visual evidence without re-reading the hierarchy. Automatic
+   * post-action and waitFor flows use this after their final observation so a
+   * retry/poll loop creates at most one screenshot.
+   */
+  async captureScreenshot(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void> {
+    await this.screenshotRecorder.captureFresh(perf, signal);
+    if (observation) {
+      await this.runAccessibilityAudit(observation, perf);
+    }
+  }
+
+  async runAccessibilityAudit(
+    observation: ObserveResult,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<void> {
+    await this.accessibilityAuditor.run(observation, perf);
   }
 
   /**

@@ -85,6 +85,7 @@ describe("RealWaitForCondition", () => {
     expect(result.timedOut).toBe(false);
     expect(result.polls).toBe(2);
     expect(result.matchedElement!.text).toBe("ready");
+    expect(fake.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(true);
   });
 
   test("on timeout returns the last-seen candidates, not a bare failure", async () => {

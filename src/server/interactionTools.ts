@@ -105,6 +105,7 @@ import {
   resolveSystemTrayAwaitTimeout,
   ensureSystemTrayOpen,
   ensureSystemTrayClosed,
+  captureSystemTrayTerminalEvidence,
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   tapElement,
@@ -1452,6 +1453,7 @@ export function registerInteractionTools() {
 
       if (args.action === "open") {
         const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress);
+        await captureSystemTrayTerminalEvidence(device, result.observation);
         return createJSONToolResponse({
           message: result.skipped
             ? "System tray already open; no swipe needed"
@@ -1464,6 +1466,7 @@ export function registerInteractionTools() {
 
       if (args.action === "close") {
         const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress);
+        await captureSystemTrayTerminalEvidence(device, result.observation);
         return createJSONToolResponse({
           message: result.skipped
             ? "System tray already closed; no collapse needed"
@@ -1502,6 +1505,7 @@ export function registerInteractionTools() {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
+        await captureSystemTrayTerminalEvidence(device, observation);
         return createJSONToolResponse({
           message: "Found notification in system tray",
           match: match.match.matches,
@@ -1555,7 +1559,11 @@ export function registerInteractionTools() {
         await tapElement(device, tapMatch.element);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute();
+        const nextObservation = await observeScreen.execute({
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+        });
+        await captureSystemTrayTerminalEvidence(device, nextObservation);
 
         return createJSONToolResponse({
           message: notification.tapActionLabel
@@ -1595,7 +1603,11 @@ export function registerInteractionTools() {
         await swipeElement(device, swipeTarget);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute();
+        const nextObservation = await observeScreen.execute({
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+        });
+        await captureSystemTrayTerminalEvidence(device, nextObservation);
 
         return createJSONToolResponse({
           message: "Dismissed notification",
@@ -1634,7 +1646,11 @@ export function registerInteractionTools() {
 
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute();
+        const nextObservation = await observeScreen.execute({
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+        });
+        await captureSystemTrayTerminalEvidence(device, nextObservation);
 
         return createJSONToolResponse({
           message:

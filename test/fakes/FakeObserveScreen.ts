@@ -15,11 +15,14 @@ export class FakeObserveScreen implements ObserveScreen {
   private observeResultFactory: ((index: number) => ObserveResult) | null = null;
   private observeSequence: ObserveResult[] | null = null;
   private executeCallCount: number = 0;
+  private captureScreenshotCallCount: number = 0;
+  private accessibilityAuditCallCount: number = 0;
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
   private autoVaryHierarchy: boolean = false;
   private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
+  private readonly capturedScreenshotObservations: Array<ObserveResult | undefined> = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -142,9 +145,12 @@ export class FakeObserveScreen implements ObserveScreen {
   clearHistory(): void {
     this.executedOperations = [];
     this.executeCallCount = 0;
+    this.captureScreenshotCallCount = 0;
+    this.accessibilityAuditCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
     this.executeOptionsHistory.length = 0;
+    this.capturedScreenshotObservations.length = 0;
   }
 
   /**
@@ -152,6 +158,21 @@ export class FakeObserveScreen implements ObserveScreen {
    */
   getExecuteCallCount(): number {
     return this.executeCallCount;
+  }
+
+  /** Total captureScreenshot() calls. */
+  getCaptureScreenshotCallCount(): number {
+    return this.captureScreenshotCallCount;
+  }
+
+  /** Total runAccessibilityAudit() calls. */
+  getAccessibilityAuditCallCount(): number {
+    return this.accessibilityAuditCallCount;
+  }
+
+  /** Observations associated with terminal screenshot capture, in call order. */
+  getCapturedScreenshotObservations(): Array<ObserveResult | undefined> {
+    return [...this.capturedScreenshotObservations];
   }
 
   /**
@@ -174,6 +195,31 @@ export class FakeObserveScreen implements ObserveScreen {
     }
 
     return this.getNextObserveResult();
+  }
+
+  async captureScreenshot(
+    _perf?: unknown,
+    _signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void> {
+    this.executedOperations.push("captureScreenshot");
+    this.captureScreenshotCallCount++;
+    this.capturedScreenshotObservations.push(observation);
+
+    const error = this.failures.get("captureScreenshot");
+    if (error) {
+      throw error;
+    }
+  }
+
+  async runAccessibilityAudit(_observation: ObserveResult, _perf?: unknown): Promise<void> {
+    this.executedOperations.push("runAccessibilityAudit");
+    this.accessibilityAuditCallCount++;
+
+    const error = this.failures.get("runAccessibilityAudit");
+    if (error) {
+      throw error;
+    }
   }
 
   /** Options passed to each `execute()` call, in order. */

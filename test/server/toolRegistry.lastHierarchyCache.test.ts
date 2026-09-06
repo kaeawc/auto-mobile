@@ -9,16 +9,18 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
+import {
+  createJSONToolResponse,
+  createStructuredToolResponse,
+  stringifyToolResponse,
+} from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
 /**
- * Integration coverage for issue #2758: the `lastHierarchy` session-cache write
- * must read the ObserveResult out of the MCP envelope's `structuredContent`
- * (previously it read `response.viewHierarchy`, which never existed on the
- * envelope, so the cache was silently never populated — the #2761 diff baseline
- * depends on it). Also verifies the `finalizeToolResponse` chokepoint sanitizes
- * the observe response while the cache keeps the full untrimmed hierarchy.
+ * Integration coverage for the `lastHierarchy` session-cache write. The
+ * ObserveResult can be the top-level structured payload (`observe`) or nested
+ * under `.observation` on an action result; both must update the full,
+ * untrimmed cache before `finalizeToolResponse` applies any wire projection.
  */
 describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   const androidA: BootedDevice = {
@@ -177,6 +179,36 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
+    const cachedHierarchy = cacheData.lastHierarchy as any;
+    expect(cachedHierarchy).toBeDefined();
+    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
+    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    expect(typeof cacheData.lastObserveTime).toBe("number");
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
+  });
+
+  test("caches a text-only action response's nested observation", async () => {
+    const sessionId = await setupAutolockedSession();
+    const observation = makeObserveResult();
+    ToolRegistry.registerDeviceAware("inputText", "inputText", toolSchema, async () =>
+      createJSONToolResponse({
+        success: true,
+        message: "Input complete",
+        observation,
+      }),
+    );
+    const tool = ToolRegistry.getTool("inputText")!;
+
+    await tool.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
+
+    const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
+    const cachedHierarchy = cacheData.lastHierarchy as any;
+    expect(cachedHierarchy).toBeDefined();
+    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
+    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    expect(typeof cacheData.lastObserveTime).toBe("number");
   });
 });

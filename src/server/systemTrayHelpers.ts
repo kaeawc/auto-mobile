@@ -32,6 +32,10 @@ import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
 import { boundsArea } from "../utils/bounds";
 import { logger } from "../utils/logger";
+import { shouldSkipActionObservationScreenshot } from "../features/observe/automaticScreenshotPolicy";
+import { getDeviceDataStreamServer } from "../daemon/deviceDataStreamSocketServer";
+import { serverConfig } from "../utils/ServerConfig";
+import type { PerformanceTracker } from "../utils/PerformanceTracker";
 
 // ============================================================================
 // Interfaces
@@ -39,6 +43,12 @@ import { logger } from "../utils/logger";
 
 export interface SystemTrayObserver {
   execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
+  captureScreenshot?(
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void>;
+  runAccessibilityAudit?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 }
 
 export interface SystemTrayAdb {
@@ -212,6 +222,37 @@ const sleep = (ms: number) => getSystemTrayDependencies().timer.sleep(ms);
 
 export const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => {
   return awaitTimeout ?? DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS;
+};
+
+const observeSystemTray = (
+  observeScreen: SystemTrayObserver,
+  minTimestamp: number,
+): Promise<ObserveResult> =>
+  observeScreen.execute({
+    skipWaitForFresh: false,
+    minTimestamp,
+    skipScreenshot: true,
+    skipAccessibilityAudit: true,
+  });
+
+export const captureSystemTrayTerminalEvidence = async (
+  device: BootedDevice,
+  observation: ObserveResult | undefined,
+): Promise<void> => {
+  if (!observation) {
+    return;
+  }
+  const { observeScreenFactory } = getSystemTrayDependencies();
+  const observeScreen = observeScreenFactory(device);
+  const shouldCaptureScreenshot =
+    !shouldSkipActionObservationScreenshot() ||
+    serverConfig.isAccessibilityAuditEnabled() ||
+    (getDeviceDataStreamServer()?.hasSubscriberForDevice(device.deviceId) ?? false);
+  if (shouldCaptureScreenshot) {
+    await observeScreen.captureScreenshot?.(undefined, undefined, observation);
+    return;
+  }
+  await observeScreen.runAccessibilityAudit?.(observation);
 };
 
 const expandSystemTray = async (
@@ -976,14 +1017,14 @@ const waitForSystemTrayOpen = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+  let observation = await observeSystemTray(observeScreen, minTimestamp);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (detector.isTrayOpen(observation.viewHierarchy)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+    observation = await observeSystemTray(observeScreen, minTimestamp);
   }
 
   return observation;
@@ -997,14 +1038,14 @@ const waitForSystemTrayClosed = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+  let observation = await observeSystemTray(observeScreen, minTimestamp);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (!detector.isTrayOpen(observation.viewHierarchy)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+    observation = await observeSystemTray(observeScreen, minTimestamp);
   }
 
   return observation;
@@ -1025,7 +1066,7 @@ export const ensureSystemTrayOpen = async (
   const observeScreen = observeScreenFactory(device);
 
   let minTimestamp = await detector.getObservationTimestamp();
-  const observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+  const observation = await observeSystemTray(observeScreen, minTimestamp);
   if (detector.isTrayOpen(observation.viewHierarchy)) {
     return { observation, opened: false, skipped: true, minTimestamp };
   }
@@ -1063,7 +1104,7 @@ export const ensureSystemTrayClosed = async (
   const observeScreen = observeScreenFactory(device);
 
   let minTimestamp = await detector.getObservationTimestamp();
-  const observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+  const observation = await observeSystemTray(observeScreen, minTimestamp);
   if (!detector.isTrayOpen(observation.viewHierarchy)) {
     return { observation, closed: false, skipped: true, minTimestamp };
   }
@@ -1174,7 +1215,7 @@ export const waitForNotificationMatch = async (
   let observation = result.observation;
   const minTimestamp = result.minTimestamp;
   if (!observation) {
-    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+    observation = await observeSystemTray(observeScreen, minTimestamp);
   }
 
   let lastInfoDiagSignature = "";
@@ -1231,7 +1272,7 @@ export const waitForNotificationMatch = async (
     }
 
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
+    observation = await observeSystemTray(observeScreen, minTimestamp);
   }
 };
 

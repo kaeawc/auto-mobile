@@ -294,6 +294,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     abortSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyImeActionResult>;
 
   requestSelectAll(
@@ -2254,8 +2255,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     abortSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyImeActionResult> {
-    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal);
+    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal, onDispatch);
   }
 
   async requestSelectAll(

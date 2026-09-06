@@ -70,6 +70,15 @@ export class ImeAction extends BaseVisualChange {
     // dispatch the same action a second time (double-submit/double-nav).
     let capturedActionResult: ImeActionResult | undefined;
 
+    // Flips to true the instant the iOS wire request for `request_ime_action`
+    // is actually sent (#6249 P1 follow-up) — independent of whether a result
+    // is ever observed for it. If the outer deadline fires after dispatch but
+    // before `capturedActionResult` is known, the outcome on the device is
+    // genuinely indeterminate: it may have already mutated the UI, so it must
+    // not be reported as a plain retryable timeout (see
+    // `boundIosInteractionToDeadline`).
+    let dispatched = false;
+
     const block = async (observeResult: ObserveResult): Promise<ImeActionResult> => {
       try {
         // Platform-specific IME action execution
@@ -82,7 +91,9 @@ export class ImeAction extends BaseVisualChange {
             break;
           case "ios":
             result = await perf.track("iOSImeAction", () =>
-              this.executeiOSImeAction(action, observeResult, iosAbortController?.signal),
+              this.executeiOSImeAction(action, observeResult, iosAbortController?.signal, () => {
+                dispatched = true;
+              }),
             );
             break;
           default:
@@ -122,6 +133,7 @@ export class ImeAction extends BaseVisualChange {
       action,
       iosAbortController,
       () => capturedActionResult,
+      () => dispatched,
     );
   }
 
@@ -147,14 +159,26 @@ export class ImeAction extends BaseVisualChange {
    * action ITSELF, not whatever `observedInteraction` does once that outcome
    * is known. `getActionResult` reports whether `block` (which invokes
    * `requestImeAction`) has already resolved by the time the deadline fires.
-   * If it resolved successfully, the UI mutation already happened — throwing
-   * here would tell the caller the action never took effect, inviting a
-   * retry that dispatches it a second time (double-submit/double-nav). In
-   * that case we return the completed result with a `warning` instead of
+   * If it resolved — success OR a definitive failure (#6249 P2: e.g. "No
+   * focused element") — that outcome is real and already known; throwing
+   * here would discard it and report a misleading device-connection timeout
+   * instead, and for a success would additionally invite a retry that
+   * dispatches the action a second time (double-submit/double-nav). In that
+   * case we return the completed result (adding a `warning` only for a
+   * success, per the `warning`/`success:false` invariant) instead of
    * throwing; the abandoned post-action observation is still aborted and
-   * left to settle in the background exactly as before. Only a deadline
-   * that fires before the action result is known (pre-action observation
-   * stall, or the request itself stalling) still throws.
+   * left to settle in the background exactly as before.
+   *
+   * #6249 P1 follow-up: when the result is NOT yet known, `wasDispatched`
+   * distinguishes two remaining cases. If the wire request was never sent,
+   * nothing happened on the device — a plain retryable timeout is accurate
+   * and we still throw. But if pre-action observation/reconnect resolved
+   * just before the deadline and `sendCommand` went on to dispatch
+   * `request_ime_action`, the request is now in flight with its outcome
+   * unknown: it may complete and mutate the UI after this call has already
+   * returned. Reporting that as a plain timeout would invite a caller retry
+   * that double-applies the action, so we return a non-retryable
+   * indeterminate result instead of throwing.
    */
   private async boundIosInteractionToDeadline(
     block: (observeResult: ObserveResult) => Promise<ImeActionResult>,
@@ -162,6 +186,7 @@ export class ImeAction extends BaseVisualChange {
     action: ImeActionType,
     controller: AbortController,
     getActionResult: () => ImeActionResult | undefined,
+    wasDispatched: () => boolean,
   ): Promise<ImeActionResult> {
     const timeoutMs = ImeAction.IOS_IME_ACTION_TIMEOUT_MS;
     let deadlineHandle: ReturnType<Timer["setTimeout"]> | undefined;
@@ -174,34 +199,13 @@ export class ImeAction extends BaseVisualChange {
     try {
       const outcome = await Promise.race([interaction, deadline]);
       if (outcome === "deadline") {
-        controller.abort();
-        void interaction.catch((error) => {
-          // The interaction's own outcome no longer matters to this call —
-          // only trace it so a slow/failing runner is still diagnosable.
-          logger.debug(
-            `[ImeAction] iOS execute() pipeline for action '${action}' settled after the local ${timeoutMs}ms deadline: ${errorMessage(error)}`,
-          );
-        });
-
-        const completedAction = getActionResult();
-        if (completedAction?.success) {
-          // The action already mutated the UI — only the post-action
-          // observation stalled. Preserve the real outcome instead of
-          // throwing a timeout that would invite a double-submit.
-          logger.warn(
-            `[ImeAction] iOS IME action '${action}' completed successfully, but the post-action observation did not settle within ${timeoutMs}ms; returning the action result without waiting further`,
-          );
-          return {
-            ...completedAction,
-            warning: `Post-action observation did not complete within ${timeoutMs}ms; the '${action}' action was already applied to the device.`,
-          };
-        }
-
-        logger.warn(
-          `[ImeAction] iOS IME action '${action}' exceeded its ${timeoutMs}ms deadline before the pre-action observation or request settled; failing without waiting further`,
-        );
-        throw new ActionableError(
-          `IME action '${action}' timed out after ${timeoutMs}ms waiting on the iOS device connection`,
+        return this.handleIosDeadline(
+          interaction,
+          timeoutMs,
+          action,
+          controller,
+          getActionResult,
+          wasDispatched,
         );
       }
       return outcome as ImeActionResult;
@@ -210,6 +214,84 @@ export class ImeAction extends BaseVisualChange {
         this.imeTimer.clearTimeout(deadlineHandle);
       }
     }
+  }
+
+  /**
+   * Resolve the outcome once the outer deadline in
+   * `boundIosInteractionToDeadline` has fired. Split out to keep that
+   * method's control flow shallow — this covers, in order: a known
+   * completed result (success or definitive failure, #6249 P1/P2), a
+   * dispatched-but-unresolved request (#6249 P1 follow-up), and finally the
+   * plain "nothing happened yet" retryable timeout.
+   */
+  private async handleIosDeadline(
+    interaction: Promise<ImeActionResult>,
+    timeoutMs: number,
+    action: ImeActionType,
+    controller: AbortController,
+    getActionResult: () => ImeActionResult | undefined,
+    wasDispatched: () => boolean,
+  ): Promise<ImeActionResult> {
+    controller.abort();
+    void interaction.catch((error) => {
+      // The interaction's own outcome no longer matters to this call — only
+      // trace it so a slow/failing runner is still diagnosable.
+      logger.debug(
+        `[ImeAction] iOS execute() pipeline for action '${action}' settled after the local ${timeoutMs}ms deadline: ${errorMessage(error)}`,
+      );
+    });
+
+    const completedAction = getActionResult();
+    if (completedAction?.success) {
+      // The action already mutated the UI — only the post-action
+      // observation stalled. Preserve the real outcome instead of throwing
+      // a timeout that would invite a double-submit.
+      logger.warn(
+        `[ImeAction] iOS IME action '${action}' completed successfully, but the post-action observation did not settle within ${timeoutMs}ms; returning the action result without waiting further`,
+      );
+      return {
+        ...completedAction,
+        warning: `Post-action observation did not complete within ${timeoutMs}ms; the '${action}' action was already applied to the device.`,
+      };
+    }
+
+    if (completedAction) {
+      // #6249 P2: a definitive failure (e.g. "No focused element") is just
+      // as real an outcome as a success — preserve it rather than
+      // discarding it for a misleading device-connection timeout. No
+      // `warning` here: that field is reserved for a known success with a
+      // stalled observation (see the `warning`/`success:false` invariant on
+      // `ImeActionResult`).
+      logger.warn(
+        `[ImeAction] iOS IME action '${action}' completed with a definitive failure ('${completedAction.error}'), but the post-action observation did not settle within ${timeoutMs}ms; returning the action's real outcome without waiting further`,
+      );
+      return completedAction;
+    }
+
+    if (wasDispatched()) {
+      // #6249 P1 follow-up: pre-action observation/reconnect resolved just
+      // before the deadline, so `sendCommand` went on to dispatch
+      // `request_ime_action` — but its result never arrived before this
+      // deadline fired. The device may still apply the action after this
+      // call returns, so this is NOT a plain "nothing happened, safe to
+      // retry" timeout.
+      logger.warn(
+        `[ImeAction] iOS IME action '${action}' was dispatched to the device but its result did not arrive within ${timeoutMs}ms; returning an indeterminate, non-retryable result instead of a timeout`,
+      );
+      return {
+        success: false,
+        action,
+        error: `IME action '${action}' outcome is indeterminate: the request was dispatched to the device but no result was received within ${timeoutMs}ms. The action may have already been applied — do not retry automatically.`,
+        retryable: false,
+      };
+    }
+
+    logger.warn(
+      `[ImeAction] iOS IME action '${action}' exceeded its ${timeoutMs}ms deadline before the pre-action observation or request settled; failing without waiting further`,
+    );
+    throw new ActionableError(
+      `IME action '${action}' timed out after ${timeoutMs}ms waiting on the iOS device connection`,
+    );
   }
 
   /**
@@ -302,6 +384,7 @@ export class ImeAction extends BaseVisualChange {
     action: ImeActionType,
     _observeResult: ObserveResult,
     outerSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<ImeActionResult> {
     const timeoutMs = ImeAction.IOS_IME_ACTION_TIMEOUT_MS;
     // Own the abort signal actually threaded into the wire request so a
@@ -318,7 +401,13 @@ export class ImeAction extends BaseVisualChange {
 
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const request = client.requestImeAction(action, timeoutMs, undefined, controller.signal);
+      const request = client.requestImeAction(
+        action,
+        timeoutMs,
+        undefined,
+        controller.signal,
+        onDispatch,
+      );
       const result = await this.raceIosImeActionDeadline(request, timeoutMs, action, controller);
 
       if (result === null) {

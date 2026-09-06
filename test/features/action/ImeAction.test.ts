@@ -736,5 +736,90 @@ describe("ImeAction", () => {
       expect(second.action).toBe("next");
       expect(callCount).toBe(2);
     });
+
+    test("returns an indeterminate, non-retryable result when dispatch happens but no result arrives before the deadline (#6249 P1)", async () => {
+      // The pre-action observation is served from cache (fast), so `block()`
+      // runs almost immediately and reaches `requestImeAction`. The fake
+      // mirrors `sendCommand` dispatching the wire request (invoking
+      // `onDispatch`) and then never resolving — exactly what happens when
+      // `ensureConnected()`/reconnect resolves just before the outer deadline
+      // and `sendCommand` goes on to call `ws.send` right before this call's
+      // own deadline fires. The caller must NOT see a plain retryable
+      // timeout here: the action may already be in flight on the device.
+      const stallingObserveScreen = new FakeObserveScreen();
+      (stallingObserveScreen as any).getMostRecentCachedObserveResult = async () =>
+        createObserveResult();
+
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (
+          action: string,
+          _timeoutMs?: number,
+          _perf?: unknown,
+          _signal?: AbortSignal,
+          onDispatch?: () => void,
+        ) => {
+          onDispatch?.();
+          return new Promise(() => {
+            /* dispatched, but no result is ever observed */
+          });
+        },
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      (ios as any).observeScreen = stallingObserveScreen;
+      (ios as any).window = fakeWindow;
+      (ios as any).awaitIdle = fakeAwaitIdle;
+
+      const result = await ios.execute("done");
+
+      expect(result.success).toBe(false);
+      expect(result.retryable).toBe(false);
+      expect(result.error).toContain("indeterminate");
+      expect(result.error).toContain("do not retry");
+      // Not the plain "safe to retry" device-connection timeout message.
+      expect(result.error).not.toContain("timed out after");
+      // Bounded by the outer deadline, not a hang.
+      expect(fakeTimer.getCurrentTime()).toBe(5000);
+    });
+
+    test("preserves a definitive completed failure when the post-action observation stalls (#6249 P2)", async () => {
+      // `requestImeAction` promptly returns a definitive failure (no
+      // in-flight ambiguity — the runner already answered). Only the
+      // subsequent post-action observation stalls past the deadline. This
+      // must return the real failure, not a misleading device-connection
+      // timeout — the outcome is already known.
+      const stallingObserveScreen = new FakeObserveScreen();
+      (stallingObserveScreen as any).getMostRecentCachedObserveResult = async () =>
+        createObserveResult();
+      (stallingObserveScreen as any).execute = () =>
+        new Promise(() => {
+          /* the post-action observation never settles */
+        });
+
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => ({
+          success: false,
+          action,
+          totalTimeMs: 5,
+          error: "No focused element",
+        }),
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      (ios as any).observeScreen = stallingObserveScreen;
+      (ios as any).window = fakeWindow;
+      (ios as any).awaitIdle = fakeAwaitIdle;
+
+      const result = await ios.execute("done");
+
+      expect(result.success).toBe(false);
+      expect(result.action).toBe("done");
+      expect(result.error).toBe("No focused element");
+      // Not a plain device-connection timeout despite the observation stall.
+      expect(result.error).not.toContain("timed out");
+      expect(result.warning).toBeUndefined();
+      // Bounded by the deadline, not a hang.
+      expect(fakeTimer.getCurrentTime()).toBe(5000);
+    });
   });
 });

@@ -624,6 +624,223 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `accepts an inline barrier with params null and valid inline lock deviceCount device`() {
+    // PlanNormalizer.isRecord treats a non-object params (e.g. null) as
+    // absent ({}), so an inline-form barrier step with params: null is a
+    // previously-supported normalized form -- the unconditional
+    // barrierParams $ref (which requires an object) must not reject it;
+    // only the inline fields should be validated (#6215 review).
+    val yaml =
+      """
+      name: barrier-inline-null-params
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync1
+          deviceCount: 2
+          params: null
+        - tool: barrier
+          device: B
+          lock: sync1
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(
+      result.valid,
+      "An inline barrier with params: null and valid inline fields should be valid",
+    )
+  }
+
+  @Test
+  fun `rejects an inline barrier with params null and an invalid inline field`() {
+    val yaml =
+      """
+      name: barrier-inline-null-params-invalid
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          device: A
+          lock: sync1
+          deviceCount: not-a-number
+          params: null
+        - tool: barrier
+          device: B
+          lock: sync1
+          deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "An invalid inline deviceCount with params: null should be invalid")
+  }
+
+  @Test
+  fun `rejects the same lock name used by both a criticalSection and a barrier step`() {
+    // Both tools share the runtime coordinator's lock namespace and
+    // expected-count state, so a criticalSection A/B pair and a barrier
+    // C/D pair both using lock "shared" with deviceCount=2 can pair
+    // mismatched participants and overwrite each other's expected count.
+    val yaml =
+      """
+      name: lock-shared-across-tool-types
+      devices:
+        - A
+        - B
+        - C
+        - D
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: shared
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: A
+        - tool: criticalSection
+          params:
+            device: B
+            lock: shared
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: B
+        - tool: barrier
+          params:
+            device: C
+            lock: shared
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: D
+            lock: shared
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A lock shared between criticalSection and barrier should be invalid")
+  }
+
+  @Test
+  fun `accepts criticalSection and barrier using distinct lock names`() {
+    val yaml =
+      """
+      name: distinct-locks-per-tool-type
+      devices:
+        - A
+        - B
+        - C
+        - D
+      steps:
+        - tool: criticalSection
+          params:
+            device: A
+            lock: cs-lock
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: A
+        - tool: criticalSection
+          params:
+            device: B
+            lock: cs-lock
+            deviceCount: 2
+            steps:
+              - tool: observe
+                params:
+                  device: B
+        - tool: barrier
+          params:
+            device: C
+            lock: barrier-lock
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: D
+            lock: barrier-lock
+            deviceCount: 2
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "Distinct lock names per tool type should be valid")
+  }
+
+  @Test
+  fun `rejects devices mixing a plain-string label with a label platform definition`() {
+    val yaml =
+      """
+      name: mixed-device-formats
+      devices:
+        - A
+        - label: B
+          platform: android
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "Mixed device declaration formats should be invalid")
+  }
+
+  @Test
+  fun `accepts devices that are all plain-string labels`() {
+    val yaml =
+      """
+      name: all-label-devices
+      devices:
+        - A
+        - B
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "All plain-string device labels should be valid")
+  }
+
+  @Test
+  fun `accepts devices that are all label platform definitions`() {
+    val yaml =
+      """
+      name: all-definition-devices
+      devices:
+        - label: A
+          platform: android
+        - label: B
+          platform: ios
+      steps:
+        - tool: tapOn
+          params:
+            device: A
+            text: hi
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "All label/platform device definitions should be valid")
+  }
+
+  @Test
   fun `rejects a barrier with an inline malformed platform value`() {
     // The inline form must be constrained the same as the nested-params
     // form, or PlanNormalizer moving it into params later would make the

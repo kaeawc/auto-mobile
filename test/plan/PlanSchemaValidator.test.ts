@@ -1158,6 +1158,53 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should accept an inline barrier with params: null and valid inline lock/deviceCount/device", () => {
+      // PlanNormalizer.isRecord treats a non-object params (e.g. null) as
+      // absent ({}), so an inline-form barrier step with params: null is a
+      // previously-supported normalized form -- the unconditional
+      // barrierParams $ref (which requires an object) must not reject it;
+      // only the inline fields should be validated (#6215 review).
+      const yaml = `
+name: barrier-inline-null-params
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: 2
+    params: null
+  - tool: barrier
+    device: B
+    lock: sync1
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should reject an inline barrier with params: null and an invalid inline field", () => {
+      const yaml = `
+name: barrier-inline-null-params-invalid
+devices:
+  - A
+  - B
+steps:
+  - tool: barrier
+    device: A
+    lock: sync1
+    deviceCount: not-a-number
+    params: null
+  - tool: barrier
+    device: B
+    lock: sync1
+    deviceCount: 2
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should reject a barrier step with an inline malformed platform value", () => {
       // The inline form must be constrained the same as the nested-params
       // form, or PlanNormalizer moving it into params later would make the

@@ -687,6 +687,109 @@ describe("PlanValidator", () => {
     });
   });
 
+  describe("validateNoCrossToolLockSharing", () => {
+    test("throws when the same lock name is used by both a criticalSection and a barrier step", () => {
+      // Both tools share the runtime coordinator's lock namespace and
+      // expected-count state (keyed by lock name alone), so a
+      // criticalSection A/B pair and a barrier C/D pair both using lock
+      // "shared" with deviceCount=2 can pair mismatched participants (A
+      // with C) and overwrite each other's expected count.
+      const plan: Plan = {
+        name: "Lock shared across tool types",
+        devices: ["A", "B", "C", "D"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "A",
+              lock: "shared",
+              deviceCount: 2,
+              steps: [{ tool: "observe", params: { device: "A" } }],
+            },
+          },
+          {
+            tool: "criticalSection",
+            params: {
+              device: "B",
+              lock: "shared",
+              deviceCount: 2,
+              steps: [{ tool: "observe", params: { device: "B" } }],
+            },
+          },
+          { tool: "barrier", params: { device: "C", lock: "shared", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "D", lock: "shared", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        'lock name "shared" is used by both a criticalSection step and a barrier step',
+      );
+    });
+
+    test("accepts a plan where criticalSection and barrier use distinct lock names", () => {
+      const plan: Plan = {
+        name: "Distinct locks per tool type",
+        devices: ["A", "B", "C", "D"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "A",
+              lock: "cs-lock",
+              deviceCount: 2,
+              steps: [{ tool: "observe", params: { device: "A" } }],
+            },
+          },
+          {
+            tool: "criticalSection",
+            params: {
+              device: "B",
+              lock: "cs-lock",
+              deviceCount: 2,
+              steps: [{ tool: "observe", params: { device: "B" } }],
+            },
+          },
+          { tool: "barrier", params: { device: "C", lock: "barrier-lock", deviceCount: 2 } },
+          { tool: "barrier", params: { device: "D", lock: "barrier-lock", deviceCount: 2 } },
+        ],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+  });
+
+  describe("mixed device declaration formats", () => {
+    test("throws when 'devices' mixes a plain-string label with a label/platform definition", () => {
+      const plan: Plan = {
+        name: "Mixed device formats",
+        devices: ["A", { label: "B", platform: "android" }],
+        steps: [{ tool: "tapOn", params: { text: "hi", device: "A" } }],
+      };
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow("do not mix formats");
+    });
+
+    test("accepts a 'devices' list of all plain-string labels", () => {
+      const plan: Plan = {
+        name: "All-label devices",
+        devices: ["A", "B"],
+        steps: [{ tool: "tapOn", params: { text: "hi", device: "A" } }],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+
+    test("accepts a 'devices' list of all label/platform definitions", () => {
+      const plan: Plan = {
+        name: "All-definition devices",
+        devices: [
+          { label: "A", platform: "android" },
+          { label: "B", platform: "ios" },
+        ],
+        steps: [{ tool: "tapOn", params: { text: "hi", device: "A" } }],
+      };
+      expect(() => PlanValidator.validate(plan)).not.toThrow();
+    });
+  });
+
   describe("params-wins precedence for split inline/params coordination fields", () => {
     // PlanNormalizer merges a step's inline fields and its nested `params`
     // object as `{ ...inlineParams, ...paramsFromStep }`, so when the same

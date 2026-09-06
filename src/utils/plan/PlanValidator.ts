@@ -271,10 +271,44 @@ export class PlanValidator {
   private static validateCoordinationLocks(plan: Plan): void {
     this.validateCriticalSectionLocks(plan);
     this.validateBarrierParams(plan);
+    this.validateNoCrossToolLockSharing(plan);
     this.validateBarrierConsistentDeviceCount(plan);
     this.validateBarrierDistinctDeviceCounts(plan);
     this.validateBarrierGenerationCompleteness(plan);
     this.validateBarrierExcessDeviceArrivals(plan);
+  }
+
+  /**
+   * Validates that no lock name is shared between a criticalSection step
+   * and a barrier step. Both tools share the runtime coordinator's lock
+   * namespace and expected-device-count state (CriticalSectionCoordinator
+   * keys both by the same lock name), so mixing tool types on one lock name
+   * is racy: e.g. a criticalSection A/B pair and a barrier C/D pair both
+   * using lock "shared" with deviceCount=2 can pair A with C instead of the
+   * intended A-with-B / C-with-D, and cross-tool arrivals can overwrite each
+   * other's expected count. Each tool type must use a distinct lock name.
+   */
+  private static validateNoCrossToolLockSharing(plan: Plan): void {
+    const criticalSectionLocks = new Set<string>();
+    const barrierLocks = new Set<string>();
+
+    for (const step of plan.steps) {
+      if (step.tool !== "criticalSection" && step.tool !== "barrier") {
+        continue;
+      }
+      const lock = this.effectiveField(step, "lock");
+      if (typeof lock !== "string" || lock.length === 0) {
+        continue;
+      }
+      (step.tool === "criticalSection" ? criticalSectionLocks : barrierLocks).add(lock);
+    }
+
+    const shared = Array.from(criticalSectionLocks).filter((lock) => barrierLocks.has(lock));
+    if (shared.length > 0) {
+      throw new ActionableError(
+        `lock name${shared.length === 1 ? "" : "s"} ${shared.map((l) => `"${l}"`).join(", ")} ${shared.length === 1 ? "is" : "are"} used by both a criticalSection step and a barrier step. Both tools share the runtime coordinator's lock namespace and expected-count state, so mixing tool types on the same lock name is racy and can pair mismatched participants or overwrite the expected count. Use a distinct lock name per tool type.`,
+      );
+    }
   }
 
   /**

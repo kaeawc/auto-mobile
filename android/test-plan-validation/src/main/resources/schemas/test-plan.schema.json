@@ -789,12 +789,21 @@
             "required": ["tool"]
           },
           "then": {
-            "properties": {
-              "params": {
-                "$ref": "#/$defs/criticalSectionParams"
-              }
-            },
             "allOf": [
+              {
+                "$comment": "Apply criticalSectionParams' shape ONLY when params is actually an object. PlanNormalizer.isRecord treats a non-object params (e.g. null) as absent ({}), so an inline-form step with params: null must still validate via its inline fields below, not fail the unconditional object-shaped $ref (#6215 review).",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object" } }
+                },
+                "then": {
+                  "properties": {
+                    "params": {
+                      "$ref": "#/$defs/criticalSectionParams"
+                    }
+                  }
+                }
+              },
               {
                 "anyOf": [
                   { "required": ["lock"] },
@@ -973,12 +982,21 @@
             "required": ["tool"]
           },
           "then": {
-            "properties": {
-              "params": {
-                "$ref": "#/$defs/barrierParams"
-              }
-            },
             "allOf": [
+              {
+                "$comment": "Apply barrierParams' shape ONLY when params is actually an object. PlanNormalizer.isRecord treats a non-object params (e.g. null) as absent ({}), so an inline-form step with params: null must still validate via its inline fields below, not fail the unconditional object-shaped $ref (#6215 review).",
+                "if": {
+                  "required": ["params"],
+                  "properties": { "params": { "type": "object" } }
+                },
+                "then": {
+                  "properties": {
+                    "params": {
+                      "$ref": "#/$defs/barrierParams"
+                    }
+                  }
+                }
+              },
               {
                 "anyOf": [
                   { "required": ["lock"] },

@@ -290,19 +290,32 @@ object TestPlanValidator {
   }
 
   /**
-   * Validates that every declared device label is non-blank after trimming -- mirrors the daemon's
-   * PlanValidator.validateDevicesField. The schema's minLength:1 (plus the pattern requiring a
-   * non-whitespace character) already rejects most blank labels, but this is a defense-in-depth
-   * semantic check matching the daemon's own trim-then-check logic exactly (#6215 review).
+   * Validates the declared 'devices' field's structure -- mirrors the daemon's
+   * PlanValidator.validateDevicesField:
+   * - Every label is non-blank after trimming (the schema's minLength:1 plus the non-whitespace
+   *   pattern already rejects most blank labels; this is defense in depth matching the daemon's own
+   *   trim-then-check logic exactly).
+   * - The list does not mix plain-string labels with label/platform definitions -- the daemon
+   *   rejects any such mix outright (#6215 review).
    */
   private fun validateDevicesField(parsedObject: Any?): List<ValidationError> {
     val devices = (parsedObject as? Map<*, *>)?.get("devices") as? List<*> ?: return emptyList()
     val errors = mutableListOf<ValidationError>()
+
+    var hasLabelEntries = false
+    var hasDefinitionEntries = false
+
     for (entry in devices) {
       val label =
         when (entry) {
-          is String -> entry
-          is Map<*, *> -> entry["label"] as? String
+          is String -> {
+            hasLabelEntries = true
+            entry
+          }
+          is Map<*, *> -> {
+            hasDefinitionEntries = true
+            entry["label"] as? String
+          }
           else -> null
         } ?: continue
       if (label.trim().isEmpty()) {
@@ -315,6 +328,18 @@ object TestPlanValidator {
         )
       }
     }
+
+    if (hasLabelEntries && hasDefinitionEntries) {
+      errors.add(
+        ValidationError(
+          field = "devices",
+          message =
+            "Plan 'devices' must be a list of labels or a list of objects with label/platform (do not mix formats).",
+          severity = ValidationSeverity.ERROR,
+        )
+      )
+    }
+
     return errors
   }
 
@@ -686,9 +711,51 @@ object TestPlanValidator {
   }
 
   /**
+   * Validates that no lock name is shared between a criticalSection step and a barrier step --
+   * mirrors the daemon's PlanValidator.validateNoCrossToolLockSharing. Both tools share the runtime
+   * coordinator's lock namespace and expected-device-count state (keyed by lock name alone), so
+   * mixing tool types on one lock name is racy: e.g. a criticalSection A/B pair and a barrier C/D
+   * pair both using lock "shared" with deviceCount=2 can pair mismatched participants (A with C)
+   * and overwrite each other's expected count. Each tool type must use a distinct lock name.
+   */
+  private fun validateNoCrossToolLockSharing(steps: List<*>): List<ValidationError> {
+    val criticalSectionLocks = mutableSetOf<String>()
+    val barrierLocks = mutableSetOf<String>()
+
+    for (step in steps) {
+      if (step !is Map<*, *>) {
+        continue
+      }
+      val tool = step["tool"] as? String
+      if (tool != "criticalSection" && tool != "barrier") {
+        continue
+      }
+      val lock = effectiveCoordinationField(step, "lock") as? String
+      if (lock.isNullOrEmpty()) {
+        continue
+      }
+      if (tool == "criticalSection") criticalSectionLocks.add(lock) else barrierLocks.add(lock)
+    }
+
+    val shared = criticalSectionLocks.filter { it in barrierLocks }
+    if (shared.isEmpty()) {
+      return emptyList()
+    }
+    val names = shared.joinToString(", ") { "\"$it\"" }
+    return listOf(
+      ValidationError(
+        field = "steps",
+        message =
+          "lock name(s) $names are used by both a criticalSection step and a barrier step. Both tools share the runtime coordinator's lock namespace and expected-count state, so mixing tool types on the same lock name is racy and can pair mismatched participants or overwrite the expected count. Use a distinct lock name per tool type.",
+        severity = ValidationSeverity.ERROR,
+      )
+    )
+  }
+
+  /**
    * Runs all barrier-lock coordination checks (declared-device membership, deviceCount range and
-   * consistency, distinct-device count, generation completeness, excess single-device arrivals) in
-   * one pass over the plan's steps.
+   * consistency, distinct-device count, generation completeness, excess single-device arrivals,
+   * cross-tool lock sharing) in one pass over the plan's steps.
    */
   private fun validateBarrierCoordination(parsedObject: Any?): List<ValidationError> {
     if (parsedObject !is Map<*, *>) {
@@ -703,6 +770,7 @@ object TestPlanValidator {
     val (usageByLock, membershipErrors) = collectBarrierLockUsage(steps, declaredDevices)
 
     return membershipErrors +
+      validateNoCrossToolLockSharing(steps) +
       validateBarrierConsistentDeviceCount(usageByLock) +
       validateBarrierDistinctDeviceCounts(usageByLock) +
       validateBarrierGenerationCompleteness(usageByLock) +

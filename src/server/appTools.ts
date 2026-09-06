@@ -15,6 +15,7 @@ import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
+import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
 import {
   createJSONToolResponse,
   createStructuredToolResponse,
@@ -183,10 +184,19 @@ function launchVerificationFailureReason(
   observedAppId: string | undefined,
   observation: LaunchAppResult["observation"],
 ): LaunchVerificationFailureReason | undefined {
-  if (observedAppId) {
-    return undefined;
+  if (observation === undefined) {
+    return "no_observation";
   }
-  return observation === undefined ? "no_observation" : "no_foreground_window";
+  // `resolveMissingForegroundWindow` (the SAME machine-readable verdict the
+  // observe freshness gate uses) is consulted here too, not just an empty
+  // `observedAppId` (issue #6239 review follow-up): a status-bar-only capture
+  // can still carry STALE `activeWindow.appId`/`packageName` metadata from a
+  // previously-resumed app, which would otherwise make `observedAppId` look
+  // like a real (if wrong) observed app and suppress this structured failure.
+  if (!observedAppId || resolveMissingForegroundWindow(observation) !== undefined) {
+    return "no_foreground_window";
+  }
+  return undefined;
 }
 
 function launchVerificationFailureMessage(reason: LaunchVerificationFailureReason): string {

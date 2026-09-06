@@ -17,6 +17,7 @@ import {
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
@@ -1023,15 +1024,19 @@ export class LaunchApp extends BaseVisualChange {
     // Distinguish "genuinely launched but no foreground window could be read at
     // all" from "observed a different/stale app" (issue #6220 follow-up). The
     // latter is a real mismatch — reject and strip the stale observation, as
-    // before. The former names no app whatsoever (`activeWindow.appId` AND
-    // `viewHierarchy.packageName` both empty) — most commonly the status-bar-only
-    // shape ObserveScreen's own freshness now marks `verified: false` for
-    // (#6220). That is not evidence of a wrong app; treating it identically
-    // would reject-and-delete the very observation `buildLaunchAppResponse`
-    // needs to report a structured `verified: false` + `verifyFailureReason`
-    // instead of a silent/thrown failure. Preserve it: the launch action itself
-    // already succeeded, only window verification could not be confirmed.
-    if (this.getLaunchObservationPackageNames(latestObservation).length === 0) {
+    // before. The former is checked via `isMissingForegroundWindow`, a
+    // MACHINE-READABLE verdict reused verbatim from the observe freshness gate
+    // rather than re-derived from package-name absence: a status-bar-only
+    // capture can still carry STALE `packageName`/`foregroundActivity`
+    // metadata left over from a previously-resumed app, so "has package
+    // names" alone would wrongly classify it as a wrong-app mismatch (issue
+    // #6239 review follow-up). Checking the verdict FIRST — before
+    // package-count — means a status-bar-only/no-window capture is preserved
+    // as a structured `verified: false` + `verifyFailureReason` no matter what
+    // stale attribution it still carries; only a genuinely COMPLETE capture (a
+    // real foreground window) naming a different app falls through to the
+    // wrong-app reject path below.
+    if (this.isMissingForegroundWindow(latestObservation)) {
       logger.warn(
         `[LaunchApp] Launch observation for ${expectedPackageName} reports no foreground window after ${timeoutMs}ms; preserving it for the response instead of rejecting it as a stale/wrong-app capture`,
       );
@@ -1164,6 +1169,21 @@ export class LaunchApp extends BaseVisualChange {
 
     const fallbackPackageName = this.packageFromForegroundActivity(observation);
     return fallbackPackageName ? [fallbackPackageName] : [];
+  }
+
+  /**
+   * Whether an observation reports no foreground window at all (issue #6220
+   * follow-up, #6239 review): either the same machine-readable verdict the
+   * observe freshness gate uses (`resolveMissingForegroundWindow` — catches a
+   * status-bar-only capture even when it still carries stale identity
+   * metadata), or the plain "no package names at all" case that verdict
+   * doesn't cover (e.g. no `viewHierarchy` at all).
+   */
+  private isMissingForegroundWindow(observation: ObserveResult): boolean {
+    return (
+      resolveMissingForegroundWindow(observation) !== undefined ||
+      this.getLaunchObservationPackageNames(observation).length === 0
+    );
   }
 
   /**

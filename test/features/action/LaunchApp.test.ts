@@ -3,6 +3,7 @@ import { promises as fsp } from "fs";
 import * as os from "os";
 import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
+import { buildLaunchAppResponse } from "../../../src/server/appTools";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -630,6 +631,55 @@ describe("LaunchApp", () => {
     expect(result.observation?.freshness?.verified).toBe(false);
     expect(result.observation?.activeWindow?.appId).toBeFalsy();
     expect(result.observationOmitted).toBeUndefined();
+  });
+
+  // P1 review finding on #6239: a status-bar-ONLY final capture must be
+  // classified as "no foreground window" even when it still carries STALE
+  // `packageName`/`foregroundActivity`/`activeWindow.appId` metadata left over
+  // from a previously-resumed app. The package-count check alone would see
+  // those stale package names and misroute this to the wrong-app reject path
+  // (success:false, observation stripped, buildLaunchAppResponse throws)
+  // instead of the intended structured `verified:false` +
+  // `verifyFailureReason: "no_foreground_window"`. Reusing
+  // `resolveMissingForegroundWindow` (the SAME machine-readable verdict the
+  // observe freshness gate uses) catches this via geometry, independent of
+  // whatever stale identity survives on the wire.
+  test("preserves a status-bar-only launch observation with stale identity metadata as no-window, not wrong-app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const staleAppPackageName = "com.example.previous";
+    const statusBarOnlyObservation: ObserveResult = {
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 63, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: {
+        packageName: staleAppPackageName,
+        foregroundActivity: `${staleAppPackageName}/.MainActivity`,
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+            node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
+          },
+        },
+      } as any,
+      // Stale identity that survived on the wire even though the tree itself
+      // has collapsed to status-bar-only content.
+      activeWindow: { appId: staleAppPackageName, activityName: "MainActivity", layoutSeqSum: 1 },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(statusBarOnlyObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    // Preserved as a no-window outcome, NOT flipped to a wrong-app rejection.
+    expect(result.success).toBe(true);
+    expect(result.observation).toBeDefined();
+    expect(result.observationOmitted).toBeUndefined();
+
+    const payload = buildLaunchAppResponse(packageName, result);
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_foreground_window");
   });
 
   // P2 review finding on #6239: a hierarchy naming a DIFFERENT app only via

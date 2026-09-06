@@ -250,7 +250,15 @@ function hasForegroundAppIdentity(result: ObserveResult): boolean {
   );
 }
 
-function resolveMissingForegroundWindow(
+/**
+ * Exported so other consumers can reuse the SAME machine-readable verdict
+ * this freshness gate uses, instead of re-deriving "does this capture have a
+ * foreground window" from a weaker proxy (e.g. package-name presence, which a
+ * status-bar-only capture can still carry as stale metadata). `LaunchApp`
+ * uses this to distinguish a status-bar-only/no-window post-launch capture
+ * from a genuine wrong-app landing (issue #6239 review follow-up).
+ */
+export function resolveMissingForegroundWindow(
   result: ObserveResult,
 ): { reason: "status_bar_only" | "empty_active_window" } | undefined {
   if (!result.viewHierarchy?.hierarchy?.node) {

@@ -171,6 +171,38 @@ const logsDir = logSink === "stderr" ? undefined : ensureSecureLogsDirSync();
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefined;
 
+interface FailureProneStream {
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "close", listener: () => void): void;
+}
+
+// A stream that opened successfully can still fail later — e.g. EACCES/ENOSPC
+// surfacing asynchronously once bun/node actually touches the fd. An 'error'
+// event with no listener throws and crashes the process, the exact failure
+// mode #6111/#6179 exists to prevent (just reached via the async path instead
+// of the synchronous constructor throw). Attach handlers so that instead: (a)
+// the error never goes unhandled, (b) the broken stream is dropped so the next
+// write retries opening it (or degrades to stderr, same as the sync path), and
+// (c) the diagnostic stays valid NDJSON in json mode (issue #6179).
+const attachStreamFailureHandlers = (stream: FailureProneStream, target: string): void => {
+  const dropIfCurrent = (): void => {
+    if (logStream === stream) {
+      logStream = undefined;
+    }
+  };
+  stream.on("error", (error) => {
+    try {
+      writeEmergencyLog(`Log stream error on ${target}`, error);
+    } catch (loggingError) {
+      // The emergency helper itself must never throw back into the stream's
+      // event emitter — that would just relocate the crash.
+      void loggingError;
+    }
+    dropIfCurrent();
+  });
+  stream.on("close", dropIfCurrent);
+};
+
 // Constructing an appending WriteStream can throw synchronously — e.g. bun's
 // internal fast path occasionally races its epoll registration and throws
 // `EEXIST: ... epoll_ctl` (issue #5930 family). At module load this crashes the
@@ -179,7 +211,9 @@ const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefi
 // fall back to console-only logging rather than taking the process down.
 const openLogStream = (target: string): fs.WriteStream | undefined => {
   try {
-    return fs.createWriteStream(target, { flags: "a" });
+    const stream = fs.createWriteStream(target, { flags: "a" });
+    attachStreamFailureHandlers(stream, target);
+    return stream;
   } catch (error) {
     // Logger init is the thing failing, so it cannot log itself — route the
     // diagnostic through the JSON-aware emergency helper so this line stays

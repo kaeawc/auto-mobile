@@ -254,6 +254,7 @@ export class PlanValidator {
   private static validateCoordinationLocks(plan: Plan): void {
     this.validateCriticalSectionLocks(plan);
     this.validateBarrierParams(plan);
+    this.validateBarrierConsistentDeviceCount(plan);
     this.validateBarrierDistinctDeviceCounts(plan);
     this.validateBarrierGenerationCompleteness(plan);
   }
@@ -424,6 +425,40 @@ export class PlanValidator {
   }
 
   /**
+   * Validates that a reused barrier lock declares the same `deviceCount`
+   * every time it's used.
+   *
+   * The runtime coordinator (CriticalSectionCoordinator) keys a single
+   * shared expected-device-count per lock name: every arrival's
+   * `registerExpectedDevices` call overwrites it, so whichever arrival
+   * happens to run last wins. Mixed-count reuse of the same lock therefore
+   * makes whether the barrier ever releases depend on arrival order — it
+   * can deadlock to the barrier timeout nondeterministically. A plan that
+   * legitimately wants different participant counts per phase must use a
+   * distinct lock name per count instead.
+   */
+  private static validateBarrierConsistentDeviceCount(plan: Plan): void {
+    const usageByLock = this.collectBarrierLockUsage(plan);
+    const errors: string[] = [];
+
+    for (const [lock, usage] of usageByLock.entries()) {
+      if (usage.deviceCounts.size <= 1) {
+        continue;
+      }
+      const counts = Array.from(usage.deviceCounts)
+        .sort((a, b) => a - b)
+        .join(", ");
+      errors.push(
+        `barrier lock "${lock}" is reused with inconsistent deviceCount values (${counts}). The runtime coordinator keeps a single shared expected count per lock name, so mixed-count reuse is racy and can deadlock depending on arrival order. Use a distinct lock name for each deviceCount instead.`,
+      );
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
+  }
+
+  /**
    * Validates that a reused barrier lock's total arrivals form complete
    * generations, catching a class of deadlock the distinct-device check
    * above cannot: e.g. arrivals A, B, A with deviceCount=2 has 2 distinct
@@ -431,15 +466,14 @@ export class PlanValidator {
    * generation that only ever gets 1 of the 2 devices it needs, so it waits
    * forever.
    *
-   * Sound WITHOUT reconstructing rounds: only checked when a lock has a
-   * single consistent deviceCount N (an inconsistent lock isn't itself an
-   * error here — barrier legitimately allows different deviceCount values
-   * across its reuses — but there's no single N to divide by, so this
-   * check is skipped for it). For that N, the total number of barrier steps
-   * referencing the lock must be an exact multiple of N: each generation
-   * consumes exactly N arrivals, so a non-multiple total necessarily leaves
-   * an incomplete trailing generation that can never complete. This never
-   * false-rejects a valid plan.
+   * Sound WITHOUT reconstructing rounds: only meaningful when a lock has a
+   * single consistent deviceCount N (validateBarrierConsistentDeviceCount
+   * already rejects a lock with more than one, so this defensively skips
+   * that case too rather than picking an arbitrary N). For that N, the
+   * total number of barrier steps referencing the lock must be an exact
+   * multiple of N: each generation consumes exactly N arrivals, so a
+   * non-multiple total necessarily leaves an incomplete trailing generation
+   * that can never complete. This never false-rejects a valid plan.
    */
   private static validateBarrierGenerationCompleteness(plan: Plan): void {
     const usageByLock = this.collectBarrierLockUsage(plan);

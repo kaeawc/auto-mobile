@@ -684,6 +684,164 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects a reused barrier lock declared with more than one distinct deviceCount`() {
+    // A/B at deviceCount=2, then A/B/C at deviceCount=3 for the SAME lock
+    // name: the runtime coordinator keeps one shared expected count per
+    // lock, so mixed-count reuse is racy and must be rejected regardless of
+    // whether the distinct-device/divisibility checks would otherwise pass
+    // it.
+    val yaml =
+      """
+      name: barrier-mixed-devicecount-reuse
+      devices:
+        - A
+        - B
+        - C
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 3
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A lock reused with two different deviceCount values should be invalid",
+    )
+  }
+
+  @Test
+  fun `accepts a reused barrier lock whose deviceCount stays consistent across every use`() {
+    val yaml =
+      """
+      name: barrier-consistent-devicecount-reuse
+      devices:
+        - A
+        - B
+        - C
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 3
+        - tool: barrier
+          params:
+            device: C
+            lock: sync-point
+            deviceCount: 3
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "A lock reused with a consistent deviceCount should be valid")
+  }
+
+  @Test
+  fun `rejects a barrier step that omits device entirely under a declared devices set`() {
+    // devices=[A]: one deviceCount=1 barrier step for this lock omits
+    // 'device' altogether while another targets A. The device-less step
+    // must be rejected, not silently ignored -- mirrors the daemon's
+    // PlanValidator.validateDeviceLabelsPresent.
+    val yaml =
+      """
+      name: barrier-missing-device
+      devices:
+        - A
+      steps:
+        - tool: barrier
+          params:
+            lock: sync-point
+            deviceCount: 1
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 1
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid, "A barrier step with no device label should be invalid")
+  }
+
+  @Test
+  fun `rejects a barrier deviceCount that overflows Long instead of wrapping it`() {
+    // 18446744073709551618 = 2^64 + 2, a SnakeYAML BigInteger. A naive
+    // Long.toLong() (or BigInteger.toLong()) narrowing wraps this to 2,
+    // which would make this A/B plan pass. The value must be rejected at
+    // its real magnitude, not silently wrapped into something satisfiable.
+    val yaml =
+      """
+      name: barrier-devicecount-overflows-long
+      devices:
+        - A
+        - B
+      steps:
+        - tool: barrier
+          params:
+            device: A
+            lock: sync-point
+            deviceCount: 18446744073709551618
+        - tool: barrier
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 18446744073709551618
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(
+      result.valid,
+      "A deviceCount exceeding Long range must not be silently wrapped into a satisfiable value",
+    )
+  }
+
+  @Test
   fun `validates expectations array`() {
     val yaml =
       """

@@ -87,8 +87,28 @@ object TestPlanValidator {
         )
       }
 
-    // Validate against schema
-    val validationErrors: List<Error> = schema.validate(jsonString, InputFormat.JSON)
+    // Validate against schema. A numeric value far outside the 64-bit long
+    // range (e.g. a SnakeYAML BigInteger deviceCount) can make the
+    // underlying JSON-schema library's own minimum/maximum keyword
+    // validators throw instead of reporting a validation error -- treat that
+    // the same as any other schema-validation failure rather than letting it
+    // crash validateYaml (#6215 review).
+    val validationErrors: List<Error> =
+      try {
+        schema.validate(jsonString, InputFormat.JSON)
+      } catch (e: Exception) {
+        return ValidationResult(
+          valid = false,
+          errors =
+            listOf(
+              ValidationError(
+                field = "root",
+                message = "Schema validation failed: ${e.message}",
+                severity = ValidationSeverity.ERROR,
+              )
+            ),
+        )
+      }
 
     // Validate tool names
     val toolNameErrors = validateToolNames(parsedObject, yamlContent)
@@ -261,6 +281,96 @@ object TestPlanValidator {
     var arrivals = 0
   }
 
+  /**
+   * Converts a coordination field's raw value to an exact positive Long, or null if it isn't one
+   * (including a value that is numerically out of the supported range, e.g. a SnakeYAML BigInteger
+   * beyond Long.MAX_VALUE). Never wraps/truncates a value that doesn't fit -- callers must treat a
+   * non-null raw value that maps to null here as an explicit rejection, not an absence (#6215
+   * review: a schema-valid but off-range deviceCount must be rejected, not silently narrowed).
+   */
+  private fun exactPositiveLong(raw: Any?): Long? =
+    when (raw) {
+      is Long -> raw.takeIf { it >= 1 }
+      is Int -> raw.toLong().takeIf { it >= 1 }
+      is java.math.BigInteger ->
+        try {
+          raw.longValueExact().takeIf { it >= 1 }
+        } catch (e: ArithmeticException) {
+          null
+        }
+      is Number -> {
+        val value = raw.toDouble()
+        if (
+          value.isFinite() &&
+            value >= 1.0 &&
+            value <= Long.MAX_VALUE.toDouble() &&
+            value == kotlin.math.floor(value)
+        ) {
+          value.toLong()
+        } else {
+          null
+        }
+      }
+      else -> null
+    }
+
+  /** Records one barrier step's device (membership-checked) against its lock's usage. */
+  private fun recordBarrierDevice(
+    usage: BarrierLockUsage,
+    lock: String,
+    step: Map<*, *>,
+    declaredDevices: Set<String>?,
+    errors: MutableList<ValidationError>,
+  ) {
+    val device = effectiveCoordinationField(step, "device") as? String
+    when {
+      device.isNullOrEmpty() -> {
+        errors.add(
+          ValidationError(
+            field = "steps",
+            message =
+              "barrier step for lock \"$lock\" is missing a 'device' parameter. Every barrier step must target a specific device.",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+      declaredDevices != null && device !in declaredDevices -> {
+        errors.add(
+          ValidationError(
+            field = "steps",
+            message =
+              "barrier step references device \"$device\" for lock \"$lock\", but the plan's declared devices are [${declaredDevices.joinToString(", ")}]. Every barrier device must be a declared device label.",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+      else -> usage.devices.add(device)
+    }
+  }
+
+  /** Records one barrier step's deviceCount against its lock's usage. */
+  private fun recordBarrierDeviceCount(
+    usage: BarrierLockUsage,
+    lock: String,
+    step: Map<*, *>,
+    errors: MutableList<ValidationError>,
+  ) {
+    val raw = effectiveCoordinationField(step, "deviceCount") ?: return
+    val deviceCount = exactPositiveLong(raw)
+    if (deviceCount != null) {
+      usage.deviceCounts.add(deviceCount)
+      return
+    }
+    errors.add(
+      ValidationError(
+        field = "steps",
+        message =
+          "barrier step for lock \"$lock\" declares deviceCount=$raw, which is outside the supported range (a positive integer representable in 64 bits). This is rejected rather than silently narrowed.",
+        severity = ValidationSeverity.ERROR,
+      )
+    )
+  }
+
   /** Collects each barrier step's lock/device/deviceCount usage, keyed by lock name. */
   private fun collectBarrierLockUsage(
     steps: List<*>,
@@ -281,29 +391,40 @@ object TestPlanValidator {
       val usage = usageByLock.getOrPut(lock) { BarrierLockUsage() }
       usage.arrivals += 1
 
-      val device = effectiveCoordinationField(step, "device") as? String
-      if (!device.isNullOrEmpty()) {
-        if (declaredDevices != null && device !in declaredDevices) {
-          errors.add(
-            ValidationError(
-              field = "steps",
-              message =
-                "barrier step references device \"$device\" for lock \"$lock\", but the plan's declared devices are [${declaredDevices.joinToString(", ")}]. Every barrier device must be a declared device label.",
-              severity = ValidationSeverity.ERROR,
-            )
-          )
-        } else {
-          usage.devices.add(device)
-        }
-      }
-
-      val deviceCount = (effectiveCoordinationField(step, "deviceCount") as? Number)?.toLong()
-      if (deviceCount != null && deviceCount >= 1) {
-        usage.deviceCounts.add(deviceCount)
-      }
+      recordBarrierDevice(usage, lock, step, declaredDevices, errors)
+      recordBarrierDeviceCount(usage, lock, step, errors)
     }
 
     return usageByLock to errors
+  }
+
+  /**
+   * Validates that a reused barrier lock declares the same deviceCount every time it's used --
+   * mirrors the daemon's PlanValidator.validateBarrierConsistentDeviceCount. The runtime
+   * coordinator keys a single shared expected-device-count per lock name (every arrival's
+   * registerExpectedDevices call overwrites it), so mixed-count reuse of the same lock is racy:
+   * whether the barrier ever releases depends on arrival order, and it can deadlock to the barrier
+   * timeout nondeterministically.
+   */
+  private fun validateBarrierConsistentDeviceCount(
+    usageByLock: Map<String, BarrierLockUsage>
+  ): List<ValidationError> {
+    val errors = mutableListOf<ValidationError>()
+    for ((lock, usage) in usageByLock) {
+      if (usage.deviceCounts.size <= 1) {
+        continue
+      }
+      val counts = usage.deviceCounts.sorted().joinToString(", ")
+      errors.add(
+        ValidationError(
+          field = "steps",
+          message =
+            "barrier lock \"$lock\" is reused with inconsistent deviceCount values ($counts). The runtime coordinator keeps a single shared expected count per lock name, so mixed-count reuse is racy and can deadlock depending on arrival order. Use a distinct lock name for each deviceCount instead.",
+          severity = ValidationSeverity.ERROR,
+        )
+      )
+    }
+    return errors
   }
 
   /**
@@ -339,10 +460,11 @@ object TestPlanValidator {
   /**
    * Validates that a reused barrier lock's total arrivals form complete generations -- mirrors the
    * daemon's PlanValidator.validateBarrierGenerationCompleteness. Sound without reconstructing
-   * rounds: only checked when a lock has a single consistent deviceCount N (an inconsistent
-   * deviceCount across reuses of the same lock is legitimate, and there is no single N to divide
-   * by); for that N, the total arrival count must be an exact multiple of N or a trailing
-   * generation is necessarily incomplete and would deadlock forever.
+   * rounds: only meaningful when a lock has a single consistent deviceCount N
+   * (validateBarrierConsistentDeviceCount already rejects a lock with more than one, so this
+   * defensively skips that case too rather than picking an arbitrary N); for that N, the total
+   * arrival count must be an exact multiple of N or a trailing generation is necessarily incomplete
+   * and would deadlock forever.
    */
   private fun validateBarrierGenerationCompleteness(
     usageByLock: Map<String, BarrierLockUsage>
@@ -369,8 +491,8 @@ object TestPlanValidator {
   }
 
   /**
-   * Runs all barrier-lock coordination checks (declared-device membership, distinct-device count,
-   * generation completeness) in one pass over the plan's steps.
+   * Runs all barrier-lock coordination checks (declared-device membership, deviceCount range and
+   * consistency, distinct-device count, generation completeness) in one pass over the plan's steps.
    */
   private fun validateBarrierCoordination(parsedObject: Any?): List<ValidationError> {
     if (parsedObject !is Map<*, *>) {
@@ -385,6 +507,7 @@ object TestPlanValidator {
     val (usageByLock, membershipErrors) = collectBarrierLockUsage(steps, declaredDevices)
 
     return membershipErrors +
+      validateBarrierConsistentDeviceCount(usageByLock) +
       validateBarrierDistinctDeviceCounts(usageByLock) +
       validateBarrierGenerationCompleteness(usageByLock)
   }

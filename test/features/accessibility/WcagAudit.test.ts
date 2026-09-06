@@ -936,6 +936,38 @@ describe("WcagAudit", function () {
       expect(screenId).toBe("com.test:com.example.AppContentRoot:");
       expect(screenId).not.toBe("com.test:com.example.KeyboardRoot:");
     });
+
+    it("restricts the largest-bounds-area FALLBACK to TYPE_APPLICATION roots (#6252)", async function () {
+      // Neither window is focused/active as a TYPE_APPLICATION window here —
+      // the IME is focused but is TYPE_INPUT_METHOD, and the app window is
+      // neither focused nor active (Android can mark a keyboard
+      // focused/active while the app window it sits over is neither). So the
+      // focused/active TYPE_APPLICATION search above finds nothing and this
+      // exercises the largest-bounds-area FALLBACK. In this split-screen
+      // layout the keyboard root is LARGER than the app pane, so a fallback
+      // that considers every root (the round-2 regression) would pick the
+      // keyboard and produce a keyboard-derived baseline id shared across
+      // unrelated app screens. The fix restricts the fallback to
+      // TYPE_APPLICATION roots, so it must still resolve to the app pane.
+      const appRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 800 },
+        className: "com.example.AppContentRoot",
+      } as unknown as ViewHierarchyNode;
+      const imeRoot: ViewHierarchyNode = {
+        bounds: { left: 0, top: 800, right: 1080, bottom: 2400 },
+        className: "com.example.KeyboardRoot",
+      } as unknown as ViewHierarchyNode;
+      const hierarchy: ViewHierarchyNode = { node: [appRoot, imeRoot] };
+      const windows: ViewHierarchyResult["windows"] = [
+        { isFocused: true, isActive: true, type: 2, bounds: imeRoot.bounds },
+        { isFocused: false, isActive: false, type: 1, bounds: appRoot.bounds },
+      ];
+
+      const screenId = await screenIdFor(hierarchy, "com.test", windows);
+
+      expect(screenId).toBe("com.test:com.example.AppContentRoot:");
+      expect(screenId).not.toBe("com.test:com.example.KeyboardRoot:");
+    });
   });
 
   describe("Baseline Suppression", function () {

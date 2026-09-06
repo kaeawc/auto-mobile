@@ -649,7 +649,57 @@ export class WcagAudit {
       }
     }
 
-    return (node as ViewHierarchyNode[]).reduce((largest, candidate) =>
+    return this.pickLargestRoot(node as ViewHierarchyNode[], windows);
+  }
+
+  /** `AccessibilityWindowInfo.TYPE_INPUT_METHOD` (Android SDK constant = 2) — the soft keyboard's window type. */
+  private static readonly ACCESSIBILITY_WINDOW_TYPE_INPUT_METHOD = 2;
+
+  /**
+   * Largest-bounds-area fallback used when no focused/active `TYPE_APPLICATION`
+   * window was found above (e.g. an IME owns focus while the app window is
+   * neither focused nor active). Restricted to `TYPE_APPLICATION` roots first:
+   * in split-screen/freeform layouts a keyboard root can be LARGER than the
+   * app pane, so picking the largest root among *every* root (issue #6252's
+   * round-2 regression) selects the keyboard and produces a keyboard-derived
+   * baseline id shared across unrelated app screens. Only when there is
+   * genuinely no application-typed root at all does this fall back further —
+   * and even then it prefers excluding SystemUI/IME-typed roots before
+   * considering every remaining root.
+   */
+  private pickLargestRoot(
+    candidates: ViewHierarchyNode[],
+    windows?: ViewHierarchyWindowInfo[],
+  ): ViewHierarchyNode {
+    if (windows && windows.length > 0) {
+      const applicationCandidates = candidates.filter((candidate) =>
+        windows.some(
+          (w) => this.isApplicationWindow(w) && this.boundsEqual(w.bounds, candidate.bounds),
+        ),
+      );
+      if (applicationCandidates.length > 0) {
+        return this.largestByArea(applicationCandidates);
+      }
+
+      const nonSystemNonImeCandidates = candidates.filter(
+        (candidate) =>
+          !windows.some(
+            (w) =>
+              this.boundsEqual(w.bounds, candidate.bounds) &&
+              (this.isSystemUiWindow(w) ||
+                w.type === WcagAudit.ACCESSIBILITY_WINDOW_TYPE_INPUT_METHOD),
+          ),
+      );
+      if (nonSystemNonImeCandidates.length > 0) {
+        return this.largestByArea(nonSystemNonImeCandidates);
+      }
+    }
+
+    return this.largestByArea(candidates);
+  }
+
+  private largestByArea(candidates: ViewHierarchyNode[]): ViewHierarchyNode {
+    return candidates.reduce((largest, candidate) =>
       this.boundsArea(candidate.bounds) > this.boundsArea(largest.bounds) ? candidate : largest,
     );
   }

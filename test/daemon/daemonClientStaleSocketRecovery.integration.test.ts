@@ -175,6 +175,51 @@ describe("DaemonClient stale socket recovery — winner-race reachability guard 
     },
   );
 
+  // The whole point of #6140 is to never unlink a live winner's socket. A SINGLE
+  // negative probe is not authoritative: a full accept backlog or a transient
+  // refusal can make a live winner's socket look momentarily unreachable. This
+  // fake fails the first probe, then reports the (live) winner reachable on the
+  // second — recovery must never unlink on that one transient miss.
+  (isWindows ? test.skip : test)(
+    "does not unlink a live winner's socket after one transient probe failure, even with a dead-loser PID",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "live winner socket placeholder");
+      writePidFile(pidFilePath, socketPath);
+
+      let calls = 0;
+      class TransientThenReachable implements DaemonSocketReachabilityLike {
+        async isReachable(): Promise<boolean> {
+          calls++;
+          // First probe: transient miss (e.g. a full accept backlog). Second probe:
+          // the live winner answers.
+          return calls >= 2;
+        }
+      }
+
+      let cleanupCalls = 0;
+      const client = new DaemonClient(socketPath, 500, undefined, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        // The recorded PID is dead — the OLD single-probe guard would have unlinked
+        // on the first (transient) negative probe.
+        isProcessRunning: () => {
+          cleanupCalls++;
+          return false;
+        },
+        reachability: new TransientThenReachable(),
+      });
+
+      await expect(client.connect()).rejects.toThrow();
+      expect(calls).toBeGreaterThanOrEqual(2);
+      // The dead-PID cleanup must never run once ANY probe in the sequence reports
+      // a live winner.
+      expect(cleanupCalls).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    },
+  );
+
   (isWindows ? test.skip : test)(
     "still cleans up and retries when the reachability probe reports nothing live",
     async () => {

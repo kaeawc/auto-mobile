@@ -5,9 +5,15 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import {
+  DaemonManager,
+  type DaemonProcessFinder,
+  type DaemonProcessSpawner,
+} from "../../src/daemon/manager";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
+  DEFAULT_PID_FILE_PATH,
+  DEFAULT_SOCKET_PATH,
   READINESS_PROBE_MAX_ATTEMPTS,
 } from "../../src/daemon/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
@@ -1359,6 +1365,121 @@ describe("DaemonManager readiness", () => {
       expect(fakeTimer.getCurrentTime() - start).toBeLessThan(5_000);
     } finally {
       liveSpy.mockRestore();
+    }
+  });
+
+  // #6140 P2 review finding: comparing against `PID_FILE_PATH`/`SOCKET_PATH` is a
+  // no-op once an env override (AUTOMOBILE_DAEMON_PID_FILE_PATH or the socket
+  // equivalent) is what INITIALIZED those constants in the first place — an
+  // unoverridden manager's constructor-default `pidFilePath`/`socketPath` then
+  // equals the very same overridden constant. `isIsolatedSocketNamespace` must
+  // compare against the built-in `DEFAULT_PID_FILE_PATH`/`DEFAULT_SOCKET_PATH`
+  // instead, which stays fixed regardless of any env override.
+  describe("isolated-namespace detection (#6140)", () => {
+    function internalsOf(manager: DaemonManager) {
+      return manager as unknown as { isIsolatedSocketNamespace(): boolean };
+    }
+
+    test("is false for the built-in default PID file and socket paths", () => {
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        DEFAULT_PID_FILE_PATH,
+        DEFAULT_SOCKET_PATH,
+      );
+
+      expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(false);
+    });
+
+    test("is true for a PID-file-only override, matching AUTOMOBILE_DAEMON_PID_FILE_PATH production isolation", () => {
+      const { pidPath } = createPaths();
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        pidPath,
+        DEFAULT_SOCKET_PATH,
+      );
+
+      expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(true);
+    });
+
+    test("is true for a socket-only custom path even when the PID file path is the default", () => {
+      const { socketPath } = createPaths();
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        DEFAULT_PID_FILE_PATH,
+        socketPath,
+      );
+
+      expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(true);
+    });
+  });
+
+  // #6140 P2 review finding: checking only for EXACTLY zero remaining time before
+  // the process-table scan is insufficient — a small-but-nonzero remainder still
+  // lets the scan run to its full DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS ceiling
+  // (5000ms), which can blow past both the isolated-namespace grace and the outer
+  // start-deadline delivery headroom before the actionable launch error is ever
+  // delivered. The scan must be bounded by whatever remains of the loop's own
+  // deadline instead.
+  test("bounds the process-table scan by the remaining rejoin budget, not just an exact-zero check (#6140)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    // Consumes all but a small sliver of whatever budget it is given before
+    // reporting a miss, simulating a probe that burns most of the remaining time.
+    class NearBudgetExhaustingReachability implements DaemonSocketReachabilityLike {
+      constructor(private readonly timer: FakeTimer) {}
+      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+        await this.timer.sleep(Math.max(0, timeoutMs - 40));
+        return false;
+      }
+    }
+    const reachability = new NearBudgetExhaustingReachability(fakeTimer);
+
+    const scanTimeouts: Array<number | undefined> = [];
+    const processFinder: DaemonProcessFinder = {
+      findDaemonProcesses(timeoutMs?: number) {
+        scanTimeouts.push(timeoutMs);
+        return [];
+      },
+    };
+
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      reachability,
+    );
+
+    const internals = manager as unknown as {
+      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
+    };
+
+    await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
+    expect(scanTimeouts.length).toBeGreaterThan(0);
+    // Bounded to what remained of the loop's own deadline (~40ms here), nowhere
+    // near the 5000ms DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS ceiling.
+    for (const timeoutMs of scanTimeouts) {
+      expect(timeoutMs).toBeDefined();
+      expect(timeoutMs as number).toBeLessThan(100);
     }
   });
 });

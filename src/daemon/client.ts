@@ -44,6 +44,23 @@ import {
 const STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS = 300;
 
 /**
+ * Number of consecutive failed reachability probes required before
+ * {@link DaemonClient.connect} treats the stale-socket recovery unlink as safe
+ * (issue #6140). A SINGLE negative probe is not authoritative ownership evidence:
+ * a full Unix accept backlog or a transient refusal can make a live winner's
+ * socket look momentarily unreachable, and trusting that one observation would
+ * recreate the exact brick this PR exists to prevent. Mirrors the retry count
+ * `verifyDaemonConnection` already uses for the analogous readiness-probe
+ * decision in `manager.ts` ({@link READINESS_PROBE_MAX_ATTEMPTS}). Attempts run
+ * back-to-back with no artificial backoff between them — each is already a real
+ * socket-connect attempt bounded by its own probe timeout, so no extra delay is
+ * needed to give a momentarily busy socket a chance to answer, and adding one
+ * would eat into callers with a tight overall `connect(timeoutMs)` budget for no
+ * benefit.
+ */
+const STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS = 3;
+
+/**
  * A single lazily-constructed default probe, shared across instances that don't
  * inject their own (mirrors the module-level default the manager's rejoin path
  * uses). Constructed once so a real `DaemonSocketReachability` isn't allocated
@@ -300,9 +317,9 @@ export class DaemonClient {
         // winner already owns the path but hasn't published its own PID record
         // yet. This observation-only probe never itself unlinks anything — it
         // only decides whether the existing dead-PID cleanup below is safe to run.
-        const reachable = await this.staleSocketRecoveryReachability().isReachable(
-          this.socketPath,
-          Math.min(STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS, remainingForProbe),
+        const confirmedUnreachable = await this.isStaleSocketRecoveryConfirmedUnreachable(
+          deadline,
+          signal,
         );
         // Recheck after the await: the caller can abort WHILE this probe is
         // in flight, and the pre-await check above cannot see that. Proceeding
@@ -310,7 +327,7 @@ export class DaemonClient {
         // cancellation, so bail out with the original failure instead.
         if (
           !signal?.aborted &&
-          !reachable &&
+          confirmedUnreachable &&
           DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
         ) {
           await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
@@ -323,6 +340,44 @@ export class DaemonClient {
 
   private staleSocketRecoveryReachability(): DaemonSocketReachabilityLike {
     return this.recoveryOptions.reachability ?? defaultStaleSocketRecoveryReachability;
+  }
+
+  /**
+   * Whether the stale-socket recovery unlink is safe: the socket path must fail
+   * {@link STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS} consecutive reachability
+   * probes within the caller's remaining deadline before recovery treats it as
+   * confirmed dead (issue #6140). A single negative probe is NOT authoritative —
+   * it only distinguishes "probably nothing is listening" from "definitely
+   * something is listening", and a full accept backlog or a transient refusal
+   * can produce a false negative even while a live winner owns the socket.
+   * Exhausting the remaining deadline mid-check (or an abort) is treated the
+   * same as "not confirmed" — recovery must stay non-destructive rather than
+   * act on a partial observation.
+   */
+  private async isStaleSocketRecoveryConfirmedUnreachable(
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= STALE_SOCKET_RECOVERY_PROBE_MAX_ATTEMPTS; attempt++) {
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0 || signal?.aborted) {
+        return false;
+      }
+      const reachable = await this.staleSocketRecoveryReachability().isReachable(
+        this.socketPath,
+        Math.min(STALE_SOCKET_RECOVERY_PROBE_TIMEOUT_MS, remaining),
+      );
+      if (signal?.aborted) {
+        return false;
+      }
+      if (reachable) {
+        // Something IS listening on this path — never treat it as confirmed dead,
+        // regardless of how many attempts remain.
+        return false;
+      }
+    }
+    // Every attempt within budget failed: treat as confirmed unreachable.
+    return true;
   }
 
   private remainingConnectTimeout(deadline: number, timeoutMs: number): number {

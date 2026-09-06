@@ -22,6 +22,8 @@ import { ActionableError } from "../models";
 import {
   PID_FILE_PATH,
   SOCKET_PATH,
+  DEFAULT_PID_FILE_PATH,
+  DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
@@ -118,7 +120,13 @@ export interface DaemonProcessRecord {
 }
 
 export interface DaemonProcessFinder {
-  findDaemonProcesses(): DaemonProcessRecord[];
+  /**
+   * @param timeoutMs Upper bound to apply to the underlying process-table scan, for a
+   * caller with a tight remaining budget (issue #6140). Always clamped to
+   * {@link DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS} as well — this can only shorten the
+   * scan, never lengthen it beyond that ceiling. Omit to use the ceiling itself.
+   */
+  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[];
 }
 
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
@@ -283,14 +291,18 @@ const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
   },
 };
 
+function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
+  return Math.max(0, Math.min(timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS, DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS));
+}
+
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
-  findDaemonProcesses(): DaemonProcessRecord[] {
+  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
     const psOutput = this.runCommand("ps -eo pid=,ppid=,command=", {
       encoding: "utf-8",
       maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-      timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+      timeout: boundedProcessTableScanTimeout(timeoutMs),
     });
     return parseDaemonProcessTable(psOutput);
   }
@@ -305,13 +317,13 @@ export class WindowsDaemonProcessFinder
 {
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
-  findDaemonProcesses(): DaemonProcessRecord[] {
+  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
     const processTableJson = this.runCommand(
       'powershell.exe -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
       {
         encoding: "utf-8",
         maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-        timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+        timeout: boundedProcessTableScanTimeout(timeoutMs),
       },
     );
     return parseWindowsDaemonProcessTable(processTableJson);
@@ -664,9 +676,9 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Find all running auto-mobile daemon processes (including those from other worktrees)
    */
-  findAllDaemonProcesses(): number[] {
+  findAllDaemonProcesses(timeoutMs?: number): number[] {
     try {
-      return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses());
+      return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses(timeoutMs));
     } catch (error) {
       throw new ActionableError(`Failed to inspect daemon process table: ${errorMessage(error)}`);
     }
@@ -676,8 +688,12 @@ export class DaemonManager implements DaemonManagerLike {
     return this.findLiveDaemonProcesses().filter((pid) => pid !== activeDaemonPid);
   }
 
-  findLiveDaemonProcesses(): number[] {
-    return this.findAllDaemonProcesses().filter((pid) => this.isProcessRunning(pid));
+  /**
+   * @param timeoutMs Bounds the underlying process-table scan for a caller with a
+   * tight remaining budget (issue #6140); see {@link DaemonProcessFinder.findDaemonProcesses}.
+   */
+  findLiveDaemonProcesses(timeoutMs?: number): number[] {
+    return this.findAllDaemonProcesses(timeoutMs).filter((pid) => this.isProcessRunning(pid));
   }
 
   private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
@@ -1863,8 +1879,9 @@ export class DaemonManager implements DaemonManagerLike {
     // trusted to identify a peer IN THIS socket namespace (issue #6140) — bound the
     // whole rejoin to a short grace in that case rather than the caller's full
     // start budget. The default namespace keeps the full budget, matching #6103.
-    const usesIsolatedSocketNamespace = this.pidFilePath !== PID_FILE_PATH;
-    const effectiveBudgetMs = usesIsolatedSocketNamespace
+    // See {@link isIsolatedSocketNamespace} for why the comparison uses the
+    // built-in DEFAULT_* constants rather than PID_FILE_PATH/SOCKET_PATH.
+    const effectiveBudgetMs = this.isIsolatedSocketNamespace()
       ? Math.min(budgetMs, PEER_DAEMON_UNCORRELATED_NAMESPACE_GRACE_MS)
       : budgetMs;
     const deadline = this.timer.now() + effectiveBudgetMs;
@@ -1904,11 +1921,19 @@ export class DaemonManager implements DaemonManagerLike {
       // uncancellable synchronous call, so once the budget is exhausted it must
       // return rather than start a scan that can only blow past the deadline
       // (issue #6140, folded from PR #6109 review).
-      if (this.remainingTime(deadline) === 0) {
+      const remainingForScan = this.remainingTime(deadline);
+      if (remainingForScan === 0) {
         return false;
       }
       if (peerProcessComingUp === undefined || this.timer.now() >= nextProcessScanAt) {
-        peerProcessComingUp = this.hasComingUpPeerDaemon();
+        // Bound the scan itself by whatever remains of THIS loop's deadline, not just
+        // the fixed DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS ceiling (issue #6140): with an
+        // isolated-namespace grace or tight outer start-deadline headroom, the caller
+        // can have far less than 5000ms left, and an exactly-zero check above does not
+        // catch a small-but-nonzero remainder — the scan could still run to its full
+        // ceiling and blow past both the grace and the outer delivery headroom before
+        // the actionable launch error is ever delivered.
+        peerProcessComingUp = this.hasComingUpPeerDaemon(remainingForScan);
         nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
       }
       if (!peerProcessComingUp) {
@@ -1955,9 +1980,9 @@ export class DaemonManager implements DaemonManagerLike {
    * joined regardless of this gate, and a socket that does not is not waited on unless a
    * live daemon process backs it.
    */
-  private hasComingUpPeerDaemon(): boolean {
+  private hasComingUpPeerDaemon(timeoutMs?: number): boolean {
     try {
-      return this.findLiveDaemonProcesses().length > 0;
+      return this.findLiveDaemonProcesses(timeoutMs).length > 0;
     } catch (error) {
       // Best-effort recovery probe: a transient process-table inspection failure must
       // not REPLACE the caller's original spawn/exit diagnostic (which carries the
@@ -2028,6 +2053,31 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private socketPathObservable(): boolean {
     return this.platform === "win32" || existsSync(this.socketPath);
+  }
+
+  /**
+   * Whether this manager's effective socket/PID namespace is isolated from the
+   * built-in default — i.e. a non-default PID file path, socket path, or both
+   * (issue #6140). {@link findLiveDaemonProcesses} scans the WHOLE process table
+   * and has no socket-namespace identity, so it cannot tell a daemon bound to
+   * THIS namespace's socket apart from an unrelated daemon (another worktree, a
+   * different isolated instance, or the default namespace). Trusting that
+   * unscoped signal for the full rejoin budget is only safe in the default
+   * namespace, where a process-table match is far more likely to be the actual
+   * peer ({@link tryJoinPeerDaemonAfterSpawnExit}).
+   *
+   * Compares against the built-in {@link DEFAULT_PID_FILE_PATH}/
+   * {@link DEFAULT_SOCKET_PATH} constants, NOT `PID_FILE_PATH`/`SOCKET_PATH`:
+   * when production isolation is configured via `AUTOMOBILE_DAEMON_PID_FILE_PATH`
+   * (or the socket equivalent), that env override is what INITIALIZES
+   * `PID_FILE_PATH`/`SOCKET_PATH` in the first place, so an unoverridden manager's
+   * `pidFilePath` constructor default equals the very same overridden constant —
+   * comparing against it would always read as "not isolated" and let an unrelated
+   * daemon from the global process scan poll the unreachable custom socket for
+   * the full rejoin budget instead of the intended short grace.
+   */
+  private isIsolatedSocketNamespace(): boolean {
+    return this.pidFilePath !== DEFAULT_PID_FILE_PATH || this.socketPath !== DEFAULT_SOCKET_PATH;
   }
 
   private async verifyDaemonConnection(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {

@@ -36,21 +36,37 @@ export const DAEMON_PORT_RANGE_END = 3010;
  * Unix socket path for daemon communication
  * Per-user socket to avoid permission issues
  */
+/**
+ * The built-in socket path with no env override applied — i.e. what {@link SOCKET_PATH}
+ * would be on a completely unconfigured host. Unlike `SOCKET_PATH`, this is NOT affected
+ * by `AUTOMOBILE_DAEMON_SOCKET_PATH`/`AUTO_MOBILE_DAEMON_SOCKET_PATH`, so it is the correct
+ * value to compare an effective socket path against when detecting whether a manager is
+ * using an isolated socket namespace (issue #6140): comparing against `SOCKET_PATH` itself
+ * is always a no-op once the env var is what initialized `SOCKET_PATH` in the first place.
+ */
+export const DEFAULT_SOCKET_PATH = `/tmp/auto-mobile-daemon-${uid}.sock`;
+
 const socketPathOverride =
   process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
 export const SOCKET_PATH = socketPathOverride
   ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
-  : `/tmp/auto-mobile-daemon-${uid}.sock`;
+  : DEFAULT_SOCKET_PATH;
 
 /**
  * PID lock file path
  * Contains daemon process information
  */
+/**
+ * The built-in PID file path with no env override applied — see {@link DEFAULT_SOCKET_PATH}
+ * for why this (not `PID_FILE_PATH`) is the correct isolated-namespace comparison target.
+ */
+export const DEFAULT_PID_FILE_PATH = `/tmp/auto-mobile-daemon-${uid}.pid`;
+
 const pidFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
 export const PID_FILE_PATH = pidFilePathOverride
   ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
-  : `/tmp/auto-mobile-daemon-${uid}.pid`;
+  : DEFAULT_PID_FILE_PATH;
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.

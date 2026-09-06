@@ -229,6 +229,93 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
+  // #6227 P1 follow-up: a session first reached via a `booted` tool must be
+  // *upgraded* — not left disconnected — when a later call on the same
+  // sessionUuid needs `automationReady`. The `existingSession` fast path must
+  // not silently satisfy a stricter readiness requirement than the session
+  // actually achieved.
+  test("upgrades a booted-only session to automationReady when a later call needs it (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    const bootedContext = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      {
+        ...sessionOptions,
+        deviceReadiness: "booted",
+      },
+    );
+    expect(bootedContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(0);
+    expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
+
+    // Same sessionUuid, now via an automationReady tool — must run setup
+    // (upgrade), not take the existingSession skip path.
+    const upgradedContext = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      {
+        ...sessionOptions,
+        deviceReadiness: "automationReady",
+      },
+    );
+    expect(upgradedContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+  });
+
+  test("does not redundantly re-run setup for a booted tool after an automationReady session (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    const readyContext = await createToolExecutionContext("session-1", sessionManager, devicePool, {
+      ...sessionOptions,
+      deviceReadiness: "automationReady",
+    });
+    expect(readyContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+
+    // Same sessionUuid, now via a booted-only tool — must NOT downgrade or
+    // redundantly redo setup.
+    const bootedContext = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      {
+        ...sessionOptions,
+        deviceReadiness: "booted",
+      },
+    );
+    expect(bootedContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

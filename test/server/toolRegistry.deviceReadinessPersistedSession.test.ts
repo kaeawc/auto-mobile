@@ -172,6 +172,44 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     expect(setupCalls).toBe(1);
   });
 
+  test("upgrades setup when a booted-first persisted session is later reused by an automationReady tool (#6227)", async () => {
+    const sessionUuid = "restarted-session-upgrade";
+    await setupPersistedDaemonSession(sessionUuid);
+
+    ToolRegistry.registerDeviceAware(
+      "bootedFirstProbe",
+      "Booted-first probe",
+      z.object({ sessionUuid: z.string().optional() }),
+      async () => ({ success: true }),
+      { deviceReadiness: "booted" },
+    );
+    ToolRegistry.registerDeviceAware(
+      "automationReadySecondProbe",
+      "Automation-ready-second probe",
+      z.object({ sessionUuid: z.string().optional() }),
+      async () => ({ success: true }),
+      { deviceReadiness: "automationReady" },
+    );
+
+    const bootedResponse = await ToolRegistry.getTool("bootedFirstProbe")!.handler({
+      platform: "android",
+      sessionUuid,
+    });
+    expect(bootedResponse).toMatchObject({ success: true });
+    expect(setupCalls).toBe(0);
+
+    // Same recovered sessionUuid, now reused by an automationReady tool — the
+    // `existingSession` fast path must upgrade rather than leave the session
+    // disconnected/unprepared (#6227 P1 follow-up).
+    const automationResponse = await ToolRegistry.getTool("automationReadySecondProbe")!.handler({
+      platform: "android",
+      sessionUuid,
+    });
+    expect(automationResponse).toMatchObject({ success: true });
+    expect(setupCalls).toBe(1);
+    expect(daemonSessionManager?.getDeviceReadiness(sessionUuid)).toBe("automationReady");
+  });
+
   test("a tool not declaring deviceReadiness is unaffected (defaults to full setup, matching pre-fix behavior)", async () => {
     const sessionUuid = "restarted-session-default";
     await setupPersistedDaemonSession(sessionUuid);

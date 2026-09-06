@@ -1,5 +1,6 @@
-import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -7,6 +8,9 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
+import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -18,6 +22,35 @@ const createObserveResult = (): ObserveResult => ({
   viewHierarchy: { node: {}, id: hierarchyCounter++ },
 });
 
+// Minimal Window stub that returns a scripted sequence of foreground apps,
+// one entry per `getActive` call (last entry repeats once exhausted). Lets
+// tests exercise "the global action's post-dispatch check sees the old app,
+// the post-ADB-fallback check sees the launcher" without a shared FakeWindow
+// method for sequencing.
+function sequencedWindow(appIds: string[]): WindowInterface {
+  let callIndex = 0;
+  const toActiveWindow = (appId: string): ActiveWindowInfo => ({
+    appId,
+    activityName: "Activity",
+    layoutSeqSum: 0,
+  });
+  return {
+    async getActive(): Promise<ActiveWindowInfo> {
+      const appId = appIds[Math.min(callIndex, appIds.length - 1)];
+      callIndex++;
+      return toActiveWindow(appId);
+    },
+    async getActiveHash(): Promise<string> {
+      return "fake-hash";
+    },
+    async getCachedActiveWindow(): Promise<ActiveWindowInfo | null> {
+      return null;
+    },
+    async setCachedActiveWindow(): Promise<void> {},
+    async clearCache(): Promise<void> {},
+  };
+}
+
 describe("HomeScreen", () => {
   let homeScreen: HomeScreen;
   let mockDevice: BootedDevice;
@@ -25,6 +58,8 @@ describe("HomeScreen", () => {
   let fakeObserveScreen: FakeObserveScreen;
   let fakeWindow: FakeWindow;
   let fakeAwaitIdle: FakeAwaitIdle;
+  let fakeTimer: FakeTimer;
+  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   beforeEach(() => {
     // Create fakes for testing
@@ -32,12 +67,17 @@ describe("HomeScreen", () => {
     fakeObserveScreen = new FakeObserveScreen();
     fakeWindow = new FakeWindow();
     fakeAwaitIdle = new FakeAwaitIdle();
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
 
-    // Set up default fake responses
+    // Set up default fake responses. The default foreground app is a known
+    // launcher package so home-press verification (issue #6147) passes for
+    // tests that aren't specifically exercising the verification failure
+    // path below.
     fakeWindow.configureCachedActiveWindow(null);
     fakeWindow.configureActiveWindow({
-      appId: "com.test.app",
-      activityName: "MainActivity",
+      appId: "com.android.launcher3",
+      activityName: "Launcher",
       layoutSeqSum: 123,
     });
 
@@ -50,12 +90,17 @@ describe("HomeScreen", () => {
       platform: "android",
       deviceId: "test-device",
     };
-    homeScreen = new HomeScreen(mockDevice, fakeAdb);
+    homeScreen = new HomeScreen(mockDevice, fakeAdb, fakeTimer);
 
     // Replace the internal managers with our fakes
     (homeScreen as any).observeScreen = fakeObserveScreen;
     (homeScreen as any).window = fakeWindow;
     (homeScreen as any).awaitIdle = fakeAwaitIdle;
+  });
+
+  afterEach(() => {
+    getInstanceSpy?.mockRestore();
+    getInstanceSpy = null;
   });
 
   describe("execute", () => {
@@ -146,8 +191,8 @@ describe("HomeScreen", () => {
 
       fakeWindow2.configureCachedActiveWindow(null);
       fakeWindow2.configureActiveWindow({
-        appId: "com.test.app",
-        activityName: "MainActivity",
+        appId: "com.android.launcher3",
+        activityName: "Launcher",
         layoutSeqSum: 123,
       });
       fakeObserveScreen2.setObserveResult(() => createObserveResult());
@@ -165,6 +210,74 @@ describe("HomeScreen", () => {
       expect(result2.success).toBe(true);
       expect(result1.navigationMethod).toBe("hardware");
       expect(result2.navigationMethod).toBe("hardware");
+    });
+  });
+
+  // Regression coverage for issue #6147: on Android API 28 the accessibility
+  // global action for "home" can report success while the foreground app
+  // never becomes the launcher. Home must verify the actual foreground app
+  // instead of trusting a dispatch method's self-reported result.
+  describe("home-press verification (issue #6147)", () => {
+    test("reports success when the accessibility global action actually backgrounds the app", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: true }),
+      } as unknown as AndroidCtrlProxyClient);
+      // Default fakeWindow already reports "com.android.launcher3" foreground.
+
+      const result = await homeScreen.execute();
+
+      expect(result.success).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("falls back to the ADB keyevent when the global action is inert (API 28) but the foreground never changes", async () => {
+      // Simulates the API 28 repro from issue #6147: the global action
+      // reports success, but the foreground package stays the app under
+      // test on every check, including after the ADB fallback -- so this
+      // must surface a failure rather than false success.
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: true }),
+      } as unknown as AndroidCtrlProxyClient);
+      (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
+      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+
+      await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
+
+      // The inert global action must not be trusted -- the ADB fallback has
+      // to have actually been attempted before giving up.
+      expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+    });
+
+    test("recovers via the ADB keyevent fallback when the global action is inert but the fallback reaches the launcher", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: true }),
+      } as unknown as AndroidCtrlProxyClient);
+      // The post-global-action verification retries internally (initial
+      // attempt + 2 backoff retries) before giving up, so it must see the
+      // app unchanged on all 3 of those checks; only the post-ADB-keyevent
+      // verification's first check sees the launcher.
+      (homeScreen as any).window = sequencedWindow([
+        "com.android.settings",
+        "com.android.settings",
+        "com.android.settings",
+        "com.android.launcher3",
+      ]);
+      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+
+      const result = await homeScreen.execute();
+
+      expect(result.success).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+    });
+
+    test("throws instead of reporting false success when the ADB keyevent fallback also fails to reach the launcher", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
+      } as unknown as AndroidCtrlProxyClient);
+      (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
+      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+
+      await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
     });
   });
 });

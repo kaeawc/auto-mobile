@@ -1,5 +1,117 @@
 # Changelog
 
+## [v0.0.68] - 2026-09-06
+
+### Added
+
+- setToolEnabled: persist tool-selection-profile provenance across daemon restarts/upgrades (#6148 follow-up) ([#6225](https://github.com/kaeawc/auto-mobile/issues/6225))
+- TouchLatencyTracker: flag animating apps and move the synthetic tap inside the app window ([#6167](https://github.com/kaeawc/auto-mobile/issues/6167)) (android, performance)
+- networkCondition schema/plan-schema alignment with the runtime classifier (edge inputs) ([#6090](https://github.com/kaeawc/auto-mobile/issues/6090))
+- Recovery/Retry no-ops on a wedged daemon (socket-open but ide/status times out) — make ensureReady protocol-health-aware / forced restart ([#6082](https://github.com/kaeawc/auto-mobile/issues/6082)) (desktop)
+- feat(desktop): recovery / auto-restart affordance on the workspace status dot (Start-daemon parity with the device picker) ([#6035](https://github.com/kaeawc/auto-mobile/issues/6035)) (desktop, bot-filed, routine:tracker-hygiene)
+- feat(desktop): reconnect affordance for DeviceStreamView panes after relay loss (sibling of #4868) ([#4962](https://github.com/kaeawc/auto-mobile/issues/4962)) (desktop)
+- Desktop workspace: make overlay panels modal to keyboard/a11y focus ([#4846](https://github.com/kaeawc/auto-mobile/issues/4846)) (a11y, desktop)
+- Desktop workspace: reflect Storage-facet edits live (observation stream + optimistic update) ([#4709](https://github.com/kaeawc/auto-mobile/issues/4709)) (desktop)
+
+### Changed
+
+- chore(deps): remove stale dependabot.yml swift entry for nonexistent /ios/XCTestService ([#6062](https://github.com/kaeawc/auto-mobile/issues/6062)) (bot-filed, routine:tracker-hygiene)
+- Hardening follow-ups from #4655 (proxy release-record pruning, per-kind discovery epoch, resolver coupling) ([#4689](https://github.com/kaeawc/auto-mobile/issues/4689))
+
+### Fixed
+
+- logger: transient WriteStream open failure permanently discards all logs; JSON diagnostic breaks NDJSON (from #6111) ([#6179](https://github.com/kaeawc/auto-mobile/issues/6179))
+- networkCondition TTL: preserve deadline on failed reset + mirror TTL maximum in plan schemas (from #6113) ([#6178](https://github.com/kaeawc/auto-mobile/issues/6178))
+- networkCondition TTL: expiry cleanup lacks per-condition generation guard, can return a shaped device unrestored (P1, from #6113) ([#6177](https://github.com/kaeawc/auto-mobile/issues/6177))
+- barrier lags criticalSection in Android ValidTools and PlanValidator (plan-validation parity) ([#6175](https://github.com/kaeawc/auto-mobile/issues/6175))
+- parseArgs: --port / --host / --initial-session-uuid swallow the next flag when given no value (proxy-mode sibling of #6136) ([#6168](https://github.com/kaeawc/auto-mobile/issues/6168))
+- setToolEnabled accepts a never-issued sessionUuid and reports success, while every other session tool rejects it (#6069 follow-up) ([#6148](https://github.com/kaeawc/auto-mobile/issues/6148)) (bot-filed, routine:manual-test)
+- Daemon client path: platform-aware + non-destructive connectOnce/waitForReady (Windows named-pipe e2e + downstream stale-socket unlink) ([#6140](https://github.com/kaeawc/auto-mobile/issues/6140))
+- PlanExecutor.captureFailureObservation cancels its timeout with global clearTimeout (not the injected Timer) and skips cancellation on the error path ([#6139](https://github.com/kaeawc/auto-mobile/issues/6139))
+- DefaultRetryExecutor leaks one abort listener per retry on the caller's AbortSignal (never removed when the sleep wins the race) ([#6138](https://github.com/kaeawc/auto-mobile/issues/6138))
+- IOSCtrlProxyProcessClient.isRunning treats `kill -0` EPERM ("Operation not permitted") as "not running"; the stderr guard is unreachable ([#6137](https://github.com/kaeawc/auto-mobile/issues/6137)) (ios)
+- parseDaemonArgs swallows the next flag when --host / --plan-execution-lock-scope / --tool-outputs-dir is given no value (`--host --debug` starts a non-debug daemon) ([#6136](https://github.com/kaeawc/auto-mobile/issues/6136))
+- daemon/heartbeat is queued behind in-flight tools/call on the same socket, so a bound session can be reaped (heartbeat-timeout) during a long unattributed acquisition like startDevice for a second device ([#6135](https://github.com/kaeawc/auto-mobile/issues/6135))
+- iOS hierarchy stream diff never flags a node that only moved/resized: `nodeSignature` stringifies the iOS `$.bounds` object to "[object Object]" ([#6134](https://github.com/kaeawc/auto-mobile/issues/6134)) (ios, desktop)
+- Paginated table-data resource template only matches when both `limit` and `offset` are present in that exact order; handler and description say each is optional ([#6133](https://github.com/kaeawc/auto-mobile/issues/6133)) (database)
+- startDevice min/maxOsVersion means release version to the device matcher but API level to the Android provisioner, so one value cannot satisfy both (provisioning fails or re-creates AVDs) ([#6132](https://github.com/kaeawc/auto-mobile/issues/6132)) (android)
+- FileDownloader Node-HTTP fallback hangs forever when the server closes the connection mid-body (no response error/close handler, truncated file left behind) ([#6131](https://github.com/kaeawc/auto-mobile/issues/6131))
+- NavigationRepository.getOrCreateUIElement never matches falsy identifiers (`""` text, `0` bounds) — inserts a duplicate `ui_elements` row on every tap ([#6130](https://github.com/kaeawc/auto-mobile/issues/6130)) (database)
+- rotate (Android) reads `user_rotation`, which is stale under auto-rotate, so a landscape device is reported "already in portrait" and never rotated; auto-rotate is left disabled ([#6129](https://github.com/kaeawc/auto-mobile/issues/6129)) (android)
+- swipeOn OverlayDetector counts the container's own clickable/focusable ancestors as overlays, forcing the "No unobstructed swipe area" fallback ([#6128](https://github.com/kaeawc/auto-mobile/issues/6128))
+- WCAG touch-target check compares physical pixels to a 44 dp threshold without density scaling (33 dp targets pass on xxhdpi, px reported as dp) ([#6127](https://github.com/kaeawc/auto-mobile/issues/6127)) (android, a11y)
+- explore resetToHome re-fires on every iteration while interactionCount sits on a multiple of resetInterval (including 0), then never relaunches the app ([#6126](https://github.com/kaeawc/auto-mobile/issues/6126))
+- Memory audit GC metrics are always 0 on ART: logcat filter (`-s dalvikvm:I art:I | grep "GC_"`) and regex only match Dalvik-era output ([#6125](https://github.com/kaeawc/auto-mobile/issues/6125)) (android, performance)
+- TouchLatencyTracker only counts a "response" when a jank counter increments, so a smooth app is reported as frozen and touchLatencyMs is always null ([#6124](https://github.com/kaeawc/auto-mobile/issues/6124)) (android, performance)
+- explore permission-dialog detection/dismissal still uses bare substring keywords ("access", "ok") — same defect class as #4190 ([#6122](https://github.com/kaeawc/auto-mobile/issues/6122))
+- explore passes both `text` and `elementId` to tapOn, so every element with text + resource-id fails "exactly one selector" validation and is never tapped ([#6121](https://github.com/kaeawc/auto-mobile/issues/6121))
+- logPruner: daemon's own-file cap claims peer `daemon-launch-<pid>.log` files, deleting the daemon's rotated backups while launch logs are never swept ([#6120](https://github.com/kaeawc/auto-mobile/issues/6120))
+- PortManager.allocate() rejects every host port on hosts without an IPv6 loopback (::1 bind failure treated as "port busy") ([#6119](https://github.com/kaeawc/auto-mobile/issues/6119))
+- MCP progress notifications never reach clients: tools/call handler fabricates progressToken instead of echoing `_meta.progressToken` ([#6118](https://github.com/kaeawc/auto-mobile/issues/6118))
+- barrier plan step drops its `device` label at schema.parse, so every track's barrier routes to the base session's device and fails as a duplicate arrival ([#6117](https://github.com/kaeawc/auto-mobile/issues/6117))
+- TalkBack swipeOn maps finger direction to the inverted ACTION_SCROLL (up → scroll_backward), so lookFor scrolls away from the target ([#6116](https://github.com/kaeawc/auto-mobile/issues/6116)) (android, a11y)
+- Plan schema false-rejects params-overridden inline setDeviceState fields (doNotDisturb + audit; networkCondition done in #6090) ([#6112](https://github.com/kaeawc/auto-mobile/issues/6112)) (enhancement)
+- secretParameters parser: multiline YAML flow-sequence declarations drop keys (fail-open redaction gap) ([#6097](https://github.com/kaeawc/auto-mobile/issues/6097))
+- doctor host-command timeout sends SIGTERM with no SIGKILL escalation — a wedged check can hang past DOCTOR_EXEC_TIMEOUT_MS ([#6018](https://github.com/kaeawc/auto-mobile/issues/6018)) (ios, bot-filed, routine:tracker-hygiene)
+- iOS video-recording integration test (#5984) can never assert: skipped by default, and fails on the videoRecording session tool gate when enabled ([#5987](https://github.com/kaeawc/auto-mobile/issues/5987)) (ios, testing, bot-filed, routine:manual-test)
+- #5976 still returns the non-focused status-bar window on API 34, now with verified:true and no warning — observe yields status-bar-only rows and every tap fails ([#5981](https://github.com/kaeawc/auto-mobile/issues/5981)) (android, bot-filed, routine:manual-test)
+- release: GitHub Release upload is the last step, so a late-job failure leaves an npm version with 404 asset URLs until manual re-dispatch ([#4687](https://github.com/kaeawc/auto-mobile/issues/4687)) (release engineering)
+
+### Security
+
+- security(android): authenticate CtrlProxy storage provider callers ([#6011](https://github.com/kaeawc/auto-mobile/issues/6011)) (android, bot-filed, needs-human)
+- [epic][security] iOS video capture security hardening ([#4774](https://github.com/kaeawc/auto-mobile/issues/4774)) (ios, research)
+- [security] Android video server hardening — threat model & tracking ([#4738](https://github.com/kaeawc/auto-mobile/issues/4738)) (android, video, research)
+
+### Other
+
+- listApps returns a three-step instruction sheet instead of apps, costing a round-trip and returning no data ([#6223](https://github.com/kaeawc/auto-mobile/issues/6223)) (bot-filed, routine:dogfood)
+- setUIState applies every field successfully and then returns `MCP error -32001: Request timed out`, inviting a duplicate-input retry ([#6222](https://github.com/kaeawc/auto-mobile/issues/6222)) (bot-filed, routine:dogfood)
+- Skeleton projection: non-actionable entries in an actionable-only list, duplicate ids with no disambiguator, row labels that drop the identifying text, and an observation shape that flips to a NUL-keyed diff between calls ([#6221](https://github.com/kaeawc/auto-mobile/issues/6221)) (bot-filed, routine:dogfood)
+- observe reports `verified/isFresh: true` on a status-bar-only hierarchy when the foreground window is missing, and launchApp silently drops `verified` instead of saying it failed (Android Settings SubSettings) ([#6220](https://github.com/kaeawc/auto-mobile/issues/6220)) (bot-filed, routine:dogfood)
+- Action tools return a PRE-transition observation marked `verified/isFresh: true` while `effect.screenChanged` says the window already changed ([#6219](https://github.com/kaeawc/auto-mobile/issues/6219)) (bot-filed, routine:dogfood)
+- tapOn/inputText cannot resolve the synthetic `s-<hash>` ids that observe's skeleton advertises as selectors, and tapOn reports "Tapped on element" when success is false ([#6218](https://github.com/kaeawc/auto-mobile/issues/6218)) (bot-filed, routine:dogfood)
+- test hardening: assert forwarded session UUID in nav-graph bats (#6104) + broaden snapshot-name property domain (#6071) ([#6180](https://github.com/kaeawc/auto-mobile/issues/6180))
+- Action tools other than tapOn/inputText still return a success-shaped envelope (no isError) on failure ([#6163](https://github.com/kaeawc/auto-mobile/issues/6163))
+- listApps is a documentation stub that accepts deviceId and returns prose instead of apps, and the apps resource defaults to all 226 apps despite documenting type=user as the default ([#6155](https://github.com/kaeawc/auto-mobile/issues/6155)) (bot-filed, routine:dogfood)
+- Tool input contracts are unpredictable: platform is required on pressButton/inputText/observe but not tapOn/launchApp, and launchApp's declared required/additionalProperties are not enforced ([#6154](https://github.com/kaeawc/auto-mobile/issues/6154)) (bot-filed, routine:dogfood)
+- observe's skeleton emits the identifier as "id" but every selector requires "elementId", while the project docs promise skeleton ids are "directly usable as a tapOn selector" ([#6153](https://github.com/kaeawc/auto-mobile/issues/6153)) (bot-filed, routine:dogfood)
+- tapOn still returns a success-shaped envelope ("Tapped on element", no isError) when its selector matches nothing — the #5902 fix landed on inputText only ([#6152](https://github.com/kaeawc/auto-mobile/issues/6152)) (bot-filed, routine:dogfood)
+- observe drops the focused window and returns only the systemui status bar whenever a dialog or overlay is on top — permission dialogs and the Settings Wi-Fi picker are invisible and untappable ([#6151](https://github.com/kaeawc/auto-mobile/issues/6151)) (bot-filed, routine:dogfood)
+- Recovery redaction: reverse marker-collision (secret value containing the marker) ([#6146](https://github.com/kaeawc/auto-mobile/issues/6146))
+- observe: re-correlate side samples & activeWindow after the SystemUI-overlay fallback recapture (follow-up to #6091) ([#6108](https://github.com/kaeawc/auto-mobile/issues/6108))
+- Daemon proxy can fail a device-list request just before a same-version daemon becomes ready ([#6103](https://github.com/kaeawc/auto-mobile/issues/6103))
+- observe: recapture publishes pre-recapture layoutSeqSum and deviceLock against the replacement hierarchy ([#6100](https://github.com/kaeawc/auto-mobile/issues/6100))
+- observe: bootstrap attribution recapture waits out the full fresh-wait on a static screen (+1s per observe after #6098) ([#6099](https://github.com/kaeawc/auto-mobile/issues/6099))
+- Redact secret values from AI-recovery tool-call results (second-order live-observe leak, CWE-200) ([#6094](https://github.com/kaeawc/auto-mobile/issues/6094))
+- observe: recapture hierarchy after the SystemUI-overlay adb focus fallback (follow-up to #6078) ([#6091](https://github.com/kaeawc/auto-mobile/issues/6091))
+- Same-app A→B activeWindow attribution skew on the bootstrap Window path ([#6088](https://github.com/kaeawc/auto-mobile/issues/6088))
+- CLI handleToolResult crashes with TypeError on a failure envelope whose payload is JSON `null` (regression from #6047) ([#6086](https://github.com/kaeawc/auto-mobile/issues/6086)) (bot-filed, routine:adversary, needs-human)
+- Harden device-wide network-condition simulation (follow-ups to #6012) ([#6085](https://github.com/kaeawc/auto-mobile/issues/6085))
+- observe.activeWindow names the app behind an open notification shade while returning the shade's hierarchy (API 29/31/34/35) ([#6078](https://github.com/kaeawc/auto-mobile/issues/6078)) (bot-filed, routine:manual-test)
+- API 35: activeWindow.activityName still intermittently empty/stale while backStack and adb agree (#5992 residual) ([#6070](https://github.com/kaeawc/auto-mobile/issues/6070)) (bot-filed, routine:manual-test)
+- rotate (Android) returns pre-rotation value as currentOrientation on success, duplicating previousOrientation ([#6057](https://github.com/kaeawc/auto-mobile/issues/6057)) (bot-filed, routine:exploratory)
+- pinchOn reports "Pinched <direction>" on failed gestures (success:false + error), unlike swipeOn after #4183 ([#6056](https://github.com/kaeawc/auto-mobile/issues/6056)) (bot-filed, routine:exploratory)
+- feat(android-sdk): support modular navigation-only initialization ([#6052](https://github.com/kaeawc/auto-mobile/issues/6052))
+- fix: correct case-sensitive DeviceSessionRepository test import ([#6051](https://github.com/kaeawc/auto-mobile/issues/6051))
+- Nightly artifact re-cut updates NIGHTLY_CHECKSUM_ENTRY only — "latest" installs still get the pre-fix 0.0.67 APK (#5979 follow-up 1 not delivered) ([#6040](https://github.com/kaeawc/auto-mobile/issues/6040)) (android, release engineering, bot-filed, routine:manual-test)
+- test-ts.sh: positional test paths bypass lane classification in unit/changed/coverage lanes and break `all` mode (unresolved review findings from #6024) ([#6036](https://github.com/kaeawc/auto-mobile/issues/6036)) (bot-filed, routine:tracker-hygiene)
+- Redact sensitive plan parameters before AI recovery sends context to the LLM provider (CWE-200) ([#6029](https://github.com/kaeawc/auto-mobile/issues/6029))
+- fix(android-sdk): make HTTP and WebSocket observation strictly fail-open ([#6027](https://github.com/kaeawc/auto-mobile/issues/6027))
+- perf(android-sdk): move capacity-triggered event delivery off caller threads ([#6026](https://github.com/kaeawc/auto-mobile/issues/6026))
+- fix(android-sdk): make initialization rollback and shutdown fully reversible ([#6025](https://github.com/kaeawc/auto-mobile/issues/6025))
+- Unknown sessionUuid bypasses device-session ownership entirely (even a non-UUID string like `banana`) ([#6019](https://github.com/kaeawc/auto-mobile/issues/6019)) (bot-filed, routine:exploratory)
+- --cli exits 0 while returning a session_ownership_lost error envelope, so scripted checks false-green on a dead session ([#6017](https://github.com/kaeawc/auto-mobile/issues/6017)) (bot-filed, routine:manual-test)
+- Add cross-platform network-condition simulation to device state ([#6012](https://github.com/kaeawc/auto-mobile/issues/6012))
+- api: evaluate removing deviceId aliases from getAndroid and getApple ([#6010](https://github.com/kaeawc/auto-mobile/issues/6010))
+- bug(ios): doctor reports Xcode unavailable after xcodebuild availability probe times out ([#6003](https://github.com/kaeawc/auto-mobile/issues/6003))
+- chore(release): swap the Homebrew tap PAT for a GitHub App token to remove the annual expiry cliff ([#6002](https://github.com/kaeawc/auto-mobile/issues/6002)) (bot-filed, routine:tracker-hygiene)
+- video: non-discard forceStop racing a starting recording deletes the artifact (VideoRecorderService.ts:451) ([#6001](https://github.com/kaeawc/auto-mobile/issues/6001)) (bot-filed, routine:adversary, needs-human)
+- API 35: post-tap activeWindow.activityName contradicts backStack.currentActivity and adb ground truth in the same observation, with one tap emitting an empty diff for a full screen change ([#5992](https://github.com/kaeawc/auto-mobile/issues/5992)) (bot-filed, routine:manual-test)
+- Storage live-edit follow-ups: control-proxy re-cut + reconnect/reincarnation lifecycle (#4709) ([#5979](https://github.com/kaeawc/auto-mobile/issues/5979))
+- Reference-count shared per-file storage observers so one viewer's disposal doesn't blind others ([#5969](https://github.com/kaeawc/auto-mobile/issues/5969)) (desktop)
+- putAppFile destinationPath accepts an embedded NUL byte — normalizeAppFileRelativePath omits the guard its sibling normalizeUserFilesNamespace enforces, defeating the media_library extension allowlist (#5809) ([#5856](https://github.com/kaeawc/auto-mobile/issues/5856)) (bot-filed, routine:adversary, needs-human)
+
 ## [v0.0.67] - 2026-08-30
 
 ### Added

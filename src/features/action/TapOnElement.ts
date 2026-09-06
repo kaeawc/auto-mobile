@@ -1722,6 +1722,7 @@ export class TapOnElement extends BaseVisualChange {
           perf,
           signal,
           deferPredictionOutcome: true,
+          deferPostActionScreenshot: true,
           predictionContext: {
             toolName: "tapOn",
             toolArgs: {
@@ -1751,6 +1752,7 @@ export class TapOnElement extends BaseVisualChange {
         // The observation that established the effect must be returned and become
         // the caller's diff baseline, rather than the earlier source capture.
         result.observation = postTap.observation;
+        await this.captureTerminalObservationScreenshot(result.observation, perf, signal);
         await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({
           action: options.action,

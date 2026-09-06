@@ -37,6 +37,12 @@ export interface ObserveScreen {
   ): Promise<void>;
 
   /**
+   * Run the configured accessibility audit for an already-collected observation
+   * without capturing a screenshot.
+   */
+  runAccessibilityAudit?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
+
+  /**
    * Fetch raw (unfiltered) view hierarchy from the device and attach it to an existing
    * ObserveResult. Safe to call after execute() — does not re-observe the screen.
    * @param result - Existing observe result to augment with raw hierarchy data

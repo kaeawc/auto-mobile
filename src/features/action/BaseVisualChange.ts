@@ -26,6 +26,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { shouldSkipActionObservationScreenshot } from "../observe/automaticScreenshotPolicy";
+import { serverConfig } from "../../utils/ServerConfig";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -337,9 +338,14 @@ export class BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
-    if (observation && this.shouldCapturePostActionScreenshot()) {
-      await this.observeScreen.captureScreenshot?.(perf, signal, observation);
+    if (!observation) {
+      return;
     }
+    if (this.shouldCapturePostActionScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
+      await this.observeScreen.captureScreenshot?.(perf, signal, observation);
+      return;
+    }
+    await this.observeScreen.runAccessibilityAudit?.(observation, perf);
   }
 
   private static buildDeviceLockWarning(lock: DeviceLockState): string {
@@ -376,8 +382,6 @@ export class BaseVisualChange {
     const retryBackoff = sequenceBackoff([50, 100, 200, 400]);
     const maxRetryAttempts = 4;
     const previousHash = this.hashViewHierarchy(previousObserveResult?.viewHierarchy);
-
-    const capturePostActionScreenshot = this.shouldCapturePostActionScreenshot();
 
     perf.serial("finalObserve");
     // Wait for fresh data from accessibility service (skipWaitForFresh=false)
@@ -447,7 +451,7 @@ export class BaseVisualChange {
       logger.warn(`[BaseVisualChange] ${warning}`);
     }
 
-    if (capturePostActionScreenshot && !options.deferPostActionScreenshot) {
+    if (!options.deferPostActionScreenshot) {
       await this.captureTerminalObservationScreenshot(latestObservation, perf, options.signal);
     }
 

@@ -761,8 +761,15 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<void> {
     await this.screenshotRecorder.captureFresh(perf, signal);
     if (observation) {
-      await this.accessibilityAuditor.run(observation, perf);
+      await this.runAccessibilityAudit(observation, perf);
     }
+  }
+
+  async runAccessibilityAudit(
+    observation: ObserveResult,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<void> {
+    await this.accessibilityAuditor.run(observation, perf);
   }
 
   /**

@@ -1046,11 +1046,16 @@ export const waitForObservation = async (
   const complete = async (
     outcome: WaitForObservationOutcome,
   ): Promise<WaitForObservationOutcome> => {
-    if (!shouldSkipObserveWaitForScreenshot()) {
+    if (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
       await observeScreen.captureScreenshot?.(
         createGlobalPerformanceTracker(),
         signal,
         outcome.observation,
+      );
+    } else {
+      await observeScreen.runAccessibilityAudit?.(
+        outcome.observation,
+        createGlobalPerformanceTracker(),
       );
     }
     return outcome;

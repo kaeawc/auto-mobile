@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { PortManager } from "../../../src/utils/PortManager";
 import type {
   ConditionPredicate,
   WaitForCondition,
@@ -48,6 +49,16 @@ function createTapOnElement(
 }
 
 describe("retryTapIfNoChange", () => {
+  beforeEach(() => {
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+  });
+
+  afterEach(() => {
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
+  });
+
   test("does not retry when hierarchy changed after tap", async () => {
     const { tap } = createTapOnElement();
     const preHierarchy = makeHierarchy("before");
@@ -212,6 +223,46 @@ describe("deriveTapEffect", () => {
       screenChanged: false,
       basis: "insufficient observation data",
     });
+  });
+
+  test("captures terminal evidence after effect polling selects the destination observation", async () => {
+    const { tap } = createTapOnElement();
+    const source = makeObservation({
+      activeWindow: {
+        appId: "com.example.app",
+        activityName: "SourceActivity",
+        layoutSeqSum: 1,
+      },
+    });
+    const destination = makeObservation({
+      activeWindow: {
+        appId: "com.example.app",
+        activityName: "DestinationActivity",
+        layoutSeqSum: 2,
+      },
+    });
+    const captured: ObserveResult[] = [];
+
+    (tap as any).observedInteraction = async (_interaction: unknown, options: unknown) => {
+      expect((options as { deferPostActionScreenshot?: boolean }).deferPostActionScreenshot).toBe(
+        true,
+      );
+      return { success: true, action: "tap", element: makeElement(), observation: source };
+    };
+    (tap as any).deriveTapEffectAfterPostTapObservation = async () => ({
+      effect: { screenChanged: true, basis: "activeWindow changed" },
+      observation: destination,
+    });
+    (tap as any).captureTerminalObservationScreenshot = async (observation: ObserveResult) => {
+      captured.push(observation);
+    };
+    (tap as any).recordDeferredPredictionOutcome = async () => {};
+    (tap as any).selectionStateTracker = { finalize: async () => [] };
+
+    const result = await tap.execute({ action: "tap", text: "Submit" });
+
+    expect(result.observation).toBe(destination);
+    expect(captured).toEqual([destination]);
   });
 
   test("waits for a changed Android observation before deriving the effect", async () => {

@@ -16,6 +16,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private observeSequence: ObserveResult[] | null = null;
   private executeCallCount: number = 0;
   private captureScreenshotCallCount: number = 0;
+  private accessibilityAuditCallCount: number = 0;
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
@@ -145,6 +146,7 @@ export class FakeObserveScreen implements ObserveScreen {
     this.executedOperations = [];
     this.executeCallCount = 0;
     this.captureScreenshotCallCount = 0;
+    this.accessibilityAuditCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
     this.executeOptionsHistory.length = 0;
@@ -161,6 +163,11 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Total captureScreenshot() calls. */
   getCaptureScreenshotCallCount(): number {
     return this.captureScreenshotCallCount;
+  }
+
+  /** Total runAccessibilityAudit() calls. */
+  getAccessibilityAuditCallCount(): number {
+    return this.accessibilityAuditCallCount;
   }
 
   /** Observations associated with terminal screenshot capture, in call order. */
@@ -200,6 +207,16 @@ export class FakeObserveScreen implements ObserveScreen {
     this.capturedScreenshotObservations.push(observation);
 
     const error = this.failures.get("captureScreenshot");
+    if (error) {
+      throw error;
+    }
+  }
+
+  async runAccessibilityAudit(_observation: ObserveResult, _perf?: unknown): Promise<void> {
+    this.executedOperations.push("runAccessibilityAudit");
+    this.accessibilityAuditCallCount++;
+
+    const error = this.failures.get("runAccessibilityAudit");
     if (error) {
       throw error;
     }

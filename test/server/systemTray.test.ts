@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   registerInteractionTools,
   resetSystemTrayDependencies,
@@ -20,6 +20,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { logger, LogLevel } from "../../src/utils/logger";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 
 const POLL_INTERVAL_MS = 250;
@@ -1344,6 +1345,110 @@ describe("systemTray group expansion", () => {
 
     const reResult = await reMatchPromise;
     expect(reResult.match).toBeNull();
+  });
+});
+
+describe("systemTray automatic terminal evidence", () => {
+  let originalActionScreenshotPolicy: string | undefined;
+
+  beforeEach(() => {
+    originalActionScreenshotPolicy = process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+  });
+
+  afterEach(() => {
+    if (originalActionScreenshotPolicy === undefined) {
+      delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    } else {
+      process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = originalActionScreenshotPolicy;
+    }
+    serverConfig.setAccessibilityAuditConfig(null);
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  test("captures only the final find observation when action screenshots are enabled", async () => {
+    process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = "false";
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Test Notification")),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      adbFactory: () => new SequencedFakeAdbExecutor([1000]),
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+
+    await handler!(device, {
+      action: "find",
+      notification: { title: "Test Notification" },
+      platform: "android",
+    });
+
+    expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+      true,
+    );
+    expect(
+      fakeObserveScreen.getExecuteOptions().every((options) => options.skipAccessibilityAudit),
+    ).toBe(true);
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+    expect(fakeObserveScreen.getAccessibilityAuditCallCount()).toBe(0);
+  });
+
+  test("keeps the terminal accessibility audit when automatic screenshots are skipped", async () => {
+    delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Test Notification")),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      adbFactory: () => new SequencedFakeAdbExecutor([1000]),
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+
+    await handler!(device, {
+      action: "find",
+      notification: { title: "Test Notification" },
+      platform: "android",
+    });
+
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
+    expect(fakeObserveScreen.getAccessibilityAuditCallCount()).toBe(1);
+  });
+
+  test("an enabled accessibility audit captures one fresh terminal screenshot", async () => {
+    delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    serverConfig.setAccessibilityAuditConfig({
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    });
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Test Notification")),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      adbFactory: () => new SequencedFakeAdbExecutor([1000]),
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+
+    await handler!(device, {
+      action: "find",
+      notification: { title: "Test Notification" },
+      platform: "android",
+    });
+
+    expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+      true,
+    );
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
   });
 });
 

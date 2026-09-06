@@ -7,6 +7,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 import {
   ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV,
   shouldSkipActionObservationScreenshot,
@@ -48,6 +49,7 @@ describe("BaseVisualChange post-action observation", () => {
   beforeEach(() => {
     originalActionScreenshotPolicy = process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
     delete process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
+    serverConfig.setAccessibilityAuditConfig(null);
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     fakeAdb = new FakeAdbExecutor();
@@ -65,6 +67,7 @@ describe("BaseVisualChange post-action observation", () => {
     } else {
       process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = originalActionScreenshotPolicy;
     }
+    serverConfig.setAccessibilityAuditConfig(null);
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
@@ -128,6 +131,7 @@ describe("BaseVisualChange post-action observation", () => {
     expect(options).toHaveLength(1);
     expect(options[0].skipScreenshot).toBe(true);
     expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
+    expect(fakeObserveScreen.getAccessibilityAuditCallCount()).toBe(1);
     expect(shouldSkipActionObservationScreenshot()).toBe(true);
   });
 
@@ -150,6 +154,28 @@ describe("BaseVisualChange post-action observation", () => {
     );
     expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
     expect(shouldSkipActionObservationScreenshot()).toBe(false);
+  });
+
+  test("captures one fresh terminal screenshot when the accessibility audit is enabled", async () => {
+    const instance = createVisualChange("android");
+    serverConfig.setAccessibilityAuditConfig({
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    });
+    fakeObserveScreen.setObserveResult(
+      makeObserve({ activeWindow: { appId: "com.example.app" } }),
+    );
+
+    await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      skipPreviousObserve: true,
+    });
+
+    expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
+      true,
+    );
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
   });
 
   test("takes the cached fast path with a single execute when the cache is valid", async () => {

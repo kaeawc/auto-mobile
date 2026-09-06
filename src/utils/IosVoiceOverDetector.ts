@@ -31,7 +31,13 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    * @param deviceId - The device identifier (for caching)
    * @param client - CtrlProxy service for executing the detection command
    * @param featureFlags - Feature flag service for override support
-   * @returns Promise resolving to true if VoiceOver is enabled
+   * @returns Promise resolving to true if VoiceOver is enabled, or if the
+   *   probe's state is indeterminate (timeout, error, or an unsuccessful
+   *   CtrlProxy response). Fail-safe (#6267): an indeterminate result is
+   *   never coalesced to `false`, so callers never mistake a focus-only
+   *   coordinate touch for a successful VoiceOver activation. Only an
+   *   explicit `enabled: false` response, or the `accessibility-auto-detect`
+   *   feature flag being off, returns `false`.
    */
   async isVoiceOverEnabled(
     deviceId: string,
@@ -82,7 +88,25 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     if (detected !== null) {
       this.cache.set(deviceId, detected);
     }
-    return detected ?? false;
+
+    if (detected === null) {
+      // Fail-safe (#6267): an indeterminate probe (timeout, error, or an
+      // unsuccessful CtrlProxy response) must NOT be coalesced to "disabled".
+      // Callers (TapOnElement/TapAnyElement) branch on this boolean to choose
+      // between a plain coordinate touch and a VoiceOver activation gesture.
+      // Silently treating "unknown" as "off" makes a real device with
+      // VoiceOver on receive a focus-only coordinate touch that gets reported
+      // as a successful activation. Treating "unknown" as "on" instead means
+      // the worst case is an unnecessary (but harmless) accessibility-action
+      // path on a device where VoiceOver is actually off — never a false
+      // success.
+      logger.warn(
+        `[IosVoiceOverDetector] VoiceOver state for device ${deviceId} could not be determined; ` +
+          `treating as enabled (fail-safe) so callers take the activation path instead of a plain touch`,
+      );
+      return true;
+    }
+    return detected;
   }
 
   /**

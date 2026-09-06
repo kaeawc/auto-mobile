@@ -4,7 +4,13 @@ import { platform } from "node:os";
 import { logger } from "../utils/logger";
 import { encodeNonFinite } from "../utils/nonFiniteJson";
 import { ActionableError } from "../models";
-import { DaemonRequest, DaemonResponse, DaemonNotification, isDaemonNotification } from "./types";
+import {
+  DaemonRequest,
+  DaemonResponse,
+  DaemonNotification,
+  isDaemonNotification,
+  PROGRESS_NOTIFICATION_METHOD,
+} from "./types";
 import {
   SOCKET_PATH,
   PID_FILE_PATH,
@@ -14,7 +20,7 @@ import {
   DAEMON_NON_FINITE_ENCODED_PARAM,
 } from "./constants";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
-import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -104,6 +110,21 @@ export class DaemonClient {
       resolve: (value: DaemonResponse) => void;
       reject: (error: Error) => void;
       timeout: NodeJS.Timeout;
+      toolName: string;
+      /**
+       * Present only for a `tools/call` that asked for progress relay
+       * (`progressToken !== undefined`). Lets a matching
+       * `notifications/progress` frame reset THIS pending request's own
+       * timer below, bounded by `deadline`'s ceiling -- without this, the
+       * daemon-side deadline can be correctly extended while this client's
+       * own independent timer still fires at the original fixed timeout
+       * (issue #6222 review, P1). A request with no progressToken never has
+       * these set and its timer is never touched, matching today's behavior
+       * exactly.
+       */
+      progressToken?: string | number;
+      deadline?: ProgressExtendableDeadline;
+      requestTimeoutMs?: number;
     }
   > = new Map();
   private buffer: string = "";
@@ -447,6 +468,19 @@ export class DaemonClient {
    * the socket or blocks sibling handlers.
    */
   private handleNotification(notification: DaemonNotification): void {
+    if (
+      notification.method === PROGRESS_NOTIFICATION_METHOD &&
+      notification.progressToken !== undefined
+    ) {
+      // Extend THIS client's own pending-request timer -- independent of,
+      // and in addition to, whatever the daemon does with its own internal
+      // deadline. Without this, the daemon can correctly keep working past
+      // the original timeout while this client's fixed local timer still
+      // fires and rejects the call out from under it (issue #6222 review,
+      // P1). Bounded by ProgressExtendableDeadline's own ceiling, so a
+      // request that stops progressing is still killed.
+      this.extendPendingRequestOnProgress(notification.progressToken);
+    }
     for (const handler of this.notificationHandlers) {
       try {
         handler(notification);
@@ -454,6 +488,69 @@ export class DaemonClient {
         logger.warn(`Daemon notification handler failed for ${notification.method}: ${error}`);
       }
     }
+  }
+
+  /**
+   * Reset the local timer for whichever pending request registered this
+   * `progressToken` (only requests sent with one carry `deadline`/
+   * `progressToken` at all -- see `sendRequest`). A token with no matching
+   * pending request (the call already settled, or a stray/unexpected frame)
+   * is silently ignored, matching how the daemon's own progress relay treats
+   * an unmatched token.
+   */
+  private extendPendingRequestOnProgress(progressToken: string | number): void {
+    for (const [requestId, pending] of this.pendingRequests) {
+      if (
+        pending.progressToken !== progressToken ||
+        !pending.deadline ||
+        pending.requestTimeoutMs === undefined
+      ) {
+        continue;
+      }
+      const nowMs = this.timer.now();
+      pending.deadline.extendOnProgress(nowMs, pending.requestTimeoutMs);
+      const remainingMs = pending.deadline.value - nowMs;
+      if (remainingMs <= 0) {
+        // Already at (or past) the hard ceiling -- let the existing timer
+        // fire on its own schedule rather than rescheduling to a
+        // non-positive delay, which would fire immediately anyway.
+        return;
+      }
+      this.timer.clearTimeout(pending.timeout);
+      pending.timeout = this.scheduleRequestTimeout(
+        requestId,
+        pending.toolName,
+        remainingMs,
+        pending.reject,
+      );
+      // A progressToken is caller-chosen per in-flight call; at most one
+      // pending request can match.
+      return;
+    }
+  }
+
+  /**
+   * (Re)arm the timer that rejects a pending request with `McpTimeoutError`
+   * after `delayMs`. Used both for the initial schedule in `sendRequest` and
+   * to reschedule after `extendPendingRequestOnProgress` pushes the deadline
+   * forward.
+   */
+  private scheduleRequestTimeout(
+    requestId: string,
+    toolName: string,
+    delayMs: number,
+    reject: (error: Error) => void,
+  ): NodeJS.Timeout {
+    return this.timer.setTimeout(() => {
+      this.pendingRequests.delete(requestId);
+      reject(
+        new McpTimeoutError({
+          toolName,
+          timeoutMs: delayMs,
+          origin: "DaemonClient.sendRequest",
+        }),
+      );
+    }, delayMs);
   }
 
   /**
@@ -569,18 +666,18 @@ export class DaemonClient {
 
     const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
     const toolName = method === "tools/call" ? (params?.name ?? method) : method;
+    // Only a progress-emitting tools/call gets an extendable deadline -- a
+    // request with no progressToken (the vast majority: reads, non-progress
+    // tools, etc.) keeps its exact original fixed timer, untouched below
+    // (issue #6222 review, P1: this must not change behavior for tools that
+    // never emit progress).
+    const deadline =
+      progressToken !== undefined
+        ? new ProgressExtendableDeadline(this.timer.now(), requestTimeoutMs)
+        : undefined;
 
     return new Promise((resolve, reject) => {
-      const timeout = this.timer.setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(
-          new McpTimeoutError({
-            toolName,
-            timeoutMs: requestTimeoutMs,
-            origin: "DaemonClient.sendRequest",
-          }),
-        );
-      }, requestTimeoutMs);
+      const timeout = this.scheduleRequestTimeout(requestId, toolName, requestTimeoutMs, reject);
 
       this.pendingRequests.set(requestId, {
         resolve: (response) => {
@@ -588,6 +685,10 @@ export class DaemonClient {
         },
         reject,
         timeout,
+        toolName,
+        progressToken,
+        deadline,
+        requestTimeoutMs,
       });
 
       if (!this.socket) {
@@ -637,6 +738,7 @@ export class DaemonClient {
         },
         reject,
         timeout,
+        toolName: method,
       });
 
       if (!this.socket) {

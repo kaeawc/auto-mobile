@@ -1035,6 +1035,348 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
   });
 });
 
+describe("SetUIState progress reporting and observe reuse (#6222)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+
+  let fakeTap: FakeTapOnElement;
+  let fakeInput: FakeInputText;
+  let fakeClear: FakeClearText;
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeTap = new FakeTapOnElement();
+    fakeInput = new FakeInputText();
+    fakeClear = new FakeClearText();
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+  });
+
+  const build = () =>
+    new SetUIState(device, null, {
+      tapOnElement: fakeTap,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+  const threeFieldHierarchy = (values: [string, string, string]): ViewHierarchyResult => ({
+    hierarchy: {
+      node: [
+        {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            "resource-id": "first",
+            text: values[0],
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+            "resource-id": "second",
+            text: values[1],
+            class: "android.widget.EditText",
+          },
+        },
+        {
+          $: {
+            bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+            "resource-id": "third",
+            text: values[2],
+            class: "android.widget.EditText",
+          },
+        },
+      ],
+    },
+  });
+
+  test("reports strictly increasing progress as a multi-field call advances", async () => {
+    // No textValue overrides: the real FieldTypeDetector.getTextValue reads
+    // whichever hierarchy findElement actually resolved against, so each
+    // field's own isFieldAlreadyCorrect check genuinely fails on the
+    // not-yet-edited value and the real apply+verify path runs for all
+    // three fields -- exercising FakeTapOnElement/FakeClearText's own
+    // 0,10 / 0,10 child-progress pattern (not just the boundary ticks).
+    let observeCallCount = 0;
+    const targets: [string, string, string] = ["a", "b", "c"];
+    fakeObserve.setResultFactory(() => {
+      observeCallCount++;
+      // Exactly one observe happens per successfully-verified field after the
+      // initial one (the verify observe is reused as the post-success
+      // refresh), so call N reflects the first (N-1) fields already landed.
+      const doneCount = Math.min(3, observeCallCount - 1);
+      const values: [string, string, string] = ["", "", ""];
+      for (let i = 0; i < doneCount; i++) {
+        values[i] = targets[i];
+      }
+      return createObserveResultFor(threeFieldHierarchy(values));
+    });
+    fakeFieldTypeDetector.setFieldType("first", "text");
+    fakeFieldTypeDetector.setFieldType("second", "text");
+    fakeFieldTypeDetector.setFieldType("third", "text");
+
+    const progressCalls: Array<{ progress: number; total?: number; message?: string }> = [];
+    const progress = async (progressValue: number, total?: number, message?: string) => {
+      progressCalls.push({ progress: progressValue, total, message });
+    };
+
+    const result = await build().execute(
+      {
+        fields: [
+          { selector: { elementId: "first" }, value: "a" },
+          { selector: { elementId: "second" }, value: "b" },
+          { selector: { elementId: "third" }, value: "c" },
+        ],
+      },
+      progress,
+    );
+
+    expect(result.success).toBe(true);
+    // Each field's tap AND clear child steps report the same local 0,10
+    // pattern. Ties are suppressed rather than bumped (so a repeat can never
+    // be pushed into the reserved boundary endpoint or the next field's
+    // slice) -- so only the first genuinely-advancing child tick per field
+    // (tap's "10") survives, plus that field's boundary tick: 2 per field.
+    expect(progressCalls.length).toBe(6);
+    // Every notification shares ONE consistent total across the whole call
+    // (fieldCount * 100) -- not the per-field child steps' own local total,
+    // and not a bare field-count total that would collide with those.
+    expect(progressCalls.every((c) => c.total === 300)).toBe(true);
+    // The whole sequence -- tap's 0,10, then clear's own 0,10 reset, repeated
+    // per field, plus the per-field boundary ticks -- must be STRICTLY
+    // increasing. MCP clients that enforce monotonicity reject or ignore a
+    // repeated value, not just a decrease, so a tie is as unacceptable as a
+    // regression here.
+    for (let i = 1; i < progressCalls.length; i++) {
+      expect(progressCalls[i].progress).toBeGreaterThan(progressCalls[i - 1].progress);
+    }
+    // Never exceeds the declared total.
+    expect(progressCalls.every((c) => c.progress <= 300)).toBe(true);
+    // The three field-boundary ticks land at the top of each field's slice.
+    expect(progressCalls.map((c) => c.progress)).toEqual(
+      expect.arrayContaining([100, 200, 300]) as unknown as number[],
+    );
+    expect(progressCalls[progressCalls.length - 1].message).toContain("3/3");
+  });
+
+  test("reserves the field-slice endpoint for the boundary tick when a child reports its own 100%", async () => {
+    // A child step can legitimately report (100, 100) -- its own completion.
+    // That must be capped strictly below this field's slice endpoint (not
+    // mapped onto it), so it can never tie or collide with the boundary tick
+    // that follows, and never gets bumped across into the next field's slice.
+    const twoCheckboxes: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "first",
+              class: "android.widget.CheckBox",
+              checkable: "true" as any,
+              checked: "false" as any,
+            },
+          },
+          {
+            $: {
+              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+              "resource-id": "second",
+              class: "android.widget.CheckBox",
+              checkable: "true" as any,
+              checked: "false" as any,
+            },
+          },
+        ],
+      },
+    };
+    fakeObserve.setResult(createObserveResultFor(twoCheckboxes));
+    fakeFieldTypeDetector.setFieldType("first", "checkbox");
+    fakeFieldTypeDetector.setFieldType("second", "checkbox");
+    fakeFieldTypeDetector.setSkipVerification("first", true);
+    fakeFieldTypeDetector.setSkipVerification("second", true);
+
+    // A tap fake whose "first" field reports its own 100% completion; its
+    // "second" field uses the ordinary 0,10 pattern real tools use.
+    const tapReportingFullCompletion = {
+      calls: [] as Array<{ elementId?: string }>,
+      async execute(
+        options: { elementId?: string },
+        childProgress?: (p: number, t?: number, m?: string) => Promise<void>,
+      ) {
+        this.calls.push({ elementId: options.elementId });
+        if (options.elementId === "first") {
+          await childProgress?.(0, 100, "start");
+          await childProgress?.(100, 100, "done");
+        } else {
+          await childProgress?.(0, 100, "Preparing to execute action...");
+          await childProgress?.(10, 100, "Getting previous view hierarchy...");
+        }
+        return {
+          success: true,
+          action: "tap",
+          element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
+        };
+      },
+    };
+
+    const progressCalls: Array<{ progress: number; message?: string }> = [];
+    const progress = async (progressValue: number, _total?: number, message?: string) => {
+      progressCalls.push({ progress: progressValue, message });
+    };
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: tapReportingFullCompletion as any,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+
+    const result = await setUIState.execute(
+      {
+        fields: [
+          { selector: { elementId: "first" }, selected: true },
+          { selector: { elementId: "second" }, selected: true },
+        ],
+      },
+      progress,
+    );
+
+    expect(result.success).toBe(true);
+    // Strictly increasing throughout, including across the field boundary.
+    for (let i = 1; i < progressCalls.length; i++) {
+      expect(progressCalls[i].progress).toBeGreaterThan(progressCalls[i - 1].progress);
+    }
+    // Identify the two field-boundary ticks by their message (only
+    // execute()'s own per-field boundary emission uses this wording; the
+    // child fake's messages are "start"/"done"/"Preparing..."/"Getting...").
+    // The boundary ticks must land EXACTLY at each field's slice endpoint --
+    // not endpoint+1, which is what a bump-on-tie (instead of reservation)
+    // would produce here, since field 1's own child already reports 100%.
+    const boundaryIndices = progressCalls
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.message?.includes("Set field"))
+      .map(({ i }) => i);
+    expect(boundaryIndices.length).toBe(2);
+    expect(progressCalls[boundaryIndices[0]].progress).toBe(100);
+    expect(progressCalls[boundaryIndices[1]].progress).toBe(200);
+    // Field 1's child ticks (everything before its boundary tick) all stay
+    // STRICTLY below 100 -- the (100, 100) report must not have been mapped
+    // onto the reserved endpoint.
+    const field1ChildTicks = progressCalls.slice(0, boundaryIndices[0]);
+    expect(field1ChildTicks.length).toBeGreaterThan(0);
+    expect(field1ChildTicks.every((c) => c.progress < 100)).toBe(true);
+    // Field 2's child ticks (between the two boundary ticks) stay within its
+    // own [100, 200) band.
+    const field2ChildTicks = progressCalls.slice(boundaryIndices[0] + 1, boundaryIndices[1]);
+    expect(field2ChildTicks.every((c) => c.progress > 100 && c.progress < 200)).toBe(true);
+    // No two emissions share the same value (no duplicate at the endpoint).
+    const values = progressCalls.map((c) => c.progress);
+    expect(new Set(values).size).toBe(values.length);
+    // Never exceeds the declared total (fieldCount * 100 = 200).
+    expect(progressCalls.every((c) => c.progress <= 200)).toBe(true);
+  });
+
+  test("reports progress up to the point of a mid-loop failure, not silence", async () => {
+    fakeObserve.setResult(createObserveResultFor(threeFieldHierarchy(["", "", ""])));
+    fakeFieldTypeDetector.setFieldType("first", "text");
+    fakeFieldTypeDetector.setFieldType("second", "text");
+    fakeFieldTypeDetector.setSkipVerification("first", true);
+
+    // Second field's tap fails every attempt.
+    fakeTap.setResult("second", {
+      success: false,
+      action: "tap",
+      element: { bounds: { left: 0, top: 60, right: 100, bottom: 110 } },
+      error: "Element not clickable",
+    });
+
+    const progressCalls: Array<{ progress: number; message?: string }> = [];
+    const progress = async (progressValue: number, _total?: number, message?: string) => {
+      progressCalls.push({ progress: progressValue, message });
+    };
+
+    const result = await build().execute(
+      {
+        fields: [
+          { selector: { elementId: "first" }, value: "a" },
+          { selector: { elementId: "second" }, value: "b" },
+        ],
+      },
+      progress,
+    );
+
+    expect(result.success).toBe(false);
+    // A client watching progress must see field 1 succeed before field 2 fails
+    // -- it must not look like nothing happened. Field 1's tap/clear child
+    // steps and field 2's three failed-tap retries all report their own
+    // progress too, so isolate the two per-field boundary ticks by message.
+    const boundaryTicks = progressCalls.filter(
+      (c) => c.message?.includes("Set field") || c.message?.includes("Failed field"),
+    );
+    expect(boundaryTicks.length).toBe(2);
+    expect(boundaryTicks[0].message).toContain("Set field");
+    expect(boundaryTicks[1].message).toContain("Failed field");
+    // The whole trace -- child ticks from both fields' retries included --
+    // must be STRICTLY increasing, even though field 2's tap fails and
+    // retries three times inside the same 100-wide slice (each retry's tap
+    // re-emits the same local 0,10 pattern, which would otherwise tie).
+    for (let i = 1; i < progressCalls.length; i++) {
+      expect(progressCalls[i].progress).toBeGreaterThan(progressCalls[i - 1].progress);
+    }
+  });
+
+  test("does not re-observe after a verified success -- reuses verification's own observation", async () => {
+    // Single field, starting value differs from the target so the apply+verify
+    // path actually runs (isFieldAlreadyCorrect must be false, or verification
+    // -- and this whole test -- never happens). No textValue override is set:
+    // the real FieldTypeDetector.getTextValue reads the element's own `text`
+    // straight off whichever hierarchy findElement resolved against, so the
+    // pre-edit observe genuinely reports "" and the post-edit one genuinely
+    // reports "a".
+    //
+    // Only two observes should occur total: the initial observe, and the one
+    // verifyFieldValue performs. Without the fix, a third, separate "refresh"
+    // observe follows verification's -- this test fails against that
+    // (pre-fix) behavior with callCount === 3 and passes at 2.
+    let observeCallCount = 0;
+    fakeObserve.setResultFactory(() => {
+      observeCallCount++;
+      const value = observeCallCount === 1 ? "" : "a";
+      return createObserveResultFor(threeFieldHierarchy([value, "", ""]));
+    });
+    fakeFieldTypeDetector.setFieldType("first", "text");
+
+    const result = await build().execute({
+      fields: [{ selector: { elementId: "first" }, value: "a" }],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fields[0].verified).toBe(true);
+    expect(result.fields[0].skipped).toBeUndefined();
+    expect(fakeObserve.getCallCount()).toBe(2);
+  });
+
+  function createObserveResultFor(hierarchy: ViewHierarchyResult): ObserveResult {
+    return {
+      updatedAt: fakeTimer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy,
+    };
+  }
+});
+
 describe("SetUIState budget is unaffected by slow work before the search (#4252 review 2)", () => {
   const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
   let fakeTap: FakeTapOnElement;

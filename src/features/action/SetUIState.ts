@@ -79,6 +79,16 @@ interface SetUIStateDependencies {
   timer?: Timer;
 }
 
+/**
+ * Internal per-field outcome. Carries the fresh observation (if
+ * verifyFieldValue already fetched one) alongside the public FieldResult so
+ * execute() can reuse it instead of paying for a second, effectively
+ * redundant observe against the device (#6222).
+ */
+interface InternalFieldResult extends FieldResult {
+  freshObservation?: ObserveResult;
+}
+
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_SCROLL_DIRECTION = "down";
 const MAX_FUTILE_SCROLLS = 3;
@@ -139,6 +149,61 @@ export class SetUIState extends BaseVisualChange {
     const processed = new Set<number>();
     let totalAttempts = 0;
 
+    // Progress reported to the client MUST stay on one consistent scale and
+    // strictly increase -- MCP clients that enforce monotonicity reject or
+    // ignore a repeated value, not just a decrease. Sub-steps a field's work
+    // delegates to (TapOnElement, ClearText, ...) each independently report
+    // their own local 0..100 range via the SAME callback (e.g. tap emits
+    // 0,10 and then clear ALSO emits 0,10), which would otherwise collide or
+    // reset mid-field or between fields. Give every field a fixed 100-wide
+    // slice of one overall range (#6222 review).
+    const FIELD_SLICE_WIDTH = 100;
+    const overallProgressTotal = options.fields.length * FIELD_SLICE_WIDTH;
+    let maxProgressReported = 0;
+    // Emits the per-field boundary tick -- always the top of that field's
+    // slice. This is always reachable: child-forwarded progress is capped
+    // strictly below the slice endpoint (see fieldProgress below), so the
+    // boundary value is guaranteed to exceed anything already emitted for
+    // this field. The bump is a defensive floor, not the normal path.
+    const emitProgress = async (raw: number, message?: string): Promise<void> => {
+      if (!progress) {
+        return;
+      }
+      const next = Math.min(Math.max(raw, maxProgressReported + 1), overallProgressTotal);
+      maxProgressReported = next;
+      await progress(next, overallProgressTotal, message);
+    };
+    // Projects a child step's own 0..N progress into the 100-wide slice for
+    // the field currently being worked on (identified by how many fields are
+    // already fully processed, i.e. its position in processing order). The
+    // slice's own top value (fieldStart + 100) is RESERVED for the
+    // field-boundary tick that follows -- a child reporting its own 100%
+    // (e.g. childProgress===childTotal) is capped one below that endpoint, so
+    // it can never tie or collide with the boundary tick. A child tick that
+    // cannot land strictly above what has already been emitted is suppressed
+    // outright rather than bumped: bumping here could push the value up to,
+    // or past, the reserved endpoint -- or even into the next field's slice.
+    const fieldProgress = (fieldSequence: number): ProgressCallback | undefined => {
+      if (!progress) {
+        return undefined;
+      }
+      const fieldStart = fieldSequence * FIELD_SLICE_WIDTH;
+      const fieldSliceMax = fieldStart + FIELD_SLICE_WIDTH - 1;
+      return async (childProgress, childTotal, message) => {
+        const pct =
+          childTotal && childTotal > 0 ? (childProgress / childTotal) * 100 : childProgress;
+        const candidate = Math.min(fieldStart + pct, fieldSliceMax);
+        if (candidate <= maxProgressReported) {
+          // Cannot strictly increase without crossing into the boundary
+          // tick's reserved endpoint or the next field's slice -- drop this
+          // tick rather than violate either bound.
+          return;
+        }
+        maxProgressReported = candidate;
+        await progress(candidate, overallProgressTotal, message);
+      };
+    };
+
     // Get initial observation
     let lastObservation = await this.getObserveScreen().execute(
       undefined,
@@ -172,27 +237,47 @@ export class SetUIState extends BaseVisualChange {
         // Each edit may change layout (keyboard, reflow, dynamic fields),
         // so we re-find visible fields from a fresh observation each iteration.
         const { fieldSpec, fieldIndex, element } = visibleFields[0];
-        const result = await this.processField(fieldSpec, element, progress, signal);
+        // This field's slice starts at processed.size * 100, before it is
+        // added to `processed` below.
+        const result = await this.processField(
+          fieldSpec,
+          element,
+          fieldProgress(processed.size),
+          signal,
+        );
 
-        fieldResults[fieldIndex] = result;
         processed.add(fieldIndex);
+        // Retain only the small, public FieldResult fields across the loop --
+        // `freshObservation` (a full view hierarchy) is used immediately below
+        // for reuse and then must NOT be kept alive in `fieldResults` for the
+        // rest of the call, or peak memory grows to fieldCount x one full
+        // hierarchy instead of staying ~one hierarchy (#6222 review).
+        fieldResults[fieldIndex] = this.toPublicFieldResult(result);
         totalAttempts += result.attempts;
         // Progress clears the budget: it bounds futile searching, not successful
         // work. The next search re-arms it from scratch (#4252 review).
         searchDeadline = null;
 
-        // Refresh observation after each success
+        // Report per-field advancement at the top of the field's own slice.
+        // This keeps the request alive on progress-aware clients (a live
+        // request timeout is commonly reset by progress notifications) and,
+        // independent of transport behavior, gives the client a durable
+        // trace of what has already been applied before a bare timeout could
+        // otherwise leave it blind (#6222).
+        await emitProgress(
+          processed.size * 100,
+          result.success
+            ? `Set field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
+            : `Failed field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
+        );
+
+        // Refresh observation after each success. processField already fetched
+        // a fresh observation as part of verification for most field types —
+        // reuse it instead of paying for a second, effectively redundant
+        // observe against the device, which is exactly the per-field cost that
+        // was pushing multi-field calls past the request timeout (#6222).
         if (result.success) {
-          const freshObs = await this.getObserveScreen().execute(
-            undefined,
-            undefined,
-            false,
-            0,
-            signal,
-          );
-          if (freshObs) {
-            lastObservation = freshObs;
-          }
+          lastObservation = await this.observationAfterSuccess(result, signal);
         }
 
         // Fail fast on failure
@@ -235,8 +320,13 @@ export class SetUIState extends BaseVisualChange {
 
         // Scroll one step without lookFor to avoid jumping past intermediate fields.
         // Using lookFor would enable scroll-until-visible mode which can skip over
-        // fields that need to be processed first in screen order.
-        await this.getSwipeOn().execute({ direction: currentDirection }, progress);
+        // fields that need to be processed first in screen order. The scroll is in
+        // service of the next not-yet-processed field, so it reports into that
+        // field's own progress slice (#6222 review).
+        await this.getSwipeOn().execute(
+          { direction: currentDirection },
+          fieldProgress(processed.size),
+        );
 
         // Re-observe after scroll
         const freshObs = await this.getObserveScreen().execute(
@@ -275,6 +365,42 @@ export class SetUIState extends BaseVisualChange {
       totalAttempts,
       observation: lastObservation,
     };
+  }
+
+  /**
+   * Strip the internal `freshObservation` (a full view hierarchy) from a
+   * field outcome before it is retained in `fieldResults` for the rest of the
+   * call. The observation is only needed transiently, to let the caller reuse
+   * it in place of an extra observe -- keeping it in the retained array would
+   * hold one full hierarchy per verified field alive for the whole call
+   * instead of ~one at a time (#6222 review).
+   */
+  private toPublicFieldResult(result: InternalFieldResult): FieldResult {
+    return {
+      selector: result.selector,
+      success: result.success,
+      attempts: result.attempts,
+      verified: result.verified,
+      error: result.error,
+      fieldType: result.fieldType,
+      skipped: result.skipped,
+    };
+  }
+
+  /**
+   * Observation to use as the "current state" after a field succeeded. Reuses
+   * the fresh observation processField already fetched during verification
+   * when one is available, avoiding a second observe against the device for
+   * the same state (#6222).
+   */
+  private async observationAfterSuccess(
+    result: InternalFieldResult,
+    signal?: AbortSignal,
+  ): Promise<ObserveResult> {
+    if (result.freshObservation) {
+      return result.freshObservation;
+    }
+    return this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
   }
 
   /**
@@ -336,7 +462,7 @@ export class SetUIState extends BaseVisualChange {
     initialElement: Element,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<FieldResult> {
+  ): Promise<InternalFieldResult> {
     let attempts = 0;
     let lastError: string | undefined;
     let fieldType: FieldType | undefined;
@@ -411,6 +537,7 @@ export class SetUIState extends BaseVisualChange {
         // - Text-only selector on a mutable field type (typing replaces the label text
         //   used as the selector, so re-lookup by original text fails)
         let verified: boolean | undefined;
+        let freshObservation: ObserveResult | undefined;
         const hasTextOnlySelector =
           fieldSpec.selector.text !== undefined && fieldSpec.selector.elementId === undefined;
         const isMutableTextField = fieldType === "text" || fieldType === "dropdown";
@@ -419,7 +546,9 @@ export class SetUIState extends BaseVisualChange {
           this.fieldTypeDetector.shouldSkipVerification(element, fieldType) ||
           (hasTextOnlySelector && isMutableTextField);
         if (!shouldSkipVerify) {
-          verified = await this.verifyFieldValue(fieldSpec, fieldType, signal);
+          const verifyResult = await this.verifyFieldValue(fieldSpec, fieldType, signal);
+          verified = verifyResult.verified;
+          freshObservation = verifyResult.observation;
           if (!verified) {
             lastError = `Verification failed for ${this.describeSelector(fieldSpec.selector)}`;
             continue;
@@ -432,6 +561,7 @@ export class SetUIState extends BaseVisualChange {
           attempts,
           verified,
           fieldType,
+          freshObservation,
         };
       } catch (error) {
         lastError = errorMessage(error);
@@ -660,8 +790,10 @@ export class SetUIState extends BaseVisualChange {
     fieldSpec: FieldSpec,
     fieldType: FieldType,
     signal?: AbortSignal,
-  ): Promise<boolean> {
-    // Get fresh observation
+  ): Promise<{ verified: boolean; observation?: ObserveResult }> {
+    // Get fresh observation. The caller (processField -> execute) reuses this
+    // as its own post-success refresh instead of issuing a second, effectively
+    // redundant observe against the device (#6222).
     const observation = await this.getObserveScreen().execute(
       undefined,
       undefined,
@@ -670,13 +802,13 @@ export class SetUIState extends BaseVisualChange {
       signal,
     );
     if (!observation?.viewHierarchy) {
-      return false;
+      return { verified: false, observation };
     }
 
     // Find the element again
     const element = this.findElement(fieldSpec.selector, observation.viewHierarchy);
     if (!element) {
-      return false;
+      return { verified: false, observation };
     }
 
     // Verify based on field type
@@ -684,27 +816,27 @@ export class SetUIState extends BaseVisualChange {
       case "text":
         if (fieldSpec.value !== undefined) {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return { verified: currentValue === fieldSpec.value, observation };
         }
-        return true;
+        return { verified: true, observation };
 
       case "checkbox":
       case "toggle":
         if (fieldSpec.selected !== undefined) {
           const isChecked = this.fieldTypeDetector.isChecked(element);
-          return isChecked === fieldSpec.selected;
+          return { verified: isChecked === fieldSpec.selected, observation };
         }
-        return true;
+        return { verified: true, observation };
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return { verified: currentValue === fieldSpec.value, observation };
         }
-        return true;
+        return { verified: true, observation };
 
       default:
-        return true;
+        return { verified: true, observation };
     }
   }
 

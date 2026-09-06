@@ -18,6 +18,8 @@ import {
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   resolveMcpRequestTimeoutMs,
+  ProgressExtendableDeadline,
+  MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
@@ -562,5 +564,94 @@ describe("resolveMcpRequestTimeoutMs", () => {
     const resolved = resolveMcpRequestTimeoutMs(request);
     expect(resolved).toBe(MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS);
     expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  });
+});
+
+/**
+ * Pure deadline math backing both extension points the daemon wires up for a
+ * progress-emitting request (issue #6222 review, P1): `handleIdeRequest`'s
+ * `resetTimeoutOnProgress`/`maxTotalTimeout` for the inner MCP SDK call, and
+ * `UnixSocketServer`'s own `requestDeadlineMs`-equivalent pre-flight budget
+ * check (`requireRemainingMcpForwardBudget`). Both read `deadline.value` (or
+ * `deadline.ceiling`) live and call `extendOnProgress` only when a progress
+ * notification for that specific request actually arrives -- a tool that
+ * never emits progress never touches this class at all, so its deadline is
+ * exactly what it always was.
+ */
+describe("ProgressExtendableDeadline", () => {
+  test("starts at receivedAt + initialTimeout, unaffected until a progress tick arrives", () => {
+    const deadline = new ProgressExtendableDeadline(1_000, 30_000);
+    expect(deadline.value).toBe(31_000);
+  });
+
+  test("a progress tick resets the deadline forward from now, by the extension amount", () => {
+    const deadline = new ProgressExtendableDeadline(0, 30_000);
+    // 25s in, well before the original 30s deadline, a tick arrives.
+    deadline.extendOnProgress(25_000, 30_000);
+    expect(deadline.value).toBe(55_000);
+  });
+
+  test("a request that keeps progressing survives past its original deadline, up to the bounded ceiling", () => {
+    const receivedAt = 0;
+    const initialTimeoutMs = 30_000;
+    const deadline = new ProgressExtendableDeadline(receivedAt, initialTimeoutMs);
+
+    // Tick every 20s -- each tick arrives well before the deadline it most
+    // recently set, so the request never actually expires.
+    let nowMs = 0;
+    for (let i = 0; i < 5; i++) {
+      nowMs += 20_000;
+      deadline.extendOnProgress(nowMs, initialTimeoutMs);
+      expect(deadline.value).toBeGreaterThan(nowMs);
+    }
+    // 100s of wall-clock elapsed -- more than 3x the original 30s deadline --
+    // and the request is still not expired.
+    expect(nowMs).toBe(100_000);
+    expect(deadline.value).toBeGreaterThan(nowMs);
+  });
+
+  test("progress can never push the deadline past the bounded ceiling", () => {
+    const receivedAt = 0;
+    const initialTimeoutMs = 30_000;
+    const deadline = new ProgressExtendableDeadline(receivedAt, initialTimeoutMs);
+    const ceiling = receivedAt + MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS;
+    expect(deadline.ceiling).toBe(ceiling);
+
+    // Keep progressing indefinitely, well past the ceiling.
+    let nowMs = 0;
+    for (let i = 0; i < 40; i++) {
+      nowMs += 20_000;
+      deadline.extendOnProgress(nowMs, initialTimeoutMs);
+      expect(deadline.value).toBeLessThanOrEqual(ceiling);
+    }
+    expect(nowMs).toBeGreaterThan(ceiling);
+    // Once past the ceiling, the deadline is pinned there -- the request
+    // is effectively already expired relative to `nowMs`, exactly the
+    // "still killed" behavior a genuinely hung-but-progressing tool needs.
+    expect(deadline.value).toBe(ceiling);
+    expect(deadline.value).toBeLessThan(nowMs);
+  });
+
+  test("a proposal at or behind the current deadline never shortens it", () => {
+    const deadline = new ProgressExtendableDeadline(0, 30_000);
+    deadline.extendOnProgress(25_000, 30_000); // pushes to 55_000
+    const beforeMs = deadline.value;
+    // A late-arriving/out-of-order tick proposing an earlier value is a no-op.
+    deadline.extendOnProgress(10_000, 1_000); // would propose 11_000, far behind
+    expect(deadline.value).toBe(beforeMs);
+  });
+
+  test("a request with a floor already above the progress ceiling keeps its own larger ceiling", () => {
+    // e.g. executePlan's 10-minute floor is larger than the default 5-minute
+    // progress ceiling -- progress must not SHRINK that tool's effective ceiling.
+    const tenMinutes = 600_000;
+    const deadline = new ProgressExtendableDeadline(0, tenMinutes);
+    expect(deadline.ceiling).toBe(tenMinutes);
+  });
+
+  test("never extended when no progress arrives -- a non-progressing request's deadline is exactly its original value", () => {
+    const deadline = new ProgressExtendableDeadline(1_000, DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    // No extendOnProgress call at all.
+    expect(deadline.value).toBe(1_000 + DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 });

@@ -204,4 +204,85 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 8000);
   });
+
+  // Thread PRRT_kwDOP-GF5M6ftxl4: the public schema accepts a fractional longPress
+  // duration and previously forwarded it unchanged, but CtrlProxy's
+  // `RequestTapCoordinates.duration` (Swift Models.swift) is `Int?`, so Swift's
+  // JSON decoder rejects a fractional value outright. The duration must be
+  // normalized to an integer before it is used for BOTH the request payload and
+  // the timeout sizing.
+  test("longPress with a fractional duration forwards a normalized integer duration", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+
+    const result = await tapAny.execute({ action: "longPress", duration: 1500.5 });
+
+    expect(result.success).toBe(true);
+    // Normalized to 1501ms — used verbatim for the request payload, and the
+    // timeout is sized from that same normalized value (1501 + 2000 headroom).
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1501, 3501);
+    expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1501 }]);
+  });
+
+  // Thread PRRT_kwDOP-GF5M6ftxl6: under VoiceOver, a coordinate press only
+  // FOCUSES an element — it does not activate it. When the selected clickable has
+  // a resource-id but no label/content-desc/text, tapAny must activate it through
+  // the identifier-based node-action path (`requestAction`) instead of doing a
+  // single coordinate press and reporting success.
+  test("VoiceOver enabled + resource-id-only target activates via requestAction, not a coordinate tap", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    fakeElementSelector.setNextElement({
+      bounds: { left: 0, top: 0, right: 84, bottom: 168 },
+      "resource-id": "com.test.app:id/submit_button",
+      clickable: "true",
+    } as Element);
+    const actionSpy = spyOn(fakeIosClient, "requestAction");
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(true);
+    expect(actionSpy).toHaveBeenCalledWith(
+      "activate",
+      "com.test.app:id/submit_button",
+      undefined,
+      undefined,
+    );
+    expect(fakeIosClient.getActionHistory()).toEqual([
+      { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
+    ]);
+    expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
+    expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
+
+  test("VoiceOver enabled + resource-id-only target propagates a requestAction failure (no coordinate fallback)", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    fakeElementSelector.setNextElement({
+      bounds: { left: 0, top: 0, right: 84, bottom: 168 },
+      "resource-id": "com.test.app:id/submit_button",
+      clickable: "true",
+    } as Element);
+    fakeIosClient.setActionResult({ success: false, error: "element not found" });
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("element not found");
+    expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
+
+  test("VoiceOver enabled + no label and no resource-id fails fast instead of a focus-only coordinate press", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    fakeElementSelector.setNextElement({
+      bounds: { left: 0, top: 0, right: 84, bottom: 168 },
+      clickable: "true",
+    } as Element);
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no accessibility label");
+    expect(fakeIosClient.getActionHistory()).toHaveLength(0);
+    expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
+    expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
 });

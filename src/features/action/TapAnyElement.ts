@@ -232,7 +232,13 @@ export class TapAnyElement extends BaseVisualChange {
       return 0;
     }
     if (options.duration && options.duration > 0) {
-      return options.duration;
+      // Normalize to an integer: the public schema accepts a fractional
+      // duration, but CtrlProxy's `RequestTapCoordinates.duration` (iOS
+      // Models.swift) is `Int?`, so a fractional value fails to decode on
+      // the runner rather than performing a shorter/longer press (issue
+      // #6248 review). Round rather than truncate so a value like 999.6
+      // still reads as "about a second" instead of quietly losing time.
+      return Math.round(options.duration);
     }
     return this.device.platform === "ios" ? 1500 : 1000;
   }
@@ -312,15 +318,60 @@ export class TapAnyElement extends BaseVisualChange {
   /**
    * Execute iOS tap using VoiceOver accessibility actions.
    *
-   * Falls back to a coordinate-based tap only when no label is resolvable at all
-   * (there is nothing to activate semantically). Once a label IS resolved and
-   * `requestVoiceOverActivate` is actually attempted, a failure is propagated
-   * instead of falling back to a coordinate press: under VoiceOver a bare
-   * coordinate press only *focuses* an element rather than activating it, so
-   * reporting success after that fallback would mask a real activation failure
-   * (issue #6248 review). This mirrors the non-fallback-on-failure behavior
-   * `TapOnElement` should also have for the same reason.
+   * Prefers activating by accessibility label (`requestVoiceOverActivate`); when no
+   * label is resolvable but the element has a `resource-id`, activates through the
+   * identifier-based node-action path instead (`requestAction`, mirroring how
+   * `TapOnElement`/`TalkBackTapStrategy` activate Android elements by resourceId) —
+   * on-device this resolves the element via `elementLocator.findElement(byResourceId:)`
+   * and calls `found.tap()`/`found.press()`, a real activation rather than a bare
+   * coordinate press. Only when NEITHER a label nor a resource-id exists — nothing to
+   * activate semantically — does this throw instead of falling back to a coordinate
+   * press: under VoiceOver a bare coordinate press only *focuses* an element rather
+   * than activating it, so reporting success after that fallback (or after a real
+   * activation attempt fails) would mask a real activation failure (issue #6248
+   * review). This mirrors the non-fallback-on-failure behavior `TapOnElement` should
+   * also have for the same reason.
    */
+  private resolveIosVoiceOverLabel(element: Element): string | undefined {
+    // ios-accessibility-label > content-desc > text > fallback
+    return (
+      (element["ios-accessibility-label"] as string | undefined) ??
+      (typeof element["content-desc"] === "string" && element["content-desc"]
+        ? element["content-desc"]
+        : undefined) ??
+      (typeof element.text === "string" && element.text ? element.text : undefined)
+    );
+  }
+
+  private resolveIosResourceId(element: Element): string | undefined {
+    return typeof element["resource-id"] === "string" && element["resource-id"]
+      ? element["resource-id"]
+      : undefined;
+  }
+
+  /**
+   * Activate a resource-id-only target (no resolvable label) through the
+   * identifier-based node-action path rather than a coordinate press.
+   */
+  private async activateIosByResourceId(
+    xcTestClient: IOSCtrlProxyClient,
+    resourceId: string,
+    voiceOverAction: "activate" | "long_press",
+    timeoutMs: number | undefined,
+  ): Promise<void> {
+    const result = await xcTestClient.requestAction(
+      voiceOverAction,
+      resourceId,
+      undefined,
+      timeoutMs,
+    );
+    if (!result.success) {
+      throw new ActionableError(
+        `VoiceOver action failed for resource-id "${resourceId}": ${result.error ?? "unknown error"}`,
+      );
+    }
+  }
+
   private async executeIosTapWithVoiceOver(
     xcTestClient: IOSCtrlProxyClient,
     action: string,
@@ -329,24 +380,31 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     longPressDuration: number,
   ): Promise<void> {
-    // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
-    const label =
-      (element["ios-accessibility-label"] as string | undefined) ??
-      (typeof element["content-desc"] === "string" && element["content-desc"]
-        ? element["content-desc"]
-        : undefined) ??
-      (typeof element.text === "string" && element.text ? element.text : undefined);
+    const label = this.resolveIosVoiceOverLabel(element);
+    const resourceId = this.resolveIosResourceId(element);
 
-    if (!label) {
-      logger.info("[TapAnyElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
-      return;
+    if (!label && !resourceId) {
+      throw new ActionableError(
+        "VoiceOver is enabled but the selected element has no accessibility label, " +
+          "content-desc, text, or resource-id to activate; a coordinate press would " +
+          "only focus it under VoiceOver, not activate it",
+      );
     }
 
     const voiceOverAction: "activate" | "long_press" =
       action === "longPress" ? "long_press" : "activate";
     const timeoutMs =
       action === "longPress" ? longPressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS : undefined;
+
+    if (!label) {
+      await this.activateIosByResourceId(
+        xcTestClient,
+        resourceId as string,
+        voiceOverAction,
+        timeoutMs,
+      );
+      return;
+    }
 
     const result = await xcTestClient.requestVoiceOverActivate(label, voiceOverAction, timeoutMs);
 

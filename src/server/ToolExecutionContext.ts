@@ -9,6 +9,7 @@ import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScree
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 
 /**
  * Storage for accessibility service setup timing.
@@ -65,6 +66,16 @@ interface ToolExecutionContext {
 export interface SessionOptions {
   keepScreenAwake?: boolean;
   platform?: Platform;
+  /**
+   * `booted` skips automation-only setup (accessibility-service / CtrlProxy
+   * preparation) for a tool that only needs the device connected and booted.
+   * `automationReady` (the default when omitted) performs full setup, matching
+   * the historical unconditional behavior. Mirrors
+   * {@link DeviceReadinessLevel} so both the fresh-session (legacy) and
+   * persisted daemon-session paths honor a tool's declared `deviceReadiness`
+   * (#6227).
+   */
+  deviceReadiness?: DeviceReadinessLevel;
 }
 
 /**
@@ -126,6 +137,23 @@ export async function createToolExecutionContext(
   };
 }
 
+function isReadinessSatisfied(
+  achieved: DeviceReadinessLevel | undefined,
+  required: DeviceReadinessLevel,
+): boolean {
+  // `undefined` means this session was never routed through this module's own
+  // setup — e.g. a test (or another internal caller) that tracks a session
+  // directly via `SessionManager.createSession`. Trust the existing-session
+  // fast path exactly as it behaved before #6227 rather than forcing setup
+  // on a session this code has no record of ever needing it.
+  if (achieved === undefined) {
+    return true;
+  }
+  // `booted` is satisfied by either recorded level; `automationReady` needs
+  // the higher level to have actually been achieved.
+  return required === "booted" || achieved === "automationReady";
+}
+
 async function setupSession(
   session: Session,
   existingSession: boolean,
@@ -133,18 +161,27 @@ async function setupSession(
   sessionOptions: SessionOptions,
 ): Promise<void> {
   await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
+  const requiredReadiness: DeviceReadinessLevel =
+    sessionOptions.deviceReadiness ?? "automationReady";
+
   if (existingSession) {
+    // #6227: `existingSession` only means this call reused an already-tracked
+    // session — it says nothing about which readiness level that session's
+    // prior setup actually reached. A session first touched by a `booted`
+    // tool leaves CtrlProxy/accessibility-service setup unprepared; a later
+    // call on the same UUID that needs `automationReady` must run that setup
+    // now rather than trusting the fast path and returning early against a
+    // disconnected/unprepared device.
+    if (
+      !isReadinessSatisfied(sessionManager.getDeviceReadiness(session.sessionId), requiredReadiness)
+    ) {
+      await runDeviceReadinessSetup(session, sessionManager, requiredReadiness);
+    }
     return;
   }
 
   ensureSessionIsCurrent(session, sessionManager);
-  if (session.platform === "android") {
-    await ensureAccessibilityServiceReady(
-      session.assignedDevice,
-      session.sessionId,
-      session.platform,
-    );
-  }
+  await runDeviceReadinessSetup(session, sessionManager, requiredReadiness);
   ensureSessionIsCurrent(session, sessionManager);
 
   // Start test coverage session for navigation graph tracking
@@ -158,6 +195,29 @@ async function setupSession(
       `[ToolExecutionContext] Started test coverage tracking for session ${session.sessionId}`,
     );
   }
+}
+
+/**
+ * Run the automation-only setup (CtrlProxy / accessibility service) needed to
+ * reach `requiredReadiness` for `session`, then record the achieved level
+ * (#6227). Only android needs the extra setup for `automationReady`; every
+ * other case is a no-op setup that still records the level so a later
+ * `existingSession` call can compare against it.
+ */
+async function runDeviceReadinessSetup(
+  session: Session,
+  sessionManager: SessionManager,
+  requiredReadiness: DeviceReadinessLevel,
+): Promise<void> {
+  if (session.platform === "android" && requiredReadiness !== "booted") {
+    await ensureAccessibilityServiceReady(
+      session.assignedDevice,
+      session.sessionId,
+      session.platform,
+    );
+  }
+  ensureSessionIsCurrent(session, sessionManager);
+  sessionManager.setDeviceReadiness(session.sessionId, requiredReadiness);
 }
 
 function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager): void {

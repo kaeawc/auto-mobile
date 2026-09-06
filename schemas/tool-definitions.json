@@ -2871,12 +2871,43 @@
   },
   {
     "name": "listApps",
-    "description": "Guide for listing apps via MCP resources",
+    "description": "List installed apps on a device. Filters by type (default: user), search, and profile.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": {}
+      "properties": {
+        "type": {
+          "description": "Filter by app type. Defaults to 'user'.",
+          "type": "string",
+          "enum": ["user", "system", "all"]
+        },
+        "search": {
+          "description": "Filter by a case-insensitive substring of the package name or display name.",
+          "type": "string"
+        },
+        "profile": {
+          "description": "Filter to apps visible to this user profile id.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   {

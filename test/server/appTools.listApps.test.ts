@@ -11,57 +11,29 @@ import {
   setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
 import {
-  APP_RESOURCE_TEMPLATES,
-  APPS_RESOURCE_URIS,
   invalidateInstalledAppResourceCache,
   invalidateInstalledAppsCache,
+  type AppsQueryOptions,
+  type AppsQueryResourceContent,
 } from "../../src/server/appResources";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeToolUtils } from "../fakes/FakeToolUtils";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import type { BootedDevice } from "../../src/models";
 
-const resolveWithFakeTimer = async <T>(
-  promise: Promise<T>,
-  timer: FakeTimer,
-  stepMs: number = 1,
-): Promise<T> => {
-  let settled = false;
-  let result: T | undefined;
-  let error: unknown;
-
-  promise
-    .then((value) => {
-      settled = true;
-      result = value;
-    })
-    .catch((caught) => {
-      settled = true;
-      error = caught;
-    });
-
-  let steps = 0;
-  while (!settled) {
-    if (
-      timer.getPendingTimeoutCount() > 0 ||
-      timer.getPendingIntervalCount() > 0 ||
-      timer.getPendingSleepCount() > 0
-    ) {
-      timer.advanceTime(stepMs);
-    }
-    await new Promise((resolve) => setImmediate(resolve));
-    steps += 1;
-    if (steps > 100) {
-      throw new Error("FakeTimer pump exceeded max steps");
-    }
-  }
-
-  if (error) {
-    throw error;
-  }
-  return result as T;
-};
+function fakeAppsContent(
+  overrides: Partial<AppsQueryResourceContent> = {},
+): AppsQueryResourceContent {
+  return {
+    query: { deviceId: "emulator-5554", type: "user" },
+    observationComplete: true,
+    totalCount: 0,
+    deviceCount: 1,
+    lastUpdated: new Date(0).toISOString(),
+    devices: [],
+    ...overrides,
+  };
+}
 
 describe("listApps tool", () => {
   beforeEach(() => {
@@ -77,51 +49,102 @@ describe("listApps tool", () => {
     resetTerminateAppToolDependencies();
   });
 
-  test("registers listApps tool with a permissive schema", () => {
+  const device: BootedDevice = {
+    deviceId: "emulator-5554",
+    name: "Pixel 8",
+    platform: "android",
+  };
+
+  test("registers listApps as a device-aware tool accepting type/search/profile", () => {
     const tool = ToolRegistry.getTool("listApps");
     expect(tool).toBeDefined();
+    expect(tool?.requiresDevice).toBe(true);
+    expect(tool?.deviceAwareHandler).toBeDefined();
     expect(() => tool!.schema.parse({})).not.toThrow();
     expect(() => tool!.schema.parse({ deviceId: "device-123" })).not.toThrow();
+    expect(() => tool!.schema.parse({ type: "system", search: "clock", profile: 0 })).not.toThrow();
+    expect(() => tool!.schema.parse({ type: "bogus" })).toThrow();
   });
 
-  test("returns MCP resource guidance using a fake formatter and FakeTimer", async () => {
+  test("returns structured app data (not prose) for the resolved device", async () => {
     const tool = ToolRegistry.getTool("listApps");
     expect(tool).toBeDefined();
 
     const fakeToolUtils = new FakeToolUtils();
-    setListAppsToolDependencies({ toolResponseFormatter: fakeToolUtils });
+    let capturedOptions: AppsQueryOptions | undefined;
+    const fakeContent = fakeAppsContent({
+      totalCount: 1,
+      devices: [
+        {
+          deviceId: device.deviceId,
+          platform: device.platform,
+          totalCount: 1,
+          lastUpdated: new Date(0).toISOString(),
+          apps: [
+            { packageName: "com.example.app", type: "user", foreground: false, recent: false },
+          ],
+        },
+      ],
+    });
+    setListAppsToolDependencies({
+      toolResponseFormatter: fakeToolUtils,
+      queryInstalledApps: async (options) => {
+        capturedOptions = options;
+        return fakeContent;
+      },
+    });
 
-    const fakeTimer = new FakeTimer();
+    const result = await tool!.deviceAwareHandler!(device, {});
 
-    const result = await resolveWithFakeTimer(tool!.handler({}), fakeTimer);
+    expect(capturedOptions).toEqual({
+      deviceId: device.deviceId,
+      platform: device.platform,
+      type: undefined,
+      search: undefined,
+      profile: undefined,
+    });
 
     expect(fakeToolUtils.getJSONResponseCount()).toBe(1);
     const payload = fakeToolUtils.getLastJSONResponse();
-    expect(payload).toEqual({
-      message:
-        "To list installed apps, follow this workflow:\n\n" +
-        "1. Get available devices:\n" +
-        "   Read resource: automobile:devices/booted\n\n" +
-        "2. List apps for a specific device (using deviceId from step 1):\n" +
-        "   Read resource: automobile:devices/{deviceId}/apps\n" +
-        "   Or query format: automobile:apps?deviceId={deviceId}\n\n" +
-        "Optional query filters:\n" +
-        "  - type=user|system (default: user)\n" +
-        "  - search=<term> (filter by package name)\n" +
-        "  - profile=<userId> (filter by user profile)\n\n" +
-        "Example: automobile:apps?deviceId=emulator-5554&type=system&search=google",
-      resources: [
-        "automobile:devices/booted",
-        APP_RESOURCE_TEMPLATES.DEVICE_APPS,
-        APPS_RESOURCE_URIS.BASE + "?deviceId={deviceId}",
-      ],
-      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://apps' are not supported.",
-    });
+    expect(typeof payload.message).toBe("string");
+    expect(payload.devices).toEqual(fakeContent.devices);
+    expect(payload.totalCount).toBe(1);
 
     const content = result.content?.[0];
     expect(content?.type).toBe("text");
-    expect(content?.text).toBeDefined();
     expect(JSON.parse(content!.text)).toEqual(payload);
+  });
+
+  test("passes an explicit type filter through to the query", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    const fakeToolUtils = new FakeToolUtils();
+    let capturedOptions: AppsQueryOptions | undefined;
+    setListAppsToolDependencies({
+      toolResponseFormatter: fakeToolUtils,
+      queryInstalledApps: async (options) => {
+        capturedOptions = options;
+        return fakeAppsContent({ query: options });
+      },
+    });
+
+    await tool!.deviceAwareHandler!(device, { type: "all", search: "clock", profile: 0 });
+
+    expect(capturedOptions?.type).toBe("all");
+    expect(capturedOptions?.search).toBe("clock");
+    expect(capturedOptions?.profile).toBe(0);
+  });
+
+  test("wraps a query failure as an ActionableError", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    setListAppsToolDependencies({
+      queryInstalledApps: async () => {
+        throw new Error("device not found");
+      },
+    });
+
+    await expect(tool!.deviceAwareHandler!(device, {})).rejects.toThrow(
+      `Failed to list apps for device ${device.deviceId}`,
+    );
   });
 
   test("keeps foreground resource invalidation separate from package cache dirtying", () => {

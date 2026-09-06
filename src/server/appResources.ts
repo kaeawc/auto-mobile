@@ -34,9 +34,10 @@ export const APPS_RESOURCE_URIS = {
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
 const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}{?${APPS_QUERY_KEYS.join(",")}}`;
 const APPS_QUERY_PARAM_KEYS = new Set<string>(APPS_QUERY_KEYS);
-type AppsQueryType = "user" | "system";
+type InstalledAppType = "user" | "system";
+export type AppsQueryType = InstalledAppType | "all";
 
-interface AppsQueryOptions {
+export interface AppsQueryOptions {
   platform?: Platform;
   search?: string;
   type?: AppsQueryType;
@@ -44,9 +45,9 @@ interface AppsQueryOptions {
   deviceId?: string;
 }
 
-interface AppsQueryAppInfo {
+export interface AppsQueryAppInfo {
   packageName: string;
-  type: AppsQueryType;
+  type: InstalledAppType;
   foreground: boolean;
   recent: boolean;
   userId?: number;
@@ -63,7 +64,7 @@ interface AppsQueryDeviceContent {
   apps: AppsQueryAppInfo[];
 }
 
-interface AppsQueryResourceContent {
+export interface AppsQueryResourceContent {
   query: AppsQueryOptions;
   observationComplete: boolean;
   totalCount: number;
@@ -470,7 +471,8 @@ function parseProfileParam(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions {
+// Exported for tests: pure query-string parsing, no device/cache I/O (#6155).
+export function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions {
   const unknownKeys = Object.keys(params).filter((key) => !APPS_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -493,9 +495,11 @@ function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions 
     platform = platformRaw;
   }
 
-  let type: AppsQueryType | undefined;
+  // Documented default is "user" (see registerAppResources / listApps guidance) — an
+  // omitted type must not silently return every app, including system ones (#6155).
+  let type: AppsQueryType = "user";
   if (typeRaw) {
-    if (typeRaw !== "user" && typeRaw !== "system") {
+    if (typeRaw !== "user" && typeRaw !== "system" && typeRaw !== "all") {
       throw new Error(`Invalid type: ${typeRaw}`);
     }
     type = typeRaw;
@@ -532,14 +536,18 @@ function buildAppsUri(options: AppsQueryOptions): string {
   return queryString ? `${APPS_RESOURCE_URIS.BASE}?${queryString}` : APPS_RESOURCE_URIS.BASE;
 }
 
-function filterAppsByQuery(
+// Exported for tests: pure filtering, no device/cache I/O (#6155).
+export function filterAppsByQuery(
   apps: AppsQueryAppInfo[],
   options: AppsQueryOptions,
 ): AppsQueryAppInfo[] {
   const searchTerm = options.search?.toLowerCase();
+  // Documented default is "user" (#6155) — an omitted type must not fall through
+  // to "no filter" and return system apps too.
+  const effectiveType = options.type ?? "user";
 
   return apps.filter((app) => {
-    if (options.type && app.type !== options.type) {
+    if (effectiveType !== "all" && app.type !== effectiveType) {
       return false;
     }
 
@@ -584,41 +592,54 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
   throw new Error(`Device not found or not booted: ${options.deviceId}`);
 }
 
+/**
+ * Resolves the target device and returns the filtered installed-apps content
+ * for it, applying the documented `type` default (see filterAppsByQuery).
+ * Shared by the `apps` resource and the `listApps` tool (#6155) so both honor
+ * the same default and filtering behavior. Throws on failure — callers that
+ * need a resource-shaped error payload should catch via getAppsQueryResource.
+ */
+export async function queryInstalledApps(
+  options: AppsQueryOptions,
+): Promise<AppsQueryResourceContent> {
+  const device = await getAppsQueryDevice(options);
+  const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
+  if (!cacheEntry) {
+    throw new Error(`Device not found or not booted: ${device.deviceId}`);
+  }
+
+  const apps = filterAppsByQuery(cacheEntry.queryApps, options);
+  const deviceEntries: AppsQueryDeviceContent[] = [
+    {
+      deviceId: device.deviceId,
+      platform: device.platform,
+      totalCount: apps.length,
+      lastUpdated: cacheEntry.content.lastUpdated,
+      apps,
+    },
+  ];
+
+  const parsed = Date.parse(cacheEntry.content.lastUpdated);
+  const lastUpdated = Number.isNaN(parsed)
+    ? new Date().toISOString()
+    : new Date(parsed).toISOString();
+
+  return {
+    query: { ...options, type: options.type ?? "user" },
+    observationComplete: cacheEntry.content.observationComplete,
+    totalCount: apps.length,
+    deviceCount: 1,
+    lastUpdated,
+    devices: deviceEntries,
+  };
+}
+
 async function getAppsQueryResource(
   options: AppsQueryOptions,
   uri: string,
 ): Promise<ResourceContent> {
   try {
-    const device = await getAppsQueryDevice(options);
-    const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
-    if (!cacheEntry) {
-      throw new Error(`Device not found or not booted: ${device.deviceId}`);
-    }
-
-    const apps = filterAppsByQuery(cacheEntry.queryApps, options);
-    const deviceEntries: AppsQueryDeviceContent[] = [
-      {
-        deviceId: device.deviceId,
-        platform: device.platform,
-        totalCount: apps.length,
-        lastUpdated: cacheEntry.content.lastUpdated,
-        apps,
-      },
-    ];
-
-    const parsed = Date.parse(cacheEntry.content.lastUpdated);
-    const lastUpdated = Number.isNaN(parsed)
-      ? new Date().toISOString()
-      : new Date(parsed).toISOString();
-
-    const content: AppsQueryResourceContent = {
-      query: options,
-      observationComplete: cacheEntry.content.observationComplete,
-      totalCount: apps.length,
-      deviceCount: 1,
-      lastUpdated,
-      devices: deviceEntries,
-    };
+    const content = await queryInstalledApps(options);
 
     if (options.deviceId) {
       recordAppsQueryUri(options.deviceId, uri);

@@ -664,16 +664,22 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         providedSessionUuid &&
         !tool.requiresDevice &&
         !isDeviceSessionAcquisitionTool(name) &&
-        name !== "setActiveDevice" &&
-        // #6148 (#6069 residual): setToolEnabled is exempt ONLY when the caller
-        // echoed back this connection's own already-issued tool-selection
-        // profile uuid (the internal resume path uses a distinct
-        // DAEMON_TOOL_SELECTION_PROFILE_PARAM, never this branch). Any other
-        // explicit sessionUuid — including a never-issued/fabricated one — must
-        // clear the same admission check every other plain session tool
-        // (listDevices, etc.) already enforces here, instead of silently
-        // succeeding and writing state for a session that was never issued.
-        (name !== SET_TOOL_ENABLED_TOOL_NAME || providedSessionUuid !== connectionProfileUuid)
+        name !== "setActiveDevice"
+        // #6148 (#6069 residual, review round 2): setToolEnabled previously got
+        // a blanket exemption from this gate, then a narrower exemption for a
+        // sessionUuid matching `connectionProfileUuid` — but that profile uuid
+        // has NO server-verified provenance: it is threaded from a raw,
+        // caller-controlled HTTP header (DAEMON_TOOL_SELECTION_PROFILE_HEADER,
+        // see src/daemon/daemon.ts) with no issuance check, so a proxied caller
+        // can set the header to the same fabricated string it also sends as
+        // `arguments.sessionUuid` and satisfy the equality, reopening the exact
+        // hole this fix closes. The legitimate cross-connection resume path
+        // never touches `arguments.sessionUuid` at all (it flows solely through
+        // that header/DAEMON_TOOL_SELECTION_PROFILE_PARAM), so there is no
+        // legitimate case where an explicit `sessionUuid` argument to
+        // setToolEnabled should bypass admission. No exemption: every explicit
+        // sessionUuid argument, self-referential or not, clears the same
+        // admission check every sibling plain session tool already enforces.
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware
         // tools carry their admitted identity into execution in ToolRegistry.

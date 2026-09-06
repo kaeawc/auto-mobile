@@ -240,13 +240,14 @@ export interface TouchLatencyPointDecision {
   /** A verified-inert coordinate to tap, present only when one was found. */
   touchPoint?: { x: number; y: number };
   /**
-   * True when there is no verified-inert point to tap - either `windowBounds`
-   * was undefined (no app window found), or every scanned candidate
+   * True when there is no verified-inert point to tap - `windowBounds` was
+   * undefined (no app window found), the view hierarchy was truncated (so
+   * the obstacle map may be incomplete), or every scanned candidate
    * overlapped an interactive element or a content-hidden region. The caller
    * must skip the touch-latency measurement entirely in this case rather
    * than fall through to `TouchLatencyTracker`'s own unverified default
    * point, which risks activating a full-screen button, WebView, map, or a
-   * hidden control (issue #6167).
+   * hidden or unemitted control (issue #6167).
    */
   skipTouchLatency: boolean;
 }
@@ -270,6 +271,21 @@ export function deriveTouchLatencyPoint(
     logger.warn(
       "[PerformanceAudit] Skipping touch-latency measurement: window bounds are malformed " +
         `(zero-area, inverted, or non-finite): ${JSON.stringify(windowBounds)}`,
+    );
+    return { skipTouchLatency: true };
+  }
+
+  // CtrlProxy stops emitting descendants once it hits a hard limit
+  // (`max_nodes`, `max_depth`) or is cancelled mid-walk - the resulting
+  // hierarchy is silently PARTIAL, not "no obstacles here". Certifying a
+  // point inert against an incomplete obstacle map risks tapping a real
+  // control whose node was simply never emitted (issue #6167 follow-up), so
+  // a truncated hierarchy can never produce a verified-inert point.
+  const truncationReasons = result.viewHierarchy?.truncationReasons;
+  if (truncationReasons && truncationReasons.length > 0) {
+    logger.warn(
+      "[PerformanceAudit] Skipping touch-latency measurement: view hierarchy is truncated " +
+        `(${truncationReasons.join(", ")}) - the obstacle map may be incomplete`,
     );
     return { skipTouchLatency: true };
   }

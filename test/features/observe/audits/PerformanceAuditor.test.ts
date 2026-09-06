@@ -616,3 +616,69 @@ describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden reg
     expect(insideHiddenRegion).toBe(false);
   });
 });
+
+describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => {
+  const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
+
+  // P1: CtrlProxy stops emitting descendants once it hits max_nodes/max_depth
+  // or is cancelled mid-walk, so an empty accessibility hierarchy here does
+  // NOT mean "no obstacles" - it may mean "the obstacle wasn't emitted".
+  // Certifying any point as inert from a truncated hierarchy is unsafe.
+  test("skips touch-latency when truncationReasons is non-empty, even with an empty hierarchy", () => {
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        truncationReasons: ["max_nodes"],
+      } as any,
+      // No obstacles are visible at all - without the truncation check this
+      // would wrongly certify the window center as inert.
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
+  test("skips touch-latency for a max_depth truncation reason", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, truncationReasons: ["max_depth"] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+  });
+
+  test("skips touch-latency for a cancelled truncation reason", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, truncationReasons: ["cancelled"] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+  });
+
+  test("is unaffected by an empty truncationReasons array", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, truncationReasons: [] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+  });
+
+  test("is unaffected when truncationReasons is absent entirely", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+  });
+});

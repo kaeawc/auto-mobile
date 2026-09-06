@@ -95,6 +95,7 @@ interface AndroidInstalledAppInfo {
 
 interface IosInstalledAppInfo {
   bundleId: string;
+  type: InstalledAppType;
   displayName?: string;
   version?: string;
   path?: string;
@@ -231,10 +232,38 @@ function extractIosPath(app: Record<string, unknown>): string | undefined {
   return getIosInstalledAppPath(app);
 }
 
+/**
+ * Classifies an iOS app as "user" or "system" so `type=user` (the documented
+ * default, #6155) actually excludes preinstalled apps on iOS the same way it
+ * excludes them on Android.
+ *
+ * `simctl listapps` reports an explicit `ApplicationType` ("System"/"Hidden"
+ * vs "User"); devicectl's physical-device listing carries no equivalent field,
+ * so this falls back to Apple's own `com.apple.` bundle-id namespace, which
+ * every first-party system app uses.
+ */
+// Exported for tests: pure classification, no device/cache I/O (#6155).
+export function extractIosApplicationType(
+  app: Record<string, unknown>,
+  bundleId: string,
+): InstalledAppType {
+  const raw = readIosAppField(app, ["ApplicationType", "applicationType", "type", "Type"]);
+  if (raw) {
+    const normalized = raw.toLowerCase();
+    if (normalized === "system" || normalized === "hidden") {
+      return "system";
+    }
+    if (normalized === "user") {
+      return "user";
+    }
+  }
+  return bundleId.startsWith("com.apple.") ? "system" : "user";
+}
+
 function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
   return {
     packageName: app.bundleId,
-    type: "user",
+    type: app.type,
     userId: 0,
     userProfile: "personal",
     foreground: false,
@@ -354,11 +383,33 @@ interface FetchedAppsCacheEntry {
   cacheable: boolean;
 }
 
+/** Narrow surface `fetchAppsForDevice` needs from `ListInstalledApps`, so tests can
+ * inject a fake without driving the real adb/simctl/devicectl command chain. */
+type InstalledAppsLister = Pick<
+  ListInstalledApps,
+  "executeDetailedResult" | "executeIosDetailedResult"
+>;
+type ListInstalledAppsFactory = (device: BootedDevice) => InstalledAppsLister;
+
+const defaultListInstalledAppsFactory: ListInstalledAppsFactory = (device) =>
+  new ListInstalledApps(device);
+
+let listInstalledAppsFactory: ListInstalledAppsFactory = defaultListInstalledAppsFactory;
+
+/** Test-only seam: inject a fake app lister so a failed listing command can be
+ * simulated without real adb/simctl/devicectl I/O (#6155). Pass null to restore
+ * the default. */
+export function setListInstalledAppsFactoryForTests(
+  factory: ListInstalledAppsFactory | null,
+): void {
+  listInstalledAppsFactory = factory ?? defaultListInstalledAppsFactory;
+}
+
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
 ): Promise<FetchedAppsCacheEntry> {
-  const listInstalledApps = new ListInstalledApps(device);
+  const listInstalledApps = listInstalledAppsFactory(device);
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
@@ -397,8 +448,10 @@ async function fetchAppsForDevice(
     const displayName = extractIosDisplayName(app as Record<string, unknown>);
     const version = extractIosVersion(app as Record<string, unknown>);
     const path = extractIosPath(app as Record<string, unknown>);
+    const type = extractIosApplicationType(app as Record<string, unknown>, bundleId);
     const info: IosInstalledAppInfo = {
       bundleId,
+      type,
       displayName,
       ...(version ? { version } : {}),
       ...(path ? { path } : {}),
@@ -606,6 +659,16 @@ export async function queryInstalledApps(
   const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
   if (!cacheEntry) {
     throw new Error(`Device not found or not booted: ${device.deviceId}`);
+  }
+  // `observationComplete` is wired directly to whether the underlying adb /
+  // simctl / devicectl listing command itself succeeded (ListInstalledApps'
+  // `successful` flag) — false here means the listing FAILED, not "0 apps
+  // installed". Reporting that as a normal (possibly empty) app list would be
+  // a dishonest success; surface it as a failure instead (#6155).
+  if (!cacheEntry.content.observationComplete) {
+    throw new Error(
+      `Failed to list installed apps for device ${device.deviceId}: the app-listing command did not complete successfully`,
+    );
   }
 
   const apps = filterAppsByQuery(cacheEntry.queryApps, options);

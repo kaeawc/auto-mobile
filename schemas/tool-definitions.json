@@ -2882,7 +2882,7 @@
           "enum": ["user", "system", "all"]
         },
         "search": {
-          "description": "Filter by a case-insensitive substring of the package name or display name.",
+          "description": "Filter by a case-insensitive substring of the package name/bundle id. Also matches the app's display name where the platform reports one (iOS only today — Android's listing does not include app labels).",
           "type": "string"
         },
         "profile": {

@@ -45,7 +45,7 @@ the exact arguments supported by your connection.
 
 | Tool                                                                                             | What it does                                                                                                               |
 | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| 📱 <code>listApps</code>                                                                         | Provides guidance for listing installed apps through MCP resources.                                                        |
+| 📱 <code>listApps</code>                                                                         | Lists installed apps on a device (params: `deviceId`, `type`, `search`, `profile`; default `type=user`).                   |
 | 🚀 <code>launchApp</code>                                                                        | Launches an app by package name.                                                                                           |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                         |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                       |

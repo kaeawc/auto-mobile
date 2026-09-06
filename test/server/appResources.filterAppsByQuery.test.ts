@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  extractIosApplicationType,
   filterAppsByQuery,
   parseAppsQueryParams,
   type AppsQueryAppInfo,
@@ -63,5 +64,61 @@ describe("parseAppsQueryParams type default (#6155)", () => {
     expect(() => parseAppsQueryParams({ deviceId: "emulator-5554", type: "bogus" })).toThrow(
       "Invalid type: bogus",
     );
+  });
+});
+
+describe("extractIosApplicationType iOS user/system classification (#6155)", () => {
+  test("simctl's explicit ApplicationType: System is classified as system", () => {
+    expect(extractIosApplicationType({ ApplicationType: "System" }, "com.apple.mobilesafari")).toBe(
+      "system",
+    );
+  });
+
+  test("simctl's ApplicationType: Hidden is classified as system", () => {
+    expect(extractIosApplicationType({ ApplicationType: "Hidden" }, "com.apple.springboard")).toBe(
+      "system",
+    );
+  });
+
+  test("simctl's ApplicationType: User is classified as user even under com.apple.", () => {
+    // A user-installed app can legitimately carry a com.apple. bundle id in
+    // fixtures/tests; an explicit ApplicationType always wins over the
+    // bundle-id fallback heuristic.
+    expect(extractIosApplicationType({ ApplicationType: "User" }, "com.apple.example")).toBe(
+      "user",
+    );
+  });
+
+  test("no ApplicationType field falls back to the com.apple. bundle-id namespace (devicectl)", () => {
+    expect(extractIosApplicationType({}, "com.apple.mobilesafari")).toBe("system");
+    expect(extractIosApplicationType({}, "com.example.myapp")).toBe("user");
+  });
+});
+
+describe("iOS apps are classified before the type=user default is applied (#6155)", () => {
+  const iosUserApp: AppsQueryAppInfo = {
+    packageName: "com.example.myapp",
+    type: "user",
+    foreground: false,
+    recent: false,
+  };
+  const iosSystemApp: AppsQueryAppInfo = {
+    packageName: "com.apple.mobilesafari",
+    type: "system",
+    foreground: false,
+    recent: false,
+  };
+  const iosApps = [iosUserApp, iosSystemApp];
+
+  test("default (omitted type) excludes iOS system apps, matching Android", () => {
+    expect(filterAppsByQuery(iosApps, {})).toEqual([iosUserApp]);
+  });
+
+  test("type=system returns only iOS system apps", () => {
+    expect(filterAppsByQuery(iosApps, { type: "system" })).toEqual([iosSystemApp]);
+  });
+
+  test("type=all returns every iOS app", () => {
+    expect(filterAppsByQuery(iosApps, { type: "all" })).toEqual(iosApps);
   });
 });

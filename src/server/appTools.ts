@@ -423,7 +423,11 @@ export const listAppsSchema = addDeviceTargetingToSchema(
     search: z
       .string()
       .optional()
-      .describe("Filter by a case-insensitive substring of the package name or display name."),
+      .describe(
+        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
+          "the app's display name where the platform reports one (iOS only today — Android's " +
+          "listing does not include app labels).",
+      ),
     profile: z
       .number()
       .int()

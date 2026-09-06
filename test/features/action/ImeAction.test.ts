@@ -9,6 +9,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 
 describe("ImeAction", () => {
   let imeAction: ImeAction;
@@ -510,6 +511,110 @@ describe("ImeAction", () => {
       expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_TAB")).toBe(true);
       // At least 2 calls for the key combination, but BaseVisualChange might make additional calls
       expect(fakeAdb.getExecutedCommands().length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe("iOS platform (#6249 stalled-runner guard)", () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "ios-device",
+      platform: "ios",
+      name: "iPhone",
+    };
+    let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+
+    afterEach(() => {
+      getInstanceSpy?.mockRestore();
+      getInstanceSpy = null;
+    });
+
+    test("succeeds promptly when the CtrlProxy request resolves", async () => {
+      let calledAction: string | null = null;
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => {
+          calledAction = action;
+          return { success: true, action, totalTimeMs: 5 };
+        },
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      const result = await (ios as any).executeiOSImeAction("done", createObserveResult());
+
+      expect(result.success).toBe(true);
+      expect(result.action).toBe("done");
+      expect(calledAction).toBe("done");
+      // The bounded deadline never had to fire.
+      expect(fakeTimer.getCurrentTime()).toBe(0);
+    });
+
+    test("propagates a runner-reported failure without waiting for the local deadline", async () => {
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => ({
+          success: false,
+          action,
+          totalTimeMs: 3,
+          error: "No focused element",
+        }),
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      const result = await (ios as any).executeiOSImeAction("done", createObserveResult());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("No focused element");
+      expect(fakeTimer.getCurrentTime()).toBe(0);
+    });
+
+    test("bounds a stalled CtrlProxy request to the local deadline instead of hanging (#6249)", async () => {
+      // Simulates the real repro: `ensureConnected()` (WebSocket reconnect, auto-setup,
+      // a dying runner) never settles within the request's own configured timeout
+      // because that internal timeout only starts counting AFTER a connection is
+      // established. The underlying request here simply never resolves.
+      const request = new Promise(() => {
+        /* never settles — mirrors a wedged connection/runner */
+      });
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async () => request,
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+      const result = await (ios as any).executeiOSImeAction("done", createObserveResult());
+
+      expect(result.success).toBe(false);
+      expect(result.action).toBe("done");
+      expect(result.error).toBe("IME action timed out after 5000ms");
+      // Returned via the independent local deadline, not a hang.
+      expect(fakeTimer.getCurrentTime()).toBe(5000);
+    });
+
+    test("a stalled iOS imeAction request does not corrupt a subsequent call against the same client (#6249)", async () => {
+      // First call: the CtrlProxy request stalls forever (wedged runner).
+      const stalledRequest = new Promise(() => {
+        /* never settles */
+      });
+      let callCount = 0;
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestImeAction: async (action: string) => {
+          callCount++;
+          if (callCount === 1) {
+            return stalledRequest;
+          }
+          // Second call: a healthy runner (or a fresh client after recovery)
+          // answers normally — this must NOT be affected by the first call's
+          // still-pending (abandoned) promise.
+          return { success: true, action, totalTimeMs: 5 };
+        },
+      } as any);
+
+      const ios = new ImeAction(iosDevice, null, null, fakeTimer);
+
+      const first = await (ios as any).executeiOSImeAction("done", createObserveResult());
+      expect(first.success).toBe(false);
+      expect(first.error).toBe("IME action timed out after 5000ms");
+
+      const second = await (ios as any).executeiOSImeAction("next", createObserveResult());
+      expect(second.success).toBe(true);
+      expect(second.action).toBe("next");
+      expect(callCount).toBe(2);
     });
   });
 });

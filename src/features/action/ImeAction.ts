@@ -11,12 +11,21 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import type { CtrlProxyImeActionResult } from "../observe/ios/types";
 import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 
 export class ImeAction extends BaseVisualChange {
   private a11yService: AndroidCtrlProxy | null = null;
   private imeTimer: Timer;
+
+  /**
+   * Local deadline for the iOS CtrlProxy IME-action request (#6249). Matches
+   * the wire-level default in `SharedTextDelegate.requestImeAction`/`sendCommand`
+   * so a healthy runner behaves identically; the difference only shows up when
+   * the connection layer is unhealthy — see `executeiOSImeAction`.
+   */
+  private static readonly IOS_IME_ACTION_TIMEOUT_MS = 5000;
 
   constructor(
     device: BootedDevice,
@@ -171,9 +180,19 @@ export class ImeAction extends BaseVisualChange {
     action: ImeActionType,
     _observeResult: ObserveResult,
   ): Promise<ImeActionResult> {
+    const timeoutMs = ImeAction.IOS_IME_ACTION_TIMEOUT_MS;
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await client.requestImeAction(action);
+      const request = client.requestImeAction(action, timeoutMs);
+      const result = await this.raceIosImeActionDeadline(request, timeoutMs, action);
+
+      if (result === null) {
+        return {
+          success: false,
+          action,
+          error: `IME action timed out after ${timeoutMs}ms`,
+        };
+      }
 
       if (result.success) {
         logger.info(`[ImeAction] IME action '${action}' completed via CtrlProxy iOS`);
@@ -185,6 +204,59 @@ export class ImeAction extends BaseVisualChange {
     } catch (error) {
       logger.error(`[ImeAction] CtrlProxy iOS exception: ${error}`);
       return { success: false, action, error: String(error) };
+    }
+  }
+
+  /**
+   * Bound an in-flight iOS CtrlProxy IME-action request with a deadline that
+   * starts immediately and runs independently of the request itself (#6249).
+   *
+   * `IOSCtrlProxyClient.requestImeAction`'s own `timeoutMs` only bounds the
+   * wait for a wire response AFTER `ensureConnected()` resolves — and
+   * `ensureConnected()` (WebSocket reconnect, iOS auto-setup, a runner mid
+   * restart) runs first and is NOT itself bounded by that timeout. A real
+   * repro of #6249 returned ~35s late against a configured 5000ms timeout,
+   * while the daemon's own reconnect-failure counter tore down the iOS
+   * CtrlProxy test-runner process in the background during that wait.
+   *
+   * Racing an independently-scheduled deadline here means this call always
+   * returns to the caller within `timeoutMs`, regardless of what the
+   * connection layer is doing. The underlying request is left to settle on
+   * its own — its eventual result is irrelevant once we've timed out, so it
+   * is only logged (never thrown) to avoid an unhandled rejection; letting it
+   * run to completion in the background is also what allows the client's own
+   * reconnect/health-check state to recover normally for the *next* call
+   * instead of being aborted mid-flight.
+   */
+  private async raceIosImeActionDeadline(
+    request: Promise<CtrlProxyImeActionResult>,
+    timeoutMs: number,
+    action: ImeActionType,
+  ): Promise<CtrlProxyImeActionResult | null> {
+    let timeoutHandle: ReturnType<Timer["setTimeout"]> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+      timeoutHandle = this.imeTimer.setTimeout(() => resolve(null), timeoutMs);
+    });
+
+    try {
+      const outcome = await Promise.race([request, deadline]);
+      if (outcome === null) {
+        void request.catch((error) => {
+          // The request's own outcome no longer matters to this call — only
+          // trace it so a slow/failing runner is still diagnosable.
+          logger.debug(
+            `[ImeAction] iOS CtrlProxy request for action '${action}' settled after the local ${timeoutMs}ms deadline: ${errorMessage(error)}`,
+          );
+        });
+        logger.warn(
+          `[ImeAction] iOS IME action '${action}' exceeded its ${timeoutMs}ms local deadline before the connection/request settled; returning failure without waiting further`,
+        );
+      }
+      return outcome;
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.imeTimer.clearTimeout(timeoutHandle);
+      }
     }
   }
 }

@@ -9,6 +9,11 @@ import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { redactAndroidCommandOutput } from "./android-cmdline-tools/redactAndroidCommandOutput";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import {
+  acquireDeviceReadinessLock,
+  deviceReadinessLockKey,
+  type DeviceReadinessLockRelease,
+} from "./deviceReadinessLock";
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
 import { runWithAbortSignal } from "./AbortContext";
@@ -181,25 +186,6 @@ interface ReadinessAttemptContext extends RunnerReadinessRequest {
   healthDeadlineMs: number | null;
 }
 
-type ReadinessRelease = () => void;
-
-interface ReadinessWaiter {
-  active: boolean;
-  resolve: (release: ReadinessRelease) => void;
-  reject: (error: unknown) => void;
-  timer: Timer;
-  timeoutHandle?: NodeJS.Timeout;
-  abortListener?: () => void;
-  signal?: AbortSignal;
-}
-
-interface ReadinessLock {
-  locked: boolean;
-  waiters: ReadinessWaiter[];
-}
-
-const readinessLocksByDevice = new Map<string, ReadinessLock>();
-
 export class RunnerReadinessService {
   constructor(private readonly dependencies: RunnerReadinessDependencies) {}
 
@@ -208,7 +194,7 @@ export class RunnerReadinessService {
     // window is opened later (see `startHealthWindow`) so a cold launch cannot
     // starve it (#5376).
     const context: ReadinessAttemptContext = { ...request, healthDeadlineMs: null };
-    const key = `${request.device.platform}:${request.device.deviceId}`;
+    const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     const release = await this.acquireReadinessTurn(context, key);
     try {
       await this.ensureReadyUncoordinated(context);
@@ -228,87 +214,22 @@ export class RunnerReadinessService {
   private async acquireReadinessTurn(
     context: ReadinessAttemptContext,
     key: string,
-  ): Promise<ReadinessRelease> {
+  ): Promise<DeviceReadinessLockRelease> {
     if (this.remainingForPhase(context, "runner-setup") <= 0) {
       this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock");
     }
-    const lock = readinessLocksByDevice.get(key) ?? { locked: false, waiters: [] };
-    readinessLocksByDevice.set(key, lock);
-    if (!lock.locked) {
-      lock.locked = true;
-      return this.createReadinessRelease(key, lock);
-    }
     try {
-      return await new Promise<ReadinessRelease>((resolve, reject) => {
-        const waiter: ReadinessWaiter = {
-          active: true,
-          resolve,
-          reject,
-          timer: this.dependencies.timer,
-          signal: context.signal,
-        };
-        const abandon = (error: unknown) => {
-          if (!waiter.active) {
-            return;
-          }
-          waiter.active = false;
-          this.removeReadinessWaiter(lock, waiter);
-          this.cleanupReadinessWaiter(waiter);
-          reject(error);
-        };
-        waiter.timeoutHandle = this.dependencies.timer.setTimeout(
-          () => abandon(new Error("readiness setup lock exceeded this request's deadline")),
-          this.remainingForPhase(context, "runner-setup"),
-        );
-        waiter.abortListener = () => abandon(context.signal?.reason);
-        context.signal?.addEventListener("abort", waiter.abortListener, { once: true });
-        lock.waiters.push(waiter);
-        if (context.signal?.aborted) {
-          waiter.abortListener();
-        }
+      // Shared per-device lock (#6227): the session-scoped readiness upgrade in
+      // ToolExecutionContext participates in this SAME lock, so an acquisition
+      // and an upgrade never reset+setup the same device concurrently.
+      return await acquireDeviceReadinessLock(key, {
+        timer: this.dependencies.timer,
+        signal: context.signal,
+        timeoutMs: this.remainingForPhase(context, "runner-setup"),
+        timeoutError: () => new Error("readiness setup lock exceeded this request's deadline"),
       });
     } catch (error) {
       this.fail(context, "runner-setup", 1, normalizeDiagnostic(error));
-    }
-  }
-
-  private createReadinessRelease(key: string, lock: ReadinessLock): ReadinessRelease {
-    let released = false;
-    return () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      let waiter = lock.waiters.shift();
-      while (waiter && !waiter.active) {
-        waiter = lock.waiters.shift();
-      }
-      if (waiter) {
-        waiter.active = false;
-        this.cleanupReadinessWaiter(waiter);
-        waiter.resolve(this.createReadinessRelease(key, lock));
-        return;
-      }
-      lock.locked = false;
-      if (readinessLocksByDevice.get(key) === lock) {
-        readinessLocksByDevice.delete(key);
-      }
-    };
-  }
-
-  private removeReadinessWaiter(lock: ReadinessLock, waiter: ReadinessWaiter): void {
-    const index = lock.waiters.indexOf(waiter);
-    if (index >= 0) {
-      lock.waiters.splice(index, 1);
-    }
-  }
-
-  private cleanupReadinessWaiter(waiter: ReadinessWaiter): void {
-    if (waiter.timeoutHandle) {
-      waiter.timer.clearTimeout(waiter.timeoutHandle);
-    }
-    if (waiter.abortListener) {
-      waiter.signal?.removeEventListener("abort", waiter.abortListener);
     }
   }
 

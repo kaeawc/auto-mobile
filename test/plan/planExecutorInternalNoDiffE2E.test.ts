@@ -85,6 +85,12 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    // #6227: `setupAutolockedSession` creates its session directly via
+    // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
+    // recorder), so it drives real per-session accessibility-service setup
+    // against a fake device. The shared test preload
+    // (test/setup/testPreload.ts) installs a no-op readiness driver so that
+    // setup cannot block on real `adb`/network.
   });
 
   afterEach(() => {

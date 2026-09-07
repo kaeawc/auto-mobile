@@ -1,6 +1,7 @@
 import type { ChildProcess } from "child_process";
 import { logger } from "../utils/logger";
 import { SessionManager, type Session, type SessionExecutionMetadata } from "./sessionManager";
+import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import { Mutex } from "async-mutex";
 import {
@@ -4586,8 +4587,13 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
+    beforeReplacementPublishes?: () => void,
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.assignmentMutex.runExclusive(async () => {
+      // The caller's marker must cover the entire visible replacement
+      // lifecycle, including a replacement that another pool path has already
+      // discovered. It is moved before any session rebind or addDevice call.
+      beforeReplacementPublishes?.();
       const currentExpectedDevice = this.devices.get(expectedDevice.id);
       const existingReplacement = this.devices.get(replacement.deviceId);
       if (
@@ -4609,6 +4615,7 @@ export class DevicePool {
           expectedDevice,
           replacement,
           sourceImage,
+          beforeReplacementPublishes,
         );
         await this.trackStartedDeviceProcess(replacement, childProcess);
         if (this.devices.get(replacementDevice.id) !== replacementDevice) {
@@ -4726,6 +4733,7 @@ export class DevicePool {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
+    beforeReplacementPublishes?: () => void,
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;
@@ -5542,6 +5550,7 @@ export class DevicePool {
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
+    achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
@@ -5556,6 +5565,7 @@ export class DevicePool {
         expectedIdentity,
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
+        achievedReadiness,
       ),
     );
   }
@@ -5569,6 +5579,7 @@ export class DevicePool {
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
+    achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string> {
     const sessionId = this.idGenerator.next();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
@@ -5651,6 +5662,15 @@ export class DevicePool {
     const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
       this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs, timeoutMs),
     );
+    // #6227 (round 9): record the achieved readiness BEFORE publishing the
+    // autolock route below. `mcpSessionAutolockMap.set` makes this session
+    // reachable to a concurrent tool call from the same MCP client (via
+    // `resolveAutolockSessionForMcpClient`); if that call resolved the session
+    // and consulted `getDeviceReadiness` before the caller recorded the level,
+    // it would see an unrecorded readiness and redundantly re-run (or wrongly
+    // skip) setup. The setter is monotonic, so recording here is safe even for
+    // a restored session that already reached a higher level.
+    this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
     }

@@ -350,6 +350,48 @@ describe("DevicePool autolock", () => {
       ).toBeUndefined();
     });
 
+    it("records achieved readiness before publishing the MCP session route (#6227 round 9)", async () => {
+      await initializeLiveAndroidDevice();
+
+      // A concurrent tool call from the same MCP client reaches the new session
+      // through `resolveAutolockSessionForMcpSession`. Readiness must be recorded
+      // before that route is publishable, or the concurrent call could observe an
+      // unrecorded readiness and redundantly re-run (or wrongly skip) setup.
+      const originalSetter = sessionManager.setDeviceReadiness.bind(sessionManager);
+      let routeResolvableAtRecordTime: string | undefined = "setter-not-called";
+      sessionManager.setDeviceReadiness = (sessionId, level) => {
+        routeResolvableAtRecordTime = pool.resolveAutolockSessionForMcpSession(
+          "mcp-session-1",
+          "android",
+        );
+        originalSetter(sessionId, level);
+      };
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+
+      expect(routeResolvableAtRecordTime).toBeUndefined();
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(sessionId);
+      expect(sessionManager.getDeviceReadiness(sessionId!)).toBe("automationReady");
+    });
+
+    it("honors the achieved readiness level passed to autolockDevice (#6227 round 9)", async () => {
+      await initializeLiveAndroidDevice();
+
+      const sessionId = await pool.autolockDevice(
+        "emulator-5554",
+        "android",
+        "mcp-session-1",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "booted",
+      );
+
+      expect(sessionManager.getDeviceReadiness(sessionId!)).toBe("booted");
+    });
+
     it("clears MCP session mapping when the autolock session expires", async () => {
       await initializeLiveAndroidDevice();
 

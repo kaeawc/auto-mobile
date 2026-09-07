@@ -2317,12 +2317,21 @@ describe("DevicePool", () => {
           ...device,
           deviceId: "emulator-5556",
         };
+        let readinessMarkerPublished = false;
         const handoff = await devicePool.replaceDeviceForSystemUiAnrRecovery(
           shutdownReservation.device,
           replacement,
           sourceImage,
+          undefined,
+          () => {
+            // Session work can discover the replacement inside addDevice, so
+            // the marker must exist before that publication point.
+            expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
+            readinessMarkerPublished = true;
+          },
         );
 
+        expect(readinessMarkerPublished).toBe(true);
         expect(handoff.preservedSessionId).toBe("owner-session");
         expect(devicePool.getDevice(device.deviceId)).toBeNull();
         expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({
@@ -6286,6 +6295,58 @@ describe("DevicePool", () => {
       await devicePool.removeDevice("emulator-5554");
       const appsAfter = await fakeAppsRepo.listInstalledApps("emulator-5554");
       expect(appsAfter.length).toBe(0);
+    });
+  });
+
+  // #6227 round 7: `bindOrReuseDeviceSession` can hand back a live session
+  // already bound to the exact requested device (`reuseExistingDeviceSession`)
+  // instead of the caller's own session id. A later, less-demanding
+  // acquisition of that same reused session (e.g. a `booted`-only or
+  // `provisionDevice({ readiness: "none" })` caller) must not downgrade its
+  // already-recorded `automationReady` readiness — `setDeviceReadiness` is
+  // monotonic by achieved level, so recording the lower level afterward is a
+  // no-op.
+  describe("bindOrReuseDeviceSession reuse keeps readiness monotonic (#6227 round 7)", () => {
+    test("readiness recorded for a reused live session is not downgraded", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+
+      const firstBinding = await devicePool.bindOrReuseDeviceSession(
+        "session-first",
+        "emulator-5554",
+        "android",
+        sourceImage,
+      );
+      expect(firstBinding).toBe("session-first");
+      sessionManager.setDeviceReadiness("session-first", "automationReady");
+      expect(sessionManager.getDeviceReadiness("session-first")).toBe("automationReady");
+
+      // A second, unrelated session id requests the same already-live device
+      // without a fresh source image (mirrors a warm/already-booted
+      // acquisition) — the pool hands back the existing session rather than
+      // binding the new id.
+      const secondBinding = await devicePool.bindOrReuseDeviceSession(
+        "session-second",
+        "emulator-5554",
+        "android",
+        undefined,
+      );
+      expect(secondBinding).toBe("session-first");
+
+      // The caller that requested this acquisition only needed `booted` (or
+      // ran `provisionDevice({ readiness: "none" })`), so it records that
+      // lower achieved level on the session it got back — which is the
+      // reused `session-first`, not its own requested id.
+      sessionManager.setDeviceReadiness(secondBinding, "booted");
+
+      expect(sessionManager.getDeviceReadiness("session-first")).toBe("automationReady");
     });
   });
 });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import {
   provisionDeviceSchema,
   registerDeviceTools,
@@ -7,6 +8,12 @@ import {
 } from "../../src/server/deviceTools";
 import { classifyDisplayCutout } from "../../src/utils/displayCutout";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import {
+  installNoOpReadinessDriver,
+  setDeviceReadinessProxyDriverProviderForTesting,
+} from "../helpers/stubCtrlProxySetup";
 import type {
   ExactDeviceProvisionRequest,
   ExactDeviceProvisioner,
@@ -739,6 +746,166 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.getCallCount("startDevice")).toBe(1);
     expect(readinessCalls).toBe(2);
     sessionManager.stopCleanupTimer();
+  });
+
+  // #6227 (round 6 P1): `readiness: "none"` deliberately skips CtrlProxy /
+  // accessibility-service setup in `ensureProvisionDeviceReadiness`, so the
+  // freshly-bound session must NOT be recorded as `automationReady` — that
+  // would make a later `automationReady` tool (e.g. `observe`) wrongly treat
+  // setup as already satisfied and run against a device whose CtrlProxy setup
+  // was intentionally skipped.
+  test("records booted (not automationReady) when readiness: 'none' skips CtrlProxy setup (#6227 round 6)", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+    });
+
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const response = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-readiness-none-record",
+          device: {
+            platform: "android",
+            name: "phone-api-36-a",
+            spec: {
+              runtime: "system-images;android-36;google_apis;x86_64",
+              deviceType: "pixel_9",
+            },
+          },
+          boot: true,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
+
+    expect(readinessCalls).toBe(0);
+    expect(response.sessionId).toEqual(expect.any(String));
+    expect(sessionManager.getDeviceReadiness(response.sessionId)).toBe("booted");
+    sessionManager.stopCleanupTimer();
+  });
+
+  // #6227 (round 6 P1, continued): because the session bound after
+  // `readiness: "none"` is recorded as merely `booted`, a subsequent
+  // `automationReady`-declaring tool call against that same session must
+  // still run CtrlProxy / accessibility-service setup rather than skipping it
+  // as already-satisfied.
+  test("a later automationReady tool runs setup for a session acquired via readiness: 'none' (#6227 round 6)", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {},
+    });
+
+    let setupCalls = 0;
+    const originalGetInstance = AndroidCtrlProxyManager.getInstance;
+    const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+    AndroidCtrlProxyClient.resetInstances();
+    // This test drives the real `ensureAccessibilityServiceReady` path and
+    // counts setup via the `getInstance` overrides above; restore the real
+    // readiness driver so those overrides take effect (the shared preload's
+    // no-op driver is re-installed in `finally`) — #6227.
+    setDeviceReadinessProxyDriverProviderForTesting(null);
+
+    try {
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+      const response = JSON.parse(
+        (
+          (await tool.handler({
+            operationId: "operation-readiness-none-upgrade",
+            device: {
+              platform: "android",
+              name: "phone-api-36-a",
+              spec: {
+                runtime: "system-images;android-36;google_apis;x86_64",
+                deviceType: "pixel_9",
+              },
+            },
+            boot: true,
+            readiness: "none",
+          })) as any
+        ).content[0].text,
+      );
+      const sessionUuid = response.sessionId as string;
+      expect(sessionManager.getDeviceReadiness(sessionUuid)).toBe("booted");
+
+      ToolRegistry.registerDeviceAware(
+        "automationReadyAfterProvisionProbe",
+        "Automation-ready probe after provisionDevice readiness: none",
+        z.object({ sessionUuid: z.string().optional() }),
+        async () => ({ success: true }),
+        { deviceReadiness: "automationReady" },
+      );
+
+      const automationResponse = await ToolRegistry.getTool(
+        "automationReadyAfterProvisionProbe",
+      )!.handler({
+        platform: "android",
+        sessionUuid,
+      });
+
+      expect(automationResponse).toMatchObject({ success: true });
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness(sessionUuid)).toBe("automationReady");
+    } finally {
+      AndroidCtrlProxyManager.getInstance = originalGetInstance;
+      AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
+      AndroidCtrlProxyClient.resetInstances();
+      installNoOpReadinessDriver();
+      sessionManager.stopCleanupTimer();
+    }
   });
 
   test("associates a live autolock session with a reconnected MCP client", async () => {

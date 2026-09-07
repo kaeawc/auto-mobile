@@ -17,7 +17,7 @@ import {
   type BiometricEnrollment,
   type NetworkConditionProfile,
 } from "../features/utility/DeviceState";
-import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import { deviceReadinessRank, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -2486,8 +2486,28 @@ export class SessionManager {
    * later call reusing the same session UUID can detect an upgrade is needed
    * (e.g. a prior `booted`-only call left CtrlProxy setup unprepared) rather
    * than trusting `existingSession` alone.
+   *
+   * MONOTONIC by achieved level (#6227 round 7): only ever RAISES the
+   * recorded level, never lowers it. `bindOrReuseDeviceSession` can hand back
+   * a live session already bound to the exact requested device — a session
+   * that previously reached `automationReady` through one acquisition path.
+   * A later, less-demanding acquisition on that same session (e.g.
+   * `provisionDevice({ readiness: "none" })`, or the `booted`-only branch of
+   * `ensureReadinessUpgraded`) would otherwise overwrite that recorded level
+   * with `"booted"`, silently downgrading it — a later `automationReady` tool
+   * would then trust the stale `booted` record and skip CtrlProxy/
+   * accessibility-service setup the device still needs, or an unnecessary
+   * redundant setup would run. Comparing against the currently recorded level
+   * and only writing when the new one is higher (or none has been recorded
+   * yet) closes that hole. There is currently no caller that needs to lower
+   * or clear a recorded level — a genuine reset/teardown should add a
+   * distinct, explicitly-named method rather than repurposing this recorder.
    */
   setDeviceReadiness(sessionId: string, level: DeviceReadinessLevel): void {
+    const current = this.getDeviceReadiness(sessionId);
+    if (current !== undefined && deviceReadinessRank(current) >= deviceReadinessRank(level)) {
+      return;
+    }
     this.updateSessionCache(sessionId, { deviceReadiness: level });
   }
 

@@ -4212,7 +4212,26 @@ export function registerDeviceTools() {
     if (!revalidatedSession || !getLiveProvisionDeviceSession(result)) {
       return false;
     }
-    await DaemonState.getInstance()
+    const daemonState = DaemonState.getInstance();
+    // #6227 round 7: this point confirms the persisted session is live and
+    // bound to the requested device (`getLiveProvisionDeviceSession` re-check
+    // above), and — when `args.readiness === "automation"` — that
+    // `ensureProvisionDeviceReadiness` just re-verified (or re-established, if
+    // a prior CtrlProxy connection had dropped) automation readiness for it.
+    // Record the readiness level `args.readiness` implies the same way the
+    // initial `bootExactProvisionedDevice` acquisition does
+    // (`resolveProvisionDeviceAchievedReadiness`), so a session whose cache
+    // lost its recorded level (e.g. a fresh `Session` incarnation after daemon
+    // recovery) doesn't report unrecorded readiness to a later tool call and
+    // redundantly re-run setup. `setDeviceReadiness` is monotonic, so this is
+    // a no-op when the level is already recorded at or above what applies
+    // here.
+    recordAcquiredSessionReadiness(
+      daemonState,
+      revalidatedSession.sessionId,
+      resolveProvisionDeviceAchievedReadiness(args.readiness),
+    );
+    await daemonState
       .getDevicePool()
       .attachAutolockSessionToMcpSession(revalidatedSession.sessionId, args.__mcpSessionId);
     return true;
@@ -5032,6 +5051,26 @@ export function registerDeviceTools() {
         new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
         verifiedWarmAndroidAvdIdentity,
       ));
+    if (readinessResult.preservedSessionId) {
+      // #6227 round 7: the System UI ANR recovery path above bypasses
+      // `bindBootedDeviceSession` (and therefore its own
+      // `recordAcquiredSessionReadiness` call) entirely when a preserved
+      // session is being reused. But by this point
+      // `prepareStartDeviceRunnerReadiness` has already run the *same*
+      // `ensureCtrlProxyReady` setup this function always awaits for a
+      // freshly-bound session — recovery re-verified runner readiness on the
+      // replacement device before handing back `preservedSessionId` (see
+      // `ensureRunnerReadyWithSystemUiAnrRecovery`) — so the achieved level
+      // here is unconditionally `automationReady`, exactly like the
+      // freshly-bound branch. Recording it here closes the gap where a
+      // recovered session's readiness cache stayed `undefined` and the first
+      // `automationReady` tool after recovery redundantly re-ran setup.
+      recordAcquiredSessionReadiness(
+        daemonState,
+        readinessResult.preservedSessionId,
+        "automationReady",
+      );
+    }
     state.ownershipTransferred = true;
 
     await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
@@ -5324,12 +5363,17 @@ export function registerDeviceTools() {
    * still needs. Callers must pass the readiness level actually achieved
    * (`achievedReadiness`), not assume the highest one.
    *
-   * This is only reached for a freshly-bound (non-recovered) session: the
-   * `readinessResult.preservedSessionId` recovery path in `bootAndPrepareDevice`
-   * skips `bindBootedDeviceSession` entirely, so a recovered session whose
-   * readiness was never actually re-verified after recovery stays unrecorded
-   * and still runs setup on next use, preserving the concurrency-hole fix in
-   * `isReadinessSatisfied`.
+   * Called directly (bypassing `bindBootedDeviceSession`) from
+   * `bootAndPrepareDevice`'s `readinessResult.preservedSessionId` branch too
+   * (#6227 round 7): recovery re-verifies runner readiness on the
+   * replacement device before handing back a preserved session id, so that
+   * path's achieved level is likewise always `automationReady`.
+   *
+   * The setter this delegates to (`SessionManager.setDeviceReadiness`) is
+   * monotonic by achieved level (#6227 round 7): a lower level passed here
+   * for a session that already recorded a higher one is a no-op rather than
+   * a downgrade, so callers do not need to compare against the existing
+   * record themselves.
    */
   function recordAcquiredSessionReadiness(
     daemonState: DaemonState,

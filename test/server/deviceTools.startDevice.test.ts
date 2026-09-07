@@ -657,6 +657,67 @@ describe("startDevice handler", () => {
     expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe("emulator-5556");
   });
 
+  // #6227 round 7: `bootAndPrepareDevice` bypasses `bindBootedDeviceSession`
+  // (and its `recordAcquiredSessionReadiness` call) entirely when a preserved
+  // session comes back from System UI ANR recovery. By this point
+  // `ensureCtrlProxyReady` already succeeded on the replacement device (the
+  // second `readinessAttempts` call above), so the achieved level is
+  // `automationReady` just like a freshly-bound session — it must be recorded
+  // rather than left `undefined`, or the first `automationReady` tool call
+  // after recovery would redundantly re-run CtrlProxy setup.
+  it("records automationReady for a preserved session recovered from a System UI ANR (#6227 round 7)", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.sessionUuid).toBe("owner-session");
+    expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
+  });
+
   it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

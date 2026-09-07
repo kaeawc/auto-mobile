@@ -242,6 +242,22 @@ export interface DeviceSessionManager {
 
 export type DeviceReadinessLevel = "booted" | "automationReady";
 
+/**
+ * Ordering of {@link DeviceReadinessLevel} by how much setup each represents
+ * having achieved. `SessionManager.setDeviceReadiness` (#6227 round 7) uses
+ * this to keep the recorded level monotonic — a session's readiness record
+ * may only be raised, never silently downgraded by a later, less-demanding
+ * acquisition of the same session.
+ */
+const DEVICE_READINESS_RANK: Readonly<Record<DeviceReadinessLevel, number>> = {
+  booted: 0,
+  automationReady: 1,
+};
+
+export function deviceReadinessRank(level: DeviceReadinessLevel): number {
+  return DEVICE_READINESS_RANK[level];
+}
+
 export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;

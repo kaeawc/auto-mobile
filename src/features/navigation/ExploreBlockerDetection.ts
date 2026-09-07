@@ -208,6 +208,39 @@ const ALLOW_KEYWORDS = ["allow", "allows", "while using", "only this time", "ok"
 const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
 
 /**
+ * Deny/negative-button keywords that must NEVER be tapped as the affirmative
+ * grant target (safety, issue #6241).
+ *
+ * Whole-token matching (issue #6190) cannot distinguish grant from deny here:
+ * Android's deny button reads "Don't allow", which tokenizes to
+ * `["don", "t", "allow"]` — a genuine "allow" token — so it satisfies
+ * `ALLOW_KEYWORDS`. When the deny button precedes the grant button in element
+ * order, the old handler tapped the FIRST match and silently denied the
+ * permission it set out to grant. An affirmative match is therefore accepted
+ * only when the element does NOT also match one of these deny labels, so a
+ * button carrying "allow" purely as part of a negative phrase ("Don't Allow")
+ * is excluded rather than tapped.
+ *
+ * Listed as exact tokens/phrases (see `tokenize`): "don't allow" ->
+ * `["don", "t", "allow"]`, "deny", "block", "reject", "disallow", plus the
+ * dismissive "no thanks". Matched independently on `text` and `content-desc`.
+ */
+const DENY_KEYWORDS = ["don't allow", "deny", "denied", "block", "reject", "disallow", "no thanks"];
+
+const DENY_KEYWORD_TOKENS = toKeywordTokenLists(DENY_KEYWORDS);
+
+/**
+ * True when an element is a safe affirmative grant target: it matches an
+ * "Allow" keyword AND does not match any deny/negative label (issue #6241).
+ */
+function isAffirmativeGrantElement(element: Element): boolean {
+  return (
+    matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element) &&
+    !matchesAnyKeywordInAnyField(DENY_KEYWORD_TOKENS, element)
+  );
+}
+
+/**
  * Handle permission dialog by clicking "Allow" or similar
  */
 export async function handlePermissionDialog(
@@ -222,7 +255,7 @@ export async function handlePermissionDialog(
       continue;
     }
 
-    if (matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element)) {
+    if (isAffirmativeGrantElement(element)) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;

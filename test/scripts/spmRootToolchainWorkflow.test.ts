@@ -2,14 +2,34 @@ import { describe, expect, test } from "bun:test";
 import { loadJobSteps, loadJobs, stepNamed } from "../helpers/workflowSteps";
 
 describe("root SPM toolchain floor workflow", () => {
-  test("keeps pull-request jobs off the self-hosted runner", () => {
+  // swiftlint is a deliberate, documented exception to the "PR jobs stay hosted"
+  // rule: it is the cheapest PR job to self-host (checkout + lint script only, no
+  // secrets, no Xcode toolchain, no simulator), so kaeawc-authored PRs route it to
+  // the self-hosted runner. Every other PR job must stay on a GitHub-hosted runner.
+  const SELF_HOSTED_PR_EXCEPTIONS = new Set(["swiftlint"]);
+
+  test("keeps every non-excepted pull-request job off the self-hosted runner", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     const prohibitedRunners = ["self-hosted", "automobile-mac"];
-    const selfHostedJobs = Object.entries(jobs).filter(([, job]) =>
-      prohibitedRunners.some((runner) => JSON.stringify(job["runs-on"] ?? "").includes(runner)),
-    );
+    const selfHostedJobs = Object.entries(jobs)
+      .filter(
+        ([name, job]) =>
+          !SELF_HOSTED_PR_EXCEPTIONS.has(name) &&
+          prohibitedRunners.some((runner) => JSON.stringify(job["runs-on"] ?? "").includes(runner)),
+      )
+      .map(([name]) => name);
 
     expect(selfHostedJobs).toEqual([]);
+  });
+
+  test("routes swiftlint to the self-hosted runner behind the kaeawc author guard", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const runsOn = JSON.stringify(jobs["swiftlint"]?.["runs-on"] ?? "");
+
+    expect(runsOn).toContain("automobile-mac");
+    expect(runsOn).toContain("github.event.pull_request.user.login == 'kaeawc'");
+    // Fallback to a GitHub-hosted runner for every other author.
+    expect(runsOn).toContain("macos-26");
   });
 
   test("pins the Swift package matrix to its configured Xcode floor", () => {

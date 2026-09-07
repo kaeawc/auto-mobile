@@ -1648,10 +1648,16 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    # PR workflow definitions are supplied by the pull request, so every PR job
-    # stays on a GitHub-hosted runner. Trusted post-merge work retains the
-    # automobile-mac route in merge.yml.
-    runs-on: macos-26
+    # Deliberate exception to the "PR jobs stay hosted" rule (the other PR jobs
+    # below keep that rule). SwiftLint is the cheapest PR job to self-host: it
+    # checks out and runs a lint script only — no secrets, no Xcode toolchain, no
+    # simulator — so kaeawc-authored PRs route to the self-hosted Apple Silicon
+    # runner (label automobile-mac) for fast feedback; every other author falls
+    # back to GitHub-hosted macos-26. NOTE: the author guard is a default, not a
+    # security boundary — a PR supplies its own workflow file and could target
+    # self-hosted regardless. The real gate is the repo's all_external_contributors
+    # fork-PR approval policy, which holds untrusted PRs until manually approved.
+    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:

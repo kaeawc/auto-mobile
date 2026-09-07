@@ -26,6 +26,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
+  DAEMON_LAUNCH_LOG_PATH_ENV,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
@@ -54,7 +55,11 @@ import {
 } from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { cleanupDaemonFiles, isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
+import {
+  cleanupDaemonFiles,
+  clearDaemonLaunchLogOwnerTombstoneSync,
+  isProcessRunning as isDaemonProcessRunning,
+} from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
@@ -1007,8 +1012,17 @@ export class DaemonManager implements DaemonManagerLike {
     const logPath = capturesLaunchOutput
       ? (this.heldLockLogPath ?? this.daemonLaunchLogPath())
       : devNull;
+    // Preserve the exact capture path for the child PID record. Retention uses
+    // this association instead of letting an unrelated live daemon protect all
+    // launch logs in a shared directory.
+    childEnv[DAEMON_LAUNCH_LOG_PATH_ENV] = capturesLaunchOutput ? logPath : "";
     if (capturesLaunchOutput) {
       ensureSecureLogsDirSync();
+      // `openSync(..., "w")` below starts a new launch-log generation. A
+      // same-PID manager reuse can otherwise leave a dead prior generation's
+      // exact-owner sidecar behind and let pruning delete this fresh file while
+      // its child still holds the descriptor.
+      clearDaemonLaunchLogOwnerTombstoneSync(logPath);
     }
     // Open with restricted permissions (0o600 = owner read/write only).
     // Stderr-only containers deliberately skip the file capture and do not need

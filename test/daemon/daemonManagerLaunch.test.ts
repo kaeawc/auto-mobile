@@ -62,8 +62,10 @@ describe("DaemonManager launch", () => {
     const dataDir = createTempDir("daemon-data-dir-");
     process.env.AUTOMOBILE_DATA_DIR = dataDir;
 
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
     const processSpawner: DaemonProcessSpawner = {
-      spawn: (_command: string, _args: string[], _options: SpawnOptions) => {
+      spawn: (_command: string, _args: string[], options: SpawnOptions) => {
+        capturedEnv = options.env;
         return {
           unref() {},
           once() {
@@ -109,6 +111,7 @@ describe("DaemonManager launch", () => {
     expect(existsSync(logsDir)).toBe(true);
     const launchLogs = readdirSync(logsDir).filter((name) => name.startsWith("daemon-launch"));
     expect(launchLogs.length).toBeGreaterThan(0);
+    expect(capturedEnv?.AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH).toBe(join(logsDir, launchLogs[0]));
   });
 
   test("pipes stderr without a launch capture when structured stderr logging is enabled", async () => {

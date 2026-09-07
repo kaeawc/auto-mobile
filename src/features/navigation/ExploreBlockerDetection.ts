@@ -190,11 +190,39 @@ const PERMISSION_KEYWORDS = [
 
 const PERMISSION_KEYWORD_TOKENS = toKeywordTokenLists(PERMISSION_KEYWORDS);
 
+// Broad copy matching is useful for the interactive blocker fast-path, where
+// the next observation confirms the result. Dry-run candidate removal is
+// irreversible for that plan, so require provenance or a distinctive platform
+// action label before hiding ordinary app navigation controls.
+const DISTINCTIVE_PERMISSION_ACTION_TOKENS = toKeywordTokenLists([
+  "while using",
+  "only this time",
+  "don't allow",
+  "dont allow",
+  "dontallow",
+  "do not allow",
+  "donotallow",
+  "not allow",
+  "notallow",
+  "never allow",
+  "neverallow",
+]);
+
 /**
  * Check if screen is a permission dialog
  */
 export function isPermissionDialog(elements: Element[]): boolean {
   return elements.some((el) => matchesAnyKeywordInAnyField(PERMISSION_KEYWORD_TOKENS, el));
+}
+
+function isConfirmedPermissionDialogForNavigation(elements: Element[]): boolean {
+  return elements.some((element) => {
+    const resourceId = element["resource-id"]?.toLowerCase() ?? "";
+    return (
+      resourceId.includes("permissioncontroller") ||
+      matchesAnyKeywordInAnyField(DISTINCTIVE_PERMISSION_ACTION_TOKENS, element)
+    );
+  });
 }
 
 /**
@@ -314,7 +342,8 @@ export function filterPermissionNavigationCandidates(
   candidates: Element[],
   screenElements: Element[],
 ): Element[] {
-  return isPermissionDialog(screenElements)
+  return isPermissionDialog(screenElements) &&
+    isConfirmedPermissionDialogForNavigation(screenElements)
     ? candidates.filter((element) => !isPermissionDenyElement(element))
     : candidates;
 }

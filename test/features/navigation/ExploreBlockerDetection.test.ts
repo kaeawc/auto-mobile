@@ -813,6 +813,15 @@ describe("ExploreBlockerDetection", () => {
       },
     );
 
+    test("keeps ordinary navigation controls despite broad permission-like copy", () => {
+      const accessCopy = createMockElement({ text: "Access options", clickable: false });
+      const blockUser = createMockElement({ text: "Block user" });
+
+      expect(filterPermissionNavigationCandidates([blockUser], [accessCopy, blockUser])).toEqual([
+        blockUser,
+      ]);
+    });
+
     test("keeps a valid affirmative permission label selectable", () => {
       const allow = createMockElement({ text: "Allow" });
       const deny = createMockElement({ text: "dontallow" });

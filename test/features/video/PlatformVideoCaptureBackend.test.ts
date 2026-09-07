@@ -10,7 +10,8 @@ import type {
   RecordingHandle,
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
-import type { BootedDevice } from "../../../src/models";
+import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
+import { type BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -440,6 +441,132 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
       expect(result.codec).toBe("h264");
       expect(probedPaths).toEqual([outputPath]);
+    });
+
+    // issue #6291: stopping immediately after start races screenrecord's own
+    // flush on the device, so a fixed 1s wait isn't always enough — poll the
+    // device file's size until it stabilizes before ever attempting the pull.
+    test("polls the device file size until it stabilizes before pulling (issue #6291)", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      // Not flushed yet, then a size that stabilizes across two checks.
+      fakeClient.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
+        "0",
+        "512",
+        "512",
+      ]);
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const outputPath = path.join(tempDir, "finalize.mp4");
+      await fsPromises.writeFile(outputPath, Buffer.alloc(512, 1));
+      const handle = buildAndroidStopHandle(outputPath, fakeProcess);
+
+      const result = await backend.stop(handle);
+
+      expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(3);
+      expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(1);
+      expect(result.sizeBytes).toBe(512);
+
+      // Assert ORDER, not just totals: a regression that moved the finalize
+      // poll to run after `adb pull` would still satisfy the two counts above
+      // while reintroducing the #6291 race. Every finalize `stat` poll must
+      // precede the pull in the merged call sequence.
+      const interactionLog = fakeClient.getInteractionLog();
+      const statIndices = interactionLog
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => entry.kind === "command" && entry.text.includes("shell stat -c %s"))
+        .map(({ index }) => index);
+      const pullIndex = interactionLog.findIndex(
+        (entry) => entry.kind === "spawn" && entry.text.startsWith("pull "),
+      );
+
+      expect(statIndices).toHaveLength(3);
+      expect(pullIndex).toBeGreaterThan(-1);
+      expect(Math.max(...statIndices)).toBeLessThan(pullIndex);
+    });
+
+    test("retains a recording that never stabilizes instead of pulling a truncated file", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      fakeClient.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
+        "128",
+        "256",
+        "384",
+        "512",
+        "640",
+      ]);
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "unstable.mp4"), fakeProcess);
+
+      await expect(backend.stop(handle)).rejects.toThrow(/did not finish writing/);
+
+      expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(5);
+      expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
+    });
+
+    test("retains a confirmed zero-byte device file instead of accepting an empty pull", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      fakeClient.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+      ]);
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "empty.mp4"), fakeProcess);
+
+      await expect(backend.stop(handle)).rejects.toThrow(/did not finish writing/);
+
+      expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
+    });
+
+    // issue #6291: a stop-right-after-start pull failure must not leak the raw
+    // `adb pull failed with exit code N` — it should retry, then surface a
+    // structured ActionableError while still cleaning up the device temp file
+    // so the recording is not orphaned on-device.
+    test("surfaces a genuine pull failure as an ActionableError after retrying (issue #6291)", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      fakeClient.setSpawnExit("pull", 1);
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "fail.mp4"), fakeProcess);
+
+      let caught: unknown;
+      try {
+        await backend.stop(handle);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect((caught as Error).message).not.toBe("adb pull failed with exit code 1");
+      expect((caught as Error).message).toContain("after 3 attempts");
+      expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(3);
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
     });
 
     test("still removes the /sdcard temp file when the pull itself fails", async () => {

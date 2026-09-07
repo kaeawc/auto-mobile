@@ -221,7 +221,16 @@ export class WcagAudit {
     // dp gate must be scaled by density the same way checkFormInputLabels
     // scales its gap gate (labelGapThresholdPx) — otherwise a 33dp target on an
     // xxhdpi device (~100px) is compared against a raw 44px and wrongly passes.
-    const dpi = density && density > 0 ? density : WcagAudit.FALLBACK_DENSITY_DPI;
+    //
+    // Unlike checkFormInputLabels, this check must NOT reuse FALLBACK_DENSITY_DPI
+    // (320) when density is unreported: for a proximity *gap* gate a higher
+    // assumed density widens the gate (safer), but for this *minimum-size* gate
+    // a higher assumed density raises the pixel threshold (44dp * 320/160 =
+    // 88px), which flags legitimate targets on real mdpi (160 DPI) devices with
+    // unreported density as too-small (issue #6196). BASELINE_DENSITY_DPI (160,
+    // i.e. no scaling) preserves pre-#6192 density-unknown behavior and only
+    // changes when density IS reported.
+    const dpi = density && density > 0 ? density : WcagAudit.BASELINE_DENSITY_DPI;
     const minSizePx = minSizeDp * (dpi / WcagAudit.BASELINE_DENSITY_DPI);
 
     for (const element of elements) {

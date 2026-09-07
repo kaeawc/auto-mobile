@@ -581,15 +581,19 @@ describe("WcagAudit", function () {
       expect(sizeViolations[0].message).toContain("40x40dp");
     });
 
-    it("falls back to a sensible default density when none is reported, consistent with checkFormInputLabels", async function () {
-      // No density passed at all — exercises the same fallback path as
-      // labelGapThresholdPx's FALLBACK_DENSITY_DPI (320 == xhdpi/2x), so a
-      // 44dp target on that assumed density is ~88px.
+    it("falls back to baseline density (160, no scaling) when none is reported — not FALLBACK_DENSITY_DPI (#6196)", async function () {
+      // No density passed at all. Unlike checkFormInputLabels' proximity gate
+      // (which safely widens under FALLBACK_DENSITY_DPI==320 when density is
+      // unreported), the minimum-size gate must NOT reuse that higher
+      // fallback: 320 would raise the 44dp gate to 88px and wrongly flag a
+      // 60x60px target that's fine on a real mdpi (160 DPI) device whose
+      // runner didn't report density. This exercises the exact false
+      // positive from issue #6196.
       const elements: Element[] = [
         {
-          bounds: { left: 0, top: 0, right: 88, bottom: 88 }, // exactly 44dp at 320 DPI
+          bounds: { left: 0, top: 0, right: 60, bottom: 60 }, // 60dp on a real mdpi device
           clickable: true,
-          text: "Perfect",
+          text: "Fine on real mdpi",
         },
       ];
 
@@ -597,6 +601,25 @@ describe("WcagAudit", function () {
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(0);
+    });
+
+    it("still flags a genuinely too-small target when density is unreported", async function () {
+      // 30x30px with no density reported (falls back to 160 DPI, i.e. 1px ==
+      // 1dp) is a genuine 30dp target, under the 44dp minimum, and must still
+      // be flagged — the #6196 fix must not silence real violations.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+          clickable: true,
+          text: "Genuinely too small",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(1);
+      expect(sizeViolations[0].message).toContain("30x30dp");
     });
 
     it("never rounds a failing dimension's reported dp up to the minimum", async function () {

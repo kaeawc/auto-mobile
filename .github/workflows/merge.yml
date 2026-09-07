@@ -959,7 +959,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
           - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
     steps:
       - name: "Git Checkout"
@@ -1010,7 +1009,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
           - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
     steps:
       - name: "Git Checkout"
@@ -1051,7 +1049,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
           - { name: "Xcode 26", runner: "macos-26", xcode: "26.5" }
     steps:
       - name: "Git Checkout"
@@ -1506,17 +1503,12 @@ jobs:
 
   swift-code-coverage:
     name: "Swift Code Coverage"
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      - name: "Select Xcode 15.4"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: "15.4"
 
       - name: "Generate Swift Coverage Badge"
         run: bash scripts/coverage/generate-swift-coverage.sh

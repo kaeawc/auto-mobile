@@ -134,6 +134,23 @@ export const LOCK_FILE_PATH = lockFilePathOverride
   : `/tmp/auto-mobile-daemon-${uid}.lock`;
 
 /**
+ * Env var the manager stamps on a daemon child it spawns while HOLDING the
+ * O_EXCL startup lock (issue #6232). The child's control-socket bind reads it to
+ * decide whether it may reclaim an existing socket unconditionally: a daemon
+ * launched this way inherits the manager's lock protection, so it keeps today's
+ * unconditional stale-socket reclaim; a daemon launched BY HAND never sees this
+ * flag and so its bind must instead probe for a live sibling and refuse to
+ * clobber it. Set to "1" when present.
+ */
+export const DAEMON_STARTUP_LOCK_HELD_ENV = "AUTOMOBILE_DAEMON_STARTUP_LOCK_HELD";
+
+/**
+ * Whether THIS process was launched under the manager's O_EXCL startup lock
+ * (issue #6232). Read once at module load from {@link DAEMON_STARTUP_LOCK_HELD_ENV}.
+ */
+export const DAEMON_LAUNCHED_UNDER_STARTUP_LOCK = process.env[DAEMON_STARTUP_LOCK_HELD_ENV] === "1";
+
+/**
  * Connection timeout in milliseconds
  * How long to wait for daemon to respond to a request.
  * Set to 120s to accommodate long-running operations like device cold boot (26-60s+).

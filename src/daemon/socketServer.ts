@@ -38,6 +38,10 @@ import {
 } from "./constants";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
+  DaemonSocketReachability,
+  type DaemonSocketReachabilityLike,
+} from "./daemonSocketReachability";
+import {
   ListChangedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
   type ListChangedKind,
@@ -116,6 +120,61 @@ import {
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
+
+/**
+ * Bound on the observation-only liveness probe a LOCK-LESS bind runs against an
+ * existing socket before it would unlink it (issue #6232). Kept short — it only
+ * needs to answer "is a daemon accepting right now?" — and matches the sibling
+ * probe timeouts in {@link DaemonManager}.
+ */
+const SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
+
+/**
+ * Seams governing whether a socket bind may reclaim an EXISTING socket file
+ * (issue #6232).
+ *
+ * The unlink-before-`listen()` in {@link UnixSocketServer.start} is safe only
+ * when it runs under `DaemonManager`'s `O_EXCL` startup lock — that lock is what
+ * serializes daemon starts so the unlink cannot race a live winner. A daemon
+ * launched BY HAND (invoking the entry point with `--daemon-mode` directly)
+ * reaches the same bind holding no such lock; if it unlinked a live sibling's
+ * socket it would brick every existing client (the #6140 failure mode via a
+ * different actor). So a lock-less bind must PROBE the existing socket and refuse
+ * to clobber a live listener, while a locked bind keeps today's unconditional
+ * reclaim of a stale (post-crash) socket.
+ */
+export interface SocketBindGuardOptions {
+  /**
+   * Whether this daemon process was launched under `DaemonManager`'s `O_EXCL`
+   * startup lock. Only such a locked bind may unlink a LIVE sibling's socket.
+   * Defaults to `true` so every existing (already lock-coordinated) construction
+   * path keeps its exact behavior; the production daemon passes the value it
+   * derives from its launch environment, and a lock-less/hand-launched daemon
+   * passes `false`.
+   */
+  startupLockHeld?: boolean;
+  /**
+   * Observation-only reachability probe used by a lock-less bind. Injected so a
+   * test can drive the live/stale outcome deterministically without a real
+   * socket; defaults to the real {@link DaemonSocketReachability}.
+   */
+  reachability?: DaemonSocketReachabilityLike;
+}
+
+/**
+ * Resolve {@link SocketBindGuardOptions} to their concrete defaults (issue #6232).
+ * Kept out of the constructor so its `??` fallbacks do not add to the
+ * constructor's already-at-threshold complexity.
+ */
+function resolveSocketBindGuard(bindGuard: SocketBindGuardOptions): {
+  startupLockHeld: boolean;
+  reachability: DaemonSocketReachabilityLike;
+} {
+  return {
+    startupLockHeld: bindGuard.startupLockHeld ?? true,
+    reachability: bindGuard.reachability ?? new DaemonSocketReachability(),
+  };
+}
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -335,6 +394,14 @@ export class UnixSocketServer {
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
+  /**
+   * Whether this bind runs under `DaemonManager`'s `O_EXCL` startup lock and may
+   * therefore reclaim (unlink) an existing socket unconditionally (issue #6232).
+   * A lock-less bind must not clobber a live sibling.
+   */
+  private readonly startupLockHeld: boolean;
+  /** Observation-only liveness probe used before a LOCK-LESS bind's reclaim (issue #6232). */
+  private readonly socketReachability: DaemonSocketReachabilityLike;
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
@@ -406,12 +473,16 @@ export class UnixSocketServer {
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
+    bindGuard: SocketBindGuardOptions = {},
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
     this.idGenerator = idGenerator;
+    const resolvedBindGuard = resolveSocketBindGuard(bindGuard);
+    this.startupLockHeld = resolvedBindGuard.startupLockHeld;
+    this.socketReachability = resolvedBindGuard.reachability;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -437,9 +508,15 @@ export class UnixSocketServer {
     // access control (issue #4750).
     await ensureSecureDir(path.dirname(this.socketPath));
 
-    // Remove existing socket file if it exists
+    // Reclaim any existing socket file before listen(). Under DaemonManager's
+    // O_EXCL startup lock this unlink is safe (starts are serialized, so it only
+    // ever removes a stale post-crash socket). A LOCK-LESS bind — a hand-launched
+    // daemon that bypassed the manager — must NOT unlink a live sibling's socket:
+    // doing so bricks every existing client (issue #6232, the #6140 failure mode
+    // via a bypassed launch path). So probe first and refuse when a live daemon
+    // still owns it.
     if (existsSync(this.socketPath)) {
-      await unlink(this.socketPath);
+      await this.reclaimExistingSocketBeforeBind();
     }
 
     this.server = createServer((socket) => {
@@ -481,6 +558,39 @@ export class UnixSocketServer {
         reject(error);
       });
     });
+  }
+
+  /**
+   * Reclaim an existing socket file before `listen()`, refusing to clobber a live
+   * sibling when this bind is not lock-protected (issue #6232).
+   *
+   * A locked bind (the normal `DaemonManager.start()` path) keeps today's
+   * behavior exactly: unlink unconditionally, since the O_EXCL startup lock has
+   * already serialized starts and any leftover socket is a stale post-crash one.
+   *
+   * A LOCK-LESS bind (a hand-launched daemon) first runs an observation-only
+   * liveness probe. If a daemon is still accepting on the path, it throws an
+   * ActionableError rather than unlinking — only the locked bind is allowed to
+   * remove a live socket. If the probe finds no live listener the socket is
+   * genuinely stale, so it is safe to unlink and bind. The probe itself never
+   * touches the socket file, so this introduces no new destructive actor on the
+   * path (the #6140 brick class stays fixed).
+   */
+  private async reclaimExistingSocketBeforeBind(): Promise<void> {
+    if (!this.startupLockHeld) {
+      const reachable = await this.socketReachability.isReachable(
+        this.socketPath,
+        SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
+      );
+      if (reachable) {
+        throw new ActionableError(
+          `Refusing to bind: another AutoMobile daemon is already listening on ${this.socketPath}. ` +
+            "This process did not acquire the daemon startup lock, so it must not unlink a live daemon's " +
+            "socket out from under its clients. Stop the running daemon or run `--daemon restart` to replace it.",
+        );
+      }
+    }
+    await unlink(this.socketPath);
   }
 
   /**

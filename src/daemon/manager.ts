@@ -26,6 +26,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
+  DAEMON_STARTUP_LOCK_HELD_ENV,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
@@ -990,6 +991,11 @@ export class DaemonManager implements DaemonManagerLike {
     // resolves to the same locations this manager polls.
     const childEnv = { ...process.env };
     childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
+    // startUnlocked only runs while this manager holds the O_EXCL startup lock, so
+    // the child it spawns inherits that lock's protection: its control-socket bind
+    // may reclaim a stale socket unconditionally. A hand-launched daemon never gets
+    // this flag and so must refuse to clobber a live sibling (issue #6232).
+    childEnv[DAEMON_STARTUP_LOCK_HELD_ENV] = "1";
     if (this.pidFilePath !== PID_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
     }

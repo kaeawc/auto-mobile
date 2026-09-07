@@ -26,7 +26,7 @@ import {
 import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
+import { PID_FILE_PATH, DAEMON_VERSION, DAEMON_LAUNCHED_UNDER_STARTUP_LOCK } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
@@ -557,6 +557,10 @@ export class Daemon {
       FeatureFlagService.getInstance(),
       undefined,
       this.idGenerator,
+      // A hand-launched daemon (no startup lock) must refuse to unlink a live
+      // sibling's socket; only a manager-launched, lock-protected daemon may
+      // reclaim it (issue #6232).
+      { startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK },
     );
     logger.info("Starting Unix socket server...");
     startupBenchmark.startPhase("socketServerStart");
@@ -2141,6 +2145,10 @@ export class Daemon {
           FeatureFlagService.getInstance(),
           undefined,
           this.idGenerator,
+          // Same launch-derived authorization as the initial bind (issue #6232):
+          // an in-process recovery rebind reclaims only its own now-dead socket,
+          // and a hand-launched daemon still must not clobber a live sibling.
+          { startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK },
         );
         try {
           await this.socketServer.start();

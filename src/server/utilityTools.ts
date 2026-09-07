@@ -235,7 +235,7 @@ export const displayConfigSchema = withJsonSchemaOverride(
             "its inherited default. Android only. Omit to leave unchanged.",
         ),
       density: z
-        .union([z.number().min(1), z.enum(["smaller", "default", "larger"])])
+        .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
         .optional()
         .describe(
           "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +

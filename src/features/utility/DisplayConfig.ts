@@ -305,12 +305,15 @@ export class DisplayConfig {
   private async getIosSimulatorConfig(): Promise<DisplayConfigResult> {
     try {
       const theme = await this.readIosTheme();
+      if (theme === undefined) {
+        throw new Error("simctl did not report a readable Simulator appearance");
+      }
       return {
         success: true,
         deviceId: this.device.deviceId,
         platform: this.device.platform,
         supported: this.support(),
-        current: theme !== undefined ? { theme } : {},
+        current: { theme },
       };
     } catch (error) {
       logger.warn(
@@ -686,10 +689,18 @@ export class DisplayConfig {
     return `shell wm density ${scaled}`;
   }
 
-  /** Read a command's stdout, tolerating an empty/failed read as an empty string. */
+  /**
+   * Read a command's stdout, rejecting shell-reported failures rather than
+   * fabricating a restoration baseline from partial output.
+   */
   private async run(adb: AdbExecutor, command: string): Promise<string> {
     const result = await adb.executeCommand(command, undefined, undefined, true);
-    return result.stdout ?? "";
+    const stdout = result.stdout ?? "";
+    const stderr = result.stderr ?? "";
+    if (outputLooksLikeShellFailure(stdout, stderr)) {
+      throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
+    }
+    return stdout;
   }
 
   /**

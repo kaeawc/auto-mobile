@@ -122,9 +122,35 @@ describe("DisplayConfig getConfig", () => {
     expect(result.success).toBe(true);
     expect(result.supported.density).toBe("partial");
   });
+
+  test("fails an iOS Simulator read when simctl does not report an appearance", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(["ui", iosSimulator.deviceId, "appearance"], { stdout: "\n" });
+
+    const result = await new DisplayConfig(iosSimulator, { simctl }).getConfig();
+
+    expect(result.success).toBe(false);
+    expect(result.current).toBeUndefined();
+  });
 });
 
 describe("DisplayConfig setConfig", () => {
+  test("does not mutate after a shell-reported unreadable baseline", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult(FONT_GET, { stdout: "", stderr: "Error: permission denied" });
+    client.setCommandResult(DENSITY_GET, "Physical density: 440\n");
+    client.setCommandResult(NIGHT_GET, "Night mode: no\n");
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2,
+    });
+
+    expect(result.success).toBe(false);
+    expect(client.getCommandCalls().map((call) => call.command)).not.toContain(
+      "shell settings put system font_scale 2",
+    );
+  });
   test("sets font scale via settings put and returns applied + previous", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();

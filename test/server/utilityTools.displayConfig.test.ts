@@ -19,4 +19,9 @@ describe("displayConfigSchema", () => {
 
     expect(parsed.success).toBe(true);
   });
+
+  test("rejects densities below Android's wm density minimum", () => {
+    expect(displayConfigSchema.safeParse({ density: 71 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: 72 }).success).toBe(true);
+  });
 });

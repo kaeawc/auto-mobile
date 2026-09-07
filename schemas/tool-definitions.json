@@ -1104,7 +1104,7 @@
           "anyOf": [
             {
               "type": "number",
-              "minimum": 1
+              "minimum": 72
             },
             {
               "type": "string",

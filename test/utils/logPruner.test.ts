@@ -341,3 +341,71 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
     });
   });
 });
+
+describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
+  test("calls daemonPidFiles/readDaemonPid at most once across many launch logs in one sweep", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLogs = Array.from({ length: 20 }, (_, i) => `daemon-launch-${5000 + i}.log`);
+      for (const file of launchLogs) {
+        await writeFile(path.join(dir, file), "old bootstrap output");
+      }
+
+      let enumerateCalls = 0;
+      let readCalls = 0;
+      const ownPidFile = "/tmp/auto-mobile-daemon-nsX.pid";
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false, // every spawning manager AND discovered pid is dead
+        daemonPidFiles: () => {
+          enumerateCalls += 1;
+          return { pidFiles: [ownPidFile], uncertain: false };
+        },
+        readDaemonPid: () => {
+          readCalls += 1;
+          return undefined;
+        },
+        isDaemonRunning: () => false,
+      });
+
+      // One retention decision covers the whole sweep — 20 launch logs must not
+      // trigger 20 pidfile-directory scans + reads (O(n) event-loop-blocking
+      // filesystem work).
+      expect(enumerateCalls).toBe(1);
+      expect(readCalls).toBe(1);
+
+      const after = await readdir(dir);
+      for (const file of launchLogs) {
+        expect(after).not.toContain(file); // confidently no owner -> all pruned
+      }
+    });
+  });
+
+  test("never calls daemonPidFiles when the sweep contains no daemon-launch logs", async () => {
+    await withTempLogDir(async (dir) => {
+      await writeFile(path.join(dir, "stdio-777.log"), "x");
+
+      let enumerateCalls = 0;
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false,
+        daemonPidFiles: () => {
+          enumerateCalls += 1;
+          return { pidFiles: [], uncertain: false };
+        },
+        readDaemonPid: () => undefined,
+        isDaemonRunning: () => false,
+      });
+
+      // Lazily computed: never needed because no daemon-launch log was swept.
+      expect(enumerateCalls).toBe(0);
+    });
+  });
+});

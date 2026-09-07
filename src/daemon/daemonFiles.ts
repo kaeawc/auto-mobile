@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { logger } from "../utils/logger";
@@ -212,19 +212,22 @@ function logSafeDebug(message: string, error: unknown): void {
  * all co-located pid files lets the pruner retain a launch log while ANY
  * namespace's daemon is alive.
  *
- * A single-directory scan cannot discover namespaces whose pid files live
- * OUTSIDE the scanned directory. Two cases make discovery incomplete, and both
- * set `uncertain` so the pruner fails closed (retains launch logs):
- *   - a CUSTOM pid-file namespace (`pidFilePath` is not the default location):
- *     peers sharing this log dir may keep their pid files in other directories
- *     (e.g. `/state/a/daemon.pid`, `/state/b/daemon.pid`) that this scan can't
- *     see; and
- *   - an unreadable pid-file directory: the scan could not enumerate even the
- *     co-located siblings.
+ * A single-directory scan can NEVER prove it discovered every namespace that
+ * could share this log directory — `AUTOMOBILE_LOG_DIR` and
+ * `AUTOMOBILE_DAEMON_PID_FILE_PATH` are independent overrides
+ * (`src/daemon/constants.ts:119-123`), so a peer can leave the log directory at
+ * its default (making it discoverable-looking) while relocating ONLY its pid
+ * file to an arbitrary directory this scan never visits (e.g. `/state/a/daemon.pid`).
+ * That combination is invisible to a directory listing regardless of whether
+ * `pidFilePath` itself is the default location or a custom one — an
+ * unreadable pid-file directory is a second, narrower way discovery can fail.
+ * `uncertain` is therefore ALWAYS set so every caller — default namespace
+ * included — fails closed (retains launch logs) rather than assuming
+ * exhaustiveness it cannot prove (issue #6194). `pidFiles` is still returned
+ * and still checked for liveness first: a genuinely discovered live peer is
+ * caught immediately, and `uncertain` only decides the residual "found nothing
+ * alive" case.
  *
- * In the DEFAULT namespace every daemon (default + bench + isolated) co-locates
- * its pid file in the same directory, so the scan is exhaustive and `uncertain`
- * stays false — launch logs there are still pruned once no daemon is alive.
  * Deduplicated, and always includes `pidFilePath` so the caller never loses its
  * own-namespace check.
  */
@@ -233,7 +236,10 @@ export function listDaemonPidFilesSync(
 ): DaemonPidFileEnumeration {
   const dir = path.dirname(pidFilePath);
   const found = new Set<string>([pidFilePath]);
-  let uncertain = false;
+  // A directory-listing scan can never prove it enumerated every namespace
+  // sharing this log directory (see docstring) — always uncertain, regardless
+  // of whether `pidFilePath` is the default location or a custom one.
+  const uncertain = true;
   try {
     for (const entry of readdirSync(dir)) {
       if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
@@ -241,19 +247,9 @@ export function listDaemonPidFilesSync(
       }
     }
   } catch (error) {
-    // The pid-file directory could not be read, so co-located sibling namespaces
-    // could not be enumerated — carry uncertainty so the pruner retains launch
-    // logs (a live daemon may exist in a namespace we failed to discover).
-    uncertain = true;
+    // The pid-file directory could not be read either, so not even the
+    // co-located siblings could be enumerated this time.
     logSafeDebug(`src/daemon/daemonFiles.ts pidfile dir scan failed: ${error}`, error);
-  }
-  // A custom pid namespace may be shared, by other custom namespaces, through a
-  // common AUTOMOBILE_LOG_DIR while its peers keep pid files in directories this
-  // scan never visits. That is undiscoverable here, so mark it uncertain and let
-  // the pruner fail closed (issue #6194). The default namespace co-locates every
-  // pid file in one directory and stays certain.
-  if (path.resolve(pidFilePath) !== path.resolve(DEFAULT_PID_FILE_PATH)) {
-    uncertain = true;
   }
   return { pidFiles: [...found], uncertain };
 }
@@ -275,13 +271,18 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
 /**
  * Read the owning daemon PID for a launch-log RETENTION decision, distinguishing
  * a CONFIDENTLY-absent pid file (returns `undefined` — no daemon recorded in that
- * namespace) from a present-but-unreadable/malformed one (THROWS — ambiguous).
+ * namespace) from a present-but-unreadable/malformed/schema-invalid one (THROWS
+ * — ambiguous).
  *
  * The pruner treats a throw as "a live daemon may still own this launch log" and
- * retains it, so an unreadable pid file must NOT be swallowed to `undefined` the
- * way {@link readPidFileDataSync} does — that would let a stale launch log be
- * pruned while a live daemon still holds the inherited fd (issue #6194). No
- * logger reference, so it is safe to call during the cyclic logger import.
+ * retains it, so an unreadable OR schema-invalid pid file must NOT be swallowed
+ * to `undefined`/an unusable value the way {@link readPidFileDataSync} does —
+ * that would let a stale launch log be pruned while a live daemon still holds
+ * the inherited fd (issue #6194). A present record whose `pid` field is not a
+ * positive integer (missing, non-numeric, `0`, negative, or non-finite) is just
+ * as ambiguous as a JSON syntax error: it is neither a confidently-absent file
+ * nor a usable pid, so it throws rather than returning it as-is. No logger
+ * reference, so it is safe to call during the cyclic logger import.
  */
 export function readDaemonPidForRetentionSync(
   pidFilePath: string = PID_FILE_PATH,
@@ -292,7 +293,14 @@ export function readDaemonPidForRetentionSync(
   // A read/parse failure propagates on purpose: an existing but unreadable pid
   // file is ambiguous, and the pruner must fail closed (retain) on ambiguity.
   const data = JSON.parse(readFileSync(pidFilePath, "utf-8")) as PidFileData;
-  return data.pid;
+  const pid = data?.pid;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+    // A present but schema-invalid record (e.g. `{}`, `{"pid":"123"}`) is
+    // ambiguous, not confidently absent — throw so the caller retains rather
+    // than silently treating this namespace as dead.
+    throw new Error(`Pid file at ${pidFilePath} is present but does not contain a valid pid`);
+  }
+  return pid;
 }
 
 export function isProcessRunning(pid: number): boolean {

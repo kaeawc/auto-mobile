@@ -164,7 +164,7 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   // (issue #6194). Consider every co-located namespace's pid file, treating a
   // launch log as protected if ANY of those daemons is alive; fall back to the
   // single-namespace `isDaemonRunning` when no pid files were enumerated.
-  const anyDaemonHoldsLaunchLog = (): boolean => {
+  const computeAnyDaemonHoldsLaunchLog = (): boolean => {
     const enumerate = opts.daemonPidFiles;
     const readDaemonPid = opts.readDaemonPid;
     if (enumerate && readDaemonPid) {
@@ -197,6 +197,21 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
       }
     }
     return isDaemonRunning();
+  };
+
+  // The retention decision above is invariant for the whole sweep: it depends
+  // only on daemon-namespace state, never on which file is being considered. A
+  // directory with a backlog of dead-manager launch logs would otherwise redo a
+  // full PID-directory scan + per-file reads once PER launch log (issue #6194) —
+  // O(launch logs × pid files) synchronous filesystem work blocking the event
+  // loop. Compute it at most once, lazily (only if a launch log is actually
+  // encountered), and reuse the cached verdict for the rest of this sweep.
+  let cachedAnyDaemonHoldsLaunchLog: boolean | undefined;
+  const anyDaemonHoldsLaunchLog = (): boolean => {
+    if (cachedAnyDaemonHoldsLaunchLog === undefined) {
+      cachedAnyDaemonHoldsLaunchLog = computeAnyDaemonHoldsLaunchLog();
+    }
+    return cachedAnyDaemonHoldsLaunchLog;
   };
 
   let entries: string[];

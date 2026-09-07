@@ -2480,7 +2480,6 @@ export class Daemon {
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
         { name: "managed ADB server", run: this.stopManagedAdbServer },
-        { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
         {
           name: "database write drain",
           run: async () => {
@@ -2532,6 +2531,15 @@ export class Daemon {
             await logger.closeAfterFlush();
           },
         },
+        // Removed LAST, only once logging has fully flushed and closed: the pid
+        // record is this daemon's ONLY externally-observable liveness signal, and
+        // the detached process keeps holding the inherited launch-log fd through
+        // every earlier stage above. Removing it any earlier opens a window where
+        // a concurrent pruning sweep in another process reads "no daemon" while
+        // this one is still alive and still writing, and unlinks a launch log out
+        // from under it (issue #6194). The unconditional `process.once("exit", ...)`
+        // cleanup remains as a safety net for shutdown paths that never reach here.
+        { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
       ],
       (message, error) => logger.warn(message, error),
     );

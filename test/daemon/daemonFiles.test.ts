@@ -146,10 +146,30 @@ describe("listDaemonPidFilesSync (cross-namespace enumeration, issue #6194)", ()
     expect(listDaemonPidFilesSync(own).uncertain).toBe(true);
   });
 
-  test("is confident (uncertain=false) for the default pid namespace", () => {
-    // The default namespace co-locates every daemon's pid file in one directory,
-    // so a single scan is exhaustive. The default /tmp dir is readable.
-    expect(listDaemonPidFilesSync(DEFAULT_PID_FILE_PATH).uncertain).toBe(false);
+  test("is ALSO uncertain for the default pid namespace, even with a clean sibling scan", () => {
+    // A peer can leave AUTOMOBILE_LOG_DIR at its default (sharing this log dir)
+    // while relocating ONLY its pid file via AUTOMOBILE_DAEMON_PID_FILE_PATH to a
+    // directory this scan never visits — invisible to a directory listing no
+    // matter how "default" the scanning caller's own namespace is. A clean
+    // default-dir scan can therefore never be treated as exhaustive (issue #6194).
+    expect(listDaemonPidFilesSync(DEFAULT_PID_FILE_PATH).uncertain).toBe(true);
+  });
+
+  test("still discovers co-located sibling pid files even though the enumeration is uncertain", () => {
+    // Uncertainty gates the pruner's fallback decision, not what gets discovered:
+    // a sibling that IS visible must still be returned so its liveness can be
+    // checked first (a discovered live peer short-circuits to "retain" without
+    // needing the uncertain flag at all).
+    const dir = makeDir();
+    const own = join(dir, "auto-mobile-daemon-1000.pid");
+    const bench = join(dir, "auto-mobile-daemon-bench-abc.pid");
+    writeFileSync(own, "{}");
+    writeFileSync(bench, "{}");
+
+    const result = listDaemonPidFilesSync(own);
+    expect(result.uncertain).toBe(true);
+    expect(result.pidFiles).toContain(own);
+    expect(result.pidFiles).toContain(bench);
   });
 });
 
@@ -187,6 +207,30 @@ describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", ()
     writeFileSync(pidFile, "{ this is not json");
     // The pruner relies on this throw to fail closed and retain the launch log.
     expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+  });
+
+  test("THROWS on syntactically-valid JSON missing the pid field", () => {
+    const dir = makeDir();
+    const pidFile = join(dir, "daemon.pid");
+    writeFileSync(pidFile, "{}");
+    // Present but schema-invalid — ambiguous, not confidently absent.
+    expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+  });
+
+  test("THROWS when pid is a non-numeric string", () => {
+    const dir = makeDir();
+    const pidFile = join(dir, "daemon.pid");
+    writeFileSync(pidFile, JSON.stringify({ pid: "123" }));
+    expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+  });
+
+  test("THROWS when pid is zero, negative, or non-integer", () => {
+    const dir = makeDir();
+    for (const badPid of [0, -1, 1.5]) {
+      const pidFile = join(dir, `daemon-${badPid}.pid`);
+      writeFileSync(pidFile, JSON.stringify({ pid: badPid }));
+      expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+    }
   });
 });
 

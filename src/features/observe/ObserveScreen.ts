@@ -1510,7 +1510,10 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const initialTimestamp = this.resolveObservationTimestampMs(result);
-    const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
+    // `minTimestamp` is interpreted by the device hierarchy source. If this
+    // partial result has no hierarchy-owned device timestamp, omit the floor;
+    // substituting the host timer would cross clock domains.
+    const minTimestamp = initialTimestamp === undefined ? undefined : initialTimestamp + 1;
     let hierarchy: ObserveResult["viewHierarchy"];
     try {
       // `minTimestamp` rejects the cached (initial) tree; skipping the fresh wait
@@ -1626,7 +1629,9 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const initialTimestamp = this.resolveObservationTimestampMs(result);
-    const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
+    // See the overlay recapture path above: never substitute host time for a
+    // device-side freshness floor when the initial hierarchy has no timestamp.
+    const minTimestamp = initialTimestamp === undefined ? undefined : initialTimestamp + 1;
     let hierarchy: ObserveResult["viewHierarchy"];
     try {
       // `minTimestamp` rejects the cached (initial) tree; skipping the fresh
@@ -1945,17 +1950,7 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
-    const candidate = result.viewHierarchy?.updatedAt ?? result.updatedAt;
-    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
-      return candidate;
-    }
-    if (typeof candidate === "string") {
-      const parsed = Date.parse(candidate);
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
-    }
-    return undefined;
+    return result.viewHierarchy?.updatedAt;
   }
 
   /**

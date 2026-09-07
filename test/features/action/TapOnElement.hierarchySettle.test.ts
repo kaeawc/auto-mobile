@@ -204,6 +204,7 @@ describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
     const fresh = {
       packageName: "com.example.app",
       hierarchy: { node: { marker: "fresh" } },
+      updatedAt: 42,
       screenWidth: 1080,
       screenHeight: 1920,
     } as unknown as ViewHierarchyResult;
@@ -216,6 +217,34 @@ describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
     expect(observation.freshness?.verified).toBe(true);
     expect(observation.freshness?.warning).toBeUndefined();
     expect(observation.freshness?.category).toBeUndefined();
+    // The result carries the device capture time, never the FakeTimer/host
+    // clock used to measure the surrounding action.
+    expect(observation.freshness?.actualTimestamp).toBe(42);
+  });
+
+  test("replaceObservationHierarchy does not promote an incomplete live replacement", () => {
+    const tap = createTapOnElement();
+    const staleFreshness = {
+      isFresh: false as const,
+      verified: false,
+      category: "cache_age" as const,
+      warning: "served from host-side cache without re-verification",
+    };
+    const observation = makeObservation({
+      viewHierarchy: makeHierarchy("old"),
+      freshness: { ...staleFreshness },
+    });
+    const incomplete = {
+      packageName: "com.example.app",
+      hierarchy: { node: { marker: "partial" } },
+      updatedAt: 42,
+      ctrlProxyIncomplete: true,
+    } as unknown as ViewHierarchyResult;
+
+    (tap as any).replaceObservationHierarchy(observation, incomplete, true);
+
+    expect(observation.viewHierarchy).toBe(incomplete);
+    expect(observation.freshness).toEqual(staleFreshness);
   });
 
   test("replaceObservationHierarchy does NOT promote a non-cache-age freshness failure (#6284 P1)", () => {

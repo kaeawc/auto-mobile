@@ -2,7 +2,7 @@ import type { ObserveResult } from "../../models";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { updatedAtToMillis } from "./observeTimestamp";
+import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
 /**
  * Shared observe poll loop for the settle / wait-for-condition primitives
@@ -61,6 +61,25 @@ export interface ObservePollOutcome {
  */
 function isScreenOff(observation: ObserveResult): boolean {
   return observation.wakefulness === "Asleep";
+}
+
+/**
+ * A poll can advance a device-clock floor only when it carries a complete
+ * hierarchy and that hierarchy itself carries the device capture timestamp.
+ * The top-level observation timestamp can be host-created for a partial base
+ * result, so it must never participate in this contract.
+ */
+function deviceCaptureTimestamp(observation: ObserveResult): number | undefined {
+  const hierarchy = observation.viewHierarchy;
+  if (
+    !hierarchy ||
+    typeof hierarchy.hierarchy !== "object" ||
+    hierarchy.hierarchy === null ||
+    "error" in hierarchy.hierarchy
+  ) {
+    return undefined;
+  }
+  return hierarchyUpdatedAtToMillis(hierarchy);
 }
 
 /**
@@ -136,6 +155,10 @@ export async function pollObserveUntil(
   // Set once any capture is strictly newer than the entering reference — from
   // then on the floor relaxes to inclusive so a static screen can settle.
   let hasPostInvocationEvidence = false;
+  // Preserve the newest complete, non-regressing device capture for timeout
+  // results. A late stale fallback must not replace evidence that already met a
+  // raised floor (e.g. 10 -> 30 -> 20).
+  let newestTrustworthyObservation: ObserveResult | undefined;
 
   while (true) {
     throwIfAborted(options.signal);
@@ -158,20 +181,32 @@ export async function pollObserveUntil(
     polls++;
     throwIfAborted(options.signal);
 
-    const observedMs = updatedAtToMillis(observation.updatedAt);
+    const observedMs = deviceCaptureTimestamp(observation);
     // Unseeded: the first observation is a throwaway baseline. It establishes
     // the entering reference (and the floor) but can never itself be terminal
     // evidence — it may be the pre-call cache the loop must read past.
-    if (enteringReference === undefined) {
+    if (enteringReference === undefined && observedMs !== undefined) {
       enteringReference = observedMs;
     }
     // `Math.max` guarantees a stale/cached capture can never LOWER the floor.
-    deviceFloor = deviceFloor === undefined ? observedMs : Math.max(deviceFloor, observedMs);
+    const meetsPriorFloor =
+      observedMs !== undefined && (deviceFloor === undefined || observedMs >= deviceFloor);
+    if (observedMs !== undefined) {
+      deviceFloor = deviceFloor === undefined ? observedMs : Math.max(deviceFloor, observedMs);
+    }
     // Strictly newer than the entering/baseline capture => a genuine
     // post-invocation read the caller may act on.
-    const isPostInvocation = observedMs > enteringReference;
+    const isPostInvocation =
+      observedMs !== undefined &&
+      enteringReference !== undefined &&
+      observedMs > enteringReference &&
+      meetsPriorFloor;
     if (isPostInvocation) {
       hasPostInvocationEvidence = true;
+    }
+
+    if (meetsPriorFloor) {
+      newestTrustworthyObservation = observation;
     }
 
     if (isScreenOff(observation)) {
@@ -189,7 +224,12 @@ export async function pollObserveUntil(
     previous = observation;
 
     if (timer.now() - start >= options.timeoutMs) {
-      return { observation, polls, waitMs: timer.now() - start, stopped: false };
+      return {
+        observation: newestTrustworthyObservation ?? observation,
+        polls,
+        waitMs: timer.now() - start,
+        stopped: false,
+      };
     }
 
     await timer.sleep(options.pollMs);

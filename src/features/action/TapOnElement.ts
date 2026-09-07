@@ -70,7 +70,7 @@ import type {
   WaitForCondition,
   WaitForConditionResult,
 } from "../observe/interfaces/WaitForCondition";
-import { updatedAtToMillis } from "../observe/observeTimestamp";
+import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
@@ -657,7 +657,7 @@ export class TapOnElement extends BaseVisualChange {
         // the device-authored `updatedAt` of the capture we already hold, not
         // the host clock, so a device whose clock trails the daemon still
         // clears the floor with a genuinely fresh repeat capture.
-        initialMinTimestampMs: updatedAtToMillis(currentObservation.updatedAt),
+        initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
       },
     );
     const effect = this.deriveTapEffect(previousObservation, effectObservation.observation);
@@ -747,7 +747,7 @@ export class TapOnElement extends BaseVisualChange {
         pollMs: POST_TAP_EFFECT_POLL_MS,
         signal,
         // Device-clock-domain floor seed (issue #6284). See method doc.
-        initialMinTimestampMs: updatedAtToMillis(currentObservation.updatedAt),
+        initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
       },
     );
 
@@ -930,12 +930,26 @@ export class TapOnElement extends BaseVisualChange {
    */
   private markObservationFreshAfterSyncRefresh(observeResult: ObserveResult): void {
     const freshness = observeResult.freshness;
-    if (freshness?.isFresh === false && freshness.category === "cache_age") {
+    const hierarchy = observeResult.viewHierarchy;
+    const actualTimestamp = hierarchyUpdatedAtToMillis(hierarchy);
+    const hasCompleteLiveHierarchy =
+      hierarchy !== undefined &&
+      typeof hierarchy.hierarchy === "object" &&
+      hierarchy.hierarchy !== null &&
+      !("error" in hierarchy.hierarchy) &&
+      hierarchy.ctrlProxyIncomplete !== true &&
+      hierarchy.fresh !== false &&
+      actualTimestamp !== undefined;
+    if (
+      hasCompleteLiveHierarchy &&
+      freshness?.isFresh === false &&
+      freshness.category === "cache_age"
+    ) {
       observeResult.freshness = {
         ...freshness,
         isFresh: true,
         verified: true,
-        actualTimestamp: this.timer.now(),
+        actualTimestamp,
         ageMs: 0,
         staleDurationMs: undefined,
         warning: undefined,

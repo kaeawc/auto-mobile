@@ -25,6 +25,7 @@ function obs(updatedAt: number, marker: string): ObserveResult {
     viewHierarchy: {
       packageName: "com.example",
       hierarchy: { node: { marker } as any },
+      updatedAt,
     },
   } as ObserveResult;
 }
@@ -96,6 +97,57 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     // post-invocation reached) -> max(30,20)=30. The 4th poll's floor is 30, NOT
     // the stale 20 — the same stale hash cannot be re-served.
     expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 30, 30]);
+  });
+
+  test("does not accept or return a regressed terminal sample after raising the floor", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // The final 20 is later than the entering baseline (10), but it is older
+    // than the 30 already accepted into the device floor. It must not become
+    // terminal evidence or replace the newer trustworthy evidence on timeout.
+    fake.setObserveSequence([obs(10, "baseline"), obs(30, "newest"), obs(20, "regressed")]);
+    let polls = 0;
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 300, pollMs: 150 },
+      () => ++polls >= 3,
+    );
+
+    expect(outcome.stopped).toBe(false);
+    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("newest");
+    expect(outcome.observation.updatedAt).toBe(30);
+    expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 30]);
+  });
+
+  test("does not use a host-created observation timestamp as a device floor", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const hostStampedPartial = {
+      ...obs(1_000_000, "partial"),
+      // A base observation's top-level timestamp is host metadata. No
+      // hierarchy timestamp means this capture cannot establish device
+      // freshness or be accepted as terminal evidence.
+      viewHierarchy: { packageName: "com.example", hierarchy: { node: { marker: "partial" } } },
+    } as ObserveResult;
+    fake.setObserveSequence([hostStampedPartial, obs(20, "device-baseline"), obs(30, "device")]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150 },
+      () => true,
+    );
+
+    expect(outcome.stopped).toBe(true);
+    expect(outcome.observation.updatedAt).toBe(30);
+    // The second read is still unfloored: no device timestamp was available
+    // from the partial first result to turn into a device-side minTimestamp.
+    // It establishes the actual device baseline for the third read.
+    expect(fake.getExecuteMinTimestamps()).toEqual([0, 0, 21]);
   });
 
   test("a seeded poll that re-serves the entering capture is never accepted as terminal (#6284 P1)", async () => {

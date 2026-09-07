@@ -24,6 +24,7 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     viewHierarchy: {
       packageName: "com.example",
       hierarchy: { node: node as any },
+      updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
     },
     ...extra,
   } as ObserveResult;
@@ -36,6 +37,7 @@ function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): 
     viewHierarchy: {
       packageName: "com.apple.mobilesafari",
       hierarchy: { node: node as any },
+      updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
     },
     screenIdentity: {
       platform: "ios",

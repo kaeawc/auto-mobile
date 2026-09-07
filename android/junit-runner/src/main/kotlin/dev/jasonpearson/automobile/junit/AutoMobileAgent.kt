@@ -134,11 +134,22 @@ open class AutoMobileAgent(
       // prompt is already redacted by the executor (#6092); this closes the loop channel. With no
       // secrets the raw client is used unchanged (no wrapper allocated).
       //
-      // Known limitation (follow-up): the wrapper also redacts the intermediate observe result that
-      // the composite WaitForTool searches locally — its own output to the model is synthesized and
-      // safe, so there is no leak, but a wait target that is a substring of an on-screen secret can
-      // falsely time out. A clean fix hands composite tools the raw client; deferred to keep this
-      // security change scoped.
+      // #6145 fix: the wrapper also redacts the intermediate observe result that the composite
+      // WaitForTool searches locally. Its own output to the model is synthesized ("found" /
+      // "timeout") and never leaks that observe text, so redacting the copy it searches only
+      // produces a false timeout when the wait target is a substring of an on-screen secret value
+      // — it buys no security. So WaitForTool is wired to the RAW (unredacted-on-success) client
+      // below via createAIAgentWithMCPTools's rawMcpClient param, while every pass-through tool
+      // (whose result DOES reach the model) keeps using agentMcpClient, the redacting wrapper.
+      //
+      // #6145 follow-up: a FAILED observe call bypasses that "never leaks" argument —
+      // DefaultMCPClient
+      // throws with the server's response body / error in the message, which can echo on-screen
+      // data,
+      // and WaitForTool logs it on every failed poll. rawMcpClient is wrapped in
+      // FailureRedactingMCPClient so a successful result still reaches WaitForTool byte-for-byte
+      // unredacted (the local match keeps working), while a thrown exception's message is redacted
+      // before WaitForTool can log or surface it.
       //
       // Normalize the incoming concrete secret values into every scrub form (NFC/NFD + the
       // transport-encoding depths) HERE, at the public recovery entry point, so the loop is safe
@@ -148,8 +159,16 @@ open class AutoMobileAgent(
       val redactionValues = SecretRedactor.secretValues(secretValues)
       val agentMcpClient =
         if (redactionValues.isEmpty()) mcpClient else RedactingMCPClient(mcpClient, redactionValues)
+      val waitForRawMcpClient =
+        if (redactionValues.isEmpty()) mcpClient
+        else FailureRedactingMCPClient(mcpClient, redactionValues)
       val aiAgent =
-        aiAgentFactory.createAIAgentWithMCPTools(modelConfig, agentMcpClient, maxToolCalls)
+        aiAgentFactory.createAIAgentWithMCPTools(
+          modelConfig,
+          agentMcpClient,
+          maxToolCalls,
+          waitForRawMcpClient,
+        )
 
       // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
       // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path;
@@ -680,7 +699,19 @@ open class AutoMobileAgent(
     }
   }
 
-  /** Wait for elements to appear or conditions to be met */
+  /**
+   * Wait for elements to appear or conditions to be met.
+   *
+   * A composite tool: unlike the pass-through tools above, its RESULT to the model is a synthesized
+   * "found"/"timeout" string, never the observe text it searches. So [AutoMobileMCPToolFactory]
+   * wires this to a client that is RAW (unredacted) on a successful call — searching a redacted
+   * copy would falsely time out whenever the wait target is a substring of an on-screen secret
+   * value, with no security benefit (issue #6145; the intermediate observe text itself never
+   * reaches the model through this tool). During recovery that client is
+   * [FailureRedactingMCPClient], which still redacts a thrown exception's message — a FAILED
+   * observe call's error content is a different leak channel this tool logs on every failed poll
+   * attempt, unlike the synthesized success result.
+   */
   class WaitForTool(private val mcpClient: MCPClient) :
     SimpleTool<WaitForTool.Args>(
       argsType = typeToken<Args>(),
@@ -857,8 +888,31 @@ open class AutoMobileAgent(
     }
   }
 
-  /** Helper to create all MCP tools for an agent */
-  class AutoMobileMCPToolFactory(private val mcpClient: MCPClient) {
+  /**
+   * Helper to create all MCP tools for an agent.
+   *
+   * [mcpClient] backs every pass-through tool (its result reaches the model, so during recovery
+   * this is the redacting wrapper). [rawMcpClient] backs [WaitForTool] alone — a composite tool
+   * whose model-facing result is a synthesized string, so redacting the observe text it searches
+   * locally only produces false timeouts, not a leak (issue #6145) — though a FAILED call is still
+   * redacted before it can be logged (see [FailureRedactingMCPClient]). Defaults to [mcpClient] so
+   * non-recovery callers (no secrets, no wrapper) are unaffected.
+   *
+   * `@JvmOverloads` on the primary constructor (issue #6145 P2 — binary compatibility): a bare
+   * Kotlin default parameter only generates a synthetic mask/marker constructor, not the original
+   * one-argument JVM descriptor. Replacing the old `(MCPClient)` constructor with a defaulted
+   * two-argument one therefore removed `<init>(MCPClient)V` entirely, breaking already-compiled
+   * consumers that call `AutoMobileMCPToolFactory(mcpClient)` directly with `NoSuchMethodError`.
+   * `@JvmOverloads` makes Kotlin emit the original one-argument constructor (delegating to the
+   * two-argument one with `rawMcpClient` defaulted to [mcpClient], the pre-#6145 behavior) in
+   * addition to the two-argument one, so both descriptors exist.
+   */
+  class AutoMobileMCPToolFactory
+  @JvmOverloads
+  constructor(
+    private val mcpClient: MCPClient,
+    private val rawMcpClient: MCPClient = mcpClient,
+  ) {
     fun createAllTools(): List<SimpleTool<*>> =
       listOf(
         ObserveTool(mcpClient),
@@ -867,7 +921,7 @@ open class AutoMobileAgent(
         InputTextTool(mcpClient),
         SwipeTool(mcpClient),
         ScrollTool(mcpClient),
-        WaitForTool(mcpClient),
+        WaitForTool(rawMcpClient),
         GoBackTool(mcpClient),
         PressButtonTool(mcpClient),
         ClearTextTool(mcpClient),
@@ -902,11 +956,40 @@ open class AutoMobileAgent(
   interface AIAgentFactory {
     fun createAIAgent(config: ModelConfig): AIAgent<String, String>
 
+    /**
+     * The original (pre-#6145) abstract method, kept as its OWN method rather than folded into the
+     * 4-arg overload below via a defaulted `rawMcpClient` parameter (issue #6145 P2 — binary
+     * compatibility). A Kotlin default parameter value is resolved at the CALL SITE from the
+     * declaration visible to the compiler; it is not something an implementing class provides, so
+     * it does nothing to preserve what an implementor's `.class` actually links against. Adding
+     * `rawMcpClient` as a 4th defaulted parameter directly on this method (the #6145 mistake)
+     * silently replaced the 3-arg abstract method the interface published with a 4-arg one — any
+     * external [AIAgentFactory] implementer compiled against the old 3-arg descriptor would stop
+     * satisfying the interface (`AbstractMethodError` at link time), because their `.class` only
+     * ever contained a 3-arg method.
+     */
     fun createAIAgentWithMCPTools(
       config: ModelConfig,
       mcpClient: MCPClient,
       maxToolCalls: Int = 5,
     ): AIAgent<String, String>
+
+    /**
+     * New overload (#6145): [rawMcpClient] backs [WaitForTool] with a client that is raw
+     * (unredacted) on success while [mcpClient] backs every pass-through tool. Carries a default
+     * body — it is NOT abstract — that forwards to the 3-arg method above, discarding the separate
+     * raw client (the pre-#6145 behavior: [WaitForTool] shared whatever client every other tool
+     * used). That keeps this method optional: an external [AIAgentFactory] implementer that
+     * predates #6145 and only overrides the 3-arg method above still compiles and links against
+     * this interface without ever knowing this overload exists. [DefaultAIAgentFactory] overrides
+     * it directly to route `rawMcpClient` to [WaitForTool] distinctly.
+     */
+    fun createAIAgentWithMCPTools(
+      config: ModelConfig,
+      mcpClient: MCPClient,
+      maxToolCalls: Int,
+      rawMcpClient: MCPClient,
+    ): AIAgent<String, String> = createAIAgentWithMCPTools(config, mcpClient, maxToolCalls)
   }
 
   interface TimeProvider {
@@ -1016,16 +1099,30 @@ open class AutoMobileAgent(
       )
     }
 
+    // The original (pre-#6145) abstract method's mandatory override; see the interface doc on the
+    // 3-arg createAIAgentWithMCPTools for why this is a distinct method rather than a defaulted
+    // rawMcpClient parameter. Delegates to the 4-arg overload with rawMcpClient=mcpClient — no
+    // separate raw client, matching the pre-#6145 behavior this method's callers expect.
     override fun createAIAgentWithMCPTools(
       config: ModelConfig,
       mcpClient: MCPClient,
       maxToolCalls: Int,
+    ): AIAgent<String, String> =
+      createAIAgentWithMCPTools(config, mcpClient, maxToolCalls, mcpClient)
+
+    override fun createAIAgentWithMCPTools(
+      config: ModelConfig,
+      mcpClient: MCPClient,
+      maxToolCalls: Int,
+      rawMcpClient: MCPClient,
     ): AIAgent<String, String> {
       val executor = createPromptExecutor(config)
       val model = selectModel(config.provider)
 
-      // Create AutoMobile MCP tools using class-based pattern (no reflection)
-      val toolFactory = AutoMobileMCPToolFactory(mcpClient)
+      // Create AutoMobile MCP tools using class-based pattern (no reflection). WaitForTool gets the
+      // raw client (#6145); every other, pass-through tool gets mcpClient (the redacting wrapper
+      // during recovery).
+      val toolFactory = AutoMobileMCPToolFactory(mcpClient, rawMcpClient)
       val toolRegistry = ToolRegistry { toolFactory.createAllTools().forEach { tool(it) } }
 
       val systemPrompt =

@@ -631,6 +631,26 @@ describe("Rotate", () => {
       expect(fakeTimer.getSleepCallCount()).toBe(2);
     });
 
+    test("does not report a lone final opposite-orientation sample as a confirmed reversion (#6211)", async () => {
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult(""), // settle attempt 1: unreadable
+        createExecResult(""), // settle attempt 2: unreadable
+        createExecResult("mRotation=1"), // settle attempt 3: lone landscape sample
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+      expect(fakeTimer.getSleepCallCount()).toBe(2);
+    });
+
     test("does not accept a lone match on the FINAL settle-wait attempt after an earlier non-adjacent match resets the streak (#6211)", async () => {
       // Alternate sequence from the review finding: portrait, landscape,
       // portrait. The first attempt matches but is immediately broken by the

@@ -127,30 +127,20 @@ export class Rotate extends BaseVisualChange {
    * threshold (#6211 review).
    */
   private resolveExhaustedSettleWait(
-    requestedOrientation: "portrait" | "landscape",
-    lastValue: number | null,
     lastAchieved: "portrait" | "landscape" | null,
+    lastStreakCount: number,
     lastConfirmed: { value: number | null; achieved: "portrait" | "landscape" | null },
   ): number | null {
-    // A lone match on this FINAL attempt has no opportunity for a confirming
-    // subsequent sample — unconditionally returning it here would
-    // reintroduce the exact false "requested orientation held" report the
-    // stability check exists to prevent, so report it as unconfirmed (null)
-    // rather than accepted.
-    if (lastAchieved === requestedOrientation) {
-      return null;
+    // A lone final sample, whether it matches the requested orientation or
+    // contradicts it, has no opportunity for a confirming later sample. Do
+    // not turn that unsettled observation into either a definitive success or
+    // a definitive reversion. A later non-null sample supersedes an earlier
+    // confirmed streak unless that later sample completes its own confirmed
+    // streak. An unreadable final sample leaves the earlier confirmed streak
+    // as the newest trustworthy evidence.
+    if (lastAchieved !== null) {
+      return lastStreakCount >= Rotate.SETTLE_WAIT_STABLE_READS ? lastConfirmed.value : null;
     }
-    // A final read that does NOT match the requested orientation carries no
-    // such risk — the caller reports it as "reverted", which understates
-    // confidence rather than overstating it — so it is returned as-is.
-    if (lastValue !== null) {
-      return lastValue;
-    }
-    // The final attempt failed to read at all (unparseable/unavailable). That
-    // read FAILURE is not a contradicting sample, so it must not discard an
-    // opposite orientation that two earlier consecutive samples already
-    // confirmed stable — falling back to "unknown" here would throw away
-    // real evidence just because the very last poll came back empty.
     return lastConfirmed.achieved !== null ? lastConfirmed.value : null;
   }
 
@@ -191,12 +181,7 @@ export class Rotate extends BaseVisualChange {
         await this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS);
       }
     }
-    return this.resolveExhaustedSettleWait(
-      requestedOrientation,
-      lastValue,
-      lastAchieved,
-      lastConfirmed,
-    );
+    return this.resolveExhaustedSettleWait(lastAchieved, streak.count, lastConfirmed);
   }
 
   /**

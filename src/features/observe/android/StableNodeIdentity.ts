@@ -25,12 +25,28 @@ import { createHash } from "crypto";
  *
  * Content-identical duplicates (repeated spacer rows, empty Compose click
  * surfaces) share a hash by construction, so the k-th duplicate (document
- * order) gets an ordinal `-k` suffix. That keeps `view-id` unique within a
- * capture (a property the path UUIDs provided) and lets the diff layer's
+ * order) gets an ordinal `-k` suffix — and, critically, so does the FIRST
+ * (`-1`): whenever a hash occurs more than once in a capture, EVERY occurrence
+ * is ordinal-suffixed, and the bare `s-<hash>` form is emitted only for a hash
+ * that occurs exactly once. That keeps `view-id` unique within a capture (a
+ * property the path UUIDs provided) and lets the diff layer's
  * uniqueness-on-both-sides guard re-pair duplicates in encounter order — the
  * same best-effort heuristic `diffObserveResult` already applies to identical
  * same-path siblings. Distinct rows still cannot false-merge: an ordinal only
  * ever disambiguates nodes whose *entire* stable subtree content is identical.
+ *
+ * Reserving the bare form for genuinely-unique content is what makes a bare id
+ * safe to trust across a capture boundary (issue #6229). Previously the first
+ * of a duplicate pair `[A, B]` took the bare `s-<hash>` and `B` took `-2`; when
+ * `A` was then removed before the next capture, `B` became the sole survivor
+ * and was reassigned that same bare `s-<hash>` — so a caller who had observed
+ * `A`'s bare id silently retargeted `B` (a content-identical peer the caller
+ * never selected). Emitting `-1` for `A` instead means the id a caller observes
+ * for a member of a duplicate group is never the bare form, so the reassigned
+ * survivor's bare id can no longer collide with it: the stale selector misses
+ * (or, while ≥2 peers remain, `ElementFinder`'s ambiguity guard rejects it)
+ * rather than acting on the wrong node. The bare `s-<hash>` invariant is now
+ * "this content was unique when observed".
  *
  * Rewriting at ingest (rather than in the Kotlin extractor) means it applies
  * to every already-released runner — the runner APK is a pinned release, so a
@@ -51,8 +67,13 @@ import { createHash } from "crypto";
 export const GENERATED_VIEW_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** Prefix marking a content-derived stable id emitted by this module. */
-export const STABLE_VIEW_ID_PREFIX = "s-";
+/**
+ * Versioned prefix for content-derived ids. The previous `s-<hash>` namespace
+ * issued a bare id to the first member of a duplicate group; a later singleton
+ * can reproduce that unsafe id after an upgrade. A new namespace makes every
+ * post-upgrade selector disjoint from those legacy bare ids.
+ */
+export const STABLE_VIEW_ID_PREFIX = "s2-";
 
 /**
  * Fixed hex-character width of the content hash this module emits (see the
@@ -86,13 +107,17 @@ function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] 
 
 /**
  * Rewrite every generated (UUID-shaped) `view-id` under `root` — in place —
- * into a content-derived stable id: `s-<hash16>` for the first node with a
- * given content hash in document order, `s-<hash16>-<k>` for the k-th
- * content-identical duplicate. Nodes whose `view-id` is absent or not
- * UUID-shaped (resource-id-backed ids, already-stable ids) are left untouched,
- * so the pass is a no-op on non-CtrlProxy hierarchies and idempotent on its
- * own output. Accepts the converted hierarchy root (or any node-like object);
- * a non-object input is ignored.
+ * into a content-derived stable id: `s-<hash16>` for a node whose content hash
+ * is UNIQUE in the capture, and `s-<hash16>-<k>` (document-order, 1-based) for
+ * EVERY node in a content-identical duplicate group — including the first,
+ * which takes `-1` rather than the bare form (issue #6229). Reserving the bare
+ * form for unique content keeps a reassigned survivor's bare id from silently
+ * colliding with a suffixed id a caller observed for a since-removed peer.
+ * Nodes whose `view-id` is absent or not UUID-shaped (resource-id-backed ids,
+ * already-stable ids) are left untouched, so the pass is a no-op on
+ * non-CtrlProxy hierarchies and idempotent on its own output. Accepts the
+ * converted hierarchy root (or any node-like object); a non-object input is
+ * ignored.
  */
 export function assignStableViewIds(root: unknown): Map<string, string> {
   if (!root || typeof root !== "object") {
@@ -131,8 +156,32 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   };
   compute(rootNode);
 
-  // Pass 2 (pre-order): assign ids, suffixing content-identical duplicates by
-  // document-order occurrence so ids stay unique within the capture.
+  // Pass 2a (pre-order): count, per content hash, how many nodes this pass will
+  // actually rewrite. A hash rewritten more than once is a content-identical
+  // duplicate group; one rewritten exactly once is unique content. Only
+  // rewritten (generated-view-id) nodes count — a resource-id-backed node that
+  // happens to share a content hash is left untouched and never competes for
+  // the bare form.
+  const rewrittenCounts = new Map<string, number>();
+  const countRewritten = (node: Record<string, unknown>): void => {
+    const viewId = node["view-id"];
+    if (typeof viewId === "string" && GENERATED_VIEW_ID_PATTERN.test(viewId)) {
+      const hash = contentHash.get(node)!;
+      rewrittenCounts.set(hash, (rewrittenCounts.get(hash) ?? 0) + 1);
+    }
+    for (const child of toChildArray(node)) {
+      countRewritten(child);
+    }
+  };
+  countRewritten(rootNode);
+
+  // Pass 2b (pre-order): assign ids. A hash that occurs once gets the bare
+  // `s-<hash>` form; a content-identical duplicate group gets a 1-based
+  // document-order ordinal on EVERY member — including the first (`-1`) — so
+  // the bare form is reserved for unique content and can never be silently
+  // reassigned to a since-removed peer's suffixed id (issue #6229). Ordinals
+  // stay unique within the capture, preserving the diff layer's encounter-order
+  // re-pair of duplicates.
   const occurrences = new Map<string, number>();
   const rewrittenViewIds = new Map<string, string>();
   const assign = (node: Record<string, unknown>): void => {
@@ -141,8 +190,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       const hash = contentHash.get(node)!;
       const seen = (occurrences.get(hash) ?? 0) + 1;
       occurrences.set(hash, seen);
-      const stableViewId =
-        seen === 1 ? `${STABLE_VIEW_ID_PREFIX}${hash}` : `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`;
+      const isDuplicateGroup = (rewrittenCounts.get(hash) ?? 0) > 1;
+      const stableViewId = isDuplicateGroup
+        ? `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`
+        : `${STABLE_VIEW_ID_PREFIX}${hash}`;
       node["view-id"] = stableViewId;
       rewrittenViewIds.set(viewId, stableViewId);
     }

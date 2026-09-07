@@ -62,6 +62,10 @@ describe("Window.getActive deadline + abort plumbing (#6289)", () => {
   });
 
   test("bounds every read with the caller budget and threads the signal", async () => {
+    // The contract below is about budget propagation, not the host wall clock.
+    // Keep the observation clock deterministic so a millisecond boundary cannot
+    // reduce the second sub-read's remaining budget.
+    window = new Window(device, new FakeAdbClientFactory(fakeAdb), scriptedClock([0]));
     fakeAdb.setDefaultResponse(
       execResult("imeControlTarget in display# 0 Window{1 u0 com.example.app/.Main}"),
     );

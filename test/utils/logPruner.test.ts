@@ -360,6 +360,10 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        // File timestamp granularity on Windows can place a just-created file
+        // slightly after Date.now(); use an explicit future sweep clock so this
+        // test exercises its ownership verdict rather than filesystem timing.
+        now: Date.now() + 60_000,
         isProcessAlive: () => false,
         // A custom sibling namespace may be undiscoverable, but the recorded
         // owner of THIS exact launch log is present and positively dead.
@@ -382,6 +386,9 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        // See the matching dead-owner test above: avoid depending on a fresh
+        // Windows file's timestamp being earlier than the test clock.
+        now: Date.now() + 60_000,
         isProcessAlive: () => false,
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
         readDaemonOwner: () => undefined,

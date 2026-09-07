@@ -5,9 +5,78 @@ import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelper
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { ResourceRegistry } from "./resourceRegistry";
 import type { KeyValueType } from "../features/storage/storageTypes";
+import {
+  clearAndroidKeyValueFileDirect,
+  isSharedPreferencesInspectionDisabledError,
+  removeAndroidKeyValueDirect,
+  setAndroidKeyValueDirect,
+} from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { logger } from "../utils/logger";
+
+/** The subset of AndroidCtrlProxyClient the key-value tool handlers depend on. */
+export interface AndroidKeyValueClient {
+  setPreference(
+    appId: string,
+    fileName: string,
+    key: string,
+    value: string,
+    type: KeyValueType,
+  ): Promise<void>;
+  removePreference(appId: string, fileName: string, key: string): Promise<void>;
+  clearPreferenceStore(appId: string, fileName: string): Promise<void>;
+  listDataStores(appId: string, adapterName: string): Promise<unknown>;
+  getDataStore(appId: string, adapterName: string, name: string): Promise<unknown>;
+}
+
+/** The subset of IOSCtrlProxyClient the key-value tool handlers depend on. */
+export interface IosKeyValueClient {
+  setPreference(
+    appId: string,
+    fileName: string,
+    key: string,
+    value: string,
+    type: KeyValueType,
+  ): Promise<void>;
+  removePreference(appId: string, fileName: string, key: string): Promise<void>;
+  clearPreferenceStore(appId: string, fileName: string): Promise<void>;
+}
+
+export interface StorageToolsDependencies {
+  androidClientFactory: (device: BootedDevice) => AndroidKeyValueClient;
+  iosClientFactory: (device: BootedDevice) => IosKeyValueClient;
+  adbClientFactory: AdbClientFactory;
+}
+
+let storageToolsDependencies: StorageToolsDependencies | null = null;
+
+function getStorageToolsDependencies(): StorageToolsDependencies {
+  if (!storageToolsDependencies) {
+    storageToolsDependencies = {
+      androidClientFactory: (device) =>
+        AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
+      iosClientFactory: (device) => IOSCtrlProxyClient.getInstance(device),
+      adbClientFactory: defaultAdbClientFactory,
+    };
+  }
+  return storageToolsDependencies;
+}
+
+/** Test-only seam: inject fakes for the Android/iOS storage clients and adb factory. */
+export function setStorageToolsDependenciesForTesting(
+  overrides: Partial<StorageToolsDependencies>,
+): void {
+  storageToolsDependencies = { ...getStorageToolsDependencies(), ...overrides };
+}
+
+export function resetStorageToolsDependencies(): void {
+  storageToolsDependencies = null;
+}
 
 // Valid types for key-value storage (union of Android and iOS types)
 const KEY_VALUE_TYPES = [
@@ -188,6 +257,57 @@ function buildEntriesUri(deviceId: string, packageName: string, fileName: string
 }
 
 /**
+ * Runs an Android SharedPreferences key-value mutation through the SDK ContentProvider
+ * (`viaSdk`) and, if that fails specifically because SharedPreferences inspection is
+ * disabled on the app, falls back to the same direct-file `adb shell run-as` XML edit
+ * that `setPreference`/`getPreference` always use (`viaDirectFile`). This keeps
+ * write/delete/clear reachability consistent for the same app + SharedPreferences file
+ * (issue #6292) — a caller who can write a preference through `setPreference` can also
+ * delete or clear it through `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`, instead
+ * of the delete/clear paths being wrongly gated behind a capability the write path never
+ * needed.
+ *
+ * A failure that is NOT the "inspection disabled" gate (e.g. a genuine transport error,
+ * or the direct-file fallback itself failing because the app is not debuggable) is
+ * surfaced as-is so the caller sees the real, actionable cause rather than a misleading
+ * fallback error.
+ */
+/**
+ * DataStore (unlike SharedPreferences) has no on-device XML file to fall back to — it is
+ * only reachable through the host app's registered adapter — so a disabled inspection
+ * capability is a genuine dead end here. Say what enables it (issue #6292 requirement 3)
+ * instead of surfacing the SDK's bare "SharedPreferences inspection is disabled".
+ */
+function dataStoreInspectionDisabledError(appId: string): ActionableError {
+  return new ActionableError(
+    `SharedPreferences inspection is disabled for ${appId}, so its DataStore adapter is unreachable. ` +
+      "Enable it in the app's debug build by calling SharedPreferencesInspector.setEnabled(true) " +
+      "(dev.jasonpearson.automobile.sdk.storage) during initialization, typically in Application.onCreate().",
+  );
+}
+
+async function withSharedPreferencesInspectionFallback(
+  device: BootedDevice,
+  appId: string,
+  fileName: string,
+  viaSdk: () => Promise<void>,
+  viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
+): Promise<void> {
+  try {
+    await viaSdk();
+  } catch (error) {
+    if (!isSharedPreferencesInspectionDisabledError(error)) {
+      throw error;
+    }
+    logger.info(
+      `[storageTools] SharedPreferences inspection is disabled for ${appId}; falling back to direct-file access for ${fileName} (issue #6292)`,
+    );
+    const adb = getStorageToolsDependencies().adbClientFactory.create(device);
+    await viaDirectFile(adb);
+  }
+}
+
+/**
  * Validate that the type is supported on the given platform. Throws ActionableError with guidance if not.
  *
  * Exported so the daemon `ide/*` socket key-value handlers can enforce the same
@@ -229,14 +349,29 @@ export function registerStorageTools(): void {
       }
 
       if (device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
-        if (args.value === null) {
-          await client.removePreference(args.appId, storageName, args.key);
-        } else {
-          await client.setPreference(args.appId, storageName, args.key, args.value, args.type);
-        }
+        const client = getStorageToolsDependencies().androidClientFactory(device);
+        await withSharedPreferencesInspectionFallback(
+          device,
+          args.appId,
+          storageName,
+          () =>
+            args.value === null
+              ? client.removePreference(args.appId, storageName, args.key)
+              : client.setPreference(args.appId, storageName, args.key, args.value!, args.type),
+          (adb) =>
+            args.value === null
+              ? removeAndroidKeyValueDirect(adb, args.appId, storageName, args.key)
+              : setAndroidKeyValueDirect(
+                  adb,
+                  args.appId,
+                  storageName,
+                  args.key,
+                  args.value!,
+                  args.type,
+                ),
+        );
       } else if (device.platform === "ios") {
-        const client = IOSCtrlProxyClient.getInstance(device);
+        const client = getStorageToolsDependencies().iosClientFactory(device);
         if (args.value === null) {
           await client.removePreference(args.appId, storageName, args.key);
         } else {
@@ -271,10 +406,16 @@ export function registerStorageTools(): void {
     try {
       const storageName = resolveStorageName(args);
       if (device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
-        await client.removePreference(args.appId, storageName, args.key);
+        const client = getStorageToolsDependencies().androidClientFactory(device);
+        await withSharedPreferencesInspectionFallback(
+          device,
+          args.appId,
+          storageName,
+          () => client.removePreference(args.appId, storageName, args.key),
+          (adb) => removeAndroidKeyValueDirect(adb, args.appId, storageName, args.key),
+        );
       } else if (device.platform === "ios") {
-        const client = IOSCtrlProxyClient.getInstance(device);
+        const client = getStorageToolsDependencies().iosClientFactory(device);
         await client.removePreference(args.appId, storageName, args.key);
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
@@ -303,10 +444,16 @@ export function registerStorageTools(): void {
     try {
       const storageName = resolveStorageName(args);
       if (device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
-        await client.clearPreferenceStore(args.appId, storageName);
+        const client = getStorageToolsDependencies().androidClientFactory(device);
+        await withSharedPreferencesInspectionFallback(
+          device,
+          args.appId,
+          storageName,
+          () => client.clearPreferenceStore(args.appId, storageName),
+          (adb) => clearAndroidKeyValueFileDirect(adb, args.appId, storageName),
+        );
       } else if (device.platform === "ios") {
-        const client = IOSCtrlProxyClient.getInstance(device);
+        const client = getStorageToolsDependencies().iosClientFactory(device);
         await client.clearPreferenceStore(args.appId, storageName);
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
@@ -337,7 +484,7 @@ export function registerStorageTools(): void {
       );
     }
     try {
-      const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+      const client = getStorageToolsDependencies().androidClientFactory(device);
       const stores = await client.listDataStores(args.appId, args.adapterName);
       return createJSONToolResponse({
         success: true,
@@ -348,6 +495,9 @@ export function registerStorageTools(): void {
     } catch (error) {
       if (error instanceof ActionableError) {
         throw error;
+      }
+      if (isSharedPreferencesInspectionDisabledError(error)) {
+        throw dataStoreInspectionDisabledError(args.appId);
       }
       throw new ActionableError(`Failed to list data stores: ${error}`);
     }
@@ -361,7 +511,7 @@ export function registerStorageTools(): void {
       );
     }
     try {
-      const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+      const client = getStorageToolsDependencies().androidClientFactory(device);
       const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
       return createJSONToolResponse({
         success: true,
@@ -373,6 +523,9 @@ export function registerStorageTools(): void {
     } catch (error) {
       if (error instanceof ActionableError) {
         throw error;
+      }
+      if (isSharedPreferencesInspectionDisabledError(error)) {
+        throw dataStoreInspectionDisabledError(args.appId);
       }
       throw new ActionableError(`Failed to get data store: ${error}`);
     }

@@ -1648,7 +1648,13 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    runs-on: macos-26
+    # Self-hosted routing: PRs authored by kaeawc run on the self-hosted Apple
+    # Silicon runner (label automobile-mac); every other author falls back to the
+    # GitHub-hosted macos-26 runner. runs-on wants a label array for self-hosted
+    # and a plain string for hosted, so fromJSON supplies the array on the kaeawc
+    # branch. This workflow is pull_request-only, so pull_request.user.login is
+    # always populated. Non-simulator job (no ensure-ios-simulator-runtime).
+    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -1676,7 +1682,9 @@ jobs:
   swift-code-coverage:
     timeout-minutes: 20
     name: "Swift Code Coverage"
-    runs-on: macos-26
+    # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
+    # macos-26. No setup-xcode step here, so it uses the runner's ambient Xcode.
+    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -1701,7 +1709,10 @@ jobs:
 
   ios-swift-packages:
     name: "Swift Packages (${{ matrix.config.name }})"
-    runs-on: ${{ matrix.config.runner }}
+    # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
+    # the matrix's macos-26 runner. The Select-Xcode step below is gated to hosted
+    # runners so the self-hosted Mac uses its ambient (upgraded) Xcode toolchain.
+    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
@@ -1725,7 +1736,10 @@ jobs:
         with:
           lfs: false
 
+      # Only the GitHub-hosted runner needs an explicit Xcode pin; the self-hosted
+      # Mac uses its ambient (upgraded) Xcode toolchain.
       - name: "Select Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
@@ -2095,7 +2109,11 @@ jobs:
   ios-spm-root-package-build:
     timeout-minutes: 20
     name: "Build Root SPM Package"
-    runs-on: macos-26
+    # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
+    # macos-26. The root manifest needs the Swift 6.3 toolchain (Xcode 26.5); the
+    # Select-Xcode step below is gated to hosted runners, so the self-hosted Mac
+    # must carry an Xcode whose Swift toolchain is >= 6.3.
+    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -2109,7 +2127,10 @@ jobs:
       # ships with Xcode 26.5. Xcode 26.0 ships Swift 6.2 and cannot even parse
       # a 6.3 manifest, so this floor-guarantee job builds on 26.5 to match the
       # published SDK's toolchain floor and every other Swift-package job here.
+      # Only the GitHub-hosted runner needs an explicit Xcode pin; the self-hosted
+      # Mac uses its ambient (upgraded) Xcode toolchain (Swift >= 6.3 required).
       - name: "Select Xcode 26.5"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"

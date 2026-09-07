@@ -324,6 +324,33 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     }
   });
 
+  test("does not tap a hierarchy refresh that returns at the search deadline", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const hierarchy = createObserveResult().viewHierarchy;
+    spyOn(fakeElementSelector, "selectClickable")
+      .mockImplementationOnce(() => ({
+        element: null,
+        indexInMatches: -1,
+        totalMatches: 0,
+        strategy: "first",
+      }))
+      .mockImplementation(() => ({
+        element: makeClickableElement(),
+        indexInMatches: 0,
+        totalMatches: 1,
+        strategy: "first",
+      }));
+    (tapAny as any).refreshViewHierarchy = async () => {
+      fakeTimer.advanceTime(400);
+      return hierarchy;
+    };
+
+    const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
+
+    expect(result.success).toBe(false);
+    expect(fakeIosClient.getTapHistory()).toEqual([]);
+  });
+
   // Thread PRRT_kwDOP-GF5M6fuZRt (#6248 review, terminal round): an earlier
   // round merely CLAMPED the inner/outer timers while still forwarding the
   // full absurd `duration` to XCTest -- a clamp-vs-duration mismatch that

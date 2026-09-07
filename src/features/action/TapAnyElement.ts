@@ -812,6 +812,15 @@ export class TapAnyElement extends BaseVisualChange {
                 continue;
               }
 
+              // A hierarchy request can consume the last millisecond of the
+              // search window. Do not select from its result after the
+              // deadline: CtrlProxy may have served a stale fallback when its
+              // synchronous refresh timed out, and a late candidate must not
+              // turn a bounded search into an unbounded tap.
+              if (this.timer.now() >= deadline) {
+                break;
+              }
+
               const hash = this.hashViewHierarchy(refreshed);
               if (hash && hash !== lastHash) {
                 changeCount += 1;

@@ -20,6 +20,33 @@ class AsyncFailStream extends EventEmitter {
   }
 }
 
+/** A stream whose close is driven manually by the test, so ordering between
+ * "old stream asked to close" and "replacement stream constructed" can be
+ * asserted deterministically instead of racing real fs/epoll timing. */
+class ControllableStream extends EventEmitter {
+  destroyed = false;
+  writable = true;
+  ended = false;
+  private endCallback: (() => void) | undefined;
+
+  write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
+    queueMicrotask(() => callback?.(null));
+    return true;
+  }
+
+  end(callback?: () => void): void {
+    this.ended = true;
+    this.endCallback = callback;
+  }
+
+  /** Simulates the stream's fd having actually finished closing. */
+  finishClose(): void {
+    const callback = this.endCallback;
+    this.endCallback = undefined;
+    callback?.();
+  }
+}
+
 let importCounter = 0;
 
 async function loggerWithEnv(
@@ -397,6 +424,96 @@ describe("size-based rotation is not broken by the stream-error handler (Codex P
       // (now-renamed) 11MiB file.
       expect(activeContents.length).toBeLessThan(1024);
     } finally {
+      rmSync(logDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("rotation waits for the old stream to fully close before reopening (#6149)", () => {
+  test("does not open the replacement WriteStream until the old stream's close callback fires", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-rotate-race-"));
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    // Pre-seed the target past the rotation threshold (a real file, so
+    // io.ts's directly-captured `statAsync`/`renameAsync` bindings — not
+    // interceptable via spyOn, since they copy the function reference at
+    // import time rather than reading it through the module object on every
+    // call — see and hit the real rotation path).
+    writeFileSync(targetLogFile, Buffer.alloc(11 * 1024 * 1024, "x"));
+
+    const opened: ControllableStream[] = [];
+    const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
+      const stream = new ControllableStream();
+      opened.push(stream);
+      return stream as unknown as fs.WriteStream;
+    });
+
+    // A macrotask tick — real fs I/O (stat/rename on a local tmp file)
+    // resolves via the libuv threadpool, not a bare microtask.
+    const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "file", logDir);
+      // Module load opened the stream that rotation is about to replace.
+      expect(opened.length).toBe(1);
+      const oldStream = opened[0];
+
+      // ControllableStream.end() records the call but withholds its callback
+      // until finishClose() is invoked — simulating the old fd's close still
+      // being in flight (the real race is a Bun/epoll timing window on
+      // Linux; withholding the callback here pins the same causal shape
+      // deterministically). A fix that awaits a proper close (via that
+      // callback, or the stream's 'close' event) before reopening the same
+      // path must therefore stay pending too.
+      //
+      // Wait for the actual end() call event-drivenly rather than polling a
+      // fixed tick count — real stat/existsSync I/O ahead of it can take
+      // longer than any fixed budget under CI/parallel-shard load, and a
+      // fixed budget here would make the test itself flaky.
+      let endWasCalled: () => void;
+      const endWasCalledPromise = new Promise<void>((resolve) => {
+        endWasCalled = resolve;
+      });
+      const originalEnd = oldStream.end.bind(oldStream);
+      oldStream.end = (callback?: () => void) => {
+        endWasCalled();
+        originalEnd(callback);
+      };
+
+      mod.logger.info("triggers rotation");
+      const flushed = mod.logger.flush();
+      let flushSettled = false;
+      void flushed.then(() => {
+        flushSettled = true;
+      });
+
+      await endWasCalledPromise;
+      expect(oldStream.ended).toBeTrue();
+
+      // From here on there is no more legitimate real I/O for a *fixed*
+      // implementation to be doing — it is purely blocked on the close
+      // callback we are withholding — so a short, fixed window is enough to
+      // catch a *buggy* implementation racing ahead to reopen regardless.
+      for (let i = 0; i < 20; i++) {
+        await tick();
+      }
+      // A fix must not let rotation's replacement stream — and therefore the
+      // write that depends on it — complete while the old stream's close is
+      // still outstanding. Reopening the same path before the OS has
+      // released the old fd is exactly what races bun's epoll registration
+      // and throws EEXIST on the new WriteStream's construction (#6149).
+      expect(flushSettled).toBeFalse();
+      expect(opened.length).toBe(1);
+
+      // Only once the old stream reports it has actually finished closing
+      // may rotation — and the pending write — complete.
+      oldStream.finishClose();
+      await flushed;
+
+      expect(flushSettled).toBeTrue();
+      expect(opened.length).toBe(2);
+    } finally {
+      createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });
     }
   });

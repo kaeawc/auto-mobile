@@ -185,13 +185,15 @@ interface FailureProneStream {
 // (c) the diagnostic stays valid NDJSON in json mode (issue #6179).
 //
 // Deliberately NOT listening for 'close': checkAndRotateLog() ends the active
-// stream on purpose at the size cap and immediately opens its replacement —
-// a normal, expected close with no error. Clearing `logStream` on every close
-// (regardless of cause) raced that legitimate rotation and could drop the
-// freshly-opened replacement stream right after rotating, breaking logging
-// for the rest of the process. An unexpected close without a preceding
-// 'error' is rare enough (and self-healing via the next write's lazy retry
-// once a subsequent write actually fails) that it doesn't need a handler here.
+// stream on purpose at the size cap, awaits that close (see closeLogStream /
+// closeStreamBeforeRotation, issue #6149), and only then opens its
+// replacement — a normal, expected close with no error. Clearing `logStream`
+// on every close (regardless of cause) raced that legitimate rotation and
+// could drop the freshly-opened replacement stream right after rotating,
+// breaking logging for the rest of the process. An unexpected close without a
+// preceding 'error' is rare enough (and self-healing via the next write's
+// lazy retry once a subsequent write actually fails) that it doesn't need a
+// handler here.
 const attachStreamFailureHandlers = (stream: FailureProneStream, target: string): void => {
   stream.on("error", (error) => {
     try {
@@ -295,6 +297,51 @@ if (logsDir) {
   });
 }
 
+// Closes the active stream ahead of rotation and WAITS for it to actually
+// finish before the caller opens a replacement at the same path. A
+// fire-and-forget `end()` races bun's epoll registration for the reused fd:
+// opening the new WriteStream while the old one's close is still in flight
+// can throw `EEXIST: file already exists, epoll_ctl` on the new stream's own
+// construction (issue #6149). A stream failing to close cleanly must not
+// block rotation itself, so that failure is caught and logged here rather
+// than propagated — the caller still proceeds to open the replacement.
+const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<void> => {
+  try {
+    await closeLogStream(stream);
+  } catch (closeError) {
+    await reportLogFailure("Failed to close log stream before rotation", closeError);
+  }
+};
+
+// Closes the oversized active stream, renames it to a timestamped backup, and
+// opens a fresh replacement at the original path. Split out of
+// checkAndRotateLog so each step reads at its own nesting level instead of
+// stacking inside that function's existing try/if/if.
+const rotateLogFile = async (paths: { dir: string; path: string }): Promise<void> => {
+  const closingStream = logStream;
+  logStream = undefined;
+  if (closingStream) {
+    await closeStreamBeforeRotation(closingStream);
+  }
+
+  // Create backup filename with timestamp, scoped to this process's PID so
+  // rotation never collides with another process's files.
+  const timestamp = new Date().toISOString().replace(/:/g, "-");
+  const backupPath = path.join(paths.dir, `${ownLogPrefix}-${timestamp}.log`);
+
+  // Check if file still exists right before rename to avoid race condition
+  if (fs.existsSync(paths.path)) {
+    // Rename current log file to backup
+    await renameAsync(paths.path, backupPath);
+  }
+
+  // Always create a new log stream after rotation attempt
+  logStream = openLogStream(paths.path);
+
+  // Prune old log files to stay within the cap
+  await pruneOldLogFiles();
+};
+
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
   const paths = fileLogPaths();
@@ -305,25 +352,7 @@ const checkAndRotateLog = async (): Promise<void> => {
     if (fs.existsSync(paths.path)) {
       const stats = await statAsync(paths.path);
       if (stats.size >= MAX_LOG_SIZE) {
-        // Close current stream
-        logStream?.end();
-
-        // Create backup filename with timestamp, scoped to this process's PID so
-        // rotation never collides with another process's files.
-        const timestamp = new Date().toISOString().replace(/:/g, "-");
-        const backupPath = path.join(paths.dir, `${ownLogPrefix}-${timestamp}.log`);
-
-        // Check if file still exists right before rename to avoid race condition
-        if (fs.existsSync(paths.path)) {
-          // Rename current log file to backup
-          await renameAsync(paths.path, backupPath);
-        }
-
-        // Always create a new log stream after rotation attempt
-        logStream = openLogStream(paths.path);
-
-        // Prune old log files to stay within the cap
-        await pruneOldLogFiles();
+        await rotateLogFile(paths);
       }
     }
   } catch (err) {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -15,6 +15,22 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
  */
 describe("Proxy tools/call relays progress tagged with the client's own token (issue #6205)", () => {
   let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+
+  beforeAll(() => {
+    // `createProxyMcpServer` registers its ping/prompts handlers via
+    // `require("@modelcontextprotocol/sdk/types.js")` rather than the static
+    // ESM import used for the other schemas in that file (`ListToolsRequestSchema`
+    // et al.) — tsgo cannot resolve `PingRequestSchema` / `ListPromptsRequestSchema`
+    // as named exports of that deep path, so the source works around it with a
+    // runtime `require()`. That `require()`'s FIRST call in a process JIT-links a
+    // CJS-interop wrapper for the module (~25-30ms) even though the identical
+    // module is already ESM-imported elsewhere — a one-time cost that otherwise
+    // lands inside whichever test calls `createProxyMcpServer` first. Absorb it
+    // here, in setup, rather than letting it push that test over the 100ms/test
+    // CI budget (`scripts/validate-bun-test-timings.sh`) — same class of flake
+    // fixed for sharedStorageTools's Ajv2020 cold-start, see #6313.
+    require("@modelcontextprotocol/sdk/types.js");
+  });
 
   afterEach(() => {
     isAvailableSpy?.mockRestore();

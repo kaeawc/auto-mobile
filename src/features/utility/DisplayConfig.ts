@@ -389,21 +389,19 @@ export class DisplayConfig {
     }
   }
 
-  private async setIosSimulatorConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+  /** Reject requests that cannot produce an iOS Simulator mutation before a baseline read. */
+  private validateIosSimulatorSetInput(
+    input: SetDisplayConfigInput,
+  ): DisplayConfigResult | undefined {
     if (
       !input.reset &&
       input.fontScale === undefined &&
       input.density === undefined &&
       input.theme === undefined
     ) {
-      return {
-        success: false,
-        deviceId: this.device.deviceId,
-        platform: this.device.platform,
-        supported: this.support(),
-        error:
-          "At least one of fontScale, density, theme, or reset must be provided to set display config.",
-      };
+      return this.invalidRequest(
+        "At least one of fontScale, density, theme, or reset must be provided to set display config.",
+      );
     }
 
     // A request containing only an unsupported field cannot produce a useful
@@ -416,6 +414,14 @@ export class DisplayConfig {
       if (input.density !== undefined) {
         return this.unsupported(IOS_DENSITY_UNSUPPORTED_ERROR);
       }
+    }
+    return undefined;
+  }
+
+  private async setIosSimulatorConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+    const invalidInput = this.validateIosSimulatorSetInput(input);
+    if (invalidInput) {
+      return invalidInput;
     }
 
     // Read the pre-change state first. If this fails, no mutation has run, so

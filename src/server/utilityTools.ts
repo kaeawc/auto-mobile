@@ -11,6 +11,11 @@ import {
   type DeviceStateResult,
   type SetDeviceStateInput,
 } from "../features/utility/DeviceState";
+import {
+  DisplayConfig,
+  type DisplayConfigResult,
+  type SetDisplayConfigInput,
+} from "../features/utility/DisplayConfig";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
@@ -213,6 +218,38 @@ const networkConditionInputSchema = z
     }
   });
 
+// Display configuration (issue #6096): font scale, effective density, and
+// light/dark theme. A call with no set field is a getter; any set field (or
+// `reset`) makes it a setter that returns applied + previous values so the
+// client can restore. Android only — iOS has no automatable per-device control.
+export const displayConfigSchema = addDeviceTargetingToSchema(
+  z.object({
+    fontScale: z
+      .number()
+      .min(0.1)
+      .max(10)
+      .optional()
+      .describe("System text scale, e.g. 1.0 (default), 1.3, 2.0. Omit to leave unchanged."),
+    density: z
+      .union([z.number().min(1), z.enum(["smaller", "default", "larger"])])
+      .optional()
+      .describe(
+        "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
+          "(smaller/default/larger). Best-effort on physical devices. Omit to leave unchanged.",
+      ),
+    theme: z
+      .enum(["light", "dark", "system"])
+      .optional()
+      .describe(
+        "Light, dark, or system (follow-device) theme / night mode. Omit to leave unchanged.",
+      ),
+    reset: z
+      .boolean()
+      .optional()
+      .describe("Restore font scale, density, and theme to device defaults."),
+  }),
+);
+
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
     include: z
@@ -347,6 +384,35 @@ export function assertChangeLocalizationPlatformConstraints(
   if (platform === "android" && args.locale && !args.appId) {
     throw new ActionableError("appId is required for Android locale changes.");
   }
+}
+
+export type DisplayConfigArgs = z.infer<typeof displayConfigSchema>;
+
+/** A displayConfig call is a setter when it carries reset or any display field. */
+function displayConfigArgsAreSet(args: DisplayConfigArgs): boolean {
+  return (
+    args.reset === true ||
+    args.fontScale !== undefined ||
+    args.density !== undefined ||
+    args.theme !== undefined
+  );
+}
+
+/** Project the wire args onto the feature's set-input shape, dropping absent fields. */
+function displayConfigSetInput(args: DisplayConfigArgs): SetDisplayConfigInput {
+  return {
+    ...(args.fontScale !== undefined ? { fontScale: args.fontScale } : {}),
+    ...(args.density !== undefined ? { density: args.density } : {}),
+    ...(args.theme !== undefined ? { theme: args.theme } : {}),
+    ...(args.reset !== undefined ? { reset: args.reset } : {}),
+  };
+}
+
+function displayConfigMessage(result: DisplayConfigResult): string {
+  if (result.success) {
+    return result.applied ? "Applied display configuration" : "Read display configuration";
+  }
+  return result.error ?? "Failed to apply display configuration";
 }
 
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
@@ -569,6 +635,17 @@ export function registerUtilityTools() {
     });
   };
 
+  const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
+    const displayConfig = new DisplayConfig(device);
+    const result = displayConfigArgsAreSet(args)
+      ? await displayConfig.setConfig(displayConfigSetInput(args))
+      : await displayConfig.getConfig();
+    return createJSONToolResponse({
+      message: displayConfigMessage(result),
+      ...result,
+    });
+  };
+
   const getDeviceStateHandler = async (device: BootedDevice, args: GetDeviceStateArgs) => {
     const deviceState = new DeviceState(device);
     const result = await deviceState.getState(args.include);
@@ -699,6 +776,14 @@ export function registerUtilityTools() {
     "Change locale, time zone, text direction, time format, and calendar system",
     changeLocalizationSchema,
     changeLocalizationHandler,
+    { defaultEnabled: false },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "displayConfig",
+    "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android only; density overrides are best-effort on physical devices.",
+    displayConfigSchema,
+    displayConfigHandler,
     { defaultEnabled: false },
   );
 

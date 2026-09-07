@@ -273,7 +273,9 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      // mdpi (160 DPI) so the touch-target-size check (which now skips entirely
+      // when density is unknown, issue #6196) actually runs.
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
 
       // The fixture is two clickable, unlabelled elements both under 44x44dp, so
       // each yields a missing-content-description (error) AND a
@@ -581,15 +583,18 @@ describe("WcagAudit", function () {
       expect(sizeViolations[0].message).toContain("40x40dp");
     });
 
-    it("falls back to a sensible default density when none is reported, consistent with checkFormInputLabels", async function () {
-      // No density passed at all — exercises the same fallback path as
-      // labelGapThresholdPx's FALLBACK_DENSITY_DPI (320 == xhdpi/2x), so a
-      // 44dp target on that assumed density is ~88px.
+    it("skips the check (no false too-small finding) when density is absent", async function () {
+      // No density passed at all. Assuming ANY density (160, 320, or
+      // otherwise) to convert px to dp misjudges targets on a device whose
+      // real density differs from the assumption — a 60x60px target reads as
+      // 60dp (fine) under a 160 DPI guess but is only ~20dp on a real xxhdpi
+      // device. With density genuinely unknown, the check must be skipped
+      // rather than evaluated against a guess (issue #6196).
       const elements: Element[] = [
         {
-          bounds: { left: 0, top: 0, right: 88, bottom: 88 }, // exactly 44dp at 320 DPI
+          bounds: { left: 0, top: 0, right: 60, bottom: 60 },
           clickable: true,
-          text: "Perfect",
+          text: "Density unknown",
         },
       ];
 
@@ -597,6 +602,44 @@ describe("WcagAudit", function () {
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(0);
+    });
+
+    it("skips the check (no false too-small finding) when density is 0", async function () {
+      // density=0 signals a failed on-device lookup (e.g. CtrlProxy.getDensity()
+      // returning 0), which is just as "unknown" as an absent density and must
+      // not be treated as a real density value.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+          clickable: true,
+          text: "Density lookup failed",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 0);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(0);
+    });
+
+    it("still flags a genuinely too-small target when density IS known", async function () {
+      // Same 30x30px target as above, but this time density is reported
+      // (160 DPI, i.e. 1px == 1dp): a genuine 30dp target, under the 44dp
+      // minimum, must be flagged — the #6196 fix must not silence real
+      // violations once density is actually known.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+          clickable: true,
+          text: "Genuinely too small",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(1);
+      expect(sizeViolations[0].message).toContain("30x30dp");
     });
 
     it("never rounds a failing dimension's reported dp up to the minimum", async function () {

@@ -4,6 +4,22 @@ import { logger } from "./logger";
 
 export const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
+/**
+ * Thrown by {@link waitForExit} when a process still has not been observed to
+ * exit even after escalating to SIGKILL. The signal was sent, but delivery and
+ * reaping are not guaranteed (uninterruptible I/O, a zombie, a wedged host) —
+ * so unlike a normal rejection, the process may still be alive. A caller that
+ * owns process/resource cleanup (e.g. recording ownership) must not treat this
+ * as proof the process is gone: retain whatever handle would let a later pass
+ * retry reaping it, instead of dropping ownership on this error alone.
+ */
+export class ProcessTeardownUnconfirmedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProcessTeardownUnconfirmedError";
+  }
+}
+
 export interface ProcessExitState {
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
@@ -186,7 +202,7 @@ export async function waitForExit(
 
   const forceResult = await waitForExitOrTimeout(exitPromise, forceKillTimeoutMs, timer);
   if (forceResult === "timeout") {
-    throw new Error(
+    throw new ProcessTeardownUnconfirmedError(
       `Process did not exit within ${timeoutMs}ms plus ${forceKillTimeoutMs}ms after SIGKILL`,
     );
   }

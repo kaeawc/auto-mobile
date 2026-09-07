@@ -58,6 +58,12 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
   private spawnedProcesses: FakeAdbProcess[] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
+  // A single merged log of executeCommand()/spawn() calls in the order they
+  // actually happened. `commandCalls`/`spawnCalls` are separate arrays, so a
+  // count- or membership-only assertion against them can't tell a caller that
+  // interleaves the two (e.g. "poll via executeCommand, then pull via spawn")
+  // from one a regression silently reordered.
+  private interactionLog: Array<{ kind: "command" | "spawn"; text: string }> = [];
 
   /**
    * Record a command execution
@@ -76,6 +82,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     includes: (search: string) => boolean;
   }> {
     this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
+    this.interactionLog.push({ kind: "command", text: command });
 
     const error = this.commandErrors.get(command);
     if (error) {
@@ -139,6 +146,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   async spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess> {
     this.spawnCalls.push([...args]);
     this.spawnOptions.push(options);
+    this.interactionLog.push({ kind: "spawn", text: args.join(" ") });
     const joined = args.join(" ");
     const behavior = this.spawnBehaviors.find((b) => joined.includes(b.match));
     if (behavior?.outcome.kind === "reject") {
@@ -174,6 +182,15 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /** All recorded spawn argv arrays, in order. */
   getSpawnCalls(): string[][] {
     return this.spawnCalls.map((call) => [...call]);
+  }
+
+  /**
+   * The merged executeCommand()/spawn() call sequence, in the order the calls
+   * actually happened — use this instead of `getCommandCount`/`getSpawnCalls`
+   * when a test needs to assert relative ordering between the two call kinds.
+   */
+  getInteractionLog(): Array<{ kind: "command" | "spawn"; text: string }> {
+    return this.interactionLog.map((entry) => ({ ...entry }));
   }
 
   getSpawnOptions(): Array<AdbSpawnOptions | undefined> {
@@ -374,6 +391,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.spawnedProcesses = [];
     this.spawnBehaviors = [];
     this.deviceTimestampMs = null;
+    this.interactionLog = [];
   }
 
   /**

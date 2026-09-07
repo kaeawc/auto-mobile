@@ -10,6 +10,7 @@ import type {
   BootedDevice,
   VideoResolution,
 } from "../../models";
+import { toActionableError } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import {
@@ -17,6 +18,7 @@ import {
   type SecurePermissions,
 } from "../../utils/filesystem/securePermissions";
 import { combineAbortSignals } from "../../utils/AbortContext";
+import { ProcessTeardownUnconfirmedError } from "../../utils/ChildProcessTracker";
 
 /**
  * Keep only the declared {@link VideoRecordingConfig} fields. A backend that
@@ -315,15 +317,7 @@ export class VideoRecorderService {
     try {
       stopResult = await this.backend.stop(handle);
     } catch (error) {
-      // The backend's stop() already tore down the device-side process before
-      // this failure (e.g. a genuine `adb pull` failure, issue #6291) — the
-      // capture is no longer live, so retaining ownership here would
-      // permanently block a new recording on this device with "Video
-      // recording already active for device X".
-      if (this.activeRecordings.get(recordingId) === active) {
-        this.activeRecordings.delete(recordingId);
-      }
-      throw error;
+      throw this.handleStopFailure(active, error);
     }
     if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
@@ -360,6 +354,41 @@ export class VideoRecorderService {
     this.activeRecordings.delete(recordingId);
 
     return metadata;
+  }
+
+  /**
+   * Decides what a failed {@link backend.stop} call means for in-memory
+   * ownership of `active`, and returns the error to throw. Split out of
+   * {@link stopActiveRecording} to keep that method's branching within the
+   * complexity ratchet.
+   */
+  private handleStopFailure(active: ActiveRecordingState, error: unknown): unknown {
+    const recordingId = active.recordingId;
+    if (error instanceof ProcessTeardownUnconfirmedError) {
+      // waitForExit escalated to SIGKILL but never observed the capture
+      // process exit — it may still be alive. Unlike a genuine `adb pull`
+      // failure below (where the device-side process is already confirmed
+      // gone), dropping ownership here would let a caller start a second
+      // recording against a device that may still have the old capture
+      // process running underneath it. Keep the handle in `activeRecordings`
+      // so a later teardown/cleanup pass (shutdown, forceStop) can still
+      // reach it and retry reaping the process; only release ownership once
+      // exit is actually confirmed.
+      return toActionableError(
+        error,
+        `Recording ${recordingId} could not be confirmed stopped; the capture ` +
+          `process may still be running on the device`,
+      );
+    }
+    // The backend's stop() already tore down the device-side process before
+    // this failure (e.g. a genuine `adb pull` failure, issue #6291) — the
+    // capture is no longer live, so retaining ownership here would
+    // permanently block a new recording on this device with "Video
+    // recording already active for device X".
+    if (this.activeRecordings.get(recordingId) === active) {
+      this.activeRecordings.delete(recordingId);
+    }
+    return error;
   }
 
   async forceStopRecording(recordingId: string): Promise<void> {

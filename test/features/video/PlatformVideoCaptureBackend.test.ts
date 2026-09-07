@@ -470,6 +470,23 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(3);
       expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(1);
       expect(result.sizeBytes).toBe(512);
+
+      // Assert ORDER, not just totals: a regression that moved the finalize
+      // poll to run after `adb pull` would still satisfy the two counts above
+      // while reintroducing the #6291 race. Every finalize `stat` poll must
+      // precede the pull in the merged call sequence.
+      const interactionLog = fakeClient.getInteractionLog();
+      const statIndices = interactionLog
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => entry.kind === "command" && entry.text.includes("shell stat -c %s"))
+        .map(({ index }) => index);
+      const pullIndex = interactionLog.findIndex(
+        (entry) => entry.kind === "spawn" && entry.text.startsWith("pull "),
+      );
+
+      expect(statIndices).toHaveLength(3);
+      expect(pullIndex).toBeGreaterThan(-1);
+      expect(Math.max(...statIndices)).toBeLessThan(pullIndex);
     });
 
     // issue #6291: a stop-right-after-start pull failure must not leak the raw

@@ -263,7 +263,10 @@ class AutoMobileAgentTest {
         modelConfig,
         capture(agentClientSlot),
         5,
-        mockMcpClient,
+        // #6145 follow-up: with secrets present the raw client handed to WaitForTool is wrapped in
+        // FailureRedactingMCPClient (still delegates unredacted successes to mockMcpClient), not
+        // mockMcpClient itself — match any() rather than the exact pre-wrap reference.
+        any(),
       )
     } returns mockAIAgent
     coEvery { mockAIAgent.run(any()) } returns "done"
@@ -306,6 +309,69 @@ class AutoMobileAgentTest {
     assertTrue(
       rawObserve.contains(secret),
       "the underlying client (device execution) still receives real values",
+    )
+  }
+
+  @Test
+  fun `WaitForTool's raw client redacts a failure but leaves a success untouched during recovery`() {
+    // Issue #6145 follow-up: WaitForTool is wired to the RAW client so its local text match keeps
+    // working (a redacted copy would falsely time out). But DefaultMCPClient throws with the MCP
+    // server's response body / error in the message on FAILURE, which can echo on-screen secret
+    // data,
+    // and WaitForTool logs that message on every failed poll. attemptAiRecovery must wrap the raw
+    // client it hands WaitForTool in FailureRedactingMCPClient rather than passing mcpClient itself
+    // unwrapped, so a thrown exception is redacted while a successful call stays byte-for-byte raw.
+    val secret = "SECRET-hunter2-TOKEN"
+    val context =
+      FailedStepContext(
+        failedStepIndex = 1,
+        failedTool = "inputText",
+        error = "step failed",
+        succeededSteps = emptyList(),
+        planContent = "name: test\nsteps: []",
+        deviceId = "emulator-5554",
+      )
+    val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
+    val rawClientSlot = slot<AutoMobileAgent.MCPClient>()
+
+    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
+    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
+    every { mockMcpClient.isConnected() } returns false
+    every { mockMcpClient.connect(any()) } just runs
+    every { mockMcpClient.disconnect() } just runs
+    every { mockConfigProvider.getModelConfig() } returns modelConfig
+    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
+    every {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5, capture(rawClientSlot))
+    } returns mockAIAgent
+    coEvery { mockAIAgent.run(any()) } returns "done"
+
+    autoMobileAgent.attemptAiRecovery(context, secretValues = listOf(secret))
+
+    val rawClient = rawClientSlot.captured
+
+    // A successful call must return the RAW, unredacted result unchanged — WaitForTool's local
+    // match relies on this.
+    every { mockMcpClient.callTool("waitForCheck", any()) } returns
+      """{"elements":[{"text":"$secret"}]}"""
+    assertEquals(
+      """{"elements":[{"text":"$secret"}]}""",
+      rawClient.callTool("waitForCheck", emptyMap()),
+      "a successful observe must reach WaitForTool's local match completely unredacted",
+    )
+
+    // A FAILED call's thrown message must be redacted — this is what WaitForTool logs on every
+    // failed poll attempt.
+    every { mockMcpClient.callTool("waitForFailure", any()) } throws
+      RuntimeException("MCP server error: token $secret leaked in the error body")
+    val error = assertThrows<RuntimeException> { rawClient.callTool("waitForFailure", emptyMap()) }
+    assertFalse(
+      error.message!!.contains(secret),
+      "a failed observe's exception message must not leak the secret",
+    )
+    assertTrue(
+      error.message!!.contains(SecretRedactor.PLACEHOLDER),
+      "the secret must be replaced by the placeholder",
     )
   }
 
@@ -384,7 +450,10 @@ class AutoMobileAgentTest {
         modelConfig,
         capture(agentClientSlot),
         5,
-        mockMcpClient,
+        // #6145 follow-up: with secrets present the raw client handed to WaitForTool is wrapped in
+        // FailureRedactingMCPClient (still delegates unredacted successes to mockMcpClient), not
+        // mockMcpClient itself — match any() rather than the exact pre-wrap reference.
+        any(),
       )
     } returns mockAIAgent
     coEvery { mockAIAgent.run(any()) } returns "done"

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.junit
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -103,4 +104,84 @@ class WaitForToolRedactionTest {
     assertFalse(observeResult.contains(secret))
     assertTrue(observeResult.contains(SecretRedactor.PLACEHOLDER))
   }
+
+  /**
+   * Throws with a secret echoed in the exception message — mimics DefaultMCPClient's failure mode.
+   */
+  private class ThrowingClient(private val message: String) : AutoMobileAgent.MCPClient {
+    override fun isConnected() = true
+
+    override fun connect(serverUrl: String) {}
+
+    override fun disconnect() {}
+
+    override fun callTool(toolName: String, parameters: Map<String, Any>): String =
+      throw RuntimeException(message)
+
+    override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> = emptyList()
+  }
+
+  @Test
+  fun `FailureRedactingMCPClient returns a successful result completely unredacted`() =
+    runBlocking {
+      // WaitForTool's local match must see the RAW text, or a wait target that is only a substring
+      // of
+      // an on-screen secret would falsely time out (#6145).
+      val secret = "TOKEN-OK-123"
+      val rawResult = """{"elements":[{"text":"$secret"}]}"""
+      val client =
+        FailureRedactingMCPClient(
+          FixedResultClient(rawResult),
+          SecretRedactor.secretValues(listOf(secret)),
+        )
+
+      assertEquals(rawResult, client.callTool("observe", emptyMap()))
+    }
+
+  @Test
+  fun `FailureRedactingMCPClient redacts a thrown exception's message`() {
+    // #6145 follow-up: a FAILED observe call bypasses the "WaitForTool never leaks observe text"
+    // argument — DefaultMCPClient throws with the server's response body / error in the message,
+    // and WaitForTool logs it on every failed poll attempt.
+    val secret = "TOKEN-OK-123"
+    val client =
+      FailureRedactingMCPClient(
+        ThrowingClient("MCP server error: token $secret leaked in the error body"),
+        SecretRedactor.secretValues(listOf(secret)),
+      )
+
+    val error =
+      assertThrows(RuntimeException::class.java) { client.callTool("observe", emptyMap()) }
+
+    assertFalse("the thrown message must not contain the secret", error.message!!.contains(secret))
+    assertTrue(
+      "the secret must be replaced by the placeholder",
+      error.message!!.contains(SecretRedactor.PLACEHOLDER),
+    )
+    assertEquals(
+      "the cause must be dropped so the raw text cannot survive",
+      null,
+      error.cause,
+    )
+  }
+
+  @Test
+  fun `WaitForTool wrapped in FailureRedactingMCPClient still matches an unredacted substring`() =
+    runBlocking {
+      // End-to-end: WaitForTool wired to the failure-redacting wrapper must behave identically to
+      // the plain raw client on the success path this suite already covers above.
+      val secret = "TOKEN-OK-123"
+      val rawObserveResult = """{"elements":[{"text":"$secret"}]}"""
+      val client =
+        FailureRedactingMCPClient(
+          FixedResultClient(rawObserveResult),
+          SecretRedactor.secretValues(listOf(secret)),
+        )
+
+      val result =
+        AutoMobileAgent.WaitForTool(client)
+          .execute(AutoMobileAgent.WaitForTool.Args(text = "OK", timeout = 2000))
+
+      assertEquals("Element with text 'OK' found", result)
+    }
 }

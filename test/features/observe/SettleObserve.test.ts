@@ -203,8 +203,9 @@ describe("RealSettleObserve", () => {
     await settle.execute({ timeoutMs: 2500, pollMs: 150 });
 
     const mins = fake.getExecuteMinTimestamps();
-    // First poll seeds from loop-start (0); each subsequent poll waits for a read
-    // strictly newer than the previous observation's timestamp.
+    // The first poll carries no floor (0 = "freshest available"); each
+    // subsequent poll floors on the monotonic device-domain `updatedAt` of the
+    // prior observation, so a static screen cannot false-settle (#6284).
     expect(mins).toEqual([0, 10, 20]);
     // Monotonic non-decreasing.
     for (let i = 1; i < mins.length; i++) {

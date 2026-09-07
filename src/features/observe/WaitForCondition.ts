@@ -39,7 +39,12 @@ export class RealWaitForCondition implements WaitForCondition {
     const outcome = await pollObserveUntil(
       this.observeScreen,
       this.timer,
-      { timeoutMs, pollMs, signal: options.signal },
+      {
+        timeoutMs,
+        pollMs,
+        signal: options.signal,
+        initialMinTimestampMs: options.initialMinTimestampMs,
+      },
       (observation) => {
         lastEvaluation = predicate(observation);
         return lastEvaluation.matched;

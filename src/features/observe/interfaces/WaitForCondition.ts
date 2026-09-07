@@ -30,6 +30,14 @@ export interface WaitForConditionOptions {
   pollMs?: number;
   /** Cancellation signal, checked before each poll and after each observation. */
   signal?: AbortSignal;
+  /**
+   * Device-clock-domain (`updatedAt`) seed for the poll loop's monotonic
+   * `minTimestamp` floor (issue #6284). Pass the device timestamp of the
+   * capture the caller wants the first poll to be at least as new as — e.g. a
+   * pre-tap/post-tap observation's `updatedAt` — so the settle floor is in the
+   * same domain the device freshness gate compares against. Never a host clock.
+   */
+  initialMinTimestampMs?: number;
 }
 
 /**

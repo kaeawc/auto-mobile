@@ -2110,9 +2110,7 @@ jobs:
     timeout-minutes: 20
     name: "Build Root SPM Package"
     # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
-    # macos-26. The root manifest needs the Swift 6.3 toolchain (Xcode 26.5); the
-    # Select-Xcode step below is gated to hosted runners, so the self-hosted Mac
-    # must carry an Xcode whose Swift toolchain is >= 6.3.
+    # macos-26. The root manifest needs the Swift 6.3 toolchain from Xcode 26.5.
     runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -2127,10 +2125,9 @@ jobs:
       # ships with Xcode 26.5. Xcode 26.0 ships Swift 6.2 and cannot even parse
       # a 6.3 manifest, so this floor-guarantee job builds on 26.5 to match the
       # published SDK's toolchain floor and every other Swift-package job here.
-      # Only the GitHub-hosted runner needs an explicit Xcode pin; the self-hosted
-      # Mac uses its ambient (upgraded) Xcode toolchain (Swift >= 6.3 required).
+      # Select it on both runner types: the self-hosted runner must install 26.5
+      # for this floor-guarantee job to be eligible.
       - name: "Select Xcode 26.5"
-        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"

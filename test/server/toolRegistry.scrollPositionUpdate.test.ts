@@ -12,6 +12,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { ScrollPosition } from "../../src/utils/interfaces/NavigationGraph";
+import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 
 /**
  * Integration coverage for issue #2897: the swipeOn scroll-position update block
@@ -33,6 +34,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let spiedSessionIds: string[];
+  let ctrlProxyStub: CtrlProxySetupStub;
 
   /**
    * Stand up a daemon-backed session locked to `androidA` and pre-seed keep-awake
@@ -85,6 +87,12 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     spiedSessionIds = [];
+    // #6227: `setupAutolockedSession` creates its session directly via
+    // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
+    // recorder), so it drives real per-session accessibility-service setup
+    // against a fake device with no real `adb`/network backing it — see
+    // test/helpers/stubCtrlProxySetup.ts.
+    ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
@@ -97,6 +105,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     }
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+    ctrlProxyStub.restore();
   });
 
   const swipeSchema = z.object({

@@ -8,8 +8,7 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 import type { DeviceSession } from "../../src/db/types";
 
 /**
@@ -53,9 +52,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
   let originalDeviceSessionManager: unknown;
   let originalToolCallRepository: unknown;
   let daemonSessionManager: SessionManager | undefined;
-  let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
-  let originalClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
-  let setupCalls: number;
+  let ctrlProxyStub: CtrlProxySetupStub;
 
   /**
    * Stand up a daemon with a device pool that has NOT bound `sessionUuid` to any
@@ -103,22 +100,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     (ToolRegistry as any).toolCallRepository = {
       async recordToolCall(): Promise<void> {},
     };
-    setupCalls = 0;
-    originalGetInstance = AndroidCtrlProxyManager.getInstance;
-    originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      close: async () => {},
-    })) as any;
-    AndroidCtrlProxyClient.resetInstances();
+    ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
@@ -127,9 +109,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
-    AndroidCtrlProxyManager.getInstance = originalGetInstance;
-    AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
-    AndroidCtrlProxyClient.resetInstances();
+    ctrlProxyStub.restore();
   });
 
   test("skips accessibility-service setup for a booted-only tool on the persisted session path", async () => {
@@ -150,7 +130,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     });
 
     expect(response).toMatchObject({ success: true });
-    expect(setupCalls).toBe(0);
+    expect(ctrlProxyStub.setupCallCount()).toBe(0);
     expect(daemonSessionManager?.getSession(sessionUuid)?.assignedDevice).toBe(androidA.deviceId);
   });
 
@@ -172,7 +152,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     });
 
     expect(response).toMatchObject({ success: true });
-    expect(setupCalls).toBe(1);
+    expect(ctrlProxyStub.setupCallCount()).toBe(1);
   });
 
   test("upgrades setup when a booted-first persisted session is later reused by an automationReady tool (#6227)", async () => {
@@ -199,7 +179,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       sessionUuid,
     });
     expect(bootedResponse).toMatchObject({ success: true });
-    expect(setupCalls).toBe(0);
+    expect(ctrlProxyStub.setupCallCount()).toBe(0);
 
     // Same recovered sessionUuid, now reused by an automationReady tool — the
     // `existingSession` fast path must upgrade rather than leave the session
@@ -209,7 +189,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       sessionUuid,
     });
     expect(automationResponse).toMatchObject({ success: true });
-    expect(setupCalls).toBe(1);
+    expect(ctrlProxyStub.setupCallCount()).toBe(1);
     expect(daemonSessionManager?.getDeviceReadiness(sessionUuid)).toBe("automationReady");
   });
 
@@ -230,6 +210,6 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     });
 
     expect(response).toMatchObject({ success: true });
-    expect(setupCalls).toBe(1);
+    expect(ctrlProxyStub.setupCallCount()).toBe(1);
   });
 });

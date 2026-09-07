@@ -13,6 +13,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 
 /**
  * Internal tool-to-tool no-diff guard (issue #3053 part 2).
@@ -48,6 +49,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let originalNoObserve: boolean;
+  let ctrlProxyStub: CtrlProxySetupStub;
 
   /** Same-screen observation so `isSameObservationScreen` holds between calls. */
   function sameScreenObserve(): ObserveResult {
@@ -164,6 +166,12 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     originalNoObserve = serverConfig.isActionsNoObserveEnabled();
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    // #6227: `setupAutolockedSession` creates its session directly via
+    // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
+    // recorder), so it drives real per-session accessibility-service setup
+    // against a fake device with no real `adb`/network backing it — see
+    // test/helpers/stubCtrlProxySetup.ts.
+    ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
@@ -175,6 +183,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     serverConfig.setActionsNoObserveEnabled(originalNoObserve);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+    ctrlProxyStub.restore();
   });
 
   test("EC2.3: an internal tapOn keeps the full observation; a normal tapOn diffs it", async () => {

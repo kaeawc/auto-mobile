@@ -15,6 +15,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 
 /**
  * End-to-end guard for issue #3053 part 2: run a real `DefaultPlanExecutor` step
@@ -36,6 +37,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
+  let ctrlProxyStub: CtrlProxySetupStub;
 
   function sameScreenObserve(): ObserveResult {
     return {
@@ -85,6 +87,12 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    // #6227: `setupAutolockedSession` creates its session directly via
+    // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
+    // recorder), so it drives real per-session accessibility-service setup
+    // against a fake device with no real `adb`/network backing it — see
+    // test/helpers/stubCtrlProxySetup.ts.
+    ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
@@ -96,6 +104,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
     registerInteractionTools();
+    ctrlProxyStub.restore();
   });
 
   test("a plan tapOn step neither diffs its observation nor advances the agent baseline", async () => {

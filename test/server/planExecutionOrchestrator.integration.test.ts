@@ -17,8 +17,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
 import { ExecutionTracker } from "../../src/server/executionTracker";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { stubCtrlProxySetup } from "../helpers/stubCtrlProxySetup";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -317,21 +316,9 @@ steps:
     // setup. This test exercises session-assignment survival through expiry
     // cleanup, not the accessibility-setup mechanism itself, so stub the
     // underlying CtrlProxy calls to succeed immediately instead of hitting
-    // the real device (which fails "toggle not supported" and retries with a
-    // real 3s delay, timing out the test) — mirrors
-    // toolRegistry.deviceReadinessPersistedSession.test.ts's stub.
-    const originalCtrlProxyGetInstance = AndroidCtrlProxyManager.getInstance;
-    const originalCtrlProxyClientGetInstance = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => ({ success: true, message: "ok" }),
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      close: async () => {},
-    })) as any;
-    AndroidCtrlProxyClient.resetInstances();
+    // the real device (which has no real `adb`/network backing it and can
+    // block well past the test timeout) — see test/helpers/stubCtrlProxySetup.ts.
+    const ctrlProxyStub = stubCtrlProxySetup();
 
     const multiDevicePlan = `
 name: multi-device-test
@@ -376,9 +363,7 @@ steps:
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();
-      AndroidCtrlProxyManager.getInstance = originalCtrlProxyGetInstance;
-      AndroidCtrlProxyClient.getInstance = originalCtrlProxyClientGetInstance;
-      AndroidCtrlProxyClient.resetInstances();
+      ctrlProxyStub.restore();
     }
   });
 

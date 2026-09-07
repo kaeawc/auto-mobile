@@ -42,6 +42,7 @@ import {
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
 import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
+import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../utils/fileLock";
 import {
   ListChangedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
@@ -157,6 +158,51 @@ export interface SocketBindGuardOptions {
    * defaults to reading the daemon PID record.
    */
   ownerLiveness?: SocketOwnerLiveness;
+  /**
+   * Cross-process lock held across the whole probe → reclaim → `listen()`
+   * sequence so two concurrent binders cannot both reclaim/unlink the same
+   * socket path (issue #6232, W5). The reachability probe and owner-liveness
+   * checks are observation-only: two lock-less `start()` calls over a
+   * genuinely-dead ownerless socket can BOTH pass them, then one binds while
+   * the other unlinks the freshly-bound path in the gap before its own
+   * `listen()`. Serializing the sequence on a single shared lock closes that
+   * TOCTOU: the loser cannot enter the reclaim window until the winner has
+   * bound, at which point its probe sees a reachable socket and it refuses.
+   * Injected so a test can drive contention deterministically; defaults to the
+   * canonical {@link tryAcquireExclusiveLock} primitive keyed on a lock file
+   * beside the socket path.
+   */
+  bindLock?: SocketReclaimLock;
+}
+
+/**
+ * The cross-process lock guarding the reclaim → bind sequence (issue #6232, W5).
+ * A non-blocking single attempt: {@link acquire} returns false when another live
+ * process already holds it (a concurrent bind is in flight), and the caller then
+ * fails CLOSED rather than racing it. {@link release} drops the lock once the
+ * socket is bound (or the bind fails), so the window it covers is only the brief
+ * reclaim-and-listen interval, never the daemon's whole lifetime.
+ */
+export interface SocketReclaimLock {
+  acquire(): boolean;
+  release(): void;
+}
+
+/**
+ * Default {@link SocketReclaimLock}: the canonical `O_EXCL` file lock
+ * ({@link tryAcquireExclusiveLock}) on `<socketPath>.bind.lock`. Deterministic
+ * per socket path so every binder — manager-launched or hand-launched —
+ * contends on the same file, and distinct from both the socket itself and the
+ * `DaemonManager` startup lock. A per-instance owner token makes release
+ * incarnation-aware, and a lock left by a crashed holder is reclaimed on the
+ * next attempt via the primitive's dead-PID check.
+ */
+function defaultSocketReclaimLock(socketPath: string, ownerToken: string): SocketReclaimLock {
+  const lockFilePath = `${socketPath}.bind.lock`;
+  return {
+    acquire: () => tryAcquireExclusiveLock(lockFilePath, { ownerToken }),
+    release: () => releaseExclusiveLock(lockFilePath, process.pid, ownerToken),
+  };
 }
 
 /**
@@ -200,13 +246,19 @@ const defaultSocketOwnerLiveness: SocketOwnerLiveness = {
  * Kept out of the constructor so its `??` fallbacks do not add to the
  * constructor's already-at-threshold complexity.
  */
-function resolveSocketBindGuard(bindGuard: SocketBindGuardOptions): {
+function resolveSocketBindGuard(
+  bindGuard: SocketBindGuardOptions,
+  socketPath: string,
+  bindLockOwnerToken: string,
+): {
   reachability: DaemonSocketReachabilityLike;
   ownerLiveness: SocketOwnerLiveness;
+  bindLock: SocketReclaimLock;
 } {
   return {
     reachability: bindGuard.reachability ?? new DaemonSocketReachability(),
     ownerLiveness: bindGuard.ownerLiveness ?? defaultSocketOwnerLiveness,
+    bindLock: bindGuard.bindLock ?? defaultSocketReclaimLock(socketPath, bindLockOwnerToken),
   };
 }
 
@@ -432,6 +484,8 @@ export class UnixSocketServer {
   private readonly socketReachability: DaemonSocketReachabilityLike;
   /** Observation-only owner check that fails every bind closed on an inconclusive probe (issue #6232). */
   private readonly socketOwnerLiveness: SocketOwnerLiveness;
+  /** Cross-process lock serializing the reclaim → bind sequence against a concurrent binder (issue #6232, W5). */
+  private readonly socketReclaimLock: SocketReclaimLock;
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
@@ -510,9 +564,18 @@ export class UnixSocketServer {
     this.daemonState = daemonState;
     this.timer = timer;
     this.idGenerator = idGenerator;
-    const resolvedBindGuard = resolveSocketBindGuard(bindGuard);
+    // The reclaim lock's per-instance owner token comes from the module default
+    // generator, NOT the injected `idGenerator` — that one is reserved for socket
+    // SESSION ids, and consuming it here would shift every session id a test
+    // pins to the injected sequence.
+    const resolvedBindGuard = resolveSocketBindGuard(
+      bindGuard,
+      socketPath,
+      defaultIdGenerator.next(),
+    );
     this.socketReachability = resolvedBindGuard.reachability;
     this.socketOwnerLiveness = resolvedBindGuard.ownerLiveness;
+    this.socketReclaimLock = resolvedBindGuard.bindLock;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -538,56 +601,79 @@ export class UnixSocketServer {
     // access control (issue #4750).
     await ensureSecureDir(path.dirname(this.socketPath));
 
-    // Reclaim any existing socket file before listen(). Under DaemonManager's
-    // O_EXCL startup lock this unlink is safe (starts are serialized, so it only
-    // ever removes a stale post-crash socket). A LOCK-LESS bind — a hand-launched
-    // daemon that bypassed the manager — must NOT unlink a live sibling's socket:
-    // doing so bricks every existing client (issue #6232, the #6140 failure mode
-    // via a bypassed launch path). So probe first and refuse when a live daemon
-    // still owns it.
-    if (existsSync(this.socketPath)) {
-      await this.reclaimExistingSocketBeforeBind();
+    // Hold a single cross-process lock across the whole reclaim → `listen()`
+    // sequence (issue #6232, W5). The reachability/owner checks below are
+    // observation-only, so two concurrent binders can BOTH judge a stale socket
+    // reclaimable and then race unlink-vs-listen, leaving the winner bound to an
+    // fd whose pathname the loser deleted. Serializing on `<socket>.bind.lock`
+    // makes the sequence atomic: a losing binder cannot enter the reclaim window
+    // until the winner has bound, at which point its own probe sees a reachable
+    // socket and it refuses. A live holder means another launch is mid-bind, so
+    // fail CLOSED rather than racing it (recoverable via `--daemon restart`).
+    // A stale lock from a crashed holder is reclaimed by the primitive's dead-PID
+    // check on the next attempt.
+    if (!this.socketReclaimLock.acquire()) {
+      throw new ActionableError(
+        `Refusing to bind: another AutoMobile process is currently reclaiming or binding the daemon socket ${this.socketPath}. ` +
+          "Two concurrent launches cannot bind the same socket; let the in-flight one finish, then re-observe, or run `--daemon restart`.",
+      );
     }
+    try {
+      // Reclaim any existing socket file before listen(). Under this reclaim lock
+      // the unlink is exclusive across processes. A LOCK-LESS bind — a
+      // hand-launched daemon that bypassed the manager — must still NOT unlink a
+      // live sibling's socket: doing so bricks every existing client (issue #6232,
+      // the #6140 failure mode via a bypassed launch path). So probe first and
+      // refuse when a live daemon still owns it.
+      if (existsSync(this.socketPath)) {
+        await this.reclaimExistingSocketBeforeBind();
+      }
 
-    this.server = createServer((socket) => {
-      this.handleConnection(socket);
-    });
-
-    // Fan list-changed events out to subscribed socket clients (issue #3223).
-    // Subscribed here (not in the daemon) so a socket-server recreation during
-    // recovery re-wires itself; close() unsubscribes symmetrically.
-    this.listChangedUnsubscribe?.();
-    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
-      this.broadcastListChanged(kind);
-    });
-
-    // Fan session-release events out to subscribed proxy clients (issue #4610),
-    // so a proxy clears its remembered binding on a real release instead of the
-    // replay-TTL guess. Subscribed here (not in the daemon) for the same
-    // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
-    this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-      (sessionId, reason, snapshot) => {
-        this.clearBoundMcpClientsForReleasedSession(sessionId);
-        this.broadcastSessionReleased(sessionId, reason, snapshot);
-      },
-    );
-
-    return new Promise((resolve, reject) => {
-      this.server!.listen(this.socketPath, () => {
-        this.socketFileIdentity = this.readSocketFileIdentity();
-        logger.info(`Unix socket server listening on ${this.socketPath}`);
-        // Restrict the bound socket to the owner (0o600) before start() resolves,
-        // so no client can connect while it is still world-accessible. listen()
-        // creates the socket at the umask default (issue #4750).
-        secureFile(this.socketPath).then(resolve).catch(reject);
+      this.server = createServer((socket) => {
+        this.handleConnection(socket);
       });
 
-      this.server!.on("error", (error) => {
-        logger.error(`Unix socket server error: ${error}`);
-        reject(error);
+      // Fan list-changed events out to subscribed socket clients (issue #3223).
+      // Subscribed here (not in the daemon) so a socket-server recreation during
+      // recovery re-wires itself; close() unsubscribes symmetrically.
+      this.listChangedUnsubscribe?.();
+      this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+        this.broadcastListChanged(kind);
       });
-    });
+
+      // Fan session-release events out to subscribed proxy clients (issue #4610),
+      // so a proxy clears its remembered binding on a real release instead of the
+      // replay-TTL guess. Subscribed here (not in the daemon) for the same
+      // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
+      this.sessionReleaseUnsubscribe?.();
+      this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+        (sessionId, reason, snapshot) => {
+          this.clearBoundMcpClientsForReleasedSession(sessionId);
+          this.broadcastSessionReleased(sessionId, reason, snapshot);
+        },
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        this.server!.listen(this.socketPath, () => {
+          this.socketFileIdentity = this.readSocketFileIdentity();
+          logger.info(`Unix socket server listening on ${this.socketPath}`);
+          // Restrict the bound socket to the owner (0o600) before start() resolves,
+          // so no client can connect while it is still world-accessible. listen()
+          // creates the socket at the umask default (issue #4750).
+          secureFile(this.socketPath).then(resolve).catch(reject);
+        });
+
+        this.server!.on("error", (error) => {
+          logger.error(`Unix socket server error: ${error}`);
+          reject(error);
+        });
+      });
+    } finally {
+      // Release once the socket is bound (or the bind failed): the lock only
+      // needs to cover the brief unlink-and-listen window. Past a committed bind
+      // the reachability probe alone protects the live socket from later binders.
+      this.socketReclaimLock.release();
+    }
   }
 
   /**

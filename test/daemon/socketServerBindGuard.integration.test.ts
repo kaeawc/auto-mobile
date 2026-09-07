@@ -8,6 +8,7 @@ import {
   UnixSocketServer,
   type SocketOwnerLiveness,
   type SocketOwnerStatus,
+  type SocketReclaimLock,
 } from "../../src/daemon/socketServer";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -49,6 +50,7 @@ function makeServer(
   bindGuard: {
     reachability?: DaemonSocketReachabilityLike;
     ownerLiveness?: SocketOwnerLiveness;
+    bindLock?: SocketReclaimLock;
   },
 ): UnixSocketServer {
   return new UnixSocketServer(
@@ -188,6 +190,83 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
 
       await expect(server.start()).rejects.toThrow(/positively known to be dead/);
       expect(existsSync(socketPath)).toBe(true);
+    },
+  );
+
+  // Issue #6232, W5: the reachability/owner checks are observation-only, so two
+  // concurrent binders can both judge a stale socket reclaimable. A single
+  // cross-process reclaim lock serializes the probe → unlink → listen sequence.
+  (isWindows ? test.skip : test)(
+    "refuses to bind while the reclaim lock is held, without probing or unlinking",
+    async () => {
+      const socketPath = tempSocketPath();
+      // A stale socket a lone binder could otherwise reclaim; a held reclaim lock
+      // must short-circuit BEFORE any probe/owner check or unlink runs.
+      writeFileSync(socketPath, "");
+
+      let released = false;
+      const server = makeServer(socketPath, {
+        reachability: {
+          isReachable: async () => {
+            throw new Error("probe must not run while the reclaim lock is unavailable");
+          },
+        },
+        ownerLiveness: throwingOwnerLiveness,
+        bindLock: {
+          acquire: () => false,
+          release: () => {
+            released = true;
+          },
+        },
+      });
+
+      await expect(server.start()).rejects.toThrow(/reclaiming or binding/);
+
+      // The socket a concurrent winner may have just bound is left untouched.
+      expect(existsSync(socketPath)).toBe(true);
+      expect(server.isListening()).toBe(false);
+      // A lock we never acquired must never be released out from under its holder.
+      expect(released).toBe(false);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "two concurrent lock-less binds over a dead socket: exactly one reclaims, the other refuses",
+    async () => {
+      const socketPath = tempSocketPath();
+      // A stale, ownerless-dead socket that BOTH contenders' observation-only
+      // checks would judge reclaimable. Only the real shared `<socket>.bind.lock`
+      // (no bindLock injected here) keeps them from both unlinking it.
+      writeFileSync(socketPath, "");
+
+      const a = makeServer(socketPath, {
+        reachability: reachability(false),
+        ownerLiveness: ownerLiveness("dead"),
+      });
+      const b = makeServer(socketPath, {
+        reachability: reachability(false),
+        ownerLiveness: ownerLiveness("dead"),
+      });
+      cleanups.push(() => a.close());
+      cleanups.push(() => b.close());
+
+      const results = await Promise.allSettled([a.start(), b.start()]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      // Exactly one binder wins; the loser refuses rather than racing the unlink.
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch(
+        /reclaiming or binding/,
+      );
+
+      // The winner is bound and its socket is reachable; the loser never unlinked it.
+      expect(a.isListening() !== b.isListening()).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+      const client = await connectClient(socketPath);
+      expect(client.destroyed).toBe(false);
+      client.destroy();
     },
   );
 });

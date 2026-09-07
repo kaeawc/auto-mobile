@@ -1648,13 +1648,10 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    # Self-hosted routing: PRs authored by kaeawc run on the self-hosted Apple
-    # Silicon runner (label automobile-mac); every other author falls back to the
-    # GitHub-hosted macos-26 runner. runs-on wants a label array for self-hosted
-    # and a plain string for hosted, so fromJSON supplies the array on the kaeawc
-    # branch. This workflow is pull_request-only, so pull_request.user.login is
-    # always populated. Non-simulator job (no ensure-ios-simulator-runtime).
-    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
+    # PR workflow definitions are supplied by the pull request, so every PR job
+    # stays on a GitHub-hosted runner. Trusted post-merge work retains the
+    # automobile-mac route in merge.yml.
+    runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -1682,9 +1679,9 @@ jobs:
   swift-code-coverage:
     timeout-minutes: 20
     name: "Swift Code Coverage"
-    # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
-    # macos-26. No setup-xcode step here, so it uses the runner's ambient Xcode.
-    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
+    # See swiftlint: pull-request YAML must not schedule work on a self-hosted
+    # runner. Trusted post-merge work retains the automobile-mac route.
+    runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -1709,10 +1706,9 @@ jobs:
 
   ios-swift-packages:
     name: "Swift Packages (${{ matrix.config.name }})"
-    # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
-    # the matrix's macos-26 runner. The Select-Xcode step below is gated to hosted
-    # runners so the self-hosted Mac uses its ambient (upgraded) Xcode toolchain.
-    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || matrix.config.runner }}
+    # Pull-request YAML is untrusted, including for repository members, so the
+    # package matrix always uses the GitHub-hosted runner from its configuration.
+    runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
@@ -1736,10 +1732,9 @@ jobs:
         with:
           lfs: false
 
-      # Only the GitHub-hosted runner needs an explicit Xcode pin; the self-hosted
-      # Mac uses its ambient (upgraded) Xcode toolchain.
+      # Pin every package build to the matrix toolchain. This is the supported
+      # compiler floor, not an ambient-runner compatibility check.
       - name: "Select Xcode ${{ matrix.config.xcode }}"
-        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
@@ -2109,9 +2104,9 @@ jobs:
   ios-spm-root-package-build:
     timeout-minutes: 20
     name: "Build Root SPM Package"
-    # Self-hosted routing (see swiftlint): kaeawc PRs on automobile-mac, others on
-    # macos-26. The root manifest needs the Swift 6.3 toolchain from Xcode 26.5.
-    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
+    # Pull-request YAML must remain off self-hosted runners. The root manifest
+    # needs the Swift 6.3 toolchain from Xcode 26.5.
+    runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -2125,8 +2120,7 @@ jobs:
       # ships with Xcode 26.5. Xcode 26.0 ships Swift 6.2 and cannot even parse
       # a 6.3 manifest, so this floor-guarantee job builds on 26.5 to match the
       # published SDK's toolchain floor and every other Swift-package job here.
-      # Select it on both runner types: the self-hosted runner must install 26.5
-      # for this floor-guarantee job to be eligible.
+      # Select it explicitly so this job verifies the published compiler floor.
       - name: "Select Xcode 26.5"
         uses: maxim-lobanov/setup-xcode@v1
         with:

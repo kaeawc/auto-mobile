@@ -4,8 +4,9 @@ import { loadJobSteps, loadJobs, stepNamed } from "../helpers/workflowSteps";
 describe("root SPM toolchain floor workflow", () => {
   test("keeps pull-request jobs off the self-hosted runner", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const prohibitedRunners = ["self-hosted", "automobile-mac"];
     const selfHostedJobs = Object.entries(jobs).filter(([, job]) =>
-      JSON.stringify(job["runs-on"] ?? "").includes("self-hosted"),
+      prohibitedRunners.some((runner) => JSON.stringify(job["runs-on"] ?? "").includes(runner)),
     );
 
     expect(selfHostedJobs).toEqual([]);

@@ -375,7 +375,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
     });
   });
 
-  test("prunes a launch log from its durable dead-owner tombstone despite discovery uncertainty", async () => {
+  test("retains a launch log with a durable tombstone when discovery is uncertain", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
       const launchLogPath = path.join(dir, launchLog);
@@ -396,7 +396,9 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
           candidate === launchLogPath ? { pid: 5000, launchLogPath } : undefined,
       });
 
-      expect(await readdir(dir)).not.toContain(launchLog);
+      // A path-only tombstone can belong to a prior manager generation after
+      // PID/path reuse, so it cannot override an incomplete namespace scan.
+      expect(await readdir(dir)).toContain(launchLog);
     });
   });
 

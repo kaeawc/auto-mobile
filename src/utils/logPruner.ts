@@ -226,7 +226,12 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     );
     try {
       const tombstone = opts.readDaemonLaunchLogOwnerTombstone?.(filePath);
-      if (tombstone !== undefined) {
+      // A tombstone is tied only to a path today, not to a particular file
+      // generation. A manager PID can be reused and truncate the same path
+      // before a stale namespace cleanup publishes its former owner's
+      // tombstone. In that case the sidecar cannot disprove an undiscovered
+      // live owner, so it must not override incomplete discovery.
+      if (tombstone !== undefined && !uncertain) {
         exactOwners.push(tombstone);
       }
     } catch (error) {

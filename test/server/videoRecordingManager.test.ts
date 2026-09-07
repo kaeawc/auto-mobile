@@ -17,7 +17,7 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { VideoRecorderService } from "../../src/features/video";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   listVideoRecordings,
   interruptVideoRecording,
@@ -145,6 +145,46 @@ describe("videoRecordingManager", () => {
 
     fakeTimer.advanceTime(3000);
     expect(fakeBackend.stopCalls.length).toBe(1);
+  });
+
+  // issue #6291: stopping right after start can race the backend's own file
+  // finalization; when the backend's stop() genuinely fails (after its own
+  // retries), the manager must not leak the raw error or leave the recording
+  // stuck in "recording" status forever.
+  test("cleans up an orphaned recording and throws an ActionableError when the backend stop fails (issue #6291)", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+
+    fakeBackend.stop = async () => {
+      throw new Error("adb pull failed with exit code 1");
+    };
+
+    let caught: unknown;
+    try {
+      await stopVideoRecording(active.recordingId);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ActionableError);
+    expect((caught as Error).message).not.toBe("adb pull failed with exit code 1");
+
+    const record = await fakeRepository.getRecording(active.recordingId);
+    expect(record?.status).toBe("interrupted");
+
+    // Ownership of the device was released along with the DB cleanup, so a
+    // new recording can start on the same device instead of being blocked by
+    // the orphaned one.
+    fakeBackend.stop = async (handle) => ({
+      recordingId: handle.recordingId,
+      outputPath: handle.outputPath,
+      startedAt: handle.startedAt,
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+      sizeBytes: 10,
+      codec: "h264",
+    });
+    await expect(startVideoRecording({ device: testDevice })).resolves.toMatchObject({
+      recordingId: expect.any(String),
+    });
   });
 
   test("shares manager finalization when shutdown overlaps a user stop", async () => {

@@ -311,7 +311,20 @@ export class VideoRecorderService {
   private async stopActiveRecording(active: ActiveRecordingState): Promise<VideoRecordingMetadata> {
     const recordingId = active.recordingId;
     const handle = active.handle ?? (await active.startPromise);
-    const stopResult = await this.backend.stop(handle);
+    let stopResult: RecordingResult;
+    try {
+      stopResult = await this.backend.stop(handle);
+    } catch (error) {
+      // The backend's stop() already tore down the device-side process before
+      // this failure (e.g. a genuine `adb pull` failure, issue #6291) — the
+      // capture is no longer live, so retaining ownership here would
+      // permanently block a new recording on this device with "Video
+      // recording already active for device X".
+      if (this.activeRecordings.get(recordingId) === active) {
+        this.activeRecordings.delete(recordingId);
+      }
+      throw error;
+    }
     if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
     }

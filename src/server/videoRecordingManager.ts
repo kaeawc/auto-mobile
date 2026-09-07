@@ -9,6 +9,7 @@ import {
   VideoRecordingHighlightEntry,
   VideoRecordingHighlightInput,
   VideoRecordingMetadata,
+  toActionableError,
 } from "../models";
 import {
   HybridVideoCaptureBackend,
@@ -1030,7 +1031,26 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
   clearAutoStop(resolvedId);
   clearInProgressSizeCap(resolvedId);
 
-  const metadata = await videoRecorderService.stopRecording(resolvedId);
+  let metadata: VideoRecordingMetadata;
+  try {
+    metadata = await videoRecorderService.stopRecording(resolvedId);
+  } catch (error) {
+    // The capture backend already tore down its device-side process before
+    // this failure (e.g. a genuine `adb pull` failure after retries, issue
+    // #6291) — clean up the now-orphaned "recording" row via the same
+    // canonical interruption path used elsewhere, instead of leaving it
+    // stuck in "recording" forever, then surface a structured error rather
+    // than the backend's raw exec message.
+    try {
+      await interruptVideoRecording(resolvedId);
+    } catch (cleanupError) {
+      logger.warn(
+        `[VideoRecording] Failed to clean up orphaned recording ${resolvedId} after a failed stop: ${cleanupError}`,
+        cleanupError,
+      );
+    }
+    throw toActionableError(error, `Failed to stop video recording ${resolvedId}`);
+  }
   const highlightSession = disposeHighlightSession(resolvedId);
   if (highlightSession) {
     const finalizedHighlights = finalizeHighlightSession(

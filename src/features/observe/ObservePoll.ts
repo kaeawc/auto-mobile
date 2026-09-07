@@ -53,6 +53,8 @@ export interface ObservePollOutcome {
    * the loop exited on the budget or a screen-off fast-fail.
    */
   stopped: boolean;
+  /** Why the loop produced this observation. */
+  terminalReason: "matched" | "screen_off" | "timeout";
 }
 
 /**
@@ -61,6 +63,11 @@ export interface ObservePollOutcome {
  */
 function isScreenOff(observation: ObserveResult): boolean {
   return observation.wakefulness === "Asleep";
+}
+
+/** A rootless screen-off sample is terminal only when ADB read it on this call. */
+function isIndependentScreenOff(observation: ObserveResult): boolean {
+  return isScreenOff(observation) && observation.wakefulnessSource === "adb";
 }
 
 /**
@@ -224,8 +231,14 @@ export async function pollObserveUntil(
     // A screen-off terminal is only meaningful when the same observation passed
     // the admission contract. A stale cached "Asleep" frame after the device
     // wakes must not fast-fail a public wait or be promoted by tap settlement.
-    if (isScreenOff(observation) && isAdmissibleEvidence) {
-      return { observation, polls, waitMs: timer.now() - start, stopped: false };
+    if ((isScreenOff(observation) && isAdmissibleEvidence) || isIndependentScreenOff(observation)) {
+      return {
+        observation,
+        polls,
+        waitMs: timer.now() - start,
+        stopped: false,
+        terminalReason: "screen_off",
+      };
     }
 
     // Rejected observations are deliberately invisible to stateful predicates:
@@ -233,7 +246,13 @@ export async function pollObserveUntil(
     // could manufacture a two-sample settle from regressed evidence.
     const matched = isAdmissibleEvidence && onObservation(observation, previous, polls);
     if (matched && isPostInvocation) {
-      return { observation, polls, waitMs: timer.now() - start, stopped: true };
+      return {
+        observation,
+        polls,
+        waitMs: timer.now() - start,
+        stopped: true,
+        terminalReason: "matched",
+      };
     }
 
     if (isAdmissibleEvidence) {
@@ -246,6 +265,7 @@ export async function pollObserveUntil(
         polls,
         waitMs: timer.now() - start,
         stopped: false,
+        terminalReason: "timeout",
       };
     }
 

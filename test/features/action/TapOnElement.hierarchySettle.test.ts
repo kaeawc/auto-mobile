@@ -316,6 +316,7 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
     const asleep = makeObservation({
       updatedAt: 10,
       wakefulness: "Asleep",
+      wakefulnessSource: "adb",
       viewHierarchy: undefined,
       freshness: { isFresh: true, verified: true },
     });
@@ -329,6 +330,24 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
     // The screen-off capture is the real post-tap state, not a stale pre-tap
     // tree — its freshness must be left intact.
     expect(result.observation.freshness).toEqual({ isFresh: true, verified: true });
+  });
+
+  test("does not promote stale Asleep fallback after a settle timeout", async () => {
+    const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("baseline") });
+    const transientA = makeObservation({ updatedAt: 10, viewHierarchy: makeHierarchy("A") });
+    const staleAsleep = makeObservation({
+      updatedAt: 10,
+      wakefulness: "Asleep",
+      wakefulnessSource: "hierarchy",
+      viewHierarchy: makeHierarchy("cached-asleep"),
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    });
+    const tap = createTapWithSettleSequence([staleAsleep]);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+
+    expect(postTap.observation.wakefulness).not.toBe("Asleep");
+    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("A");
   });
 
   test("still retracts freshness on a live-hierarchy observation that predates the transition", () => {

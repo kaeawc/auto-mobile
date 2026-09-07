@@ -71,6 +71,7 @@ export class RealWaitForCondition implements WaitForCondition {
       polls: outcome.polls,
       waitMs: outcome.waitMs,
       timedOut: true,
+      screenOff: outcome.terminalReason === "screen_off" ? true : undefined,
     };
   }
 }

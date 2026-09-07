@@ -245,6 +245,8 @@ export interface ObserveResult {
    * - "Dozing": Device is in ambient display / always-on mode
    */
   wakefulness?: "Awake" | "Asleep" | "Dozing";
+  /** Provenance used internally to distinguish a live device-state read from cached hierarchy metadata. */
+  wakefulnessSource?: "hierarchy" | "adb";
 
   /**
    * Structured device-lock signal (Android only). Present when the lock state

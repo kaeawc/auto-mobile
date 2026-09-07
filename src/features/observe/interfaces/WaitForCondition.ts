@@ -55,6 +55,8 @@ export interface WaitForConditionResult {
   polls: number;
   waitMs: number;
   timedOut: boolean;
+  /** Present only when polling ended on an admissible live screen-off read. */
+  screenOff?: true;
 }
 
 /**

@@ -266,4 +266,50 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.polls).toBe(2);
     expect(outcome.observation.wakefulness).not.toBe("Asleep");
   });
+
+  test("returns a live independently sampled rootless Asleep state", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const rootlessAsleep = {
+      ...obs(20, "rootless"),
+      wakefulness: "Asleep",
+      wakefulnessSource: "adb",
+      viewHierarchy: undefined,
+    } as ObserveResult;
+    fake.setObserveSequence([obs(10, "awake"), rootlessAsleep]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150 },
+      () => false,
+    );
+
+    expect(outcome.terminalReason).toBe("screen_off");
+    expect(outcome.observation).toBe(rootlessAsleep);
+  });
+
+  test("does not label an all-stale Asleep timeout as a screen-off terminal", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const staleAsleep = {
+      ...obs(10, "cached-asleep"),
+      wakefulness: "Asleep",
+      wakefulnessSource: "hierarchy",
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    } as ObserveResult;
+    fake.setObserveSequence([staleAsleep]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 300, pollMs: 150, initialMinTimestampMs: 10 },
+      () => false,
+    );
+
+    expect(outcome.terminalReason).toBe("timeout");
+    expect(outcome.observation.wakefulness).toBe("Asleep");
+  });
 });

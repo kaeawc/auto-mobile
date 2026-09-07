@@ -763,7 +763,7 @@ export class TapOnElement extends BaseVisualChange {
     // no viewHierarchy, so re-deriving from scratch would find only an unchanged
     // `activeWindow` and flip the effect back to `screenChanged: false`,
     // erasing the transition that already entered this settle.
-    const isDefinitiveScreenOffTerminal = effectObservation.wakefulness === "Asleep";
+    const isDefinitiveScreenOffTerminal = settled.screenOff === true;
     const effect: TapOnElementResult["effect"] = isDefinitiveScreenOffTerminal
       ? { screenChanged: true, basis: "viewHierarchy changed" }
       : this.deriveTapEffect(previousObservation, effectObservation);
@@ -791,7 +791,7 @@ export class TapOnElement extends BaseVisualChange {
     settled: WaitForConditionResult,
   ): ObserveResult {
     const effectObservation = settled.observation;
-    const finalPollIsDefinitiveScreenOff = effectObservation.wakefulness === "Asleep";
+    const finalPollIsDefinitiveScreenOff = settled.screenOff === true;
     if (!settled.timedOut || finalPollIsDefinitiveScreenOff) {
       return effectObservation;
     }

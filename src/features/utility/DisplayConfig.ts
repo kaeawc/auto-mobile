@@ -437,7 +437,16 @@ export class DisplayConfig {
       : await this.applyIosChanges(input);
 
     const { applied, readError } = await this.readIosAppliedSnapshot();
-    const allErrors = readError ? [...errors, readError] : errors;
+    const allErrors = readError ? [...errors, readError] : [...errors];
+    // `simctl ui appearance` can accept a write while the simulator has not
+    // actually adopted it. A successful command is only an attempted mutation;
+    // report success only when the authoritative post-read confirms the target.
+    const expectedTheme = input.reset ? "light" : input.theme;
+    if (applied && expectedTheme && applied.theme !== expectedTheme) {
+      allErrors.push(
+        `Simulator appearance remained ${applied.theme} after requesting ${expectedTheme}`,
+      );
+    }
     const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
     return {
       success: error === undefined,

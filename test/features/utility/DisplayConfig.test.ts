@@ -512,7 +512,10 @@ describe("DisplayConfig iOS Simulator theme support", () => {
 
   test("sets the appearance through the SimCtlClient seam", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "light\n");
+    simctl.setCommandArgsResultSequence(
+      ["ui", iosSimulator.deviceId, "appearance"],
+      [{ stdout: "light\n" }, { stdout: "dark\n" }],
+    );
 
     const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       theme: "dark",
@@ -528,9 +531,27 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     ]);
   });
 
+  test("fails when the Simulator does not apply the requested appearance", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResultSequence(
+      ["ui", iosSimulator.deviceId, "appearance"],
+      [{ stdout: "light\n" }, { stdout: "light\n" }],
+    );
+
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
+
+    expect(result.success).toBe(false);
+    expect(result.applied).toEqual({ theme: "light" });
+    expect(result.previous).toEqual({ theme: "light" });
+    expect(result.error).toContain("remained light");
+  });
+
   test("reset restores light appearance", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "dark\n");
+    simctl.setCommandArgsResultSequence(
+      ["ui", iosSimulator.deviceId, "appearance"],
+      [{ stdout: "dark\n" }, { stdout: "light\n" }],
+    );
 
     const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       reset: true,

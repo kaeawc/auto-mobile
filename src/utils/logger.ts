@@ -282,7 +282,7 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // When isolated daemons share an `AUTOMOBILE_LOG_DIR`, a launch log there can be
 // held by a LIVE daemon in a different namespace; checking only our own would
 // unlink it (the exact #6194 data-loss). The concrete pid enumeration is passed
-// to `pruneLogFiles` via `daemonPidFiles` + `readDaemonPid` below.
+// to `pruneLogFiles` via `daemonPidFiles` + `readDaemonOwner` below.
 const isDaemonRunning = (): boolean => {
   try {
     const { readPidFileDataSync, isProcessRunning, listDaemonPidFilesSync } =
@@ -325,14 +325,14 @@ const daemonPidFiles = (): DaemonPidFileEnumeration => {
   }
 };
 
-const readDaemonPid = (pidFilePath: string): number | undefined => {
-  // Deliberately NOT wrapped in a swallowing catch: `readDaemonPidForRetentionSync`
+const readDaemonOwner = (pidFilePath: string) => {
+  // Deliberately NOT wrapped in a swallowing catch: `readDaemonOwnerForRetentionSync`
   // returns undefined only for a confidently-absent file and THROWS on an
   // unreadable/malformed one, and that throw must propagate to `pruneLogFiles`'s
   // retain-on-ambiguity path rather than be flattened to "absent" (issue #6194).
-  const { readDaemonPidForRetentionSync } =
+  const { readDaemonOwnerForRetentionSync } =
     require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-  return readDaemonPidForRetentionSync(pidFilePath);
+  return readDaemonOwnerForRetentionSync(pidFilePath);
 };
 
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
@@ -348,13 +348,13 @@ const pruneOldLogFiles = (): Promise<void> => {
     ownPrefix: ownLogPrefix,
     maxOwnFiles: MAX_LOG_FILES,
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
-    // Namespace-aware retention: check every co-located namespace's daemon pid
-    // file, with `isDaemonRunning` as the single-namespace fallback (issue #6194).
+    // Namespace-aware retention: read every co-located namespace's exact
+    // launch-log ownership declaration (issue #6194).
     // Passed as the thunk itself (not `daemonPidFiles()`) so enumeration is
     // deferred to sweep time — an eager call crashed the cyclic logger import
     // before `logger` was initialized (issue #6194).
     daemonPidFiles,
-    readDaemonPid,
+    readDaemonOwner,
     isDaemonRunning,
   });
 };

@@ -134,6 +134,13 @@ export const LOCK_FILE_PATH = lockFilePathOverride
   : `/tmp/auto-mobile-daemon-${uid}.lock`;
 
 /**
+ * Absolute path of the launch-capture log inherited from DaemonManager. The
+ * daemon publishes this in its PID record so log retention can associate a
+ * specific `daemon-launch-*.log` with its actual child owner.
+ */
+export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
+
+/**
  * Connection timeout in milliseconds
  * How long to wait for daemon to respond to a request.
  * Set to 120s to accommodate long-running operations like device cold boot (26-60s+).

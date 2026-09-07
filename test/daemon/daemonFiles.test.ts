@@ -7,7 +7,7 @@ import {
   cleanupDaemonFilesSync,
   isProcessRunning,
   listDaemonPidFilesSync,
-  readDaemonPidForRetentionSync,
+  readDaemonOwnerForRetentionSync,
 } from "../../src/daemon/daemonFiles";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import type { PidFileData } from "../../src/daemon/types";
@@ -173,7 +173,7 @@ describe("listDaemonPidFilesSync (cross-namespace enumeration, issue #6194)", ()
   });
 });
 
-describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", () => {
+describe("readDaemonOwnerForRetentionSync (ambiguity vs absence, issue #6194)", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -191,14 +191,17 @@ describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", ()
 
   test("returns undefined for a confidently-absent pid file", () => {
     const missing = join(makeDir(), "daemon.pid");
-    expect(readDaemonPidForRetentionSync(missing)).toBeUndefined();
+    expect(readDaemonOwnerForRetentionSync(missing)).toBeUndefined();
   });
 
-  test("returns the recorded pid for a well-formed pid file", () => {
+  test("preserves a well-formed PID file's explicit launch-log declaration", () => {
     const dir = makeDir();
     const pidFile = join(dir, "daemon.pid");
-    writeFileSync(pidFile, JSON.stringify({ pid: 4321 }));
-    expect(readDaemonPidForRetentionSync(pidFile)).toBe(4321);
+    writeFileSync(pidFile, JSON.stringify({ pid: 4321, launchLogPath: null }));
+    expect(readDaemonOwnerForRetentionSync(pidFile)).toEqual({
+      pid: 4321,
+      launchLogPath: null,
+    });
   });
 
   test("THROWS (does not swallow to undefined) on a present-but-malformed pid file", () => {
@@ -206,7 +209,7 @@ describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", ()
     const pidFile = join(dir, "daemon.pid");
     writeFileSync(pidFile, "{ this is not json");
     // The pruner relies on this throw to fail closed and retain the launch log.
-    expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+    expect(() => readDaemonOwnerForRetentionSync(pidFile)).toThrow();
   });
 
   test("THROWS on syntactically-valid JSON missing the pid field", () => {
@@ -214,14 +217,14 @@ describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", ()
     const pidFile = join(dir, "daemon.pid");
     writeFileSync(pidFile, "{}");
     // Present but schema-invalid — ambiguous, not confidently absent.
-    expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+    expect(() => readDaemonOwnerForRetentionSync(pidFile)).toThrow();
   });
 
   test("THROWS when pid is a non-numeric string", () => {
     const dir = makeDir();
     const pidFile = join(dir, "daemon.pid");
     writeFileSync(pidFile, JSON.stringify({ pid: "123" }));
-    expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+    expect(() => readDaemonOwnerForRetentionSync(pidFile)).toThrow();
   });
 
   test("THROWS when pid is zero, negative, or non-integer", () => {
@@ -229,7 +232,7 @@ describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", ()
     for (const badPid of [0, -1, 1.5]) {
       const pidFile = join(dir, `daemon-${badPid}.pid`);
       writeFileSync(pidFile, JSON.stringify({ pid: badPid }));
-      expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
+      expect(() => readDaemonOwnerForRetentionSync(pidFile)).toThrow();
     }
   });
 });

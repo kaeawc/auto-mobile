@@ -6,7 +6,7 @@ import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { logger } from "../utils/logger";
-import type { DaemonPidFileEnumeration } from "../utils/logPruner";
+import type { DaemonLaunchLogOwner, DaemonPidFileEnumeration } from "../utils/logPruner";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
@@ -269,7 +269,7 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
 }
 
 /**
- * Read the owning daemon PID for a launch-log RETENTION decision, distinguishing
+ * Read the daemon owner declaration for a launch-log RETENTION decision, distinguishing
  * a CONFIDENTLY-absent pid file (returns `undefined` — no daemon recorded in that
  * namespace) from a present-but-unreadable/malformed/schema-invalid one (THROWS
  * — ambiguous).
@@ -284,9 +284,9 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
  * nor a usable pid, so it throws rather than returning it as-is. No logger
  * reference, so it is safe to call during the cyclic logger import.
  */
-export function readDaemonPidForRetentionSync(
+export function readDaemonOwnerForRetentionSync(
   pidFilePath: string = PID_FILE_PATH,
-): number | undefined {
+): DaemonLaunchLogOwner | undefined {
   if (!existsSync(pidFilePath)) {
     return undefined;
   }
@@ -300,7 +300,7 @@ export function readDaemonPidForRetentionSync(
     // than silently treating this namespace as dead.
     throw new Error(`Pid file at ${pidFilePath} is present but does not contain a valid pid`);
   }
-  return pid;
+  return { pid, launchLogPath: data.launchLogPath };
 }
 
 export function isProcessRunning(pid: number): boolean {

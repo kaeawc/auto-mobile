@@ -212,7 +212,10 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         // The spawning manager 4242 is dead, but daemon 5000 (namespace A) is alive.
         isProcessAlive: (pid) => pid === daemonPidA,
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
-        readDaemonPid: (p) => (p === pidFileA ? daemonPidA : undefined),
+        readDaemonOwner: (p) =>
+          p === pidFileA
+            ? { pid: daemonPidA, launchLogPath: path.join(dir, launchLogA) }
+            : undefined,
         // Namespace B's own single-namespace view sees no daemon.
         isDaemonRunning: () => false,
       });
@@ -234,7 +237,10 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         abandonedMaxAgeMs: -1,
         isProcessAlive: () => false, // manager AND every namespace's daemon dead
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
-        readDaemonPid: (p) => (p === pidFileA ? daemonPidA : undefined),
+        readDaemonOwner: (p) =>
+          p === pidFileA
+            ? { pid: daemonPidA, launchLogPath: path.join(dir, launchLog) }
+            : undefined,
         isDaemonRunning: () => false,
       });
 
@@ -257,7 +263,10 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         abandonedMaxAgeMs: -1,
         isProcessAlive: (pid) => pid === daemonPidA, // only ns A's daemon alive
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
-        readDaemonPid: (p) => (p === pidFileA ? daemonPidA : undefined),
+        readDaemonOwner: (p) =>
+          p === pidFileA
+            ? { pid: daemonPidA, launchLogPath: path.join(dir, launchLog) }
+            : undefined,
         isDaemonRunning: () => false,
       });
 
@@ -279,7 +288,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         abandonedMaxAgeMs: -1,
         isProcessAlive: () => false,
         daemonPidFiles: () => ({ pidFiles: [pidFileA], uncertain: false }),
-        readDaemonPid: () => {
+        readDaemonOwner: () => {
           throw new Error("pidfile unreadable");
         },
         isDaemonRunning: () => false,
@@ -310,7 +319,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         abandonedMaxAgeMs: -1,
         isProcessAlive: () => false, // every pid we can see is dead
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
-        readDaemonPid: () => undefined, // our own namespace records no live daemon
+        readDaemonOwner: () => undefined, // our own namespace records no live daemon
         isDaemonRunning: () => false,
       });
 
@@ -332,7 +341,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         isProcessAlive: () => false,
         // Complete enumeration and every namespace's daemon confidently dead.
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
-        readDaemonPid: () => undefined,
+        readDaemonOwner: () => undefined,
         isDaemonRunning: () => false,
       });
 
@@ -341,13 +350,33 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
     });
   });
 
-  test("retains an uncertain launch log within the default 7-day horizon even though abandonedMaxAgeMs is effectively 0", async () => {
-    // Decoupling check: a caller that shrinks the ordinary sweep window
-    // (abandonedMaxAgeMs: -1, i.e. "always past threshold") must NOT also
-    // shrink the fail-closed uncertain horizon — it defaults independently.
+  test("does not let a live daemon protect an unrelated abandoned launch log", async () => {
+    await withTempLogDir(async (dir) => {
+      const abandoned = "daemon-launch-4242.log";
+      const liveOwnerLog = "daemon-launch-4243.log";
+      await writeFile(path.join(dir, abandoned), "abandoned output");
+      await writeFile(path.join(dir, liveOwnerLog), "live daemon output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: (pid) => pid === 5000,
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
+        readDaemonOwner: () => ({ pid: 5000, launchLogPath: path.join(dir, liveOwnerLog) }),
+      });
+
+      const after = await readdir(dir);
+      expect(after).not.toContain(abandoned);
+      expect(after).toContain(liveOwnerLog);
+    });
+  });
+
+  test("retains a legacy owner declaration even when its apparent pid is dead", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
-      await writeFile(path.join(dir, launchLog), "in-flight output");
+      await writeFile(path.join(dir, launchLog), "ownership unavailable");
 
       await pruneLogFiles({
         dir,
@@ -355,47 +384,17 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
         isProcessAlive: () => false,
-        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
-        readDaemonPid: () => undefined,
-        isDaemonRunning: () => false,
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
+        readDaemonOwner: () => ({ pid: 5000, launchLogPath: undefined }),
       });
 
-      const after = await readdir(dir);
-      expect(after).toContain(launchLog); // freshly written -> well within 7 days
-    });
-  });
-
-  test("eventually prunes an uncertain launch log once it exceeds uncertainAbandonedMaxAgeMs (issue #6194, round 3)", async () => {
-    // Regression for the round-3 finding: marking discovery `uncertain`
-    // unconditionally (to close the prior default-namespace gap) must not
-    // retain every uncertain namespace's launch logs FOREVER — that reopens
-    // the unbounded-growth problem the abandoned-log sweep exists to prevent.
-    // An uncertain namespace still gets swept, just past a longer, dedicated
-    // horizon instead of the ordinary `abandonedMaxAgeMs`.
-    await withTempLogDir(async (dir) => {
-      const launchLog = "daemon-launch-4242.log";
-      await writeFile(path.join(dir, launchLog), "long-abandoned output");
-
-      await pruneLogFiles({
-        dir,
-        ownPrefix: "stdio-111",
-        maxOwnFiles: 10,
-        abandonedMaxAgeMs: 1000 * 60 * 60 * 24 * 365, // ordinary window: effectively "never"
-        uncertainAbandonedMaxAgeMs: -1, // extended window: treat as already past
-        isProcessAlive: () => false,
-        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
-        readDaemonPid: () => undefined,
-        isDaemonRunning: () => false,
-      });
-
-      const after = await readdir(dir);
-      expect(after).not.toContain(launchLog); // past the extended uncertain horizon -> pruned
+      expect(await readdir(dir)).toContain(launchLog);
     });
   });
 });
 
 describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
-  test("calls daemonPidFiles/readDaemonPid at most once across many launch logs in one sweep", async () => {
+  test("calls daemonPidFiles/readDaemonOwner at most once across many launch logs in one sweep", async () => {
     await withTempLogDir(async (dir) => {
       const launchLogs = Array.from({ length: 20 }, (_, i) => `daemon-launch-${5000 + i}.log`);
       for (const file of launchLogs) {
@@ -416,14 +415,14 @@ describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
           enumerateCalls += 1;
           return { pidFiles: [ownPidFile], uncertain: false };
         },
-        readDaemonPid: () => {
+        readDaemonOwner: () => {
           readCalls += 1;
-          return undefined;
+          return { pid: 5000, launchLogPath: null };
         },
         isDaemonRunning: () => false,
       });
 
-      // One retention decision covers the whole sweep — 20 launch logs must not
+      // One ownership discovery covers the whole sweep — 20 launch logs must not
       // trigger 20 pidfile-directory scans + reads (O(n) event-loop-blocking
       // filesystem work).
       expect(enumerateCalls).toBe(1);
@@ -452,7 +451,7 @@ describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
           enumerateCalls += 1;
           return { pidFiles: [], uncertain: false };
         },
-        readDaemonPid: () => undefined,
+        readDaemonOwner: () => undefined,
         isDaemonRunning: () => false,
       });
 

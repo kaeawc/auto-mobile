@@ -22,10 +22,11 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
+  DAEMON_LAUNCH_LOG_PATH_ENV,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
@@ -1067,6 +1068,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
+      launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       options: this.options,
     };
@@ -1087,6 +1089,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
+      launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       entryScript: buildIdentity.entryScript,
       buildId: buildIdentity.buildId,
@@ -1095,6 +1098,11 @@ export class Daemon {
 
     await this.persistPidFileData(pidData);
     logger.info(`PID file written to ${PID_FILE_PATH}`);
+  }
+
+  private launchLogPath(): string | null {
+    const logPath = process.env[DAEMON_LAUNCH_LOG_PATH_ENV];
+    return logPath && isAbsolute(logPath) ? logPath : null;
   }
 
   /**

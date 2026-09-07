@@ -10,35 +10,26 @@ import { readdirAsync, statAsync, unlinkAsync } from "./io";
  * may live in directories this scan can't see, or a failed directory scan. When
  * uncertain, a launch log is retained past the ordinary {@link LogPruneOptions.abandonedMaxAgeMs}
  * even if none of the discovered pids is alive, because a live daemon in an
- * undiscoverable namespace may still hold the inherited fd. It is NOT retained
- * forever, though: the production enumerator (`listDaemonPidFilesSync`) can
- * never resolve `uncertain` to `false` for a custom pid-file namespace, so
- * treating uncertainty as permanent retention would leak one launch log per
- * daemon start, unbounded, on every host that uses a custom namespace — see
- * {@link LogPruneOptions.uncertainAbandonedMaxAgeMs}. A launch log is unlinked
- * on the ordinary, shorter horizon only when it is CONFIDENTLY established
- * (uncertain === false and no discovered/own daemon alive) that no live daemon
- * owns it.
+ * undiscoverable namespace may still hold the inherited fd. It remains retained
+ * until an owner is positively absent or dead; age is not ownership evidence.
  */
 export interface DaemonPidFileEnumeration {
   /** Daemon pid files this enumeration could discover (always includes the caller's own). */
   pidFiles: readonly string[];
-  /** True when discovery is incomplete/failed — retain launch logs past the extended horizon. */
+  /** True when discovery is incomplete/failed — retain launch logs. */
   uncertain: boolean;
 }
 
 /**
- * Extended retention horizon applied to a `daemon-launch-*.log` when daemon
- * discovery is UNCERTAIN rather than confidently clear. A custom pid-file
- * namespace can never make `uncertain` resolve to `false` (its siblings may
- * live in a directory a scan never visits), so gating cleanup on `uncertain`
- * alone — as the prior fix for issue #6194 did — retains every uncertain
- * namespace's launch logs forever and reopens the unbounded-growth problem the
- * ordinary `abandonedMaxAgeMs` sweep exists to prevent (issue #6194, round 3).
- * Seven days is long enough that no real daemon session plausibly still holds
- * the fd, while still bounding disk usage on a long-lived host.
+ * Ownership declaration read from a daemon PID file for launch-log retention.
+ * `launchLogPath: null` means this daemon was directly launched and owns no
+ * manager capture log. An absent field belongs to an older PID record and is
+ * intentionally represented as `undefined`: its ownership is unknown.
  */
-const DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export interface DaemonLaunchLogOwner {
+  pid: number;
+  launchLogPath: string | null | undefined;
+}
 
 export interface LogPruneOptions {
   /** Directory containing the `.log` files. */
@@ -49,42 +40,11 @@ export interface LogPruneOptions {
   maxOwnFiles: number;
   /** Other processes' files older than this (by mtime) are swept once their owner has exited. */
   abandonedMaxAgeMs: number;
-  /**
-   * Age threshold applied to a `daemon-launch-*.log` specifically when daemon
-   * discovery reports `uncertain` (not confidently clear, not confidently
-   * alive) — see {@link DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS}. Defaults to
-   * that 7-day constant when unset; independent of `abandonedMaxAgeMs` so a
-   * caller (e.g. a test) can shrink the ordinary sweep window without also
-   * shortening the fail-closed uncertain horizon.
-   */
-  uncertainAbandonedMaxAgeMs?: number;
   /** Injectable clock for testing. */
   now?: number;
   /** Injectable liveness check for testing; defaults to a signal-0 probe. */
   isProcessAlive?: (pid: number) => boolean;
-  /**
-   * Whether a daemon is currently running (owns the pidfile and is alive).
-   *
-   * A `daemon-launch-<pid>.log` names the spawning MANAGER's pid, but the fd on
-   * that file is inherited by the detached DAEMON child, which keeps writing to
-   * it (e.g. an uncaught exception) long after the manager exits — the manager
-   * routinely exits right after the daemon reports ready. So the manager pid
-   * being dead says nothing about whether the daemon still holds that fd, and
-   * the launch log's mtime goes stale quickly even while the daemon is live
-   * (steady-state logging goes to `daemon.log`). Unlinking it under those
-   * conditions silently loses output the running daemon is still capturing
-   * (issue #6194). While a daemon is running, no `daemon-launch-*.log` is swept;
-   * once no daemon is running, they become eligible for the ordinary dead-owner
-   * + stale-mtime sweep (preserving issue #2724's leak cleanup). Injectable so
-   * this module stays decoupled from the daemon pidfile module. Defaults to
-   * treating no daemon as running when unset.
-   *
-   * Only checks the pruning process's OWN daemon namespace. When isolated
-   * daemons share a log dir, prefer {@link daemonPidFiles} + {@link readDaemonPid}
-   * so a live daemon in ANOTHER namespace also protects its launch log
-   * (issue #6194); this predicate is the single-namespace fallback and is
-   * OR-ed with the namespace-aware check when both are supplied.
-   */
+  /** Single-namespace fallback used only when ownership discovery is unavailable. */
   isDaemonRunning?: () => boolean;
   /**
    * Enumerate the daemon pid files of every namespace that could own a
@@ -92,25 +52,20 @@ export interface LogPruneOptions {
    * co-located sibling namespaces sharing this log dir (issue #6194) — together
    * with whether that enumeration is complete ({@link DaemonPidFileEnumeration}).
    *
-   * A launch log is retained if ANY discovered namespace's daemon is alive OR the
-   * enumeration reports `uncertain` (an undiscoverable custom namespace may hold
-   * the fd). Passed as a THUNK, evaluated LAZILY inside {@link pruneLogFiles} at
+   * Passed as a THUNK, evaluated LAZILY inside {@link pruneLogFiles} at
    * sweep time — never at logger-module init, whose eager evaluation crashed the
    * cyclic `logger`↔`daemonFiles` import before `logger` was initialized
-   * (issue #6194). Injectable (with {@link readDaemonPid}) so this module stays
+   * (issue #6194). Injectable (with {@link readDaemonOwner}) so this module stays
    * decoupled from the daemon pidfile module and tests stay deterministic.
    */
   daemonPidFiles?: () => DaemonPidFileEnumeration;
   /**
-   * Read the owning daemon PID from a pid file listed in
-   * {@link DaemonPidFileEnumeration.pidFiles}. Returns `undefined` only for a
-   * CONFIDENTLY-absent file (no daemon recorded in that namespace); a present but
-   * unreadable/malformed file is AMBIGUOUS and must THROW so the launch log is
-   * retained (fail closed) rather than treated as absent and pruned (issue #6194).
-   * Liveness of a returned pid is checked via the same {@link isProcessAlive} seam
-   * used for peer logs.
+   * Read the owner declaration from a pid file listed in
+   * {@link DaemonPidFileEnumeration.pidFiles}. `undefined` means the file is
+   * confidently absent; an unreadable/malformed file must THROW. An owner record
+   * without `launchLogPath` is legacy/ambiguous and retains launch logs.
    */
-  readDaemonPid?: (pidFilePath: string) => number | undefined;
+  readDaemonOwner?: (pidFilePath: string) => DaemonLaunchLogOwner | undefined;
   /** Optional diagnostic sink. Kept injectable so log pruning does not import the logger that calls it. */
   logger?: { debug(message: string, ...args: unknown[]): void };
 }
@@ -187,67 +142,62 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   const isAlive = opts.isProcessAlive ?? defaultIsProcessAlive;
   const isDaemonRunning = opts.isDaemonRunning ?? (() => false);
 
-  // A daemon-launch log's inherited fd may be held by a LIVE daemon in a namespace
-  // OTHER than the pruning process's own when isolated daemons share this log dir
-  // (issue #6194). Consider every co-located namespace's pid file, treating a
-  // launch log as protected if ANY of those daemons is alive; fall back to the
-  // single-namespace `isDaemonRunning` when no pid files were enumerated.
-  //
-  // Tri-state rather than boolean: "alive" (skip unconditionally — a confirmed
-  // live daemon may hold the fd), "clear" (confidently no daemon anywhere —
-  // ordinary `abandonedMaxAgeMs` sweep applies), or "uncertain" (discovery could
-  // not be exhaustive — swept only past the longer
-  // `uncertainAbandonedMaxAgeMs` horizon, not retained forever; see
-  // {@link DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS}).
-  const computeDaemonLaunchLogProtection = (): "alive" | "uncertain" | "clear" => {
+  type LaunchLogProtection = "alive" | "dead" | "unknown";
+
+  // A launch log is protected only by its associated daemon, never by a live
+  // daemon from another namespace. Discovery/read uncertainty and legacy PID
+  // records are carried to the individual verdict rather than flattened into a
+  // global "some daemon is alive" boolean.
+  let discovery: { owners: readonly DaemonLaunchLogOwner[]; uncertain: boolean } | undefined;
+  const discoverDaemonLaunchLogOwners = (): {
+    owners: readonly DaemonLaunchLogOwner[];
+    uncertain: boolean;
+  } => {
+    if (discovery !== undefined) {
+      return discovery;
+    }
     const enumerate = opts.daemonPidFiles;
-    const readDaemonPid = opts.readDaemonPid;
-    if (enumerate && readDaemonPid) {
+    const readDaemonOwner = opts.readDaemonOwner;
+    if (enumerate && readDaemonOwner) {
       try {
         // Evaluated lazily here (not at logger init) so the cyclic
         // `logger`↔`daemonFiles` import can't reach it before `logger` exists.
         const { pidFiles, uncertain } = enumerate();
-        const anyAlive = pidFiles.some((pidFilePath) => {
-          // A present-but-unreadable pid file THROWS out of readDaemonPid and is
-          // caught below as ambiguity; only a CONFIDENTLY-absent file is undefined.
-          const pid = readDaemonPid(pidFilePath);
-          // Reject non-positive/non-integer PIDs (corrupt lock) before probing —
-          // `process.kill(0|-1, 0)` targets a whole process group (issue #6260).
-          return pid !== undefined && Number.isInteger(pid) && pid > 0 && isAlive(pid);
-        });
-        if (anyAlive) {
-          return "alive";
-        }
-        // Discovery was incomplete (an undiscoverable custom namespace, a failed
-        // scan): a live daemon we could not enumerate may still hold the fd, so
-        // retain past the extended horizon rather than the ordinary one.
-        if (uncertain) {
-          return "uncertain";
-        }
-        return "clear";
+        discovery = {
+          owners: pidFiles.flatMap((pidFilePath) => {
+            const owner = readDaemonOwner(pidFilePath);
+            return owner === undefined ? [] : [owner];
+          }),
+          uncertain,
+        };
       } catch (error) {
-        // A pidfile enumeration/read/probe failure must not green-light unlinking
-        // a launch log a live daemon may still hold — retain on ambiguity (#6194).
+        // A pidfile enumeration/read failure must not green-light unlinking.
         opts.logger?.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
-        return "uncertain";
+        discovery = { owners: [], uncertain: true };
       }
+      return discovery;
     }
-    return isDaemonRunning() ? "alive" : "clear";
+    discovery = { owners: [], uncertain: isDaemonRunning() };
+    return discovery;
   };
 
-  // The retention decision above is invariant for the whole sweep: it depends
-  // only on daemon-namespace state, never on which file is being considered. A
-  // directory with a backlog of dead-manager launch logs would otherwise redo a
-  // full PID-directory scan + per-file reads once PER launch log (issue #6194) —
-  // O(launch logs × pid files) synchronous filesystem work blocking the event
-  // loop. Compute it at most once, lazily (only if a launch log is actually
-  // encountered), and reuse the cached verdict for the rest of this sweep.
-  let cachedProtection: "alive" | "uncertain" | "clear" | undefined;
-  const daemonLaunchLogProtection = (): "alive" | "uncertain" | "clear" => {
-    if (cachedProtection === undefined) {
-      cachedProtection = computeDaemonLaunchLogProtection();
+  const daemonLaunchLogProtection = (file: string): LaunchLogProtection => {
+    const { owners, uncertain } = discoverDaemonLaunchLogOwners();
+    if (uncertain) {
+      return "unknown";
     }
-    return cachedProtection;
+    const filePath = path.resolve(opts.dir, file);
+    const owner = owners.find(
+      (candidate) =>
+        typeof candidate.launchLogPath === "string" &&
+        path.resolve(candidate.launchLogPath) === filePath,
+    );
+    if (owner) {
+      return Number.isInteger(owner.pid) && owner.pid > 0 && isAlive(owner.pid) ? "alive" : "dead";
+    }
+    // A missing field is a legacy record: it may own any launch log. A complete
+    // set of explicit claims (path or null) proves this log has no live owner.
+    return owners.some((candidate) => candidate.launchLogPath === undefined) ? "unknown" : "dead";
   };
 
   let entries: string[];
@@ -288,26 +238,20 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     // A daemon-launch log's fd is held by the detached daemon, not the manager
     // named in the filename. While a daemon is running it may still be writing
     // to that inherited fd, so unlinking on the manager's exit + stale mtime
-    // would silently drop live daemon output (issue #6194). A CONFIRMED live
-    // daemon retains the log unconditionally; UNCERTAIN discovery retains it
-    // only past a much longer horizon rather than forever, so a genuinely
-    // undiscoverable custom namespace still gets swept eventually instead of
-    // leaking one launch log per daemon start (issue #6194, round 3).
-    let effectiveMaxAgeMs = opts.abandonedMaxAgeMs;
+    // would silently drop live daemon output (issue #6194). A matching live
+    // owner, incomplete discovery, or legacy record retains this log; only a
+    // matching dead owner or a complete set of explicit non-claims permits the
+    // ordinary abandoned-log cleanup.
     if (isDaemonLaunchLog(file)) {
-      const protection = daemonLaunchLogProtection();
-      if (protection === "alive") {
+      const protection = daemonLaunchLogProtection(file);
+      if (protection !== "dead") {
         continue;
-      }
-      if (protection === "uncertain") {
-        effectiveMaxAgeMs =
-          opts.uncertainAbandonedMaxAgeMs ?? DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS;
       }
     }
     const full = path.join(opts.dir, file);
     try {
       const stats = await statAsync(full);
-      if (now - stats.mtimeMs > effectiveMaxAgeMs) {
+      if (now - stats.mtimeMs > opts.abandonedMaxAgeMs) {
         await unlinkAsync(full).catch(() => {
           /* best effort */
         });

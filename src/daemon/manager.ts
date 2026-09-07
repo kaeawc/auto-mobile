@@ -26,6 +26,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
+  DAEMON_LAUNCH_LOG_PATH_ENV,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
@@ -1007,6 +1008,10 @@ export class DaemonManager implements DaemonManagerLike {
     const logPath = capturesLaunchOutput
       ? (this.heldLockLogPath ?? this.daemonLaunchLogPath())
       : devNull;
+    // Preserve the exact capture path for the child PID record. Retention uses
+    // this association instead of letting an unrelated live daemon protect all
+    // launch logs in a shared directory.
+    childEnv[DAEMON_LAUNCH_LOG_PATH_ENV] = capturesLaunchOutput ? logPath : "";
     if (capturesLaunchOutput) {
       ensureSecureLogsDirSync();
     }

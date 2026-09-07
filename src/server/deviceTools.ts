@@ -3542,6 +3542,7 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
   boot: DeviceBootResult,
   ensureRunnerReady: (candidate: DeviceBootResult) => Promise<void>,
   rebootAfterSystemUiAnr: (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult>,
+  publishRecoveredReadinessMarker?: (candidate: DeviceBootResult) => void,
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   try {
     await ensureRunnerReady(boot);
@@ -3555,6 +3556,11 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
     }
     const recovery = await rebootAfterSystemUiAnr(boot);
     try {
+      // The replacement's runner readiness lock can release before this async
+      // function resumes. Publish the acquisition marker under its new device
+      // key before starting that readiness attempt so a queued session upgrade
+      // cannot observe an unrecorded replacement and start duplicate setup.
+      publishRecoveredReadinessMarker?.(recovery.boot);
       await ensureRunnerReady(recovery.boot);
     } catch (readinessError) {
       try {
@@ -3650,6 +3656,7 @@ interface StartDeviceRunnerReadinessInput {
   requestedIdentity: string;
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
   releaseReadinessReservations: DeviceReadinessReservation[];
+  publishRecoveredReadinessMarker?: (device: BootedDevice) => void;
 }
 
 async function prepareStartDeviceRunnerReadiness(
@@ -3660,6 +3667,7 @@ async function prepareStartDeviceRunnerReadiness(
     input.boot,
     createRunnerReadinessAttempt(input),
     createSystemUiAnrRebooter(input, devicePool),
+    (replacement) => input.publishRecoveredReadinessMarker?.(replacement.device),
   );
   if (readinessResult.recovered) {
     try {
@@ -5048,6 +5056,11 @@ export function registerDeviceTools() {
         requestedIdentity,
         ensureCtrlProxyReady: ctrlProxySetup,
         releaseReadinessReservations,
+        publishRecoveredReadinessMarker: (replacement) =>
+          moveDeviceAcquisitionReadiness(
+            acquisitionReadinessKey,
+            deviceReadinessLockKey(replacement.platform, replacement.deviceId),
+          ),
       });
       state.boot = readinessResult.boot;
       moveDeviceAcquisitionReadiness(

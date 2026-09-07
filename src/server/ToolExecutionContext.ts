@@ -130,14 +130,28 @@ export async function createToolExecutionContext(
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
 
-  await awaitReadinessWork(
-    sessionManager.trackSessionSetup(session, () =>
-      runWithAbortSignal(signal, () =>
-        setupSession(session, existingSession === session, sessionManager, sessionOptions, signal),
+  // Acquisition readiness can include an ANR recovery rebind, and that rebind
+  // drains tracked session setup before it records the replacement's achieved
+  // readiness. Waiting for its marker *inside* trackSessionSetup therefore
+  // forms a cycle. Keep marker-only waits outside the tracked mutation and
+  // retry if a new acquisition begins while setup is being admitted.
+  do {
+    await awaitPendingDeviceAcquisitionReadiness(session, signal);
+    await awaitReadinessWork(
+      sessionManager.trackSessionSetup(session, () =>
+        runWithAbortSignal(signal, () =>
+          setupSession(
+            session,
+            existingSession === session,
+            sessionManager,
+            sessionOptions,
+            signal,
+          ),
+        ),
       ),
-    ),
-    signal,
-  );
+      signal,
+    );
+  } while (await awaitPendingDeviceAcquisitionReadiness(session, signal));
   ensureSessionIsCurrent(session, sessionManager);
 
   return {
@@ -147,6 +161,20 @@ export async function createToolExecutionContext(
     sessionManager,
     devicePool,
   };
+}
+
+async function awaitPendingDeviceAcquisitionReadiness(
+  session: Session,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const acquisitionInFlight = getDeviceAcquisitionReadiness(
+    deviceReadinessLockKey(session.platform, session.assignedDevice),
+  );
+  if (!acquisitionInFlight) {
+    return false;
+  }
+  await awaitReadinessWork(acquisitionInFlight, signal);
+  return true;
 }
 
 function isReadinessSatisfied(
@@ -278,22 +306,6 @@ async function ensureReadinessUpgraded(
       // for it rather than racing a second `runDeviceReadinessSetup` call,
       // then loop back to re-check whether it reached the level we need.
       await awaitReadinessFlight(inFlight, signal);
-      continue;
-    }
-
-    // #6280 P2 follow-up: a device acquisition (`startDevice`/`getAndroid`)
-    // can still be binding/recording readiness for THIS session even after it
-    // has released the per-device readiness lock — that lock only covers the
-    // CtrlProxy setup itself, not the bind/record that follows. Racing our
-    // own `runDeviceReadinessSetup` here would acquire the now-free lock and
-    // redundantly reset/rerun CtrlProxy on the device the acquisition just
-    // prepared. Await the acquisition's marker instead, then loop back to
-    // re-check — by the time it settles, readiness has been recorded.
-    const acquisitionInFlight = getDeviceAcquisitionReadiness(
-      deviceReadinessLockKey(session.platform, session.assignedDevice),
-    );
-    if (acquisitionInFlight) {
-      await awaitReadinessWork(acquisitionInFlight, signal);
       continue;
     }
 

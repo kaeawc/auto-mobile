@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import fs, { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

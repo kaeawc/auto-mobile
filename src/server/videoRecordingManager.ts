@@ -60,6 +60,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_RETENTION_DAYS = 7;
 const DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES = 60;
 const DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS = 15;
+// A failed safety stop must leave a bounded recovery path. This retry remains
+// deliberately short enough to enforce a duration/size cap, without turning a
+// transient device failure into a tight retry loop.
+const RETAINED_STOP_RETRY_MS = 5000;
 
 /**
  * Time-based retention + in-progress size-cap policy for the video archive
@@ -584,6 +588,31 @@ function clearInProgressSizeCap(recordingId: string): void {
   }
 }
 
+async function rearmRetainedRecordingSafety(recordingId: string): Promise<void> {
+  const deps = await getVideoRecordingDependencies();
+  // A manual retry may have completed while the failed safety callback was
+  // unwinding. Only re-arm work for the durable owner that is still active.
+  if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+    return;
+  }
+  const record = await deps.recordingRepository.getRecording(recordingId);
+  if (!record || record.status !== "recording") {
+    return;
+  }
+
+  clearAutoStop(recordingId);
+  const handle = deps.timer.setTimeout(() => {
+    void stopVideoRecording(recordingId).catch((error) => {
+      logger.warn(`[VideoRecording] Retained safety stop failed for ${recordingId}: ${error}`);
+    });
+  }, RETAINED_STOP_RETRY_MS);
+  autoStopTimers.set(recordingId, { timer: deps.timer, handle });
+
+  const capBytes = Math.floor((record.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+  clearInProgressSizeCap(recordingId);
+  scheduleInProgressSizeCap(recordingId, record.filePath, capBytes, deps);
+}
+
 async function enforceInProgressSizeCap(
   recordingId: string,
   filePath: string,
@@ -1058,6 +1087,15 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
         `[VideoRecording] Stop of ${resolvedId} could not confirm teardown; the service ` +
           `retained ownership, so its recording row stays active: ${error}`,
       );
+      // A safety timer can have just fired (or an in-progress size monitor can
+      // have cleared itself) before the failed stop retained ownership. Re-arm
+      // both guards so this potentially live capture does not run indefinitely.
+      void rearmRetainedRecordingSafety(resolvedId).catch((rearmError) => {
+        logger.warn(
+          `[VideoRecording] Failed to re-arm retained safety enforcement for ${resolvedId}: ${rearmError}`,
+          rearmError,
+        );
+      });
     } else {
       try {
         await interruptVideoRecording(resolvedId);

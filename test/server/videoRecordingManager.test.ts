@@ -232,6 +232,30 @@ describe("videoRecordingManager", () => {
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
   });
 
+  test("re-arms a bounded stop retry when the auto-stop callback retains ownership", async () => {
+    const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 1 });
+    let stopAttempts = 0;
+    fakeBackend.stop = async () => {
+      stopAttempts += 1;
+      throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+    };
+
+    fakeTimer.advanceTime(1000);
+    for (let attempt = 0; attempt < 50 && stopAttempts === 0; attempt++) {
+      await defaultTimer.sleep(1);
+    }
+    expect(stopAttempts).toBe(1);
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    // The fired one-shot timeout is replaced by the bounded retained-owner retry.
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+
+    fakeTimer.advanceTime(5000);
+    for (let attempt = 0; attempt < 50 && stopAttempts < 2; attempt++) {
+      await defaultTimer.sleep(1);
+    }
+    expect(stopAttempts).toBe(2);
+  });
+
   test("interrupts a row after a backend confirms capture exit but finalization fails", async () => {
     const active = await startVideoRecording({ device: testDevice });
     fakeBackend.stop = async () => {
@@ -989,6 +1013,27 @@ describe("videoRecordingManager", () => {
       expect(recordings.map((r) => r.recordingId)).toEqual([active.recordingId]);
       // Monitor is cleared once the capture stops.
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("re-arms size monitoring after a cap-triggered stop retains ownership", async () => {
+      const capBytes = baseConfig.maxArchiveSizeMb * 1024 * 1024;
+      await reconfigureRetention(
+        { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
+        async () => capBytes * 2,
+      );
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
+      fakeBackend.stop = async () => {
+        throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+      };
+
+      fakeTimer.advanceTime(1000);
+      await drainAsyncUntil(async () => fakeTimer.getPendingIntervalCount() === 1);
+
+      expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+      // The cap callback cleared its old interval before stop; retained safety
+      // restores it and also schedules a bounded stop retry.
+      expect(fakeTimer.getPendingIntervalCount()).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
     });
 
     test("in-progress recording under the cap keeps running", async () => {

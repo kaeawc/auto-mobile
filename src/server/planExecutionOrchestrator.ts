@@ -523,6 +523,7 @@ export class PlanExecutionOrchestrator {
       this.request.device,
       { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
       getToolSelectionContext()?.execution,
+      this.signal,
     );
 
     return deviceMapping;

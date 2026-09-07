@@ -267,6 +267,13 @@ async function ensureReadinessUpgraded(
 
     const inFlight = readinessUpgradeInFlight.get(session);
     if (inFlight) {
+      // A flight whose final subscriber already left is being cancelled. A
+      // later caller must not inherit that unrelated cancellation; wait for
+      // its cleanup to settle, then establish or join a fresh flight.
+      if (inFlight.controller.signal.aborted) {
+        await inFlight.work.catch(() => undefined);
+        continue;
+      }
       // Another caller is already upgrading this session's readiness — wait
       // for it rather than racing a second `runDeviceReadinessSetup` call,
       // then loop back to re-check whether it reached the level we need.

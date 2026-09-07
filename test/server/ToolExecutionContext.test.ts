@@ -1079,6 +1079,55 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
+  test("retries after the sole cancelled readiness flight settles (#6280)", async () => {
+    let resolveSetup!: () => void;
+    const setupStarted = new Promise<void>((resolve) => {
+      resolveSetup = resolve;
+    });
+    let setupCalls = 0;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        await setupStarted;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-cancelled-flight-retry", "device-1", "android");
+
+    const cancelled = new AbortController();
+    const first = createToolExecutionContext(
+      "session-cancelled-flight-retry",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+      undefined,
+      undefined,
+      false,
+      cancelled.signal,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    cancelled.abort(new Error("first request cancelled"));
+    await expect(first).rejects.toThrow("first request cancelled");
+
+    // This request arrives after the sole subscriber has aborted but before
+    // its setup work settles. It must wait and retry rather than join that
+    // aborted flight.
+    const later = createToolExecutionContext(
+      "session-cancelled-flight-retry",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+    resolveSetup();
+
+    await expect(later).resolves.toMatchObject({ deviceId: "device-1" });
+    expect(setupCalls).toBe(2);
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

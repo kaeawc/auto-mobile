@@ -1,8 +1,10 @@
 import { logger } from "../../../utils/logger";
 import { PerformanceAudit } from "../../performance/PerformanceAudit";
+import type { InertTouchPointResolver } from "../../performance/TouchLatencyTracker";
 import { ThresholdManager } from "../../performance/ThresholdManager";
 import { isPerformanceAuditEnabled } from "../../performance/performanceAuditConfig";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
+import type { ObserveScreen } from "../interfaces/ObserveScreen";
 import type {
   BootedDevice,
   ElementBounds,
@@ -14,7 +16,9 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
+import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { updatedAtToMillis } from "../observeTimestamp";
 import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../../utility/ElementParser";
@@ -429,6 +433,95 @@ export function deriveTouchLatencyPoint(
   return { touchPoint: point, skipTouchLatency: false };
 }
 
+/**
+ * Production `InertTouchPointResolver`: re-captures a fresh, device-verified
+ * view hierarchy through the observe layer and re-derives an inert tap point
+ * for the audited app right before each synthetic tap, closing the TOCTOU where
+ * a control moves under a previously-selected point between taps (issue #6228).
+ *
+ * The re-capture asks for `skipWaitForFresh: false` (a genuinely
+ * device-verified tree, not an age-based cache hit) and `skipPerformanceAudit`
+ * so re-observing from inside the performance audit cannot recurse. Screenshot,
+ * back-stack, and accessibility-audit work are skipped as well - only the
+ * hierarchy and window attribution matter for deriving the point.
+ *
+ * `skipWaitForFresh: false` does NOT by itself force a new device capture:
+ * `CtrlProxyHierarchy.getLatestHierarchy` only waits for a fresh tree when the
+ * cache is absent or already stale, so with no floor it can hand back the SAME
+ * cached hierarchy the enclosing audit already saw - defeating the TOCTOU
+ * re-validation. So the re-capture also passes a `minTimestamp` strictly newer
+ * than the enclosing observation's `updatedAt`, and if the returned tree is not
+ * actually newer than that floor the sample is aborted rather than reusing a
+ * stale capture (issue #6228).
+ */
+export class ObserveInertTouchPointResolver implements InertTouchPointResolver {
+  constructor(
+    private readonly observeScreen: ObserveScreen,
+    private readonly appId: string,
+    private readonly enclosingUpdatedAt: string | number,
+  ) {}
+
+  async resolveInertTouchPoint(): Promise<{ x: number; y: number } | null> {
+    try {
+      // Force a hierarchy strictly newer than the enclosing observation so the
+      // re-validation can't reuse the cached tree the audit already saw.
+      const minTimestamp = updatedAtToMillis(this.enclosingUpdatedAt) + 1;
+      const fresh = await this.observeScreen.execute({
+        // Isolated tracker: sharing the enclosing `PerformanceTracker` would let
+        // this nested execute's `getTimings()` close the parent's still-open
+        // blocks, corrupting the outer audit's debug timing (issue #6228).
+        perf: new NoOpPerformanceTracker(),
+        skipWaitForFresh: false,
+        minTimestamp,
+        skipScreenshot: true,
+        skipBackStack: true,
+        skipAccessibilityAudit: true,
+        skipPerformanceAudit: true,
+      });
+
+      // The device-timestamp floor is best-effort in the capture layer (a late
+      // push or a sync fallback can still surface an older tree). If the tree we
+      // got back is not strictly newer than the enclosing observation, treat it
+      // as no fresh point available and abort rather than tapping off a stale
+      // capture (issue #6228).
+      if (updatedAtToMillis(fresh.updatedAt) < minTimestamp) {
+        logger.warn(
+          "[PerformanceAudit] Re-observation did not yield a hierarchy newer than the " +
+            "enclosing observation; aborting inert-point re-derivation rather than reusing a " +
+            "stale capture",
+        );
+        return null;
+      }
+
+      // If the foreground moved off the audited app during the audit, do not
+      // derive bounds for the wrong app. Real Android window entries often omit
+      // `packageName`, so `findAppWindowBounds` can mis-associate; compare the
+      // fresh active-window attribution and abort the sample when it changed
+      // (issue #6228).
+      if (fresh.activeWindow?.appId !== this.appId) {
+        logger.warn(
+          `[PerformanceAudit] Foreground changed from ${this.appId} to ` +
+            `${fresh.activeWindow?.appId ?? "none"} during audit; aborting inert-point re-derivation`,
+        );
+        return null;
+      }
+
+      const windowBounds = findAppWindowBounds(fresh, this.appId);
+      const { touchPoint, skipTouchLatency } = deriveTouchLatencyPoint(windowBounds, fresh);
+      if (skipTouchLatency || !touchPoint) {
+        return null;
+      }
+      return touchPoint;
+    } catch (error) {
+      // Best-effort re-validation: on any capture failure, treat the point as
+      // no-longer-verifiable so the tracker aborts the sample rather than
+      // tapping a stale point (issue #6228).
+      logger.warn(`[PerformanceAudit] Failed to re-derive inert touch point: ${error}`);
+      return null;
+    }
+  }
+}
+
 export interface PerformanceAuditorOptions {
   device: BootedDevice;
   /**
@@ -439,6 +532,15 @@ export interface PerformanceAuditorOptions {
   adbFactory?: AdbClientFactory;
   /** Allow tests to stub the config gate */
   isEnabled?: () => boolean;
+  /**
+   * Lazily supplies the `ObserveScreen` used to re-capture a fresh hierarchy
+   * for per-tap inert-point re-validation (issue #6228). A provider (rather than
+   * a direct reference) avoids an initialization-order cycle: `ObserveScreen`
+   * constructs this auditor in its own constructor, so `() => this` isn't
+   * resolvable until after construction. Omitted in tests that don't exercise
+   * the touch-latency path.
+   */
+  observeScreenProvider?: () => ObserveScreen;
 }
 
 /**
@@ -451,11 +553,13 @@ export class PerformanceAuditor {
   private readonly device: BootedDevice;
   private readonly adbFactory: AdbClientFactory;
   private readonly isEnabled: () => boolean;
+  private readonly observeScreenProvider?: () => ObserveScreen;
 
   constructor(opts: PerformanceAuditorOptions) {
     this.device = opts.device;
     this.adbFactory = opts.adbFactory ?? defaultAdbClientFactory;
     this.isEnabled = opts.isEnabled ?? isPerformanceAuditEnabled;
+    this.observeScreenProvider = opts.observeScreenProvider;
   }
 
   async run(result: ObserveResult, perf: PerformanceTracker): Promise<void> {
@@ -485,7 +589,24 @@ export class PerformanceAuditor {
         // Initialize components
         const capabilitiesDetector = new DeviceCapabilitiesDetector(this.device, this.adbFactory);
         const thresholdManager = new ThresholdManager();
-        const performanceAudit = new PerformanceAudit(this.device, this.adbFactory);
+
+        // Re-validate the synthetic-tap point against a freshly captured
+        // hierarchy immediately before each tap, so a control that moved under
+        // the point since it was first derived (carousel/snackbar/nav) can't be
+        // activated during this read-only audit (TOCTOU, issue #6228).
+        const observeScreen = this.observeScreenProvider?.();
+        const inertTouchPointResolver = observeScreen
+          ? new ObserveInertTouchPointResolver(
+              observeScreen,
+              result.activeWindow!.appId,
+              result.updatedAt,
+            )
+          : undefined;
+        const performanceAudit = new PerformanceAudit(
+          this.device,
+          this.adbFactory,
+          inertTouchPointResolver,
+        );
 
         // Get device capabilities
         const capabilities = await capabilitiesDetector.getCapabilities();

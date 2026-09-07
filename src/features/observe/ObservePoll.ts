@@ -2,6 +2,7 @@ import type { ObserveResult } from "../../models";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { updatedAtToMillis } from "./observeTimestamp";
 
 /**
  * Shared observe poll loop for the settle / wait-for-condition primitives
@@ -34,25 +35,6 @@ export interface ObservePollOutcome {
    * the loop exited on the budget or a screen-off fast-fail.
    */
   stopped: boolean;
-}
-
-/**
- * `ObserveResult.updatedAt` is documented as ms-since-epoch but typed
- * `string | number` (it falls back to a server timestamp). Coerce to a number so
- * the next poll's `minTimestamp` is monotonic; a numeric string parses directly,
- * an ISO string via `Date.parse`, and anything unparseable falls back to 0 so a
- * bad timestamp degrades to "accept any fresh read" rather than throwing.
- */
-function toMillis(updatedAt: string | number): number {
-  if (typeof updatedAt === "number") {
-    return updatedAt;
-  }
-  const numeric = Number(updatedAt);
-  if (Number.isFinite(numeric)) {
-    return numeric;
-  }
-  const parsed = Date.parse(updatedAt);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /**
@@ -92,7 +74,7 @@ export async function pollObserveUntil(
   while (true) {
     throwIfAborted(options.signal);
 
-    const minTimestamp = previous !== undefined ? toMillis(previous.updatedAt) : start;
+    const minTimestamp = previous !== undefined ? updatedAtToMillis(previous.updatedAt) : start;
     const observation = await observeScreen.execute({
       minTimestamp,
       skipWaitForFresh: false,

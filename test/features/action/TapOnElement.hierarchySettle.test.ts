@@ -294,6 +294,7 @@ describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
     const fresh = {
       packageName: "com.example.app",
       hierarchy: { node: { marker: "fresh" } },
+      updatedAt: 42,
       screenWidth: 1080,
       screenHeight: 1920,
     } as unknown as ViewHierarchyResult;

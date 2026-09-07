@@ -7,6 +7,8 @@ import {
 } from "../../../src/features/observe/androidLauncherPackages";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 const RESOLVE_HOME_PATTERN = "resolve-activity";
 
@@ -59,6 +61,40 @@ describe("androidLauncherPackages", () => {
         .getCommandCalls()
         .find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
       expect(resolveCall?.timeoutMs).toBe(1);
+    });
+
+    test("rejects a cancelled resolve even when the HOME cache is warm (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      // Warm the cache with a successful resolution.
+      expect(await resolveConfiguredHomePackage(fakeAdb, "device-1")).toBe("com.example.launcher");
+
+      // A cancellation landing before the (warm) cache lookup must reject, not
+      // return the cached launcher -- otherwise a cancelled home press verifies
+      // as success off the hot cache.
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, controller.signal),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    });
+
+    test("rejects a cancelled resolve off the AMBIENT signal with a warm cache (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      expect(await resolveConfiguredHomePackage(fakeAdb, "device-1")).toBe("com.example.launcher");
+
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          resolveConfiguredHomePackage(fakeAdb, "device-1"),
+        ),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     });
 
     test("returns null when the device cannot resolve a HOME launcher", async () => {

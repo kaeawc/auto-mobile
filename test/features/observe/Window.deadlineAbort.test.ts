@@ -7,6 +7,7 @@ import {
 } from "../../../src/features/observe/Window";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { PressButton } from "../../../src/features/action/PressButton";
 import { ExecResult } from "../../../src/models/ExecResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -188,6 +189,51 @@ describe("Window.getActive deadline + abort plumbing (#6289)", () => {
     const result = await window.getActive(true);
 
     expect(result).toEqual({ appId: "", activityName: "", layoutSeqSum: 0 });
+  });
+});
+
+describe("BaseVisualChange forwards its clock into the internal Window (#6289)", () => {
+  const execResult = (stdout: string): ExecResult => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (s: string) => stdout.includes(s),
+  });
+
+  test("the internal Window derives sub-read budgets from the parent-injected timer", async () => {
+    // A subclass built with a FakeTimer/scripted clock but WITHOUT replacing its
+    // window must still let that clock shrink the internal Window's sequential
+    // sub-read budgets; otherwise BaseVisualChange's Window would run on wall
+    // time and the shared-deadline behavior would be untestable deterministically.
+    const clock = scriptedClock([0, 100, 300, 500]);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setAndroidApiLevel(27);
+    fakeAdb.setDefaultResponse(execResult("no focus, no ty=1 windows"));
+    const device: BootedDevice = {
+      deviceId: "timer-wiring",
+      name: "Wiring",
+      platform: "android",
+    };
+
+    // PressButton is a concrete BaseVisualChange; pass a factory + the clock and
+    // reach the Window it constructed internally (not a replaced fake).
+    const pressButton = new PressButton(
+      device,
+      new FakeAdbClientFactory(fakeAdb) as unknown as null,
+      clock,
+    );
+    const internalWindow = (pressButton as unknown as { window: Window }).window;
+    await internalWindow.clearCache();
+
+    await internalWindow.getActive(true, undefined, { timeoutMs: 1000 });
+
+    const dumpsysCall = fakeAdb
+      .getCommandCalls()
+      .find((c) => c.command.includes("dumpsys window windows"));
+    expect(dumpsysCall?.timeoutMs).toBe(900);
+    const apiCall = fakeAdb.getApiLevelCalls()[0];
+    expect(apiCall?.timeoutMs).toBe(700);
   });
 });
 

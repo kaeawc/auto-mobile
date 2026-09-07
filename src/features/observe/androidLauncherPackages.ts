@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { throwIfAborted } from "../../utils/toolUtils";
 
 /**
  * Verify that a "go home" action actually landed on the home screen by
@@ -168,19 +169,24 @@ export async function resolveConfiguredHomePackage(
   signal?: AbortSignal,
   timeoutMs?: number,
 ): Promise<string | null> {
+  // Combine the caller's signal with the ambient request signal, then honor
+  // cancellation BEFORE the warm-cache early return below: a hot cache would
+  // otherwise let an already-cancelled verification return a launcher package
+  // (a false success for a cancelled press) without ever consulting the signal
+  // (issue #6289).
+  const combinedSignal = combineWithAmbientAbort(signal);
+  throwIfAborted(combinedSignal);
   const now = timer.now();
   const cached = resolvedHomePackageCache.get(deviceId);
   const freshCachedPackage = freshCachedPackageName(cached, now, incarnationToken);
   if (freshCachedPackage !== undefined) {
     return freshCachedPackage;
   }
-  // Deadline-bounded AND cancellable: combine the caller's signal with the
-  // ambient request signal so a cancelled request still aborts this resolve,
-  // then rethrow on abort so cancellation propagates instead of being swallowed
-  // into a null that downgrades to the fallback list. When a caller passes a
-  // remaining budget (e.g. home-press verification spending its request
+  // Deadline-bounded AND cancellable: a cancelled request still aborts this
+  // resolve, then rethrow on abort so cancellation propagates instead of being
+  // swallowed into a null that downgrades to the fallback list. When a caller
+  // passes a remaining budget (e.g. home-press verification spending its request
   // deadline), bound the resolve to whichever is smaller so it cannot overrun.
-  const combinedSignal = combineWithAmbientAbort(signal);
   const resolveTimeoutMs =
     timeoutMs === undefined
       ? RESOLVE_HOME_TIMEOUT_MS

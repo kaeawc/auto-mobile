@@ -125,7 +125,12 @@ export class BaseVisualChange {
     }
     this.awaitIdle = new AwaitIdle(device, this.adbFactory);
     this.observeScreen = new RealObserveScreen(device, this.adbFactory);
-    this.window = new Window(device, this.adbFactory);
+    // Forward the injected clock so the internal Window shares this instance's
+    // timer: home-verification derives its outer deadline from `this.timer`, and
+    // Window derives the per-subread budgets from ITS timer — they must be the
+    // same clock or a FakeTimer's elapsed time won't shrink the ADB sub-read
+    // budgets in the integrated path (issue #6289).
+    this.window = new Window(device, this.adbFactory, timer);
     this.predictionAnalyzer = new PredictionAnalyzer();
     this.timer = timer;
   }

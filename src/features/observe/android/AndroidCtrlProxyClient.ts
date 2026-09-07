@@ -57,6 +57,8 @@ import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedApps
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
+import { combineWithAmbientAbort } from "../../../utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
 import {
   TrackedScreenGeometry,
   screenshotBindingPushOptions,
@@ -2797,8 +2799,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; action: string; totalTimeMs: number; error?: string }> {
     const startTime = this.timer.now();
+    // Combine with the ambient request signal so a cancelled request (e.g.
+    // session teardown mid-home-press) can free this keyed device operation
+    // immediately rather than blocking on the CtrlProxy wait until its timeout
+    // (issue #6289).
+    const combinedSignal = combineWithAmbientAbort(signal);
     try {
       // Fast-fail if not already connected to avoid stalling callers
       // (all callers fall back to ADB keyevent on failure)
@@ -2808,6 +2816,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: "WebSocket not connected",
+        };
+      }
+      if (combinedSignal?.aborted) {
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: OPERATION_CANCELLED_MESSAGE,
         };
       }
 
@@ -2836,7 +2852,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         `[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`,
       );
 
-      return await promise;
+      return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
       return {
         success: false,
@@ -2854,14 +2870,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async validateFrameContext(
     frameContext: string,
     timeoutMs: number = 5000,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; totalTimeMs: number; error?: string }> {
     const startTime = this.timer.now();
+    // See requestGlobalAction: cancel the CtrlProxy wait on abort so a torn-down
+    // request does not keep the keyed device operation busy for the remaining
+    // request budget (issue #6289).
+    const combinedSignal = combineWithAmbientAbort(signal);
     try {
       if (!this.isConnected()) {
         return {
           success: false,
           totalTimeMs: this.timer.now() - startTime,
           error: "WebSocket not connected",
+        };
+      }
+      if (combinedSignal?.aborted) {
+        return {
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: OPERATION_CANCELLED_MESSAGE,
         };
       }
 
@@ -2885,9 +2913,42 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ),
       );
 
-      return await promise;
+      return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
       return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+    }
+  }
+
+  /**
+   * Await a pending CtrlProxy request, but early-resolve it with a cancellation
+   * failure the moment `signal` aborts, so a cancelled caller (e.g. session
+   * teardown) frees the keyed device operation immediately instead of blocking
+   * until the request's timeout fires. `resolveError` no-ops if the response
+   * already landed, and the listener is always removed once the promise settles.
+   */
+  private async awaitCancellableRequest<
+    T extends { success: boolean; totalTimeMs: number; error?: string },
+  >(
+    requestId: string,
+    promise: Promise<T>,
+    signal: AbortSignal | undefined,
+    startTime: number,
+  ): Promise<T> {
+    if (!signal) {
+      return promise;
+    }
+    const onAbort = (): void => {
+      this.requestManager.resolveError(
+        requestId,
+        OPERATION_CANCELLED_MESSAGE,
+        this.timer.now() - startTime,
+      );
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await promise;
+    } finally {
+      signal.removeEventListener("abort", onAbort);
     }
   }
 

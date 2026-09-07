@@ -298,6 +298,62 @@ describe("PressButton Android keycode dispatch", () => {
       expect(verifyTimeout!).toBeLessThanOrEqual(1234);
     });
 
+    test("forwards the signal into the CtrlProxy global-action wait", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async (
+          _action: string,
+          _timeoutMs?: number,
+          _perf?: unknown,
+          _frameContext?: string,
+          signal?: AbortSignal,
+        ) => {
+          capturedSignal = signal;
+          // Report failure so the flow falls back to the ADB keyevent path.
+          return { success: false, action: "home", totalTimeMs: 0, error: "not now" };
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const controller = new AbortController();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = launcherWindow();
+
+      await (pressButton as any).executeAndroidButtonPress(
+        "home",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      expect(capturedSignal).toBe(controller.signal);
+    });
+
+    test("forwards the signal into the CtrlProxy frame-context validation wait", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, action: "back", totalTimeMs: 0 }),
+        validateFrameContext: async (
+          _frameContext: string,
+          _timeoutMs?: number,
+          signal?: AbortSignal,
+        ) => {
+          capturedSignal = signal;
+          return { success: true, totalTimeMs: 0 };
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const controller = new AbortController();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+
+      const result = await (pressButton as any).executeAndroidButtonPress(
+        "back",
+        500,
+        "frame-1",
+        controller.signal,
+      );
+
+      expect(result.success).toBe(true);
+      expect(capturedSignal).toBe(controller.signal);
+    });
+
     test("classifies an ambient-only abort during verification as cancellation, not a read failure", async () => {
       // The normal MCP route forwards no explicit signal; only the ambient
       // request signal aborts. verifyAndroidHomeForeground must combine the two

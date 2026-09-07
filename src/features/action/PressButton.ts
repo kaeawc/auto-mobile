@@ -163,6 +163,7 @@ export class PressButton extends BaseVisualChange {
                   keyCode,
                   deadlineMs,
                   frameContext,
+                  signal,
                 );
                 if (validationFailure) {
                   throw new Error(validationFailure.error);
@@ -240,6 +241,7 @@ export class PressButton extends BaseVisualChange {
         globalActionTimeout,
         undefined,
         frameContext,
+        signal,
       );
       if (result.success) {
         // "home" specifically can self-report success while leaving the
@@ -276,6 +278,7 @@ export class PressButton extends BaseVisualChange {
     keyCode: number,
     deadlineMs: number | undefined,
     frameContext: string | undefined,
+    signal?: AbortSignal,
   ): Promise<PressButtonResult | undefined> {
     if (frameContext === undefined) {
       return undefined;
@@ -291,7 +294,7 @@ export class PressButton extends BaseVisualChange {
     }
 
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const validation = await client.validateFrameContext(frameContext, validationBudget);
+    const validation = await client.validateFrameContext(frameContext, validationBudget, signal);
     if (validation.success) {
       return undefined;
     }

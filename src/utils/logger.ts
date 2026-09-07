@@ -3,7 +3,7 @@
  */
 import fs from "fs";
 import path from "path";
-import { statAsync, renameAsync } from "./io";
+import { statAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
 import { pruneLogFiles } from "./logPruner";
 import {
@@ -376,7 +376,7 @@ const rotateLogFile = async (paths: { dir: string; path: string }): Promise<void
   // Check if file still exists right before rename to avoid race condition
   if (fs.existsSync(paths.path)) {
     // Rename current log file to backup
-    await renameAsync(paths.path, backupPath);
+    await fs.promises.rename(paths.path, backupPath);
   }
 
   // Always create a new log stream after rotation attempt

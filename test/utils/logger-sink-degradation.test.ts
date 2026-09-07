@@ -633,15 +633,16 @@ describe("joined writers recover from a failed shared rotation (#6149)", () => {
     seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
 
     const opened: ControllableStream[] = [];
+    const rename = spyOn(fs.promises, "rename").mockRejectedValue(
+      new Error("simulated rename failure"),
+    );
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
       const stream = new ControllableStream();
       opened.push(stream);
-      // The recovery open happens after the deliberately failed rename. Make
-      // the next size check see a normal-sized file, so this test observes the
-      // joined writer's recovery rather than starting a second blocked fake
-      // rotation against the still-oversized file.
+      // The recovery open happens after the fake rename failure. Make the next
+      // size check see a normal-sized file, so this test observes the joined
+      // writer's recovery rather than starting a second blocked fake rotation.
       if (opened.length === 2) {
-        chmodSync(logDir, 0o700);
         fs.truncateSync(targetLogFile, 0);
       }
       return stream as unknown as fs.WriteStream;
@@ -662,14 +663,12 @@ describe("joined writers recover from a failed shared rotation (#6149)", () => {
         originalEnd(callback);
       };
 
-      // A starts rotation and B joins it before the rename fails. Leaving the
-      // directory non-writable makes the real rename fail deterministically,
-      // while the stream fake keeps the assertion focused on shared-flight
-      // recovery rather than host fd timing.
+      // A starts rotation and B joins it before the injected rename failure.
+      // The fake avoids relying on filesystem permission semantics, which
+      // differ for root and across host filesystems.
       mod.logger.info("record A starts failed rotation");
       await endWasCalledPromise;
       mod.logger.info("record B joined failed rotation");
-      chmodSync(logDir, 0o500);
       oldStream.finishClose();
 
       await mod.logger.flush();
@@ -681,7 +680,7 @@ describe("joined writers recover from a failed shared rotation (#6149)", () => {
       expect(recoveredWrites).toContain("record A starts failed rotation");
       expect(recoveredWrites).toContain("record B joined failed rotation");
     } finally {
-      chmodSync(logDir, 0o700);
+      rename.mockRestore();
       createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });
     }

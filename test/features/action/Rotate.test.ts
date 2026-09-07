@@ -598,6 +598,65 @@ describe("Rotate", () => {
       expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
     });
 
+    test("does not accept a lone match on the FINAL settle-wait attempt, since there is no later sample to confirm it (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the settle-wait budget
+      // (SETTLE_WAIT_MAX_ATTEMPTS=3) is exhausted with landscape, landscape,
+      // then the requested portrait on the very last attempt — a single,
+      // unconfirmed match with no opportunity for a later stability read.
+      // Unconditionally returning that final value would falsely report
+      // "portrait" held; it must instead be reported as unconfirmed.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape
+        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Must NOT report the requested orientation as confirmed off a single,
+      // unconfirmable final-attempt sample.
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+      // The settle-wait must have exhausted its full retry budget (slept
+      // between every attempt) rather than stopping early on the lone match.
+      expect(fakeTimer.getSleepCallCount()).toBe(2);
+    });
+
+    test("does not accept a lone match on the FINAL settle-wait attempt after an earlier non-adjacent match resets the streak (#6211)", async () => {
+      // Alternate sequence from the review finding: portrait, landscape,
+      // portrait. The first attempt matches but is immediately broken by the
+      // second (non-matching) attempt, resetting the consecutive-match
+      // streak; the third (final) attempt matches again but, being the last
+      // attempt, has no later sample to confirm it either.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait (lone, then broken)
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (breaks the streak)
+        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match again
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+    });
+
     test("gives up after the settle-wait budget and honestly reports unconfirmed when the read never settles (#6211)", async () => {
       // The confirmation read stays unparseable across every settle-wait
       // attempt (persistent, not transient) — must still end up "unknown"

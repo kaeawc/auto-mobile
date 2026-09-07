@@ -107,12 +107,13 @@ export class Rotate extends BaseVisualChange {
     requestedOrientation: "portrait" | "landscape",
   ): Promise<number | null> {
     let lastValue: number | null = null;
+    let lastAchieved: "portrait" | "landscape" | null = null;
     let consecutiveMatches = 0;
     for (let attempt = 1; attempt <= Rotate.SETTLE_WAIT_MAX_ATTEMPTS; attempt++) {
       lastValue = await this.readLiveRotation();
-      const achieved =
+      lastAchieved =
         lastValue === null ? null : lastValue === 0 || lastValue === 2 ? "portrait" : "landscape";
-      if (achieved === requestedOrientation) {
+      if (lastAchieved === requestedOrientation) {
         consecutiveMatches++;
         // A single matching sample is not proof the orientation is held —
         // require it to hold across a second, later sample before accepting
@@ -127,7 +128,16 @@ export class Rotate extends BaseVisualChange {
         await this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS);
       }
     }
-    return lastValue;
+    // The attempt budget is exhausted without ever reaching the stability
+    // threshold. A lone match on this FINAL attempt has no opportunity for a
+    // confirming subsequent sample — unconditionally returning it here would
+    // reintroduce the exact false "requested orientation held" report the
+    // stability check exists to prevent, so report it as unconfirmed (null)
+    // rather than accepted. A final read that does NOT match the requested
+    // orientation carries no such risk — the caller reports it as "reverted",
+    // which understates confidence rather than overstating it — so it is
+    // still returned as-is (#6211 review).
+    return lastAchieved === requestedOrientation ? null : lastValue;
   }
 
   /**

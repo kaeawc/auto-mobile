@@ -52,8 +52,14 @@ export const DEFAULT_FONT_SCALE = 1.0;
 export interface DisplayConfigValues {
   /** System text scale, e.g. 1.0 (default), 1.3, 2.0. */
   fontScale?: number;
-  /** Effective display density in dpi. */
-  density?: number;
+  /**
+   * Effective display density: an explicit dpi when the device carries a `wm
+   * density` override, or the `"default"` bucket when it does not. `"default"`
+   * (rather than the bare physical dpi number) keeps this restorable: feeding a
+   * physical-density NUMBER back through `density` would take the explicit-dpi
+   * branch and force an override where none existed (issue #6096 review).
+   */
+  density?: DensityInput;
   /** Resolved light/dark/system theme. */
   theme?: DisplayTheme;
 }
@@ -139,21 +145,29 @@ export function parseFontScale(raw: string): number | undefined {
  *   Physical density: 440
  *   Override density: 480
  *
- * Returns `undefined` when neither line is present/parseable.
+ * `effective` is `undefined` when neither line is present/parseable. `overridden`
+ * distinguishes "no override present" (effective falls back to physical) from an
+ * actual override, so a caller can tell whether the effective number represents a
+ * forced state or the device's unmodified default (issue #6096 review).
  */
-export function parseWmDensity(raw: string): { physical?: number; effective?: number } {
+export function parseWmDensity(raw: string): {
+  physical?: number;
+  effective?: number;
+  overridden: boolean;
+} {
   const physicalMatch = raw.match(/Physical density:\s*(\d+)/i);
   const overrideMatch = raw.match(/Override density:\s*(\d+)/i);
   const physical = physicalMatch ? Number.parseInt(physicalMatch[1], 10) : undefined;
   const override = overrideMatch ? Number.parseInt(overrideMatch[1], 10) : undefined;
+  const overridden = override !== undefined && Number.isFinite(override);
   return {
     ...(physical !== undefined && Number.isFinite(physical) ? { physical } : {}),
-    effective:
-      override !== undefined && Number.isFinite(override)
-        ? override
-        : physical !== undefined && Number.isFinite(physical)
-          ? physical
-          : undefined,
+    effective: overridden
+      ? override
+      : physical !== undefined && Number.isFinite(physical)
+        ? physical
+        : undefined,
+    overridden,
   };
 }
 
@@ -310,6 +324,48 @@ export class DisplayConfig {
     return errors;
   }
 
+  /** Shape a single `readIosTheme()` call into a `DisplayConfigValues` snapshot. */
+  private async readIosThemeSnapshot(): Promise<DisplayConfigValues> {
+    const theme = await this.readIosTheme();
+    return theme !== undefined ? { theme } : {};
+  }
+
+  /** Build the failure response for a pre-read that rejects before any mutation ran. */
+  private iosPreReadFailure(error: unknown): DisplayConfigResult {
+    logger.warn(
+      `[DisplayConfig] setConfig pre-read failed (iOS simulator): ${errorMessage(error)}`,
+      error,
+    );
+    return {
+      success: false,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      error: errorMessage(error),
+    };
+  }
+
+  /**
+   * Read the post-mutation theme, isolated in its own try/catch from the
+   * pre-read: a failure here must not discard the already-captured `previous`
+   * restoration state, since the Simulator may now be modified even though this
+   * verification read failed (issue #6096 review).
+   */
+  private async readIosAppliedSnapshot(): Promise<{
+    applied?: DisplayConfigValues;
+    readError?: string;
+  }> {
+    try {
+      return { applied: await this.readIosThemeSnapshot() };
+    } catch (error) {
+      logger.warn(
+        `[DisplayConfig] setConfig post-read failed (iOS simulator): ${errorMessage(error)}`,
+        error,
+      );
+      return { readError: `failed to read applied theme: ${errorMessage(error)}` };
+    }
+  }
+
   private async setIosSimulatorConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
     if (
       !input.reset &&
@@ -327,41 +383,36 @@ export class DisplayConfig {
       };
     }
 
+    // Read the pre-change state first. If this fails, no mutation has run, so
+    // there is nothing to restore and no `previous` to advertise.
+    let previous: DisplayConfigValues;
     try {
-      const previousTheme = await this.readIosTheme();
-      const previous: DisplayConfigValues =
-        previousTheme !== undefined ? { theme: previousTheme } : {};
-      // Light is the platform default appearance, matching the Android reset's
-      // choice of the AOSP default theme (issue #6096).
-      const errors = input.reset
-        ? await this.setIosAppearance("light")
-        : await this.applyIosChanges(input);
-      const appliedTheme = await this.readIosTheme();
-      const applied: DisplayConfigValues =
-        appliedTheme !== undefined ? { theme: appliedTheme } : {};
-      const error = errors.length > 0 ? errors.join("; ") : undefined;
-      return {
-        success: error === undefined,
-        deviceId: this.device.deviceId,
-        platform: this.device.platform,
-        supported: this.support(),
-        applied,
-        previous,
-        ...(error ? { error } : {}),
-      };
+      previous = await this.readIosThemeSnapshot();
     } catch (error) {
-      logger.warn(
-        `[DisplayConfig] setConfig failed (iOS simulator): ${errorMessage(error)}`,
-        error,
-      );
-      return {
-        success: false,
-        deviceId: this.device.deviceId,
-        platform: this.device.platform,
-        supported: this.support(),
-        error: errorMessage(error),
-      };
+      return this.iosPreReadFailure(error);
     }
+
+    // `setIosAppearance`/`applyIosChanges` catch their own `executeCommandArgs`
+    // rejection and return it as an error fragment (mirroring the Android
+    // `runChecked` pattern), so the mutation step itself never throws here.
+    // Light is the platform default appearance, matching the Android reset's
+    // choice of the AOSP default theme (issue #6096).
+    const errors = input.reset
+      ? await this.setIosAppearance("light")
+      : await this.applyIosChanges(input);
+
+    const { applied, readError } = await this.readIosAppliedSnapshot();
+    const allErrors = readError ? [...errors, readError] : errors;
+    const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
+    return {
+      success: error === undefined,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      ...(applied ? { applied } : {}),
+      previous,
+      ...(error ? { error } : {}),
+    };
   }
 
   /** Read the current font scale, density, and theme. */
@@ -528,7 +579,10 @@ export class DisplayConfig {
       values.fontScale = fontScale;
     }
     if (parsedDensity.effective !== undefined) {
-      values.density = parsedDensity.effective;
+      // See DisplayConfigValues.density: only report a number when a `wm
+      // density` override is actually present, else the restorable `"default"`
+      // bucket (issue #6096 review).
+      values.density = parsedDensity.overridden ? parsedDensity.effective : "default";
     }
     const theme = parseNightMode(nightRaw);
     if (theme !== undefined) {

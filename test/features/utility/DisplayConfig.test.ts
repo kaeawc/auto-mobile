@@ -62,12 +62,15 @@ describe("DisplayConfig parsers", () => {
     expect(parseWmDensity("Physical density: 440\nOverride density: 480\n")).toMatchObject({
       physical: 440,
       effective: 480,
+      overridden: true,
     });
     expect(parseWmDensity("Physical density: 440\n")).toMatchObject({
       physical: 440,
       effective: 440,
+      overridden: false,
     });
     expect(parseWmDensity("nonsense").effective).toBeUndefined();
+    expect(parseWmDensity("nonsense").overridden).toBe(false);
   });
 
   test("parseNightMode maps yes/no/auto to theme", () => {
@@ -302,6 +305,53 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).toContain("shell settings put system font_scale 2");
   });
 
+  test("captures a no-override density as the restorable 'default' bucket, not the physical number", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    // No "Override density" line: the device is at its unmodified physical
+    // default. Reporting `previous.density: 440` here would let a later restore
+    // take the numeric branch and force an override that never existed (#6096).
+    seedReads(adbFactory, { density: "Physical density: 440\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2.0,
+    });
+
+    expect(result.previous?.density).toBe("default");
+  });
+
+  test("replaying a captured 'default' density issues wm density reset, not a forced override", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { density: "Physical density: 440\n" });
+
+    const first = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2.0,
+    });
+    const restorableDensity = first.previous?.density;
+    expect(restorableDensity).toBe("default");
+
+    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      density: restorableDensity,
+    });
+
+    const commands = adbFactory
+      .getFakeClient()
+      .getCommandCalls()
+      .map((c) => c.command);
+    expect(commands).toContain("shell wm density reset");
+    expect(commands).not.toContain("shell wm density 440");
+  });
+
+  test("still captures an overridden density as its explicit dpi number", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { density: "Physical density: 440\nOverride density: 480\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2.0,
+    });
+
+    expect(result.previous?.density).toBe(480);
+  });
+
   test("rejects an empty set request", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
@@ -454,5 +504,28 @@ describe("DisplayConfig iOS Simulator theme support", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("density");
+  });
+
+  test("preserves previous state when the post-mutation appearance read fails", async () => {
+    const simctl = new FakeSimCtlClient();
+    // The pre-read (before the write) succeeds ("light"), the write itself
+    // succeeds, but the read used to verify what actually landed rejects
+    // afterward — e.g. a transient failure or cancellation after dispatch. The
+    // Simulator is left modified, so the response must still carry `previous`
+    // (#6096 review).
+    const appearanceArgs = ["ui", iosSimulator.deviceId, "appearance"];
+    simctl.setCommandArgsResultSequence(appearanceArgs, [
+      { stdout: "light\n" },
+      new Error("simctl: operation cancelled"),
+    ]);
+
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+      theme: "dark",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.previous).toEqual({ theme: "light" });
+    expect(result.applied).toBeUndefined();
+    expect(result.error).toContain("failed to read applied theme");
   });
 });

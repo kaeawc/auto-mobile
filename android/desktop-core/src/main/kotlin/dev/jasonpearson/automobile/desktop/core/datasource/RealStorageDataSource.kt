@@ -348,7 +348,7 @@ class RealStorageDataSource(
     key: String,
     value: String?,
     type: KeyValueType,
-  ): Result<Unit> {
+  ): Result<StorageMutationResult> {
     val provider =
       clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
@@ -367,7 +367,7 @@ class RealStorageDataSource(
             type.protocolName,
             platform.protocolName,
           )
-        if (result.success) Result.Success(Unit)
+        if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
       }
     } catch (e: McpConnectionException) {

@@ -5,6 +5,8 @@ import dev.jasonpearson.automobile.desktop.core.storage.KeyValueFile
 import dev.jasonpearson.automobile.desktop.core.storage.KeyValueType
 import dev.jasonpearson.automobile.desktop.core.storage.QueryResult
 
+data class StorageMutationResult(val warning: String? = null)
+
 interface StorageDataSource {
   suspend fun getDatabases(): Result<List<DatabaseInfo>>
 
@@ -15,7 +17,7 @@ interface StorageDataSource {
     key: String,
     value: String?,
     type: KeyValueType,
-  ): Result<Unit>
+  ): Result<StorageMutationResult>
 
   suspend fun removeKeyValue(fileName: String, key: String): Result<Unit>
 

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import dev.jasonpearson.automobile.desktop.core.datasource.StorageMutationResult
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.launch
 
@@ -68,7 +69,7 @@ private data class EditingEntryIdentity(
 fun KeyValueInspector(
   keyValueFiles: List<KeyValueFile>,
   onSetValue:
-    (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<Unit>)? =
+    (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<StorageMutationResult>)? =
     null,
   recentlyChangedKeys: Set<String> = emptySet(),
   modifier: Modifier = Modifier,
@@ -90,6 +91,7 @@ fun KeyValueInspector(
   var editValue by remember { mutableStateOf("") }
   var isSaving by remember { mutableStateOf(false) }
   var saveError by remember { mutableStateOf<String?>(null) }
+  var saveWarning by remember { mutableStateOf<String?>(null) }
 
   // Filter entries by search query
   val filteredEntries =
@@ -365,6 +367,7 @@ fun KeyValueInspector(
                                   scope.launch {
                                     isSaving = true
                                     saveError = null
+                                    saveWarning = null
                                     val result =
                                       onSetValue(
                                         file.name,
@@ -375,7 +378,8 @@ fun KeyValueInspector(
                                     isSaving = false
                                     when (result) {
                                       is Result.Success -> {
-                                        editingEntry = null
+                                        saveWarning = result.data.warning
+                                        if (result.data.warning == null) editingEntry = null
                                       }
                                       is Result.Error -> {
                                         saveError = result.message
@@ -405,6 +409,14 @@ fun KeyValueInspector(
                         saveError!!,
                         fontSize = 9.sp,
                         color = Color(0xFFE57373),
+                        modifier = Modifier.padding(top = 2.dp),
+                      )
+                    }
+                    if (saveWarning != null) {
+                      Text(
+                        saveWarning!!,
+                        fontSize = 9.sp,
+                        color = Color(0xFFFFB74D),
                         modifier = Modifier.padding(top = 2.dp),
                       )
                     }

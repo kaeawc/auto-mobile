@@ -98,11 +98,38 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
 
     const parsed = JSON.parse((result as any).content[0].text);
     expect(parsed.success).toBe(true);
+    // Issue #6292: a direct-XML fallback edit on a possibly-running app warns that the
+    // change may be overwritten from the app's in-memory cache until it is relaunched.
+    expect(parsed.warning).toMatch(/relaunch/i);
+    expect(parsed.warning).toContain(APP_ID);
 
     const writeCommand = adb
       .getExecutedCommands()
       .find((cmd) => cmd.includes(`base64 -d > shared_prefs/${FILE_NAME}.xml`));
     expect(writeCommand).toBeDefined();
+  });
+
+  test("no relaunch warning on the happy path when the SDK inspection capability is enabled", async () => {
+    const adb = new FakeAdbExecutor();
+    setStorageToolsDependenciesForTesting({
+      // A client whose setPreference SUCCEEDS never trips the fallback, so no warning.
+      androidClientFactory: () => inspectionDisabledClient({ setPreference: async () => {} }),
+      adbClientFactory: singleAdbFactory(adb),
+    });
+
+    const result = await toolHandler("setKeyValue")(ANDROID_DEVICE, {
+      appId: APP_ID,
+      name: FILE_NAME,
+      key: "probeB",
+      value: "2",
+      type: "STRING",
+    });
+
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.success).toBe(true);
+    expect(parsed.warning).toBeUndefined();
+    // The SDK path handled it; no direct-file write was attempted.
+    expect(adb.getExecutedCommands()).toHaveLength(0);
   });
 
   test("removeKeyValue falls back and removes a key the direct-file setPreference path wrote, for the same app+file", async () => {

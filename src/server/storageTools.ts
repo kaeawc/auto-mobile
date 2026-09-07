@@ -13,11 +13,13 @@ import { ResourceRegistry } from "./resourceRegistry";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import {
   clearAndroidKeyValueFileDirect,
+  directFileFallbackRelaunchWarning,
   isSharedPreferencesInspectionDisabledError,
   removeAndroidKeyValueDirect,
   setAndroidKeyValueDirect,
+  withAndroidSharedPreferencesInspectionFallback,
+  type SharedPreferencesInspectionFallbackResult,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
-import { logger } from "../utils/logger";
 
 /** The subset of AndroidCtrlProxyClient the key-value tool handlers depend on. */
 export interface AndroidKeyValueClient {
@@ -257,22 +259,6 @@ function buildEntriesUri(deviceId: string, packageName: string, fileName: string
 }
 
 /**
- * Runs an Android SharedPreferences key-value mutation through the SDK ContentProvider
- * (`viaSdk`) and, if that fails specifically because SharedPreferences inspection is
- * disabled on the app, falls back to the same direct-file `adb shell run-as` XML edit
- * that `setPreference`/`getPreference` always use (`viaDirectFile`). This keeps
- * write/delete/clear reachability consistent for the same app + SharedPreferences file
- * (issue #6292) — a caller who can write a preference through `setPreference` can also
- * delete or clear it through `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`, instead
- * of the delete/clear paths being wrongly gated behind a capability the write path never
- * needed.
- *
- * A failure that is NOT the "inspection disabled" gate (e.g. a genuine transport error,
- * or the direct-file fallback itself failing because the app is not debuggable) is
- * surfaced as-is so the caller sees the real, actionable cause rather than a misleading
- * fallback error.
- */
-/**
  * DataStore (unlike SharedPreferences) has no on-device XML file to fall back to — it is
  * only reachable through the host app's registered adapter — so a disabled inspection
  * capability is a genuine dead end here. Say what enables it (issue #6292 requirement 3)
@@ -286,25 +272,27 @@ function dataStoreInspectionDisabledError(appId: string): ActionableError {
   );
 }
 
-async function withSharedPreferencesInspectionFallback(
+/**
+ * Wraps {@link withAndroidSharedPreferencesInspectionFallback} for the MCP-tool handlers,
+ * binding the lazily-created adb client to the injected `adbClientFactory` seam so the
+ * direct-file fallback stays test-injectable and no adb client is created on the happy path.
+ * The desktop `ide/*` daemon-socket routes call the shared helper directly with their own
+ * adb factory (`socketServer.ts`), so both mutation entry points share one fallback path.
+ */
+function withSharedPreferencesInspectionFallback(
   device: BootedDevice,
   appId: string,
   fileName: string,
   viaSdk: () => Promise<void>,
   viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
-): Promise<void> {
-  try {
-    await viaSdk();
-  } catch (error) {
-    if (!isSharedPreferencesInspectionDisabledError(error)) {
-      throw error;
-    }
-    logger.info(
-      `[storageTools] SharedPreferences inspection is disabled for ${appId}; falling back to direct-file access for ${fileName} (issue #6292)`,
-    );
-    const adb = getStorageToolsDependencies().adbClientFactory.create(device);
-    await viaDirectFile(adb);
-  }
+): Promise<SharedPreferencesInspectionFallbackResult> {
+  return withAndroidSharedPreferencesInspectionFallback(
+    appId,
+    fileName,
+    () => getStorageToolsDependencies().adbClientFactory.create(device),
+    viaSdk,
+    viaDirectFile,
+  );
 }
 
 /**
@@ -348,9 +336,10 @@ export function registerStorageTools(): void {
         validateTypeForPlatform(device.platform, args.type);
       }
 
+      let usedDirectFileFallback = false;
       if (device.platform === "android") {
         const client = getStorageToolsDependencies().androidClientFactory(device);
-        await withSharedPreferencesInspectionFallback(
+        ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
           device,
           args.appId,
           storageName,
@@ -369,7 +358,7 @@ export function registerStorageTools(): void {
                   args.value!,
                   args.type,
                 ),
-        );
+        ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
         if (args.value === null) {
@@ -392,6 +381,9 @@ export function registerStorageTools(): void {
         name: storageName,
         key: args.key,
         type: args.type,
+        ...(usedDirectFileFallback
+          ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
+          : {}),
       });
     } catch (error) {
       if (error instanceof ActionableError) {
@@ -405,15 +397,16 @@ export function registerStorageTools(): void {
   const removeKeyValueHandler = async (device: BootedDevice, args: RemoveKeyValueArgs) => {
     try {
       const storageName = resolveStorageName(args);
+      let usedDirectFileFallback = false;
       if (device.platform === "android") {
         const client = getStorageToolsDependencies().androidClientFactory(device);
-        await withSharedPreferencesInspectionFallback(
+        ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
           device,
           args.appId,
           storageName,
           () => client.removePreference(args.appId, storageName, args.key),
           (adb) => removeAndroidKeyValueDirect(adb, args.appId, storageName, args.key),
-        );
+        ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
         await client.removePreference(args.appId, storageName, args.key);
@@ -430,6 +423,9 @@ export function registerStorageTools(): void {
         appId: args.appId,
         name: storageName,
         key: args.key,
+        ...(usedDirectFileFallback
+          ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
+          : {}),
       });
     } catch (error) {
       if (error instanceof ActionableError) {
@@ -443,15 +439,16 @@ export function registerStorageTools(): void {
   const clearKeyValueFileHandler = async (device: BootedDevice, args: ClearKeyValueFileArgs) => {
     try {
       const storageName = resolveStorageName(args);
+      let usedDirectFileFallback = false;
       if (device.platform === "android") {
         const client = getStorageToolsDependencies().androidClientFactory(device);
-        await withSharedPreferencesInspectionFallback(
+        ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
           device,
           args.appId,
           storageName,
           () => client.clearPreferenceStore(args.appId, storageName),
           (adb) => clearAndroidKeyValueFileDirect(adb, args.appId, storageName),
-        );
+        ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
         await client.clearPreferenceStore(args.appId, storageName);
@@ -467,6 +464,9 @@ export function registerStorageTools(): void {
         success: true,
         appId: args.appId,
         name: storageName,
+        ...(usedDirectFileFallback
+          ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
+          : {}),
       });
     } catch (error) {
       if (error instanceof ActionableError) {

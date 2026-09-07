@@ -5,7 +5,7 @@ import {
   removeAndroidKeyValueDirect,
   setAndroidKeyValueDirect,
 } from "../../../src/features/storage/AndroidSharedPreferencesKeyValueFile";
-import { ActionableError } from "../../../src/models";
+import { ActionableError, type ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
@@ -185,5 +185,72 @@ describe("clearAndroidKeyValueFileDirect", () => {
     const writtenXml = decodeBase64WritePayload(writeCommand);
     expect(writtenXml).toContain("<map");
     expect(writtenXml).not.toContain("<string");
+  });
+});
+
+/**
+ * A minimal stateful `adb` that models `shared_prefs/<file>.xml` as a single in-memory
+ * document: `cat` returns the CURRENT stored XML (captured synchronously, as the real
+ * command would), and the `base64 -d > ...xml` write persists the decoded payload. This
+ * exposes the lost-update TOCTOU (issue #6292): two concurrent read-modify-write mutations
+ * to the same file each read the same snapshot and the later write clobbers the earlier,
+ * unless the direct mutations are serialized per (app, file).
+ */
+class StatefulPrefsAdb extends FakeAdbExecutor {
+  private storedXml = "<map/>";
+
+  currentXml(): string {
+    return this.storedXml;
+  }
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    if (command.includes("cat shared_prefs/settings.xml")) {
+      // Capture the snapshot at read time (as `cat` would), then yield a microtask so a
+      // concurrent, unserialized mutation gets a chance to read the SAME stale snapshot.
+      const snapshot = this.storedXml;
+      await Promise.resolve();
+      return createExecResult(snapshot, "");
+    }
+    if (command.includes("base64 -d > shared_prefs/settings.xml")) {
+      this.storedXml = decodeBase64WritePayload(command);
+      return createExecResult("", "");
+    }
+    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+  }
+}
+
+describe("direct mutation serialization (#6292)", () => {
+  test("two concurrent mutations to the same file both persist — no lost update", async () => {
+    const adb = new StatefulPrefsAdb();
+
+    await Promise.all([
+      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "alpha", "1", "STRING"),
+      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "beta", "2", "STRING"),
+    ]);
+
+    const finalXml = adb.currentXml();
+    expect(finalXml).toContain('<string name="alpha">1</string>');
+    expect(finalXml).toContain('<string name="beta">2</string>');
+  });
+
+  test("a mixed set + remove race on the same file does not clobber the other's write", async () => {
+    const adb = new StatefulPrefsAdb();
+    // Seed an existing key so the concurrent remove has something to delete.
+    await setAndroidKeyValueDirect(adb, "com.example.app", "settings", "existing", "0", "STRING");
+
+    await Promise.all([
+      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "added", "9", "STRING"),
+      removeAndroidKeyValueDirect(adb, "com.example.app", "settings", "existing"),
+    ]);
+
+    const finalXml = adb.currentXml();
+    expect(finalXml).toContain('<string name="added">9</string>');
+    expect(finalXml).not.toContain('name="existing"');
   });
 });

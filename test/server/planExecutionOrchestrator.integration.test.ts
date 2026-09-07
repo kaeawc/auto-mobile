@@ -17,6 +17,8 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
 import { ExecutionTracker } from "../../src/server/executionTracker";
+import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -306,6 +308,31 @@ steps:
       }
     };
 
+    // #6227: `registerDeviceLabelMap` now runs real per-session readiness
+    // setup (`createToolExecutionContext` -> `ensureAccessibilityServiceReady`)
+    // for every labeled session, including "base" and the freshly-allocated
+    // "base:B" — both are `existingSession` by the time it runs (created
+    // directly above / by the `assignMultipleDevices` override), and an
+    // `existingSession` with no recorded readiness no longer short-circuits
+    // setup. This test exercises session-assignment survival through expiry
+    // cleanup, not the accessibility-setup mechanism itself, so stub the
+    // underlying CtrlProxy calls to succeed immediately instead of hitting
+    // the real device (which fails "toggle not supported" and retries with a
+    // real 3s delay, timing out the test) — mirrors
+    // toolRegistry.deviceReadinessPersistedSession.test.ts's stub.
+    const originalCtrlProxyGetInstance = AndroidCtrlProxyManager.getInstance;
+    const originalCtrlProxyClientGetInstance = AndroidCtrlProxyClient.getInstance;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+    AndroidCtrlProxyClient.resetInstances();
+
     const multiDevicePlan = `
 name: multi-device-test
 devices:
@@ -349,6 +376,9 @@ steps:
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();
+      AndroidCtrlProxyManager.getInstance = originalCtrlProxyGetInstance;
+      AndroidCtrlProxyClient.getInstance = originalCtrlProxyClientGetInstance;
+      AndroidCtrlProxyClient.resetInstances();
     }
   });
 

@@ -747,6 +747,12 @@ describe("Rotate", () => {
       expect(result.previousOrientation).toBe("landscape");
       expect(result.warning).toBeDefined();
       expect(result.warning ?? "").toMatch(/reverted/i);
+      // The live read confirms landscape, but the rejected restore write does
+      // not prove auto-rotate caused it. Keep the evidence without inventing
+      // that causal outcome in the public message.
+      expect(result.message).toContain("attempting to restore auto-rotate");
+      expect(result.message).toContain("confirmed landscape");
+      expect(result.message).not.toMatch(/auto-rotate reverted/i);
     });
 
     test("retains a confirmed stable opposite orientation when the FINAL settle-wait sample fails to read (#6211)", async () => {

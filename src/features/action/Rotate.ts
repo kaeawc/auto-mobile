@@ -277,7 +277,11 @@ export class Rotate extends BaseVisualChange {
    */
   private async restoreAutoRotateAndConfirmOrientation(
     requestedOrientation: "portrait" | "landscape",
-  ): Promise<{ achievedOrientation: string; warning: string | undefined }> {
+  ): Promise<{
+    achievedOrientation: string;
+    warning: string | undefined;
+    restoreConfirmed: boolean;
+  }> {
     let restoreWriteError: unknown;
     try {
       await this.writeSystemSetting("accelerometer_rotation", "1");
@@ -303,14 +307,47 @@ export class Rotate extends BaseVisualChange {
     const { achievedOrientation, warning: confirmWarning } =
       await this.confirmOrientationAfterAutoRotateRestore(requestedOrientation, restoreConfirmed);
     if (restoreConfirmed) {
-      return { achievedOrientation, warning: confirmWarning };
+      return { achievedOrientation, warning: confirmWarning, restoreConfirmed };
     }
 
     const ambiguityNote = `the accelerometer_rotation restore write failed after a retry (ambiguous outcome — could not confirm whether auto-rotate was actually re-enabled): ${restoreWriteError}`;
     const warning = confirmWarning
       ? `${confirmWarning} Additionally, ${ambiguityNote}`
       : `Rotated to ${requestedOrientation}, but ${ambiguityNote}`;
-    return { achievedOrientation, warning };
+    return { achievedOrientation, warning, restoreConfirmed };
+  }
+
+  /**
+   * Describe the rotation outcome without treating an unconfirmed restore as
+   * proof that auto-rotate caused the final orientation. The orientation read
+   * itself remains evidence and is retained in the message.
+   */
+  private buildRotationMessage(
+    requestedOrientation: "portrait" | "landscape",
+    previousOrientation: string,
+    achievedOrientation: string,
+    warning: string | undefined,
+    restoreConfirmed: boolean,
+  ): string {
+    if (!warning) {
+      return `Successfully rotated from ${previousOrientation} to ${requestedOrientation}`;
+    }
+    if (!restoreConfirmed) {
+      if (achievedOrientation === "unknown") {
+        return `Rotated to ${requestedOrientation}, but after attempting to restore auto-rotate, the device's current orientation could not be confirmed`;
+      }
+      if (achievedOrientation === requestedOrientation) {
+        return `Rotated to ${requestedOrientation}; after attempting to restore auto-rotate, the device was confirmed to remain ${achievedOrientation}`;
+      }
+      return `Rotated to ${requestedOrientation}; after attempting to restore auto-rotate, the device was confirmed ${achievedOrientation}`;
+    }
+    if (achievedOrientation === "unknown") {
+      return `Rotated to ${requestedOrientation}, but the device's orientation after auto-rotate restore could not be confirmed`;
+    }
+    if (achievedOrientation !== requestedOrientation) {
+      return `Rotated to ${requestedOrientation}, but auto-rotate reverted the device to ${achievedOrientation}`;
+    }
+    return `Successfully rotated from ${previousOrientation} to ${requestedOrientation}`;
   }
 
   async getCurrentOrientation(): Promise<string> {
@@ -547,9 +584,10 @@ export class Rotate extends BaseVisualChange {
       // `currentOrientation` remains the legitimate prior value (see #6057).
       let achievedOrientation: string = orientation;
       let warning: string | undefined;
+      let restoreConfirmed = true;
 
       if (wasAutoRotateEnabled) {
-        ({ achievedOrientation, warning } =
+        ({ achievedOrientation, warning, restoreConfirmed } =
           await this.restoreAutoRotateAndConfirmOrientation(orientation));
       }
 
@@ -562,13 +600,13 @@ export class Rotate extends BaseVisualChange {
         rotationPerformed: true,
         orientationLockHandled: wasAutoRotateEnabled,
         warning,
-        message: warning
-          ? achievedOrientation === "unknown"
-            ? `Rotated to ${orientation}, but the device's orientation after auto-rotate restore could not be confirmed`
-            : achievedOrientation !== orientation
-              ? `Rotated to ${orientation}, but auto-rotate reverted the device to ${achievedOrientation}`
-              : `Rotated to ${orientation}, but the auto-rotate restore was ambiguous; the orientation was confirmed to still hold`
-          : `Successfully rotated from ${currentOrientation} to ${orientation}`,
+        message: this.buildRotationMessage(
+          orientation,
+          currentOrientation,
+          achievedOrientation,
+          warning,
+          restoreConfirmed,
+        ),
       };
     } catch (error) {
       // Restore auto-rotate if it was on before this call

@@ -105,6 +105,56 @@ describe("daemon file cleanup", () => {
     expect(existsSync(socketPath)).toBe(true);
     expect(existsSync(pidFilePath)).toBe(true);
   });
+
+  // Issue #6232: a lock-less contender refused over a live sibling has written
+  // its OWN early owner record (issue #2871), so `expectedPid` would authorize
+  // deletion of the shared socket/PID files even though it never bound the socket.
+  // `socketBindCommitted: false` must suppress ALL deletion so the live winner's
+  // files survive the loser's exit (the #6140 brick, prevented here).
+  test("cleanupDaemonFilesSync removes nothing when the socket bind was never committed, even for our own PID", () => {
+    const { socketPath, pidFilePath } = createTempFiles();
+
+    const removed = cleanupDaemonFilesSync({
+      pidFilePath,
+      socketPaths: [socketPath],
+      expectedPid: 12345,
+      socketBindCommitted: false,
+    });
+
+    expect(removed).toBe(false);
+    expect(existsSync(socketPath)).toBe(true);
+    expect(existsSync(pidFilePath)).toBe(true);
+  });
+
+  test("cleanupDaemonFiles removes nothing when the socket bind was never committed, even for our own PID", async () => {
+    const { socketPath, pidFilePath } = createTempFiles();
+
+    const removed = await cleanupDaemonFiles({
+      pidFilePath,
+      socketPaths: [socketPath],
+      expectedPid: 12345,
+      socketBindCommitted: false,
+    });
+
+    expect(removed).toBe(false);
+    expect(existsSync(socketPath)).toBe(true);
+    expect(existsSync(pidFilePath)).toBe(true);
+  });
+
+  test("cleanupDaemonFilesSync still cleans a committed bind's own files", () => {
+    const { socketPath, pidFilePath } = createTempFiles();
+
+    const removed = cleanupDaemonFilesSync({
+      pidFilePath,
+      socketPaths: [socketPath],
+      expectedPid: 12345,
+      socketBindCommitted: true,
+    });
+
+    expect(removed).toBe(true);
+    expect(existsSync(socketPath)).toBe(false);
+    expect(existsSync(pidFilePath)).toBe(false);
+  });
 });
 
 describe("isProcessRunning", () => {

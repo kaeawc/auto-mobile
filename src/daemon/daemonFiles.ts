@@ -101,6 +101,17 @@ export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
   socketPaths?: string[];
   expectedPid?: number;
+  /**
+   * Whether this process actually acquired the daemon socket bind. When
+   * explicitly `false`, ALL deletion is suppressed: the process holds an early
+   * owner PID record (issue #2871) — so its own pid passes the `expectedPid`
+   * self-check — yet it never owned the socket. A lock-less contender refused
+   * over a live sibling (issue #6232) is exactly this case; letting its exit
+   * cleanup unlink the shared socket/PID files would brick the live winner (the
+   * #6140 failure mode, new variant). `undefined` preserves the legacy behavior
+   * for callers that do not track socket ownership.
+   */
+  socketBindCommitted?: boolean;
 }
 
 /** Durable companion to a manager's launch-capture log. */
@@ -197,6 +208,10 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
 
+  if (options.socketBindCommitted === false) {
+    return false;
+  }
+
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
     return false;
   }
@@ -226,6 +241,10 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
 export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): boolean {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
+
+  if (options.socketBindCommitted === false) {
+    return false;
+  }
 
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
     return false;

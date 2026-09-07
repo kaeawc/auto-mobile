@@ -320,19 +320,40 @@ export class CtrlProxyHierarchy {
     perfTiming?: CtrlProxyPerfTiming;
     frameContext?: string;
   } | null> {
+    const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
+    throwIfAborted(signal);
     if (!(await this.context.ensureConnected(perf))) {
+      return null;
+    }
+    // Connection establishment can include iOS runner setup. It is not
+    // interruptible through this delegate, but it still spends this request's
+    // budget: never dispatch a hierarchy extraction after that budget expired.
+    throwIfAborted(signal);
+    const remainingTimeoutMs = deadlineMs - this.context.timer.now();
+    if (remainingTimeoutMs <= 0) {
       return null;
     }
 
     const requestId = this.context.requestManager.generateId("hierarchy");
     if (suppressObservationStreamPush) {
-      this.context.suppressHierarchyObservationStreamPush?.(requestId, timeoutMs);
+      this.context.suppressHierarchyObservationStreamPush?.(requestId, remainingTimeoutMs);
     }
     const promise = this.context.requestManager.register<{
       hierarchy?: XCTestHierarchy;
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
-    }>(requestId, "hierarchy", timeoutMs, () => ({ hierarchy: undefined, perfTiming: undefined }));
+    }>(requestId, "hierarchy", remainingTimeoutMs, () => ({
+      hierarchy: undefined,
+      perfTiming: undefined,
+    }));
+
+    const rejectOnAbort = () => {
+      this.context.requestManager.reject(
+        requestId,
+        signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"),
+      );
+    };
+    signal?.addEventListener("abort", rejectOnAbort, { once: true });
 
     const message = {
       type: disableAllFiltering ? "request_hierarchy" : "request_hierarchy_if_stale",
@@ -341,32 +362,46 @@ export class CtrlProxyHierarchy {
     };
 
     const ws = this.context.getWebSocket();
-    ws?.send(JSON.stringify(message));
+    try {
+      // The request can be cancelled between connection setup and dispatch.
+      // Rejecting the registered request first keeps that cancellation from
+      // leaking a pending RequestManager entry.
+      throwIfAborted(signal);
+      ws?.send(JSON.stringify(message));
 
-    const result = await promise;
+      const result = await promise;
+      // A response that races with cancellation or reaches us after the
+      // absolute deadline is not evidence this caller may accept.
+      throwIfAborted(signal);
+      if (this.context.timer.now() >= deadlineMs) {
+        return null;
+      }
 
-    if (result.hierarchy) {
-      // Update cache
-      const now = this.context.timer.now();
-      const previous = this.context.getCachedHierarchy();
-      const newCache: CachedHierarchy = {
-        hierarchy: result.hierarchy,
-        receivedAt: now,
-        captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
-        fresh: true,
-        perfTiming: result.perfTiming,
-        frameContext: result.frameContext,
-      };
-      this.context.setCachedHierarchy(newCache);
+      if (result.hierarchy) {
+        // Update cache
+        const now = this.context.timer.now();
+        const previous = this.context.getCachedHierarchy();
+        const newCache: CachedHierarchy = {
+          hierarchy: result.hierarchy,
+          receivedAt: now,
+          captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
+          fresh: true,
+          perfTiming: result.perfTiming,
+          frameContext: result.frameContext,
+        };
+        this.context.setCachedHierarchy(newCache);
 
-      return {
-        hierarchy: result.hierarchy,
-        perfTiming: result.perfTiming,
-        frameContext: result.frameContext,
-      };
+        return {
+          hierarchy: result.hierarchy,
+          perfTiming: result.perfTiming,
+          frameContext: result.frameContext,
+        };
+      }
+
+      return null;
+    } finally {
+      signal?.removeEventListener("abort", rejectOnAbort);
     }
-
-    return null;
   }
 
   private captureReceivedAt(

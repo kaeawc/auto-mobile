@@ -618,21 +618,33 @@ export class BaseVisualChange {
       deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
     for (let attempt = 0; ; attempt++) {
       try {
+        signal?.throwIfAborted();
+        // Do not revive an expired verification budget by handing its zero value
+        // to Window, which must clamp subcommand timeouts to keep those commands
+        // bounded. No device read is valid once this operation's deadline passed.
+        if ((remainingMs() ?? 1) <= 0) {
+          return false;
+        }
         const activeWindow = await this.window.getActive(true, undefined, {
           signal,
           timeoutMs: remainingMs(),
         });
-        if (
-          await isForegroundLauncher(
-            activeWindow.appId,
-            this.adb,
-            this.device.deviceId,
-            this.timer,
-            this.device.transportId,
-            signal,
-            remainingMs(),
-          )
-        ) {
+        if ((remainingMs() ?? 1) <= 0) {
+          return false;
+        }
+        const isLauncher = await isForegroundLauncher(
+          activeWindow.appId,
+          this.adb,
+          this.device.deviceId,
+          this.timer,
+          this.device.transportId,
+          signal,
+          remainingMs(),
+        );
+        // A successful launcher lookup is evidence only while it remains within
+        // the caller's deadline; a fast cached lookup must not accept success
+        // after a preceding foreground read spent the budget.
+        if (isLauncher && (remainingMs() ?? 1) > 0) {
           return true;
         }
       } catch (error) {

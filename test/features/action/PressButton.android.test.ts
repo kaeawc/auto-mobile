@@ -298,6 +298,47 @@ describe("PressButton Android keycode dispatch", () => {
       expect(verifyTimeout!).toBeLessThanOrEqual(1234);
     });
 
+    test("does not start a verification read after the shared deadline expires", async () => {
+      const window = launcherWindow();
+      // verifyAndroidHomeForeground only needs these collaborators. Avoid the
+      // production constructor here because it allocates a CtrlProxy port that
+      // is unrelated to this pre-read deadline gate.
+      const pressButton = Object.create(PressButton.prototype) as PressButton;
+      (pressButton as any).timer = fakeTimer;
+      (pressButton as any).adb = fakeAdb;
+      (pressButton as any).device = androidDevice;
+      (pressButton as any).window = window;
+
+      await expect(
+        (pressButton as any).verifyAndroidHomeForeground({ timeoutMs: 0 }),
+      ).resolves.toBe(false);
+
+      expect(window.getGetActiveCallCount()).toBe(0);
+    });
+
+    test("does not accept launcher evidence after the foreground read spends the budget", async () => {
+      const window = {
+        async getActive() {
+          fakeTimer.advanceTime(1);
+          return {
+            appId: "com.android.launcher3",
+            activityName: "Launcher",
+            layoutSeqSum: 0,
+          };
+        },
+      };
+      const pressButton = Object.create(PressButton.prototype) as PressButton;
+      (pressButton as any).timer = fakeTimer;
+      (pressButton as any).adb = fakeAdb;
+      (pressButton as any).device = androidDevice;
+      (pressButton as any).window = window;
+
+      await expect(
+        (pressButton as any).verifyAndroidHomeForeground({ timeoutMs: 1 }),
+      ).resolves.toBe(false);
+      expect(fakeAdb.getCommandCalls()).toEqual([]);
+    });
+
     test("forwards the signal into the CtrlProxy global-action wait", async () => {
       let capturedSignal: AbortSignal | undefined;
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({

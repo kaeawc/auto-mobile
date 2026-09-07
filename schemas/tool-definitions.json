@@ -1138,38 +1138,29 @@
         }
       },
       "additionalProperties": false,
-      "allOf": [
-        {
-          "not": {
-            "properties": {
-              "reset": {
-                "const": true
-              }
-            },
-            "required": ["reset", "fontScale"]
-          }
-        },
-        {
-          "not": {
-            "properties": {
-              "reset": {
-                "const": true
-              }
-            },
-            "required": ["reset", "density"]
-          }
-        },
-        {
-          "not": {
-            "properties": {
-              "reset": {
-                "const": true
-              }
-            },
-            "required": ["reset", "theme"]
+      "if": {
+        "required": ["reset"],
+        "properties": {
+          "reset": {
+            "const": true
           }
         }
-      ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": ["fontScale"]
+            },
+            {
+              "required": ["density"]
+            },
+            {
+              "required": ["theme"]
+            }
+          ]
+        }
+      }
     }
   },
   {

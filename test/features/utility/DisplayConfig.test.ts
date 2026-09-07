@@ -133,6 +133,21 @@ describe("DisplayConfig getConfig", () => {
     expect(result.current?.density).toBe(440);
   });
 
+  test("reports the effective font scale (not the restoration token) when unset", async () => {
+    // With no override, `settings get system font_scale` returns "null"/empty,
+    // which parseFontScaleSnapshot represents as the restoration token
+    // "default". `current` is observational, not a restore payload, so it must
+    // report the effective AOSP default scale (1.0), matching how density
+    // already reports its effective number rather than a token (#6303 review).
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { fontScale: "null\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+    expect(result.success).toBe(true);
+    expect(result.current?.fontScale).toBe(1.0);
+  });
+
   test("fails an iOS Simulator read when simctl does not report an appearance", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(["ui", iosSimulator.deviceId, "appearance"], { stdout: "\n" });
@@ -263,6 +278,11 @@ describe("DisplayConfig setConfig", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("68 dpi is below Android's 72 dpi minimum");
+    // The rejected bucket never dispatched a `wm density` command, so
+    // verification must not recompute an "expected" density from the input and
+    // report a second, misleading "Display density remained" failure alongside
+    // the resolution error above (#6303 review).
+    expect(result.error).not.toContain("Display density remained");
     const commands = adbFactory
       .getFakeClient()
       .getCommandCalls()

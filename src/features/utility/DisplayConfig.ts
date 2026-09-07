@@ -580,8 +580,8 @@ export class DisplayConfig {
     // never dropped from the restoration state (issue #6096 review). The device
     // may now be partially modified, so we still read post-mutation state and
     // always return `previous` so the caller can restore what changed.
-    const errors = input.reset
-      ? await this.applyReset(adb)
+    const { errors, issuedDensity } = input.reset
+      ? { errors: await this.applyReset(adb), issuedDensity: "default" as const }
       : await this.applyChanges(adb, input, physicalDensity);
 
     let applied: DisplayConfigValues | undefined;
@@ -592,7 +592,7 @@ export class DisplayConfig {
       const verificationErrors = this.verifyAndroidAppliedConfig(
         input,
         postMutation,
-        physicalDensity,
+        issuedDensity,
       );
       errors.push(...verificationErrors);
     } catch (error) {
@@ -634,10 +634,10 @@ export class DisplayConfig {
       this.run(adb, "shell cmd uimode night"),
     ]);
     const parsedDensity = parseWmDensity(densityRaw);
-    const fontScale = parseFontScaleSnapshot(fontRaw);
+    const fontScaleSnapshot = parseFontScaleSnapshot(fontRaw);
     const theme = parseNightMode(nightRaw);
     const unreadable: string[] = [];
-    if (fontScale === undefined) {
+    if (fontScaleSnapshot === undefined) {
       unreadable.push("font scale");
     }
     if (parsedDensity.effective === undefined) {
@@ -650,17 +650,22 @@ export class DisplayConfig {
       throw new Error(`Could not parse Android display baseline: ${unreadable.join(", ")}.`);
     }
 
-    // `values` reports the actual effective density for observations and
-    // post-mutation confirmation. `restorableValues` retains the distinct
-    // no-override token for `previous`, because replaying the physical number
-    // would create an override instead of restoring the original state.
+    // `values` reports the actual effective font scale/density for observations
+    // and post-mutation confirmation, never the restoration token: a "default"
+    // font scale means Android has no override, whose effective scale is the
+    // AOSP default (issue #6303 review). `restorableValues` retains the
+    // distinct no-override token for `previous`, because replaying the
+    // effective number would create an override where none existed.
+    const effectiveFontScale =
+      fontScaleSnapshot === "default" ? DEFAULT_FONT_SCALE : fontScaleSnapshot;
     const values: DisplayConfigValues = {
-      fontScale,
+      fontScale: effectiveFontScale,
       density: parsedDensity.effective,
       theme,
     };
     const restorableValues: DisplayConfigValues = {
       ...values,
+      fontScale: fontScaleSnapshot,
       density: parsedDensity.overridden ? parsedDensity.effective : "default",
     };
     return { values, restorableValues, physicalDensity: parsedDensity.physical };
@@ -670,7 +675,7 @@ export class DisplayConfig {
     adb: AdbExecutor,
     input: SetDisplayConfigInput,
     physicalDensity: number | undefined,
-  ): Promise<string[]> {
+  ): Promise<{ errors: string[]; issuedDensity?: number | "default" }> {
     const errors: string[] = [];
     if (input.fontScale !== undefined) {
       const command =
@@ -679,12 +684,20 @@ export class DisplayConfig {
           : `shell settings put system font_scale ${input.fontScale}`;
       errors.push(...(await this.runChecked(adb, command)));
     }
+    // `issuedDensity` stays `undefined` unless a `wm density` command was
+    // actually dispatched. When `resolveDensityCommand` rejects the request
+    // (e.g. a relative bucket resolving below Android's dpi floor), no command
+    // runs, so verification must not independently recompute an "expected"
+    // density and report a second, misleading failure alongside the resolution
+    // error already collected above (issue #6303 review).
+    let issuedDensity: number | "default" | undefined;
     if (input.density !== undefined) {
       const resolution = this.resolveDensityCommand(input.density, physicalDensity);
       if ("error" in resolution) {
         errors.push(resolution.error);
       } else {
         errors.push(...(await this.runChecked(adb, resolution.command)));
+        issuedDensity = resolution.target;
       }
     }
     if (input.theme !== undefined) {
@@ -692,7 +705,7 @@ export class DisplayConfig {
         ...(await this.runChecked(adb, `shell cmd uimode night ${nightModeArg(input.theme)}`)),
       );
     }
-    return errors;
+    return { errors, issuedDensity };
   }
 
   private async applyReset(adb: AdbExecutor): Promise<string[]> {
@@ -712,12 +725,13 @@ export class DisplayConfig {
   private resolveDensityCommand(
     density: DensityInput,
     physical: number | undefined,
-  ): { command: string } | { error: string } {
+  ): { command: string; target: number | "default" } | { error: string } {
     if (typeof density === "number") {
-      return { command: `shell wm density ${Math.round(density)}` };
+      const target = Math.round(density);
+      return { command: `shell wm density ${target}`, target };
     }
     if (density === "default") {
-      return { command: "shell wm density reset" };
+      return { command: "shell wm density reset", target: "default" };
     }
     if (physical === undefined) {
       return {
@@ -734,13 +748,13 @@ export class DisplayConfig {
           `${MIN_ANDROID_DENSITY_DPI} dpi minimum.`,
       };
     }
-    return { command: `shell wm density ${scaled}` };
+    return { command: `shell wm density ${scaled}`, target: scaled };
   }
 
   private verifyAndroidAppliedConfig(
     input: SetDisplayConfigInput,
     postMutation: Awaited<ReturnType<DisplayConfig["readRawValues"]>>,
-    physicalDensity: number | undefined,
+    issuedDensity: number | "default" | undefined,
   ): string[] {
     const errors: string[] = [];
     const expectedFontScale = input.reset ? "default" : input.fontScale;
@@ -757,17 +771,13 @@ export class DisplayConfig {
       );
     }
 
-    const expectedDensity = input.reset
-      ? "default"
-      : input.density === undefined
-        ? undefined
-        : typeof input.density === "number"
-          ? Math.round(input.density)
-          : input.density === "default"
-            ? "default"
-            : physicalDensity === undefined
-              ? undefined
-              : Math.round(physicalDensity * DENSITY_BUCKET_FACTORS[input.density]);
+    // `issuedDensity` is the density actually dispatched to the device (from
+    // `applyChanges`/`applyReset`), not a recomputation from `input`: when
+    // `resolveDensityCommand` rejected the request, no `wm density` command
+    // ran, so there is nothing to verify here (its own error is already in
+    // `errors` from the mutation step) rather than reporting a second,
+    // misleading "density remained X" failure (issue #6303 review).
+    const expectedDensity = issuedDensity;
     if (expectedDensity !== undefined) {
       const actualDensity =
         expectedDensity === "default"

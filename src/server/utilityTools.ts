@@ -273,12 +273,19 @@ export const displayConfigSchema = withJsonSchemaOverride(
     // The runtime refinement above protects direct callers. Repeat the
     // reset=true exclusivity in the advertised JSON schema so generated tool
     // clients cannot construct a request that will only fail after dispatch.
-    jsonSchema.allOf = ["fontScale", "density", "theme"].map((field) => ({
+    // `if`/`then` (not a top-level `allOf`/`anyOf`/`oneOf`) matches the
+    // networkCondition schema's convention above and keeps the top-level
+    // schema combinator-free, which `schema.integration.test.ts` gates
+    // repo-wide (issue #6303 review).
+    jsonSchema.if = {
+      required: ["reset"],
+      properties: { reset: { const: true } },
+    };
+    jsonSchema.then = {
       not: {
-        properties: { reset: { const: true } },
-        required: ["reset", field],
+        anyOf: ["fontScale", "density", "theme"].map((field) => ({ required: [field] })),
       },
-    }));
+    };
   },
 );
 

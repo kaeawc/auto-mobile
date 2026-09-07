@@ -22,6 +22,7 @@ import {
   writeAndroidPreferencesXml,
   type AndroidPreferencesXmlDocument,
 } from "./AndroidPreferencesXmlFile";
+import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
@@ -201,14 +202,21 @@ export class AppPreferences {
 
   private async setAndroidSharedPreference(input: SetPreferenceInput): Promise<void> {
     const fileName = androidSharedPreferencesFileName(input);
-    const existingXml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
-    const updatedXml = await writeAndroidPreferenceEntry(
-      existingXml,
-      input.key,
-      input.value,
-      input.type,
+    await getAndroidSharedPreferencesMutationCoordinator().run(
+      this.device.deviceId,
+      input.appId!,
+      fileName,
+      async () => {
+        const existingXml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
+        const updatedXml = await writeAndroidPreferenceEntry(
+          existingXml,
+          input.key,
+          input.value,
+          input.type,
+        );
+        await writeAndroidPreferencesXml(this.adb(), input.appId!, fileName, updatedXml);
+      },
     );
-    await writeAndroidPreferencesXml(this.adb(), input.appId!, fileName, updatedXml);
   }
 
   private async readAndroidSharedPreferencesXml(appId: string, fileName: string): Promise<string> {

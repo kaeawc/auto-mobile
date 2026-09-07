@@ -2762,7 +2762,7 @@ export class UnixSocketServer {
             appId,
             fileName,
             () => client.removePreference(appId, fileName, key),
-            (adb) => removeAndroidKeyValueDirect(adb, appId, fileName, key),
+            (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
           ));
         } else {
           // Enforce the same cross-platform type guidance as the MCP-tool path
@@ -2777,7 +2777,8 @@ export class UnixSocketServer {
             appId,
             fileName,
             () => client.setPreference(appId, fileName, key, value, type),
-            (adb) => setAndroidKeyValueDirect(adb, appId, fileName, key, value, type),
+            (adb) =>
+              setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
           ));
         }
         return usedDirectFileFallback
@@ -2809,7 +2810,7 @@ export class UnixSocketServer {
           appId,
           fileName,
           () => client.removePreference(appId, fileName, key),
-          (adb) => removeAndroidKeyValueDirect(adb, appId, fileName, key),
+          (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
         );
         return usedDirectFileFallback
           ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
@@ -2838,7 +2839,7 @@ export class UnixSocketServer {
           appId,
           fileName,
           () => client.clearPreferenceStore(appId, fileName),
-          (adb) => clearAndroidKeyValueFileDirect(adb, appId, fileName),
+          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
         );
         return usedDirectFileFallback
           ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }

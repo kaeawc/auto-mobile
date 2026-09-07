@@ -8,6 +8,9 @@ import {
 import { ActionableError, type ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { AppPreferences } from "../../../src/features/preferences/AppPreferences";
+import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { BootedDevice } from "../../../src/models";
 
 // This module gives setKeyValue/removeKeyValue/clearKeyValueFile the same reachability
 // as the setPreference/getPreference tools for Android SharedPreferences (issue #6292):
@@ -51,7 +54,15 @@ describe("setAndroidKeyValueDirect", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
-    await setAndroidKeyValueDirect(adb, "com.example.app", "settings", "probeB", "hello", "STRING");
+    await setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "probeB",
+      "hello",
+      "STRING",
+    );
 
     const commands = adb.getExecutedCommands();
     const writeCommand = commandText(commands, "base64 -d > shared_prefs/settings.xml");
@@ -66,7 +77,15 @@ describe("setAndroidKeyValueDirect", () => {
       createExecResult('<map><string name="probeA">old</string></map>', ""),
     );
 
-    await setAndroidKeyValueDirect(adb, "com.example.app", "settings", "probeA", "new", "STRING");
+    await setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "probeA",
+      "new",
+      "STRING",
+    );
 
     const writeCommand = commandText(
       adb.getExecutedCommands(),
@@ -83,6 +102,7 @@ describe("setAndroidKeyValueDirect", () => {
 
     await setAndroidKeyValueDirect(
       adb,
+      "device-1",
       "com.example.app",
       "settings",
       "tags",
@@ -105,6 +125,7 @@ describe("setAndroidKeyValueDirect", () => {
     await expect(
       setAndroidKeyValueDirect(
         adb,
+        "device-1",
         "com.example.app",
         "settings",
         "tags",
@@ -119,7 +140,15 @@ describe("setAndroidKeyValueDirect", () => {
     adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
     await expect(
-      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "big", "99999999999", "INT"),
+      setAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        "com.example.app",
+        "settings",
+        "big",
+        "99999999999",
+        "INT",
+      ),
     ).rejects.toThrow(/32-bit range/);
   });
 
@@ -131,7 +160,15 @@ describe("setAndroidKeyValueDirect", () => {
     );
 
     await expect(
-      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "probeA", "1", "STRING"),
+      setAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        "com.example.app",
+        "settings",
+        "probeA",
+        "1",
+        "STRING",
+      ),
     ).rejects.toThrow(/debuggable\/test build/);
   });
 });
@@ -148,8 +185,16 @@ describe("removeAndroidKeyValueDirect", () => {
     ]);
 
     // setPreference-equivalent write, then delete through the same file.
-    await setAndroidKeyValueDirect(adb, "com.example.app", "settings", "probeA", "1", "STRING");
-    await removeAndroidKeyValueDirect(adb, "com.example.app", "settings", "probeA");
+    await setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "probeA",
+      "1",
+      "STRING",
+    );
+    await removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA");
 
     const commands = adb.getExecutedCommands();
     const secondWrite = commands
@@ -168,7 +213,7 @@ describe("removeAndroidKeyValueDirect", () => {
     );
 
     await expect(
-      removeAndroidKeyValueDirect(adb, "com.example.app", "settings", "probeA"),
+      removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA"),
     ).resolves.toBeUndefined();
   });
 });
@@ -177,7 +222,7 @@ describe("clearAndroidKeyValueFileDirect", () => {
   test("writes an empty map without needing to read the file first", async () => {
     const adb = new FakeAdbExecutor();
 
-    await clearAndroidKeyValueFileDirect(adb, "com.example.app", "settings");
+    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
 
     const commands = adb.getExecutedCommands();
     expect(commands.some((entry) => entry.includes("cat shared_prefs/settings.xml"))).toBe(false);
@@ -198,9 +243,26 @@ describe("clearAndroidKeyValueFileDirect", () => {
  */
 class StatefulPrefsAdb extends FakeAdbExecutor {
   private storedXml = "<map/>";
+  private readCount = 0;
+  private firstReadBlocked = false;
+  private firstReadStartedResolve: (() => void) | undefined;
+  private firstReadRelease: (() => void) | undefined;
+
+  blockFirstRead(): { readStarted: Promise<void>; release: () => void } {
+    this.firstReadBlocked = true;
+    const readStarted = new Promise<void>((resolve) => {
+      this.firstReadStartedResolve = resolve;
+    });
+    const release = () => this.firstReadRelease?.();
+    return { readStarted, release };
+  }
 
   currentXml(): string {
     return this.storedXml;
+  }
+
+  reads(): number {
+    return this.readCount;
   }
 
   override async executeCommand(
@@ -214,6 +276,14 @@ class StatefulPrefsAdb extends FakeAdbExecutor {
       // Capture the snapshot at read time (as `cat` would), then yield a microtask so a
       // concurrent, unserialized mutation gets a chance to read the SAME stale snapshot.
       const snapshot = this.storedXml;
+      this.readCount += 1;
+      if (this.firstReadBlocked) {
+        this.firstReadBlocked = false;
+        this.firstReadStartedResolve?.();
+        await new Promise<void>((resolve) => {
+          this.firstReadRelease = resolve;
+        });
+      }
       await Promise.resolve();
       return createExecResult(snapshot, "");
     }
@@ -228,11 +298,31 @@ class StatefulPrefsAdb extends FakeAdbExecutor {
 describe("direct mutation serialization (#6292)", () => {
   test("two concurrent mutations to the same file both persist — no lost update", async () => {
     const adb = new StatefulPrefsAdb();
+    const gate = adb.blockFirstRead();
 
-    await Promise.all([
-      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "alpha", "1", "STRING"),
-      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "beta", "2", "STRING"),
-    ]);
+    const first = setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "alpha",
+      "1",
+      "STRING",
+    );
+    await gate.readStarted;
+    const second = setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "beta",
+      "2",
+      "STRING",
+    );
+    await Promise.resolve();
+    expect(adb.reads()).toBe(1);
+    gate.release();
+    await Promise.all([first, second]);
 
     const finalXml = adb.currentXml();
     expect(finalXml).toContain('<string name="alpha">1</string>');
@@ -242,15 +332,100 @@ describe("direct mutation serialization (#6292)", () => {
   test("a mixed set + remove race on the same file does not clobber the other's write", async () => {
     const adb = new StatefulPrefsAdb();
     // Seed an existing key so the concurrent remove has something to delete.
-    await setAndroidKeyValueDirect(adb, "com.example.app", "settings", "existing", "0", "STRING");
+    await setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "existing",
+      "0",
+      "STRING",
+    );
 
     await Promise.all([
-      setAndroidKeyValueDirect(adb, "com.example.app", "settings", "added", "9", "STRING"),
-      removeAndroidKeyValueDirect(adb, "com.example.app", "settings", "existing"),
+      setAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        "com.example.app",
+        "settings",
+        "added",
+        "9",
+        "STRING",
+      ),
+      removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "existing"),
     ]);
 
     const finalXml = adb.currentXml();
     expect(finalXml).toContain('<string name="added">9</string>');
     expect(finalXml).not.toContain('name="existing"');
+  });
+
+  test("does not serialize independent devices sharing the same app and file", async () => {
+    const firstDeviceAdb = new StatefulPrefsAdb();
+    const secondDeviceAdb = new StatefulPrefsAdb();
+    const firstGate = firstDeviceAdb.blockFirstRead();
+    const secondGate = secondDeviceAdb.blockFirstRead();
+
+    const first = setAndroidKeyValueDirect(
+      firstDeviceAdb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "alpha",
+      "1",
+      "STRING",
+    );
+    await firstGate.readStarted;
+    const second = setAndroidKeyValueDirect(
+      secondDeviceAdb,
+      "device-2",
+      "com.example.app",
+      "settings",
+      "beta",
+      "2",
+      "STRING",
+    );
+
+    await secondGate.readStarted;
+    firstGate.release();
+    secondGate.release();
+    await Promise.all([first, second]);
+  });
+
+  test("serializes the legacy setPreference route with the direct key-value route", async () => {
+    const adb = new StatefulPrefsAdb();
+    const gate = adb.blockFirstRead();
+    const device: BootedDevice = { name: "Pixel", platform: "android", deviceId: "device-1" };
+    const factory: AdbClientFactory = { create: () => adb };
+    const preferences = new AppPreferences(device, { adbFactory: factory });
+
+    const legacyWrite = preferences.setPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: "legacy",
+      value: "one",
+      type: "string",
+    });
+    await gate.readStarted;
+    const directWrite = setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "direct",
+      "two",
+      "STRING",
+    );
+
+    // The direct route must not begin its stale read while the legacy route owns
+    // the whole-file transaction.
+    await Promise.resolve();
+    expect(adb.reads()).toBe(1);
+    gate.release();
+    await Promise.all([legacyWrite, directWrite]);
+
+    expect(adb.currentXml()).toContain('<string name="legacy">one</string>');
+    expect(adb.currentXml()).toContain('<string name="direct">two</string>');
   });
 });

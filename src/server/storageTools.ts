@@ -349,9 +349,10 @@ export function registerStorageTools(): void {
               : client.setPreference(args.appId, storageName, args.key, args.value!, args.type),
           (adb) =>
             args.value === null
-              ? removeAndroidKeyValueDirect(adb, args.appId, storageName, args.key)
+              ? removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key)
               : setAndroidKeyValueDirect(
                   adb,
+                  device.deviceId,
                   args.appId,
                   storageName,
                   args.key,
@@ -405,7 +406,8 @@ export function registerStorageTools(): void {
           args.appId,
           storageName,
           () => client.removePreference(args.appId, storageName, args.key),
-          (adb) => removeAndroidKeyValueDirect(adb, args.appId, storageName, args.key),
+          (adb) =>
+            removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key),
         ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
@@ -447,7 +449,7 @@ export function registerStorageTools(): void {
           args.appId,
           storageName,
           () => client.clearPreferenceStore(args.appId, storageName),
-          (adb) => clearAndroidKeyValueFileDirect(adb, args.appId, storageName),
+          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, args.appId, storageName),
         ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);

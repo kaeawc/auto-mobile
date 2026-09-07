@@ -177,7 +177,12 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
     // unchanged activeWindow and erase the transition — the terminal must keep
     // the already-established screenChanged:true.
     const tap = createTapWithSettleSequence([
-      makeObservation({ updatedAt: 20, wakefulness: "Asleep", viewHierarchy: undefined }),
+      makeObservation({
+        updatedAt: 20,
+        wakefulness: "Asleep",
+        wakefulnessSource: "adb",
+        viewHierarchy: undefined,
+      }),
     ]);
 
     const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);

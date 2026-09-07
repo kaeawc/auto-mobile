@@ -231,7 +231,19 @@ export async function pollObserveUntil(
     // A screen-off terminal is only meaningful when the same observation passed
     // the admission contract. A stale cached "Asleep" frame after the device
     // wakes must not fast-fail a public wait or be promoted by tap settlement.
-    if ((isScreenOff(observation) && isAdmissibleEvidence) || isIndependentScreenOff(observation)) {
+    // A hierarchy reports wakefulness from the same cache as its tree. Even a
+    // young cache may predate the invocation, so hierarchy-sourced screen-off
+    // needs the same strictly-post-invocation proof as an ordinary match. ADB
+    // wakefulness is independently sampled on this poll and remains terminal
+    // immediately, including when no hierarchy is available.
+    const isHierarchySourcedScreenOff =
+      isScreenOff(observation) && observation.wakefulnessSource === "hierarchy";
+    if (
+      isIndependentScreenOff(observation) ||
+      (isScreenOff(observation) &&
+        isAdmissibleEvidence &&
+        (!isHierarchySourcedScreenOff || isPostInvocation))
+    ) {
       return {
         observation,
         polls,

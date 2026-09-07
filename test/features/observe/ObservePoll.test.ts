@@ -222,6 +222,31 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.polls).toBe(1);
   });
 
+  test("does not accept an unseeded cached hierarchy screen-off before a post-invocation capture", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const cachedAsleep = {
+      ...obs(10, "cached-asleep"),
+      wakefulness: "Asleep",
+      wakefulnessSource: "hierarchy",
+      freshness: { isFresh: true, verified: true },
+    } as ObserveResult;
+    const awake = { ...obs(20, "awake"), wakefulness: "Awake" } as ObserveResult;
+    fake.setObserveSequence([cachedAsleep, awake]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150 },
+      () => true,
+    );
+
+    expect(outcome.stopped).toBe(true);
+    expect(outcome.polls).toBe(2);
+    expect(outcome.observation).toBe(awake);
+  });
+
   test("does not accept an equal-timestamp delegate-unverified cache entry", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

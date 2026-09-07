@@ -595,7 +595,9 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
+    await this.rejectCreationAfterShutdownFence(session);
     await this.persistSession(session);
+    await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
     if (terminalRelease) {
@@ -609,6 +611,29 @@ export class SessionManager {
     this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
+  }
+
+  private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
+    if (this.acceptingSessionCreations) {
+      return;
+    }
+    const releasedAtMs = this.timer.now();
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason: "daemon-shutdown",
+      releasedAtMs,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+    await this.persistTerminalReleaseIfNeeded(snapshot);
+    this.notifySessionRelease(snapshot);
+    throw new TerminalSessionError(session.sessionId, snapshot);
   }
 
   private async getPersistedTerminalRelease(
@@ -1403,9 +1428,15 @@ export class SessionManager {
     );
   }
 
-  /** Wait a bounded amount of time for releases already started by monitors. */
-  async drainReleasePromises(timeoutMs: number): Promise<boolean> {
-    const releases = Array.from(this.activeReleasePromises, (release) => release.promise);
+  /** Wait a bounded amount of time for active and caller-started release work. */
+  async drainReleasePromises(
+    timeoutMs: number,
+    additionalReleases: ReadonlyArray<Promise<unknown>> = [],
+  ): Promise<boolean> {
+    const releases = [
+      ...Array.from(this.activeReleasePromises, (release) => release.promise),
+      ...additionalReleases,
+    ];
     if (releases.length === 0) {
       return true;
     }
@@ -1545,6 +1576,10 @@ export class SessionManager {
     if (reason.value === "device-killed") {
       return;
     }
+    if (candidate === "daemon-shutdown" && !isTerminalReleaseReason(reason.value)) {
+      reason.value = candidate;
+      return;
+    }
     if (!isTerminalReleaseReason(reason.value) && isTerminalReleaseReason(candidate)) {
       reason.value = candidate;
     }
@@ -1593,16 +1628,20 @@ export class SessionManager {
       return snapshot;
     }
     await this.persistSessionRelease(snapshot);
-    if (!isTerminalReleaseReason(reason.value)) {
+    if (reason.value === snapshot.releaseReason) {
       reason.finalizedSnapshot = snapshot;
       return snapshot;
     }
     const upgradedSnapshot = this.withReleaseReason(snapshot, reason.value, session);
     reason.finalizedSnapshot = upgradedSnapshot;
     this.recordFinalizedSessionRelease(session, reason);
-    this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
-    await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
-    reason.terminalPersisted = true;
+    if (upgradedSnapshot.terminal) {
+      this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+      await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
+      reason.terminalPersisted = true;
+    } else {
+      await this.persistSessionRelease(upgradedSnapshot);
+    }
     return upgradedSnapshot;
   }
 

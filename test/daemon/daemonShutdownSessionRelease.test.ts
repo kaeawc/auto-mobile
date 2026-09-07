@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import type { SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
 import * as databaseModule from "../../src/db";
@@ -384,6 +385,61 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     }
   });
 
+  test("bounds shutdown while a pending assignment cannot settle (#6336)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const sessionManager = daemon.getSessionManager();
+    const finishAssignment = Promise.withResolvers<void>();
+    const assignmentStarted = Promise.withResolvers<void>();
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(): Promise<string> {
+        assignmentStarted.resolve();
+        await finishAssignment.promise;
+        throw new Error("assignment stopped with daemon");
+      },
+    };
+    const assignment = sessionManager.getOrCreateSession("pending-shutdown-assignment", devicePool);
+    const assignmentOutcome = assignment.catch((error: unknown) => error);
+    await assignmentStarted.promise;
+    const events: string[] = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      events.push(`release:${sessionId}:${reason}`);
+    });
+    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      quiesce: async () => {},
+      drainSessionReleaseNotifications: async () => {
+        events.push("socket:drain-releases");
+      },
+      close: async () => {
+        events.push("socket:close");
+      },
+    };
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+
+    try {
+      await daemon.stop();
+
+      const fallback = "release:pending-shutdown-assignment:daemon-shutdown";
+      expect(events.filter((event) => event === fallback)).toHaveLength(1);
+      expect(events.indexOf("socket:drain-releases")).toBeGreaterThan(events.indexOf(fallback));
+      expect(events.indexOf("socket:close")).toBeGreaterThan(
+        events.indexOf("socket:drain-releases"),
+      );
+    } finally {
+      finishAssignment.resolve();
+      await assignmentOutcome;
+      unsubscribe();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
   test("drains a monitor release that removed its session before shutdown snapshots it", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
@@ -497,6 +553,75 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     } finally {
       persistence.resolve();
       markReleasedSpy.mockRestore();
+      unsubscribe();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
+  test("publishes a daemon-shutdown reason upgrade after an ordinary release callback (#6336)", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const sessionManager = daemon.getSessionManager();
+    const persistence = Promise.withResolvers<void>();
+    const persistenceStarted = Promise.withResolvers<void>();
+    const originalMarkReleased = repository.markReleased.bind(repository);
+    const markReleasedSpy = spyOn(repository, "markReleased").mockImplementation(
+      async (...args) => {
+        if (args[3] === "explicit-release") {
+          persistenceStarted.resolve();
+          await persistence.promise;
+        }
+        await originalMarkReleased(...args);
+      },
+    );
+    const shutdownReleaseStarted = Promise.withResolvers<void>();
+    const originalRelease = sessionManager.releaseSession.bind(sessionManager);
+    const releaseSpy = spyOn(sessionManager, "releaseSession").mockImplementation(
+      async (sessionId, reason, allowExpired) => {
+        if (reason === "daemon-shutdown") {
+          shutdownReleaseStarted.resolve();
+        }
+        return await originalRelease(sessionId, reason, allowExpired);
+      },
+    );
+    const events: string[] = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      events.push(`release:${sessionId}:${reason}`);
+    });
+    let ordinaryRelease: Promise<string | null> | undefined;
+    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      quiesce: async () => {
+        ordinaryRelease = sessionManager.releaseSession("upgraded-release", "explicit-release");
+        await persistenceStarted.promise;
+      },
+      drainSessionReleaseNotifications: async () => {},
+      close: async () => {},
+    };
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+
+    try {
+      await sessionManager.createSession("upgraded-release", "emulator-5562", "android");
+      const stop = daemon.stop();
+      await shutdownReleaseStarted.promise;
+      persistence.resolve();
+      await Promise.all([ordinaryRelease!, stop]);
+
+      expect(
+        events.filter((event) => event === "release:upgraded-release:explicit-release"),
+      ).toHaveLength(1);
+      expect(
+        events.filter((event) => event === "release:upgraded-release:daemon-shutdown"),
+      ).toHaveLength(1);
+    } finally {
+      persistence.resolve();
+      markReleasedSpy.mockRestore();
+      releaseSpy.mockRestore();
       unsubscribe();
       loggerCloseSpy.mockRestore();
     }

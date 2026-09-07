@@ -295,8 +295,10 @@ export class Daemon {
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
   private shutdownSessionReleasesDrained = true;
-  /** Session IDs whose release callback fired while shutdown sockets were preserved. */
+  /** Session IDs whose normal callback emitted the daemon-shutdown reason. */
   private shutdownReleaseNotifications: Set<string> | null = null;
+  /** Session IDs emitted by the shutdown fallback before their normal callback completed. */
+  private shutdownFallbackReleaseNotifications: Set<string> | null = null;
   /** Identities captured before concurrent shutdown release begins. */
   private shutdownSessionIds: string[] = [];
 
@@ -394,10 +396,12 @@ export class Daemon {
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
     this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
-      if (this.shutdownReleaseNotifications?.has(sessionId)) {
+      if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
         return;
       }
-      this.shutdownReleaseNotifications?.add(sessionId);
+      if (releaseReason === "daemon-shutdown") {
+        this.shutdownReleaseNotifications?.add(sessionId);
+      }
       SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
@@ -2444,6 +2448,7 @@ export class Daemon {
   async stop(): Promise<void> {
     logger.info("Stopping daemon...");
     this.shutdownReleaseNotifications = new Set();
+    this.shutdownFallbackReleaseNotifications = new Set();
     this.shutdownSessionIds = [];
 
     const heartbeatMonitor = this.heartbeatMonitor;
@@ -2665,6 +2670,7 @@ export class Daemon {
     await Promise.resolve();
     const drained = await this.sessionManager.drainReleasePromises(
       SESSION_RELEASE_DRAIN_TIMEOUT_MS,
+      releases,
     );
     if (!drained) {
       this.shutdownSessionReleasesDrained = false;
@@ -2685,14 +2691,15 @@ export class Daemon {
    */
   private publishMissingShutdownReleaseNotifications(): void {
     const notified = this.shutdownReleaseNotifications;
-    if (!notified) {
+    const fallbacks = this.shutdownFallbackReleaseNotifications;
+    if (!(notified && fallbacks)) {
       return;
     }
     for (const sessionId of this.shutdownSessionIds) {
-      if (notified.has(sessionId)) {
+      if (notified.has(sessionId) || fallbacks.has(sessionId)) {
         continue;
       }
-      notified.add(sessionId);
+      fallbacks.add(sessionId);
       SessionReleaseBroadcaster.emit(sessionId, "daemon-shutdown");
     }
   }

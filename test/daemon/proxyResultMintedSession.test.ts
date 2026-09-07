@@ -248,6 +248,65 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     }
   });
 
+  test("rejects a result-minted session released before binding and waits for EOF (#6336)", async () => {
+    const acquisitionStarted = Promise.withResolvers<void>();
+    const finishAcquisition = Promise.withResolvers<void>();
+    const oldDaemon = new FakeDaemonClient({
+      onCallTool: async (toolName) => {
+        if (toolName === "getAndroid") {
+          acquisitionStarted.resolve();
+          await finishAcquisition.promise;
+        }
+      },
+      toolResultFor: (toolName) =>
+        toolName === "getAndroid" ? deviceStartResult("released-before-result") : undefined,
+    });
+    const replacementDaemon = acquiringClient(sessionManager, ["replacement-after-race"]);
+    let clientFactoryCalls = 0;
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => {
+        clientFactoryCalls += 1;
+        return clientFactoryCalls === 1 ? oldDaemon : replacementDaemon.client;
+      },
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      const staleAcquisition = proxy.callTool("getAndroid", {
+        avdName: "am-api34-ga-arm64",
+      });
+      await acquisitionStarted.promise;
+      oldDaemon.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "released-before-result",
+        "daemon-shutdown",
+      );
+      finishAcquisition.resolve();
+
+      await expect(staleAcquisition).rejects.toMatchObject({
+        sessionUuid: "released-before-result",
+        reason: "daemon-shutdown",
+      });
+
+      const replacement = proxy.callTool("getAndroid", {
+        avdName: "am-api34-ga-arm64",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(replacementDaemon.nextIndex()).toBe(0);
+
+      oldDaemon.emitConnectionClosed();
+
+      await expect(replacement).resolves.toEqual(deviceStartResult("replacement-after-race"));
+      expect(replacementDaemon.nextIndex()).toBe(1);
+    } finally {
+      finishAcquisition.resolve();
+      await proxy.close();
+    }
+  });
+
   // AC3: a sessionless call on a fenced connection whose binding was result-minted
   // (never named by the client) fails naming the CURRENT state — directing to
   // re-acquire — rather than reporting the stale uuid the caller never referenced.

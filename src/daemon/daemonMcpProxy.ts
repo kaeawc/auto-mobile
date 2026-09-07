@@ -718,6 +718,7 @@ export class DaemonMcpProxy {
   private readonly releasedSessionEpochs = new Map<string, number>();
   private readonly releasedSessionReasons = new Map<string, string>();
   private readonly activeReleaseEpochReferences = new Map<string, number>();
+  private readonly activeAcquisitionReleaseEpochs = new Map<number, number>();
   // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
   // or the session binding mid-flight (list_changed nulls a cache; a bound-session
   // release changes the session scope). A `tools/list` / `resources/list` captures
@@ -1066,6 +1067,12 @@ export class DaemonMcpProxy {
       return;
     }
     this.recordSessionReleased(releasedSessionUuid, notification.reason);
+    if (notification.reason === "daemon-shutdown") {
+      // Daemon shutdown is connection-wide. Arm the successor barrier even when
+      // this UUID belongs to an unresolved acquisition result that has not become
+      // the current binding yet.
+      this.waitForDaemonShutdownDisconnect();
+    }
     // A released session is no longer owned: drop it so a later fresh-screenshot
     // read stops owner-routing to it and falls back to the live binding (which the
     // daemon denies), matching the "released session remains denied" guarantee
@@ -1080,9 +1087,6 @@ export class DaemonMcpProxy {
         notification.reason ?? "released",
         notification.release,
       );
-      if (notification.reason === "daemon-shutdown") {
-        this.waitForDaemonShutdownDisconnect();
-      }
     }
   }
 
@@ -1750,6 +1754,7 @@ export class DaemonMcpProxy {
     // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
+    this.retainAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
     if (progressToken !== undefined && onProgress) {
       this.progressListeners.set(progressToken, onProgress);
     }
@@ -1770,7 +1775,7 @@ export class DaemonMcpProxy {
       }
       this.rememberToolSelectionProfile(name, args, result);
       if (isSessionAcquisition) {
-        await this.bindResultMintedDeviceSession(name, result);
+        await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
         return result;
       }
       // Remember what was actually forwarded, not the caller's raw args. An
@@ -1807,6 +1812,7 @@ export class DaemonMcpProxy {
       throw error;
     } finally {
       this.releaseReleaseEpochReference(forwardedSessionUuid);
+      this.releaseAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
       if (progressToken !== undefined) {
         this.progressListeners.delete(progressToken);
       }
@@ -2153,7 +2159,10 @@ export class DaemonMcpProxy {
       return;
     }
     this.releaseEpoch += 1;
-    if (!this.activeReleaseEpochReferences.has(normalizedSessionUuid)) {
+    if (
+      !this.activeReleaseEpochReferences.has(normalizedSessionUuid) &&
+      this.activeAcquisitionReleaseEpochs.size === 0
+    ) {
       return;
     }
     this.releasedSessionEpochs.set(normalizedSessionUuid, this.releaseEpoch);
@@ -2180,8 +2189,54 @@ export class DaemonMcpProxy {
       return;
     }
     this.activeReleaseEpochReferences.delete(sessionUuid);
-    this.releasedSessionEpochs.delete(sessionUuid);
-    this.releasedSessionReasons.delete(sessionUuid);
+    const releasedAtEpoch = this.releasedSessionEpochs.get(sessionUuid);
+    if (
+      releasedAtEpoch === undefined ||
+      !this.isReleaseNeededByActiveAcquisition(releasedAtEpoch)
+    ) {
+      this.releasedSessionEpochs.delete(sessionUuid);
+      this.releasedSessionReasons.delete(sessionUuid);
+    }
+  }
+
+  private retainAcquisitionReleaseEpoch(isSessionAcquisition: boolean, epoch: number): void {
+    if (!isSessionAcquisition) {
+      return;
+    }
+    this.activeAcquisitionReleaseEpochs.set(
+      epoch,
+      (this.activeAcquisitionReleaseEpochs.get(epoch) ?? 0) + 1,
+    );
+  }
+
+  private releaseAcquisitionReleaseEpoch(isSessionAcquisition: boolean, epoch: number): void {
+    if (!isSessionAcquisition) {
+      return;
+    }
+    const references = (this.activeAcquisitionReleaseEpochs.get(epoch) ?? 0) - 1;
+    if (references > 0) {
+      this.activeAcquisitionReleaseEpochs.set(epoch, references);
+    } else {
+      this.activeAcquisitionReleaseEpochs.delete(epoch);
+    }
+    for (const [sessionUuid, releasedAtEpoch] of this.releasedSessionEpochs) {
+      if (
+        !this.activeReleaseEpochReferences.has(sessionUuid) &&
+        !this.isReleaseNeededByActiveAcquisition(releasedAtEpoch)
+      ) {
+        this.releasedSessionEpochs.delete(sessionUuid);
+        this.releasedSessionReasons.delete(sessionUuid);
+      }
+    }
+  }
+
+  private isReleaseNeededByActiveAcquisition(releasedAtEpoch: number): boolean {
+    for (const acquisitionEpoch of this.activeAcquisitionReleaseEpochs.keys()) {
+      if (releasedAtEpoch > acquisitionEpoch) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private forwardedSessionReleaseReasonSince(
@@ -2189,10 +2244,24 @@ export class DaemonMcpProxy {
     forwardEpoch: number,
   ): string | undefined {
     const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (!forwardedUuid || (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) <= forwardEpoch) {
+    if (!forwardedUuid) {
       return undefined;
     }
-    return this.releasedSessionReasons.get(forwardedUuid) ?? "released";
+    return this.sessionReleaseReasonSince(forwardedUuid, forwardEpoch);
+  }
+
+  private sessionReleaseReasonSince(sessionUuid: string, forwardEpoch: number): string | undefined {
+    if ((this.releasedSessionEpochs.get(sessionUuid) ?? 0) <= forwardEpoch) {
+      return undefined;
+    }
+    return this.releasedSessionReasons.get(sessionUuid) ?? "released";
+  }
+
+  private throwIfSessionReleasedSince(sessionUuid: string, forwardEpoch: number): void {
+    const releaseReason = this.sessionReleaseReasonSince(sessionUuid, forwardEpoch);
+    if (releaseReason) {
+      throw new DaemonBoundSessionExpiredError(sessionUuid, releaseReason);
+    }
   }
 
   private fenceReleasedForwardedSession(
@@ -2230,7 +2299,11 @@ export class DaemonMcpProxy {
   // for a result-minted session and reaps it under the pre-first-heartbeat grace
   // (issue #5689). Acquisition also clears any terminal fence: the connection is
   // usable again once a fresh session is established (AC2).
-  private async bindResultMintedDeviceSession(name: string, result: unknown): Promise<void> {
+  private async bindResultMintedDeviceSession(
+    name: string,
+    result: unknown,
+    acquisitionReleaseEpoch: number,
+  ): Promise<void> {
     if (!isDeviceSessionAcquisitionTool(name)) {
       return;
     }
@@ -2238,12 +2311,16 @@ export class DaemonMcpProxy {
     if (!mintedSessionUuid || mintedSessionUuid === this.boundSessionUuid) {
       return;
     }
+    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
     // binding.)
     if (this.heartbeatKeeperStarted) {
       await this.stopBoundSessionHeartbeat();
     }
+    // Stopping the previous binding's keeper may yield. Recheck before publishing
+    // the new binding so a release delivered during that await cannot be missed.
+    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     this.terminalBoundSession = undefined;
     this.boundSessionUuid = mintedSessionUuid;
     this.boundSessionUuidAt = this.timer.now();

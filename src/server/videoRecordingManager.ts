@@ -599,6 +599,12 @@ async function rearmRetainedRecordingSafety(recordingId: string): Promise<void> 
   if (!record || record.status !== "recording") {
     return;
   }
+  // The repository read can yield while another successful stop releases this
+  // owner. Recheck after it returns so this recovery path cannot re-arm timers
+  // for an already completed recording.
+  if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+    return;
+  }
 
   clearAutoStop(recordingId);
   const handle = deps.timer.setTimeout(() => {

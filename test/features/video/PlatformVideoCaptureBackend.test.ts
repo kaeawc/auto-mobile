@@ -515,6 +515,30 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
     });
 
+    test("retains a confirmed zero-byte device file instead of accepting an empty pull", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      fakeClient.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+      ]);
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "empty.mp4"), fakeProcess);
+
+      await expect(backend.stop(handle)).rejects.toThrow(/did not finish writing/);
+
+      expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
+    });
+
     // issue #6291: a stop-right-after-start pull failure must not leak the raw
     // `adb pull failed with exit code N` — it should retry, then surface a
     // structured ActionableError while still cleaning up the device temp file

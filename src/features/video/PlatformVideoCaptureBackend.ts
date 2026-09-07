@@ -251,11 +251,13 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   /**
-   * Reads the on-device file's size via `stat`. Returns 0 (never throws) when
-   * the file is missing or the command fails — both just mean "not finalized
-   * yet" to the poll loop above, not a hard error.
+   * Reads the on-device file's size via `stat`. Returns null when the result
+   * cannot be observed, which is distinct from a confirmed zero-byte file.
    */
-  private async readDeviceFileSizeBytes(adb: AdbExecutor, deviceTempPath: string): Promise<number> {
+  private async readDeviceFileSizeBytes(
+    adb: AdbExecutor,
+    deviceTempPath: string,
+  ): Promise<number | null> {
     try {
       const result = await adb.executeCommand(
         `shell stat -c %s ${deviceTempPath}`,
@@ -264,14 +266,14 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         true,
       );
       const parsed = Number.parseInt(result.stdout.trim(), 10);
-      return Number.isFinite(parsed) ? parsed : 0;
+      return Number.isFinite(parsed) ? parsed : null;
     } catch (error) {
       // A missing/unreadable file here just means "not finalized yet"; the
       // poll loop and the pull retry below absorb it.
       logger.debug(
         `[VideoCapture] Failed to stat device file ${deviceTempPath}: ${errorMessage(error)}`,
       );
-      return 0;
+      return null;
     }
   }
 
@@ -290,21 +292,30 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     deviceTempPath: string,
   ): Promise<boolean> {
     let lastSize = -1;
+    let observedFile = false;
     let observedNonEmptyFile = false;
     for (let attempt = 0; attempt < DEVICE_FILE_FINALIZE_POLL_ATTEMPTS; attempt++) {
       const size = await this.readDeviceFileSizeBytes(adb, deviceTempPath);
-      observedNonEmptyFile ||= size > 0;
-      if (size > 0 && size === lastSize) {
+      observedFile ||= size !== null;
+      observedNonEmptyFile ||= size !== null && size > 0;
+      if (size !== null && size > 0 && size === lastSize) {
         logger.info(`[VideoCapture] Device file finalized at ${size} bytes`);
         return true;
       }
-      lastSize = size;
+      lastSize = size ?? -1;
       await this.timer.sleep(DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS);
     }
     if (observedNonEmptyFile) {
       logger.warn(
         `[VideoCapture] Device file ${deviceTempPath} did not visibly stabilize after ` +
           `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks`,
+      );
+      return false;
+    }
+    if (observedFile) {
+      logger.warn(
+        `[VideoCapture] Device file ${deviceTempPath} remained empty after ` +
+          `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks; retaining it for recovery`,
       );
       return false;
     }

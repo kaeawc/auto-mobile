@@ -14,6 +14,10 @@ import { closeLogStream } from "../../src/utils/logger";
  */
 class FakeLogStream extends EventEmitter {
   ended = false;
+  // Mirrors Node/Bun WriteStream's `closed` getter: false until the fd has
+  // actually been released, at which point it flips true and stays true —
+  // `close` never fires a second time on the same stream.
+  closed = false;
 
   end(callback?: () => void): void {
     this.ended = true;
@@ -30,9 +34,13 @@ class FakeLogStream extends EventEmitter {
   }
 
   emitClose(): void {
+    this.closed = true;
     this.emit("close");
   }
 
+  /** Emits `error` only, leaving `close` to a later, separate emitClose()
+   * call — models the observed Node 24 / Bun 1.2.14 ordering where a
+   * shutdown error is still followed by `close` once the fd is released. */
   failClose(error: Error): void {
     this.emit("error", error);
   }
@@ -59,14 +67,33 @@ describe("closeLogStream (#6149)", () => {
     expect(settled).toBeTrue();
   });
 
-  test("propagates a stream error while closing", async () => {
+  test("waits for the confirming 'close' before rejecting on a shutdown error", async () => {
+    // Both Node 24 and Bun 1.2.14 emit `error` (e.g. ENOSPC/`/dev/full`)
+    // BEFORE `close`, not instead of it. Settling on `error` alone would let
+    // rotateLogFile() rename/reopen the path while the old fd was still live
+    // — the exact race this function exists to avoid (issue #6149 round 3).
     const stream = new FakeLogStream();
     const close = closeLogStream(stream);
+    let settled = false;
+    void close.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
     const error = new Error("log stream close failed");
 
     stream.failClose(error);
+    await Promise.resolve();
+    await Promise.resolve();
+    // The fd has not actually been released yet — must still be pending.
+    expect(settled).toBeFalse();
 
+    stream.emitClose();
     await expect(close).rejects.toBe(error);
+    expect(settled).toBeTrue();
   });
 
   test("ignores a stray 'finish' after 'close' has already settled it", async () => {
@@ -79,5 +106,16 @@ describe("closeLogStream (#6149)", () => {
     // Listeners are removed on settle, so a late finish must be a harmless no-op
     // rather than throwing or double-settling.
     expect(() => stream.emitFinish()).not.toThrow();
+  });
+
+  test("resolves immediately for a stream whose fd was already released", async () => {
+    // A second shutdown call for the same stream — e.g. logger.close()
+    // followed by closeAfterFlush(), or a repeated closeAfterFlush() — must
+    // not hang: Node/Bun never emit a second 'close' for the same stream, so
+    // a listener-based wait would never settle (issue #6149 round 3).
+    const stream = new FakeLogStream();
+    stream.emitClose();
+
+    await expect(closeLogStream(stream)).resolves.toBeUndefined();
   });
 });

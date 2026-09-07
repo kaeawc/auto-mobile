@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,6 +59,20 @@ class ControllableStream extends EventEmitter {
     this.emit("close");
   }
 }
+
+// Seeds a log file past the rotation threshold without paying for 11MiB of
+// real writes. A sparse file (grown via ftruncate rather than write) reports
+// the same `stat().size` the rotation check reads, but the filesystem never
+// allocates the backing pages — keeping these otherwise real-fs rotation
+// tests within the repo's 100ms unit-test ceiling.
+const seedOversizedLogFile = (targetPath: string, size: number): void => {
+  const fd = fs.openSync(targetPath, "w");
+  try {
+    fs.ftruncateSync(fd, size);
+  } finally {
+    fs.closeSync(fd);
+  }
+};
 
 let importCounter = 0;
 
@@ -407,7 +421,7 @@ describe("size-based rotation is not broken by the stream-error handler (Codex P
     // write triggers checkAndRotateLog's real rotation path (end() the old
     // stream, rename it to a backup, open a fresh stream) without having to
     // push 10MiB of traffic through the logger itself.
-    writeFileSync(targetLogFile, Buffer.alloc(11 * 1024 * 1024, "x"));
+    seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
 
     let mod: typeof import("../../src/utils/logger") | undefined;
     try {
@@ -451,7 +465,7 @@ describe("rotation waits for the old stream to fully close before reopening (#61
     // interceptable via spyOn, since they copy the function reference at
     // import time rather than reading it through the module object on every
     // call — see and hit the real rotation path).
-    writeFileSync(targetLogFile, Buffer.alloc(11 * 1024 * 1024, "x"));
+    seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
 
     const opened: ControllableStream[] = [];
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
@@ -538,7 +552,7 @@ describe("writes are serialized across log rotation (#6149)", () => {
     const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
     // Pre-seed past the 10MiB threshold so the first write triggers real
     // rotation (see the neighbouring #6149 test for why this uses a real file).
-    writeFileSync(targetLogFile, Buffer.alloc(11 * 1024 * 1024, "x"));
+    seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
 
     const opened: ControllableStream[] = [];
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
@@ -606,6 +620,76 @@ describe("writes are serialized across log rotation (#6149)", () => {
       // The mid-rotation record never touched the old (now-renamed) stream.
       expect(oldStream.writes.join("")).not.toContain("record B mid-rotation");
     } finally {
+      createWriteStream.mockRestore();
+      rmSync(logDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the oversized-file check itself is serialized, not just the rotation (#6149 round 3)", () => {
+  test("a second same-tick write joins the in-flight check instead of racing its own stat", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-rotate-check-lock-"));
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
+
+    const opened: ControllableStream[] = [];
+    const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
+      const stream = new ControllableStream();
+      opened.push(stream);
+      return stream as unknown as fs.WriteStream;
+    });
+    // `fs.existsSync` is called through the `fs` namespace object (unlike
+    // io.ts's statAsync/renameAsync, which are destructured at import time
+    // and so can't be spied on), making it a reliable probe for how many
+    // independent check-and-maybe-rotate cycles actually ran their own stat.
+    const existsSyncSpy = spyOn(fs, "existsSync");
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "file", logDir);
+      expect(opened.length).toBe(1);
+      const oldStream = opened[0];
+      const callsForTarget = (): number =>
+        existsSyncSpy.mock.calls.filter((call) => call[0] === targetLogFile).length;
+
+      // Fired back-to-back in the same synchronous tick, the way a caller
+      // logging twice in a row actually behaves. Before this fix the size
+      // check ran OUTSIDE the rotation lock (only rotateLogFile() itself was
+      // guarded), so the second call could start — and this synchronous
+      // assertion would catch — its own independent fs.existsSync/stat
+      // before the lock was ever acquired (the TOCTOU window from #6149
+      // round 3: both callers read "oversized", the first rotates and
+      // clears the lock, and the second then rotates AGAIN on the
+      // freshly-created small file).
+      // Observe, event-driven, when rotation asks the old stream to close —
+      // real stat I/O ahead of it can outlast any fixed tick budget.
+      let endWasCalled: () => void;
+      const endWasCalledPromise = new Promise<void>((resolve) => {
+        endWasCalled = resolve;
+      });
+      const originalEnd = oldStream.end.bind(oldStream);
+      oldStream.end = (callback?: () => void) => {
+        endWasCalled();
+        originalEnd(callback);
+      };
+
+      mod.logger.info("record A triggers rotation");
+      mod.logger.info("record B same tick");
+      expect(callsForTarget()).toBe(1);
+
+      const flushed = mod.logger.flush();
+      await endWasCalledPromise;
+      oldStream.finishClose();
+      await flushed;
+
+      // Exactly one rotation cycle ran: one replacement stream, and both
+      // records landed on it rather than either being lost or re-rotated.
+      expect(opened.length).toBe(2);
+      const newStreamWrites = opened[1].writes.join("");
+      expect(newStreamWrites).toContain("record A triggers rotation");
+      expect(newStreamWrites).toContain("record B same tick");
+    } finally {
+      existsSyncSpy.mockRestore();
       createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });
     }

@@ -385,11 +385,23 @@ async function assertCtrlProxyInstalledWhenDownloadsDisabled(
   if (!serverConfig.isSkipCtrlProxyDownloadEnabled()) {
     return;
   }
-  const installed = await getDeviceReadinessProxyDriver(device).isInstalled();
+  const driver = getDeviceReadinessProxyDriver(device);
+  const installed = await driver.isInstalled();
   if (!installed) {
     throw new ActionableError(
       `Failed to setup accessibility service for device ${device.deviceId} (session ${sessionId}): ` +
         `CtrlProxy is not installed and runner downloads are disabled`,
+    );
+  }
+  // Downloads disabled cannot upgrade an incompatible installed proxy, so an
+  // installed-but-incompatible CtrlProxy must be rejected here rather than
+  // proceeding to `setup()` against it — matching the fresh acquisition path
+  // (`RunnerReadinessService.ensureAndroidReadyWithoutDownloads`).
+  const compatible = await driver.isVersionCompatible();
+  if (!compatible) {
+    throw new ActionableError(
+      `Failed to setup accessibility service for device ${device.deviceId} (session ${sessionId}): ` +
+        `CtrlProxy version mismatch; run without skipCtrlProxyDownload to install a compatible version`,
     );
   }
 }

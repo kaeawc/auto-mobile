@@ -39,6 +39,7 @@ export function installNoOpReadinessDriver(): void {
     setup: async () => ({ success: true, message: "ok" }),
     waitForConnection: async () => true,
     isInstalled: async () => true,
+    isVersionCompatible: async () => true,
   }));
 }
 
@@ -53,6 +54,7 @@ export function stubCtrlProxySetup(): CtrlProxySetupStub {
     },
     waitForConnection: async () => true,
     isInstalled: async () => true,
+    isVersionCompatible: async () => true,
   }));
 
   return {

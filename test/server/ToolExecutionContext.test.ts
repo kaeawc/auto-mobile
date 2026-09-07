@@ -783,10 +783,12 @@ describe("ToolExecutionContext", () => {
   test("does not download CtrlProxy when upgrading a booted-only session while --skip-ctrl-proxy-download is set (#6227)", async () => {
     let setupCalls = 0;
     let installed = false;
+    let versionCompatible = true;
     AndroidCtrlProxyManager.getInstance = () =>
       ({
         resetSetupState: () => {},
         isInstalled: async () => installed,
+        isVersionCompatible: async () => versionCompatible,
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
@@ -822,9 +824,24 @@ describe("ToolExecutionContext", () => {
       expect(setupCalls).toBe(0);
       expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
 
-      // With the artifact already present, the upgrade proceeds without a
-      // download (setup runs against an installed package).
+      // Installed but INCOMPATIBLE version: downloads are disabled, so the
+      // incompatible proxy cannot be upgraded. The upgrade must refuse with the
+      // version-mismatch actionable error rather than run `setup()` against the
+      // incompatible installed proxy.
       installed = true;
+      versionCompatible = false;
+      await expect(
+        createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        }),
+      ).rejects.toThrow(/CtrlProxy version mismatch/);
+      expect(setupCalls).toBe(0);
+      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
+
+      // With the artifact already present AND compatible, the upgrade proceeds
+      // without a download (setup runs against an installed package).
+      versionCompatible = true;
       const upgraded = await createToolExecutionContext(
         "session-skip-dl",
         sessionManager,

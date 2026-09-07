@@ -41,6 +41,15 @@ export interface DeviceReadinessProxyDriver {
    * `ToolExecutionContext.ensureAccessibilityServiceReady`.
    */
   isInstalled(): Promise<boolean>;
+  /**
+   * Whether the installed CtrlProxy artifact is version-compatible with this
+   * server (#6227). Consulted only when `--skip-ctrl-proxy-download` is enabled:
+   * an installed-but-incompatible proxy cannot be upgraded (downloads disabled),
+   * so the session-scoped readiness upgrade must refuse rather than run
+   * `setup()` against it — matching the fresh acquisition path's
+   * `RunnerReadinessService.ensureAndroidReadyWithoutDownloads`.
+   */
+  isVersionCompatible(): Promise<boolean>;
 }
 
 export type DeviceReadinessProxyDriverProvider = (
@@ -54,6 +63,7 @@ const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
     setup: (force, perf) => manager.setup(force, perf),
     waitForConnection: () => AndroidCtrlProxyClient.getInstance(device).waitForConnection(),
     isInstalled: () => manager.isInstalled(),
+    isVersionCompatible: () => manager.isVersionCompatible(),
   };
 };
 

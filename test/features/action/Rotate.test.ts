@@ -749,6 +749,108 @@ describe("Rotate", () => {
       expect(result.warning ?? "").toMatch(/reverted/i);
     });
 
+    test("retains a confirmed stable opposite orientation when the FINAL settle-wait sample fails to read (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the first two post-restore
+      // samples both read landscape (two consecutive matching samples — a
+      // confirmed reversion), but the third (final) settle-wait attempt
+      // fails to parse at all. That read FAILURE must not discard the
+      // already-confirmed landscape reversion in favor of "unknown".
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (confirmed stable)
+        createExecResult(""), // post-restore confirm attempt 3 (final): unparseable
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Must report the confirmed landscape reversion, not "unknown".
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+    });
+
+    test("retries the auto-rotate restore write once before treating a transient failure as ambiguous (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. The FIRST
+      // accelerometer_rotation=1 restore write attempt fails transiently
+      // (e.g. a momentary CtrlProxy/ADB hiccup), but a retry of the same
+      // idempotent write succeeds. This must not be reported as an ambiguous
+      // outcome — the retry recovers it cleanly.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait
+        createExecResult("mRotation=0"), // post-restore confirm attempt 2: portrait (confirmed stable)
+      ]);
+
+      let restoreWriteAttempts = 0;
+      const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+      fakeAdb.executeCommand = (async (command: string, ...rest: unknown[]) => {
+        if (command.includes("settings put system accelerometer_rotation 1")) {
+          restoreWriteAttempts++;
+          if (restoreWriteAttempts === 1) {
+            throw new Error("transient device offline");
+          }
+        }
+        return (originalExecuteCommand as (...args: unknown[]) => Promise<ExecResult>)(
+          command,
+          ...rest,
+        );
+      }) as typeof fakeAdb.executeCommand;
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("portrait");
+      // No ambiguity: the retry recovered the restore write cleanly.
+      expect(result.warning).toBeUndefined();
+      // The restore write must have been attempted twice: once, then a retry.
+      expect(restoreWriteAttempts).toBe(2);
+    });
+
+    test("keeps the ambiguous-restore warning state-neutral instead of asserting auto-rotate is enabled (#6211)", async () => {
+      // The accelerometer_rotation=1 restore write fails on both the first
+      // attempt and the retry (persistent, not transient), and the live
+      // confirmation read never settles either. The composed warning must
+      // not claim "auto-rotate is enabled" — that state was never actually
+      // confirmed — while still explaining the ambiguous outcome.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult(""), // every post-restore confirm attempt is unparseable
+      ]);
+      fakeAdb.setCommandError(
+        "shell settings put system accelerometer_rotation 1",
+        new Error("device offline"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      const warning = result.warning ?? "";
+      expect(warning).toMatch(/ambiguous outcome/i);
+      expect(warning).toMatch(/could not be confirmed/i);
+      // State-neutral: must not assert a state that was never confirmed.
+      expect(warning).not.toMatch(/auto-rotate is enabled/i);
+    });
+
     test("serializes concurrent rotations on the same device so auto-rotate restore is not corrupted (#6199)", async () => {
       // Device starts portrait with auto-rotate ON.
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));

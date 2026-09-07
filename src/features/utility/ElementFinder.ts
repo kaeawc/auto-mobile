@@ -201,7 +201,11 @@ export class DefaultElementFinder implements ElementFinder {
       // A container selector has no enclosing scope of its own to resolve
       // first, so it is always checked against the whole capture.
       const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
-      this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, container.elementId);
+      this.assertStableViewIdSelectorNotAmbiguous(
+        fullCaptureRoots,
+        fullCaptureRoots,
+        container.elementId,
+      );
       // A real resource-id match anywhere in the capture always wins over a
       // synthetic view-id match - never unioned with one, and never shadowed
       // by a stable-id match found in an earlier-priority scope (review
@@ -605,19 +609,33 @@ export class DefaultElementFinder implements ElementFinder {
    * stable only while content is stable - and needs the same class of fix:
    * structural/positional identity or capture-origin provenance, not a
    * change to the current-capture-only matching done here.
+   *
+   * `activeScopeRoots` and `fullCaptureRoots` are deliberately DIFFERENT scopes
+   * (issue #6229 review thread PRRT_kwDOP-GF5M6f2X6J): the real-`resource-id`
+   * bypass (`hasExactResourceIdFieldMatch` below) must stay scoped to the
+   * active selector scope (a resolved container's subtree, when one is given -
+   * else the whole capture), exactly like the resource-id PREFERENCE callers
+   * compute alongside this call. Widening the bypass to the whole capture lets
+   * a real `resource-id` match OUTSIDE a selected container suppress the
+   * ambiguity error for a synthetic ordinal that is genuinely ambiguous
+   * INSIDE the container - the caller then falls through to a synthetic-id
+   * match there and can silently resolve the wrong peer. The duplicate COUNT
+   * must stay on `fullCaptureRoots` regardless (see above): only the early
+   * "a real id already backs this" exit needs the narrower scope.
    */
   private assertStableViewIdSelectorNotAmbiguous(
-    searchRoots: ViewHierarchyNode[],
+    activeScopeRoots: ViewHierarchyNode[],
+    fullCaptureRoots: ViewHierarchyNode[],
     id: string,
   ): void {
     const base = syntheticStableViewIdBase(id);
     if (!base) {
       return;
     }
-    if (this.hasExactResourceIdFieldMatch(searchRoots, id)) {
+    if (this.hasExactResourceIdFieldMatch(activeScopeRoots, id)) {
       return;
     }
-    const duplicateCount = this.countNodesSharingStableViewIdBase(searchRoots, base);
+    const duplicateCount = this.countNodesSharingStableViewIdBase(fullCaptureRoots, base);
     if (duplicateCount > 1) {
       throw new ActionableError(
         `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
@@ -808,9 +826,17 @@ export class DefaultElementFinder implements ElementFinder {
     // in-container original is removed, global re-ordinaling can reassign the
     // caller's `-<k>` string to a surviving peer, so a container-local count of
     // 1 would wrongly wave it through. Counting globally rejects it as ambiguous
-    // instead — the same scope the ordinals were assigned in.
+    // instead — the same scope the ordinals were assigned in. The real-id
+    // BYPASS inside that check stays scoped to the container's subtree (when
+    // one is given), not the whole capture — a real resource-id match OUTSIDE
+    // the container must not suppress an ambiguity that is genuine INSIDE it
+    // (review thread PRRT_kwDOP-GF5M6f2X6J).
     const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
-    this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, resourceId);
+    this.assertStableViewIdSelectorNotAmbiguous(
+      containerNode ? [containerNode] : fullCaptureRoots,
+      fullCaptureRoots,
+      resourceId,
+    );
 
     if (containerNode) {
       // A real resource-id match anywhere in the container's subtree always
@@ -1494,11 +1520,19 @@ export class DefaultElementFinder implements ElementFinder {
     // scope (container subtree when scoped, else whole capture) so a real
     // resource-id match is never unioned with, or shadowed in window-search
     // order by, a synthetic view-id match (review threads
-    // PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq).
+    // PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq). The ambiguity check's
+    // internal real-id BYPASS shares that same narrower scope, not the whole
+    // capture — a real resource-id match outside the container must not
+    // suppress an ambiguity that is genuine inside it (review thread
+    // PRRT_kwDOP-GF5M6f2X6J).
     const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
-    this.assertStableViewIdSelectorNotAmbiguous(fullCaptureRoots, resourceId);
     const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
       containerNode ? searchRoots : fullCaptureRoots,
+      resourceId,
+    );
+    this.assertStableViewIdSelectorNotAmbiguous(
+      containerNode ? searchRoots : fullCaptureRoots,
+      fullCaptureRoots,
       resourceId,
     );
 

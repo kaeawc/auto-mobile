@@ -455,6 +455,74 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(() => selector.selectByResourceId(viewHierarchy, observedIdForA)).toThrow(/ambiguous/i);
   });
 
+  test("a real resource-id colliding with a synthetic ordinal OUTSIDE the container does not suppress ambiguity INSIDE it (issue #6229, review thread PRRT_kwDOP-GF5M6f2X6J)", () => {
+    // c1 holds two content-identical peers, so BOTH are ordinal-suffixed (no
+    // bare form for a duplicate group) and c1 is genuinely ambiguous on its
+    // own. c2 holds an unrelated node whose REAL `resource-id` happens to
+    // equal c1's first peer's synthetic ordinal string. The ambiguity guard's
+    // internal real-id bypass previously checked the WHOLE capture for that
+    // bypass (not just the active container scope), so this collision in c2
+    // made it treat the c1 target as "backed by a real id" and skip the
+    // ambiguity error entirely - even though the container selector scopes
+    // resolution to c1, where no real id exists and the peer is genuinely
+    // ambiguous. Duplicate COUNTING stays global (per the tests above); only
+    // the bypass must stay scoped to the active container.
+    const buildRow = (tag: string) => ({
+      class: "android.view.View",
+      "content-desc": "identical-row",
+      clickable: "true",
+      "view-id": generatedViewId(tag),
+    });
+    const c1 = {
+      class: "android.view.ViewGroup",
+      "resource-id": "com.app:id/c1",
+      node: [buildRow("A"), buildRow("B")],
+    };
+    const decoy = {
+      class: "android.view.View",
+      bounds: { left: 0, top: 400, right: 100, bottom: 450 },
+      "content-desc": "decoy-node",
+      "view-id": generatedViewId("decoy"),
+    };
+    const c2 = {
+      class: "android.view.ViewGroup",
+      "resource-id": "com.app:id/c2",
+      node: [decoy],
+    };
+    const rawRoot = { node: [c1, c2] };
+    assignStableViewIds(rawRoot);
+
+    const idInContainer1 = (c1.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}-1$/);
+
+    // Give the node OUTSIDE c1 a real resource-id equal to that exact ordinal
+    // string - a collision `assignStableViewIds` cannot itself produce, since
+    // real resource-ids and synthetic ids live in separate fields, but the
+    // ambiguity guard's bypass reads the `resource-id` field independently of
+    // scope.
+    (decoy as Record<string, unknown>)["resource-id"] = idInContainer1;
+
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    // Container-scoped to c1: no real id backs `idInContainer1` there, and c1
+    // has two content-identical peers, so this must be rejected as
+    // ambiguous - the real id colliding in c2 must not leak in and suppress
+    // that rejection.
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, idInContainer1, {
+        container: { elementId: "com.app:id/c1" },
+      }),
+    ).toThrow(/ambiguous/i);
+
+    // Without a container, the whole capture IS the active scope, so the
+    // real id in c2 legitimately wins - this is existing, intentional
+    // behavior (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq)
+    // and must be unaffected by this fix.
+    const result = selector.selectByResourceId(viewHierarchy, idInContainer1);
+    expect(result.element).not.toBeNull();
+    expect(result.element!["content-desc"]).toBe("decoy-node");
+  });
+
   test("recomputing the synthetic id over a fresh capture of the same hierarchy is deterministic", () => {
     const buildRoot = () => ({
       node: [

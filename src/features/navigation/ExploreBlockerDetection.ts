@@ -151,6 +151,21 @@ const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
  * ("permissions", "allows") are listed explicitly rather than derived by
  * stemming — stemming previously turned "Notes now" into a false dismiss
  * match ("notes" -> "not").
+ *
+ * Also includes the "allow"-family machine-form negatives that `DENY_KEYWORDS`
+ * (below) exists to catch — "dont allow", "do not allow", "not allow", and the
+ * fully concatenated "notallow" — because a deny-only dialog whose only text
+ * is one of these (e.g. a custom/OEM control with `content-desc="notallow"`
+ * and no separate "permission"/"access" label) previously failed detection
+ * here entirely: `isPermissionDialog` returned false, so the permission
+ * fast-path returned "none" and the control fell through to ordinary
+ * navigation, where `performInteraction` could tap it and silently deny the
+ * permission before `handlePermissionDialog` — and therefore `DENY_KEYWORDS`
+ * — was ever consulted (issue #6293 P2). Generic deny words unrelated to
+ * "allow" ("block", "reject", "disallow", "no thanks") are deliberately NOT
+ * included here: unlike the "allow" forms, they show up in unrelated dialogs
+ * (e.g. "Block this contact") and would misclassify those as permission
+ * dialogs.
  */
 const PERMISSION_KEYWORDS = [
   "allow",
@@ -160,6 +175,10 @@ const PERMISSION_KEYWORDS = [
   "access",
   "deny",
   "don't allow",
+  "dont allow",
+  "do not allow",
+  "not allow",
+  "notallow",
   "while using",
   "only this time",
 ];

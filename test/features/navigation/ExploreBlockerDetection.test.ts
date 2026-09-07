@@ -132,8 +132,35 @@ describe("ExploreBlockerDetection", () => {
       // in PERMISSION_KEYWORDS, not derived from "permission"/"allow".
       ["Permissions required", true],
       ["Allows access", true],
+      // "allow"-family machine-form negatives (issue #6293 P2): a deny-only
+      // dialog whose sole content is one of these forms must still be
+      // recognized as a permission dialog, or the permission fast-path never
+      // runs at all and the control falls through to ordinary navigation
+      // (see PERMISSION_KEYWORDS). Generic deny words unrelated to "allow"
+      // are deliberately excluded from detection, so they stay `false` here.
+      ["dont allow", true],
+      ["do not allow", true],
+      ["not allow", true],
+      ["notallow", true],
+      ["block", false],
+      ["reject", false],
+      ["disallow", false],
+      ["no thanks", false],
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
+    });
+
+    // Issue #6293 P2: the exact reported scenario — a custom/OEM deny-only
+    // control whose ONLY content is the fully concatenated content-desc
+    // "notallow", with no separate "permission"/"access" label anywhere in
+    // the dialog. Before this fix, `isPermissionDialog` didn't recognize any
+    // "allow"-family deny form, so this dialog was invisible to the
+    // permission fast-path entirely and its clickable deny control could be
+    // tapped as ordinary navigation, silently denying the permission.
+    test("detects a deny-only dialog whose sole content is content-desc 'notallow'", () => {
+      const elements = [createMockElement({ text: "", "content-desc": "notallow" })];
+
+      expect(isPermissionDialog(elements)).toBe(true);
     });
 
     // Issue #6122 follow-up: a multi-word keyword must not be manufactured by

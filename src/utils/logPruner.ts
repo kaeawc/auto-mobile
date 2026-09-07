@@ -183,9 +183,6 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
 
   const daemonLaunchLogProtection = (file: string): LaunchLogProtection => {
     const { owners, uncertain } = discoverDaemonLaunchLogOwners();
-    if (uncertain) {
-      return "unknown";
-    }
     const filePath = path.resolve(opts.dir, file);
     const owner = owners.find(
       (candidate) =>
@@ -193,7 +190,15 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
         path.resolve(candidate.launchLogPath) === filePath,
     );
     if (owner) {
+      // An exact persisted association identifies this launch log's daemon even
+      // when sibling discovery is incomplete. Do not let unrelated namespace
+      // uncertainty turn a positively dead owner into permanent retention.
       return Number.isInteger(owner.pid) && owner.pid > 0 && isAlive(owner.pid) ? "alive" : "dead";
+    }
+    // Without an exact owner association, incomplete discovery means an
+    // undiscovered daemon may still hold this inherited descriptor.
+    if (uncertain) {
+      return "unknown";
     }
     // A missing field is a legacy record: it may own any launch log. A complete
     // set of explicit claims (path or null) proves this log has no live owner.

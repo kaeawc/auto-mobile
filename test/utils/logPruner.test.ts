@@ -328,6 +328,27 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
     });
   });
 
+  test("prunes a launch log with a positively associated dead owner despite unrelated discovery uncertainty", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "abandoned output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false,
+        // A custom sibling namespace may be undiscoverable, but the recorded
+        // owner of THIS exact launch log is present and positively dead.
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
+        readDaemonOwner: () => ({ pid: 5000, launchLogPath: path.join(dir, launchLog) }),
+      });
+
+      expect(await readdir(dir)).not.toContain(launchLog);
+    });
+  });
+
   test("prunes a launch log when discovery is confident (uncertain=false) and no daemon is alive", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";

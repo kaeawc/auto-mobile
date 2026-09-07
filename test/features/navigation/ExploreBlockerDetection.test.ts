@@ -7,7 +7,9 @@ import {
   isLoginScreen,
   isRatingDialog,
   detectAndHandleBlockers,
+  filterPermissionNavigationCandidates,
   handlePermissionDialog,
+  isPermissionDenyElement,
 } from "../../../src/features/navigation/ExploreBlockerDetection";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
@@ -132,8 +134,39 @@ describe("ExploreBlockerDetection", () => {
       // in PERMISSION_KEYWORDS, not derived from "permission"/"allow".
       ["Permissions required", true],
       ["Allows access", true],
+      // "allow"-family machine-form negatives (issue #6293 P2): a deny-only
+      // dialog whose sole content is one of these forms must still be
+      // recognized as a permission dialog, or the permission fast-path never
+      // runs at all and the control falls through to ordinary navigation
+      // (see PERMISSION_KEYWORDS). Generic deny words unrelated to "allow"
+      // are deliberately excluded from detection, so they stay `false` here.
+      ["dont allow", true],
+      ["dontallow", true],
+      ["do not allow", true],
+      ["donotallow", true],
+      ["not allow", true],
+      ["notallow", true],
+      ["never allow", true],
+      ["neverallow", true],
+      ["block", false],
+      ["reject", false],
+      ["disallow", false],
+      ["no thanks", false],
     ])("isPermissionDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isPermissionDialog([createMockElement({ text })])).toBe(expected);
+    });
+
+    // Issue #6293 P2: the exact reported scenario — a custom/OEM deny-only
+    // control whose ONLY content is the fully concatenated content-desc
+    // "notallow", with no separate "permission"/"access" label anywhere in
+    // the dialog. Before this fix, `isPermissionDialog` didn't recognize any
+    // "allow"-family deny form, so this dialog was invisible to the
+    // permission fast-path entirely and its clickable deny control could be
+    // tapped as ordinary navigation, silently denying the permission.
+    test("detects a deny-only dialog whose sole content is content-desc 'notallow'", () => {
+      const elements = [createMockElement({ text: "", "content-desc": "notallow" })];
+
+      expect(isPermissionDialog(elements)).toBe(true);
     });
 
     // Issue #6122 follow-up: a multi-word keyword must not be manufactured by
@@ -570,6 +603,278 @@ describe("ExploreBlockerDetection", () => {
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
+    });
+
+    // Issue #6241 (SAFETY): Android's deny button reads "Don't allow", which
+    // tokenizes to ["don", "t", "allow"] — a genuine "allow" token — so the
+    // whole-token matcher from #6190 accepted it as an Allow button. When the
+    // deny button precedes the grant button in element order, the handler
+    // tapped the FIRST match and silently DENIED the permission it set out to
+    // grant. The deny-exclusion set must skip "Don't allow" and tap the real
+    // grant button that follows it.
+    test("handlePermissionDialog taps the grant button, never 'Don't allow', when deny precedes grant", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({
+          text: "Don't allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_deny_button",
+        }),
+        createMockElement({
+          text: "While using the app",
+          "resource-id":
+            "com.android.permissioncontroller:id/permission_allow_foreground_only_button",
+        }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([
+        {
+          elementId: "com.android.permissioncontroller:id/permission_allow_foreground_only_button",
+          action: "tap",
+        },
+      ]);
+    });
+
+    // Deny-label variants must all be excluded even though each carries the
+    // "allow" token (or is otherwise a negative control), while a legitimate
+    // affirmative grant that follows is tapped.
+    test.each([
+      ["Don't allow"],
+      ["Don't Allow"],
+      ["DON'T ALLOW"],
+      ["Don’t allow"], // curly apostrophe
+      ["Never allow"],
+    ])(
+      "handlePermissionDialog excludes deny label %p and taps the affirmative option",
+      async (denyText: string) => {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({ text: denyText, "resource-id": "com.test:id/deny" }),
+          createMockElement({ text: "Only this time", "resource-id": "com.test:id/allow" }),
+        ];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(true);
+        expect(calls).toEqual([{ elementId: "com.test:id/allow", action: "tap" }]);
+      },
+    );
+
+    // No false grant: a dialog offering ONLY deny/negative controls must never
+    // be tapped — the handler takes no action rather than denying the
+    // permission and (previously) reporting success.
+    test.each([
+      ["Don't allow"],
+      ["Never allow"],
+      ["neverallow"],
+      ["Deny"],
+      ["Block"],
+      // Inflected deny forms tokenize distinctly from their stems ("Blocked" ->
+      // ["blocked"] != ["block"]), so each must be listed explicitly in the deny
+      // set or it would slip through the token match (issue #6241 follow-up).
+      ["Blocked"],
+      ["Reject"],
+      ["Rejected"],
+      ["Disallow"],
+      ["Disallowed"],
+    ])(
+      "handlePermissionDialog does not tap when only a deny control %p is present",
+      async (denyText: string) => {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({ text: denyText, "resource-id": "com.test:id/deny_button" }),
+        ];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(false);
+        expect(calls).toEqual([]);
+      },
+    );
+
+    // A "Blocked" label in one field must veto an "allow" token carried in the
+    // other, so a mixed control is never treated as an affirmative grant.
+    test("handlePermissionDialog does not tap a control mixing an allow token with 'Blocked'", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({
+          text: "Allow",
+          "content-desc": "Blocked",
+          "resource-id": "com.test:id/mixed",
+        }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    // Machine-form negative content-desc ids ("dontAllowButton" ->
+    // ["dont", "allow", "button"], "doNotAllowButton" -> ["do", "not", "allow",
+    // "button"], "notAllowButton" -> ["not", "allow", "button"], and the fully
+    // concatenated "notallow" -> ["notallow"]) carry an "allow" token but must
+    // be recognized as deny controls, not tapped (issue #6241 follow-up). The
+    // apostrophe phrase "don't allow" does not match any of these spellings,
+    // so all are listed explicitly.
+    test.each([
+      ["dontAllowButton"],
+      ["doNotAllowButton"],
+      ["notAllowButton"],
+      ["notallow"],
+      ["dontallow"],
+      ["donotallow"],
+      ["Never allow"],
+      ["neverallow"],
+    ])(
+      "handlePermissionDialog does not tap machine-form negative content-desc %p",
+      async (denyContentDesc: string) => {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({
+            text: "",
+            "content-desc": denyContentDesc,
+            "resource-id": "com.test:id/deny",
+          }),
+        ];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(false);
+        expect(calls).toEqual([]);
+      },
+    );
+
+    test("classifies reported lowercase concatenated deny labels without broad substring matching", () => {
+      expect(isPermissionDenyElement(createMockElement({ text: "dontallow" }))).toBe(true);
+      expect(isPermissionDenyElement(createMockElement({ text: "donotallow" }))).toBe(true);
+      expect(isPermissionDenyElement(createMockElement({ text: "neverallow" }))).toBe(true);
+      expect(isPermissionDenyElement(createMockElement({ text: "Allow" }))).toBe(false);
+      expect(isPermissionDenyElement(createMockElement({ text: "Allowance" }))).toBe(false);
+    });
+
+    test.each(["dontallow", "donotallow", "neverallow"])(
+      "does not select lowercase concatenated deny label %p through ordinary navigation",
+      (denyLabel: string) => {
+        const deny = createMockElement({ text: denyLabel });
+        expect(filterPermissionNavigationCandidates([deny], [deny])).toEqual([]);
+      },
+    );
+
+    test("keeps ordinary navigation controls despite broad permission-like copy", () => {
+      const accessCopy = createMockElement({ text: "Access options", clickable: false });
+      const blockUser = createMockElement({ text: "Block user" });
+
+      expect(filterPermissionNavigationCandidates([blockUser], [accessCopy, blockUser])).toEqual([
+        blockUser,
+      ]);
+    });
+
+    test("keeps a valid affirmative permission label selectable", () => {
+      const allow = createMockElement({ text: "Allow" });
+      const deny = createMockElement({ text: "dontallow" });
+      expect(filterPermissionNavigationCandidates([allow, deny], [allow, deny])).toEqual([allow]);
+    });
+
+    test("removes a plain legacy package-installer denial from navigation candidates", () => {
+      const allow = createMockElement({
+        text: "Allow",
+        "resource-id": "com.google.android.packageinstaller:id/permission_allow_button",
+      });
+      const deny = createMockElement({
+        text: "Deny",
+        "resource-id": "com.google.android.packageinstaller:id/permission_deny_button",
+      });
+
+      expect(filterPermissionNavigationCandidates([allow, deny], [allow, deny])).toEqual([allow]);
+    });
+
+    // The canonical modern layout (grant first, deny last) must keep working:
+    // the grant button is tapped and the trailing "Don't allow" is ignored.
+    test("handlePermissionDialog taps 'Allow' and ignores a trailing 'Don't allow'", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({
+          text: "Allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+        }),
+        createMockElement({
+          text: "Don't allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_deny_button",
+        }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(true);
+      expect(calls).toEqual([
+        {
+          elementId: "com.android.permissioncontroller:id/permission_allow_button",
+          action: "tap",
+        },
+      ]);
     });
 
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {

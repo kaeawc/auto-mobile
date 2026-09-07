@@ -31,6 +31,7 @@ import type { ElementParser } from "../../../src/utils/interfaces/ElementParser"
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -182,6 +183,30 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
+    test("does not include permission-denial controls in dry-run interactions", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = {
+        execute: async () =>
+          createMockObservation([
+            createMockViewHierarchyNode({
+              text: "Don't allow",
+              "resource-id": "com.android.permissioncontroller:id/permission_deny_button",
+            }),
+            createMockViewHierarchyNode({
+              text: "Allow",
+              "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+            }),
+          ]),
+      };
+
+      const result = await explore.execute({ dryRun: true, maxInteractions: 2 });
+
+      expect(result.dryRun).toBe(true);
+      expect(result.plannedInteractions.map((interaction) => interaction.target.value)).toEqual([
+        "Allow",
+      ]);
+    });
+
     for (const mode of ["hybrid", "discover"] as const) {
       test(`should use graph stats instead of exporting the full graph for ${mode} progress node counts`, async () => {
         fakeGraph.recordNavigationEvent({
@@ -320,6 +345,157 @@ describe("Explore", () => {
       const isPermission = isPermissionDialog(elements);
 
       expect(isPermission).toBe(true);
+    });
+
+    // Regression: a deny-only permission dialog (only "Don't allow") cannot be
+    // granted and its deny control is deliberately never tapped (issue #6241).
+    // The permission fast-path used to discard handlePermissionDialog's `false`
+    // and `continue` unconditionally, re-observing the same unchanged dialog
+    // forever until the timeout. The no-op must now be counted so the existing
+    // stuck-screen accounting stops exploration (partially addresses #6169).
+    test("does not loop indefinitely on a deny-only permission dialog", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      const denyOnlyDialog = createMockObservation([
+        createMockViewHierarchyNode({
+          class: "android.widget.Button",
+          text: "Don't allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_deny_button",
+          clickable: "true",
+        }),
+        createMockViewHierarchyNode({
+          class: "android.widget.TextView",
+          text: "This app needs camera permission",
+          clickable: "false",
+        }),
+      ]);
+
+      let observeCount = 0;
+      (explore as any).observeScreen = {
+        execute: async () => {
+          observeCount++;
+          return denyOnlyDialog;
+        },
+        getMostRecentCachedObserveResult: async () => denyOnlyDialog,
+      };
+
+      // The deny control must never be tapped.
+      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
+        success: true,
+      } as never);
+
+      // maxInteractions and timeout are set generously so the ONLY thing that
+      // can terminate the run is the stuck-screen accounting; without the fix
+      // this run would spin forever.
+      const result = await explore.execute({
+        maxInteractions: 1000,
+        timeoutMs: 60_000_000,
+        packageName: "com.test.app",
+      });
+
+      const maxNoChange = (Explore as any).MAX_CONSECUTIVE_NO_CHANGE as number;
+      expect(result.stopReason).toContain("stuck");
+      // Bounded by the stuck counter, not maxInteractions or the timeout.
+      expect(observeCount).toBe(maxNoChange);
+      expect(tapSpy).not.toHaveBeenCalled();
+
+      tapSpy.mockRestore();
+    });
+
+    // A grantable permission dialog still taps "Allow" and exploration proceeds.
+    test("grants a permission dialog and continues exploring", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      const grantDialog = createMockObservation([
+        createMockViewHierarchyNode({
+          class: "android.widget.Button",
+          text: "Allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+          clickable: "true",
+        }),
+        createMockViewHierarchyNode({
+          class: "android.widget.TextView",
+          text: "This app needs camera permission",
+          clickable: "false",
+        }),
+      ]);
+      const normalScreen = createMockObservation();
+
+      let observeCount = 0;
+      (explore as any).observeScreen = {
+        execute: async () => {
+          observeCount++;
+          return observeCount === 1 ? grantDialog : normalScreen;
+        },
+        getMostRecentCachedObserveResult: async () => normalScreen,
+      };
+
+      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
+        success: true,
+      } as never);
+      // handlePermissionDialog sleeps on the real timer after a grant; stub it
+      // so the test stays fast (<100ms).
+      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
+      // Successful interactions advance the interaction counter so the run ends
+      // deterministically at maxInteractions rather than via stuck detection.
+      (explore as any).performInteraction = async () => true;
+
+      const result = await explore.execute({
+        maxInteractions: 2,
+        timeoutMs: 5000,
+        packageName: "com.test.app",
+      });
+
+      // The "Allow" button was tapped exactly once, via the permission fast-path.
+      expect(tapSpy).toHaveBeenCalledTimes(1);
+      // Exploration continued past the dialog rather than stalling on it.
+      expect(result.stopReason).not.toContain("stuck");
+      expect(result.interactionsPerformed).toBe(2);
+      expect(observeCount).toBeGreaterThan(1);
+
+      tapSpy.mockRestore();
+      sleepSpy.mockRestore();
+    });
+
+    // Regression: a grant used to report "continue" without clearing the
+    // no-change streak accrued by earlier ungrantable dialogs. In a
+    // multi-permission flow, a first prompt that racks up the streak before
+    // being granted left it elevated, so a single unrelated no-change
+    // observation on the next prompt could immediately trip the stuck-screen
+    // stop despite the intervening successful grant.
+    test("resets the no-change streak after granting a permission", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      const grantDialog = createMockObservation([
+        createMockViewHierarchyNode({
+          class: "android.widget.Button",
+          text: "Allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+          clickable: "true",
+        }),
+        createMockViewHierarchyNode({
+          class: "android.widget.TextView",
+          text: "This app needs camera permission",
+          clickable: "false",
+        }),
+      ]);
+
+      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
+        success: true,
+      } as never);
+      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
+
+      // Simulate a streak accrued by an earlier, unrelated ungrantable dialog.
+      (explore as any).consecutiveNoChangeCount = 39;
+
+      const outcome = await (explore as any).handlePermissionDialogFastPath(grantDialog);
+
+      expect(outcome).toBe("continue");
+      expect((explore as any).consecutiveNoChangeCount).toBe(0);
+      expect(tapSpy).toHaveBeenCalledTimes(1);
+
+      tapSpy.mockRestore();
+      sleepSpy.mockRestore();
     });
 
     test("should detect login screens", async () => {

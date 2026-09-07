@@ -151,6 +151,22 @@ const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
  * ("permissions", "allows") are listed explicitly rather than derived by
  * stemming — stemming previously turned "Notes now" into a false dismiss
  * match ("notes" -> "not").
+ *
+ * Also includes the "allow"-family machine-form negatives that `DENY_KEYWORDS`
+ * (below) exists to catch — "dont allow", "do not allow", "not allow", and the
+ * fully concatenated "notallow", "dontallow", "donotallow", and "neverallow" — because a
+ * deny-only dialog whose only text is one of these (e.g. a custom/OEM control
+ * with `content-desc="notallow"`
+ * and no separate "permission"/"access" label) previously failed detection
+ * here entirely: `isPermissionDialog` returned false, so the permission
+ * fast-path returned "none" and the control fell through to ordinary
+ * navigation, where `performInteraction` could tap it and silently deny the
+ * permission before `handlePermissionDialog` — and therefore `DENY_KEYWORDS`
+ * — was ever consulted (issue #6293 P2). Generic deny words unrelated to
+ * "allow" ("block", "reject", "disallow", "no thanks") are deliberately NOT
+ * included here: unlike the "allow" forms, they show up in unrelated dialogs
+ * (e.g. "Block this contact") and would misclassify those as permission
+ * dialogs.
  */
 const PERMISSION_KEYWORDS = [
   "allow",
@@ -160,17 +176,54 @@ const PERMISSION_KEYWORDS = [
   "access",
   "deny",
   "don't allow",
+  "dont allow",
+  "dontallow",
+  "do not allow",
+  "donotallow",
+  "not allow",
+  "notallow",
+  "never allow",
+  "neverallow",
   "while using",
   "only this time",
 ];
 
 const PERMISSION_KEYWORD_TOKENS = toKeywordTokenLists(PERMISSION_KEYWORDS);
 
+// Broad copy matching is useful for the interactive blocker fast-path, where
+// the next observation confirms the result. Dry-run candidate removal is
+// irreversible for that plan, so require provenance or a distinctive platform
+// action label before hiding ordinary app navigation controls.
+const DISTINCTIVE_PERMISSION_ACTION_TOKENS = toKeywordTokenLists([
+  "while using",
+  "only this time",
+  "don't allow",
+  "dont allow",
+  "dontallow",
+  "do not allow",
+  "donotallow",
+  "not allow",
+  "notallow",
+  "never allow",
+  "neverallow",
+]);
+
 /**
  * Check if screen is a permission dialog
  */
 export function isPermissionDialog(elements: Element[]): boolean {
   return elements.some((el) => matchesAnyKeywordInAnyField(PERMISSION_KEYWORD_TOKENS, el));
+}
+
+function isConfirmedPermissionDialogForNavigation(elements: Element[]): boolean {
+  return elements.some((element) => {
+    const resourceId = element["resource-id"]?.toLowerCase() ?? "";
+    return (
+      resourceId.includes("permissioncontroller") ||
+      resourceId.includes("packageinstaller") ||
+      matchesAnyKeywordInAnyField(DISTINCTIVE_PERMISSION_ACTION_TOKENS, element)
+    );
+  });
 }
 
 /**
@@ -208,6 +261,101 @@ const ALLOW_KEYWORDS = ["allow", "allows", "while using", "only this time", "ok"
 const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
 
 /**
+ * Deny/negative-button keywords that must NEVER be tapped as the affirmative
+ * grant target (safety, issue #6241).
+ *
+ * Whole-token matching (issue #6190) cannot distinguish grant from deny here:
+ * Android's deny button reads "Don't allow", which tokenizes to
+ * `["don", "t", "allow"]` — a genuine "allow" token — so it satisfies
+ * `ALLOW_KEYWORDS`. When the deny button precedes the grant button in element
+ * order, the old handler tapped the FIRST match and silently denied the
+ * permission it set out to grant. An affirmative match is therefore accepted
+ * only when the element does NOT also match one of these deny labels, so a
+ * button carrying "allow" purely as part of a negative phrase ("Don't Allow")
+ * is excluded rather than tapped.
+ *
+ * Listed as exact tokens/phrases (see `tokenize`): "don't allow" ->
+ * `["don", "t", "allow"]`, "deny", "block", "reject", "disallow", plus the
+ * dismissive "no thanks". Matched independently on `text` and `content-desc`.
+ *
+ * Two gaps this set must close by hand, because matching is whole-token and
+ * carries no stemming:
+ *   - Inflected deny forms. "block" tokenizes to `["block"]` and so does NOT
+ *     match "Blocked" (`["blocked"]`); likewise "reject"/"rejected" and
+ *     "disallow"/"disallowed". A control that carries an allow token in one
+ *     field and "Blocked" in another would otherwise pass
+ *     `isAffirmativeGrantElement` and be tapped, so every inflected deny form a
+ *     real dialog uses is listed explicitly.
+ *   - Machine-form negatives. A custom/OEM control may expose its denial via a
+ *     `content-desc` id like `dontAllowButton` (-> `["dont", "allow",
+ *     "button"]`), `doNotAllowButton` (-> `["do", "not", "allow", "button"]`),
+ *     or `notAllowButton` (-> `["not", "allow", "button"]`, the "do"-less
+ *     standalone form). The apostrophe phrase "don't allow" (`["don", "t",
+ *     "allow"]`) does not match any of these concatenated spellings, so "dont
+ *     allow", "do not allow", and "not allow" are each listed as their own
+ *     phrase. A fully lowercase id with no separator or case boundary at all,
+ *     such as `notallow` (no trailing "button"/"btn" token to split it off),
+ *     tokenizes to the single token `["notallow"]` rather than `["not",
+ *     "allow"]` — `containsTokenSequence` is exact-token, so the two-word
+ *     phrase would not match it. "notallow" is listed as its own single-token
+ *     keyword to cover exactly that fully concatenated spelling. Likewise the
+ *     reported lowercase `dontallow`, `donotallow`, and `neverallow` forms are explicit
+ *     single-token entries. This is normalization for known machine labels,
+ *     not generic stemming or substring matching.
+ */
+const DENY_KEYWORDS = [
+  "don't allow",
+  "dont allow",
+  "dontallow",
+  "do not allow",
+  "donotallow",
+  "not allow",
+  "notallow",
+  "never allow",
+  "neverallow",
+  "deny",
+  "denied",
+  "block",
+  "blocked",
+  "reject",
+  "rejected",
+  "disallow",
+  "disallowed",
+  "no thanks",
+];
+
+const DENY_KEYWORD_TOKENS = toKeywordTokenLists(DENY_KEYWORDS);
+
+/**
+ * True when an element is a safe affirmative grant target: it matches an
+ * "Allow" keyword AND does not match any deny/negative label (issue #6241).
+ */
+export function isPermissionDenyElement(element: Element): boolean {
+  return matchesAnyKeywordInAnyField(DENY_KEYWORD_TOKENS, element);
+}
+
+/**
+ * Applies permission-denial safety policy at ordinary navigation selection.
+ * Keep non-permission screens untouched: labels such as "Block" remain valid
+ * app navigation outside a recognized permission dialog.
+ */
+export function filterPermissionNavigationCandidates(
+  candidates: Element[],
+  screenElements: Element[],
+): Element[] {
+  return isPermissionDialog(screenElements) &&
+    isConfirmedPermissionDialogForNavigation(screenElements)
+    ? candidates.filter((element) => !isPermissionDenyElement(element))
+    : candidates;
+}
+
+function isAffirmativeGrantElement(element: Element): boolean {
+  return (
+    matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element) && !isPermissionDenyElement(element)
+  );
+}
+
+/**
  * Handle permission dialog by clicking "Allow" or similar
  */
 export async function handlePermissionDialog(
@@ -222,7 +370,7 @@ export async function handlePermissionDialog(
       continue;
     }
 
-    if (matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element)) {
+    if (isAffirmativeGrantElement(element)) {
       const selector = tapSelectorFor(element, viewHierarchy);
       if (!selector) {
         continue;

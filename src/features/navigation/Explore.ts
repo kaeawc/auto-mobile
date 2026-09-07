@@ -61,6 +61,7 @@ import {
 // Import blocker detection functions
 import {
   detectAndHandleBlockers,
+  filterPermissionNavigationCandidates,
   isPermissionDialog,
   handlePermissionDialog,
 } from "./ExploreBlockerDetection";
@@ -191,14 +192,12 @@ export class Explore extends BaseVisualChange {
           signal,
         });
 
-        const viewHierarchy = observation.viewHierarchy;
-        if (viewHierarchy && !viewHierarchy.hierarchy.error) {
-          const elements = extractAllElements(viewHierarchy, this.elementParser);
-          if (isPermissionDialog(elements)) {
-            logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-            await handlePermissionDialog(elements, viewHierarchy, this.device, this.adb, progress);
-            continue;
-          }
+        const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
+        if (permissionOutcome === "break") {
+          break;
+        }
+        if (permissionOutcome === "continue") {
+          continue;
         }
 
         if (!this.targetPackageName) {
@@ -426,12 +425,16 @@ export class Explore extends BaseVisualChange {
     const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
     const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
     const allCandidates = [...navigationElements, ...scrollableContainers];
+    const safeCandidates = filterPermissionNavigationCandidates(
+      allCandidates,
+      extractAllElements(viewHierarchy, this.elementParser),
+    );
 
-    if (allCandidates.length === 0) {
+    if (safeCandidates.length === 0) {
       warnings.push("No interactable elements were detected on the current screen.");
     }
 
-    const scored = rankElementsForDryRun(allCandidates, strategy, mode, this.exploredElements);
+    const scored = rankElementsForDryRun(safeCandidates, strategy, mode, this.exploredElements);
     const plannedInteractions = scored.slice(0, maxInteractions).map((entry, index) => {
       const target = getElementTarget(entry.element);
       const predictedOutcome = predictOutcomeForElement(entry.element, edges);
@@ -470,7 +473,7 @@ export class Explore extends BaseVisualChange {
       dryRun: true,
       currentScreen: {
         name: currentScreen,
-        interactableElements: allCandidates.length,
+        interactableElements: safeCandidates.length,
       },
       plannedInteractions,
       estimatedCoverage: {
@@ -482,6 +485,61 @@ export class Explore extends BaseVisualChange {
       observation,
       durationMs: this.timer.now() - startTime,
     };
+  }
+
+  /**
+   * Detect and act on a permission dialog at the top of the exploration loop.
+   *
+   * Returns:
+   * - `"continue"` when the dialog was granted (screen changed) or the no-op of
+   *   an ungrantable dialog was accounted for and the loop should re-observe;
+   * - `"break"` when an ungrantable (e.g. deny-only) dialog has stalled the
+   *   screen long enough to trip the stuck-screen accounting;
+   * - `"none"` when no permission dialog is present.
+   *
+   * A dialog exposing no safe affirmative control (e.g. only "Don't allow") can
+   * neither be granted nor have its deny control tapped (issue #6241). The
+   * previous fast-path discarded that outcome and always continued, so
+   * exploration re-observed the same unchanged dialog until the timeout. Counting
+   * the no-op lets the existing stuck-screen accounting stop the run instead
+   * (partially addresses issue #6169).
+   */
+  private async handlePermissionDialogFastPath(
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+  ): Promise<"continue" | "break" | "none"> {
+    const viewHierarchy = observation.viewHierarchy;
+    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
+      return "none";
+    }
+    const elements = extractAllElements(viewHierarchy, this.elementParser);
+    if (!isPermissionDialog(elements)) {
+      return "none";
+    }
+
+    logger.info("[Explore] Detected permission dialog, attempting to dismiss");
+    const granted = await handlePermissionDialog(
+      elements,
+      viewHierarchy,
+      this.device,
+      this.adb,
+      progress,
+    );
+    if (granted) {
+      this.consecutiveNoChangeCount = 0;
+      return "continue";
+    }
+
+    this.consecutiveNoChangeCount++;
+    logger.warn(
+      `[Explore] Permission dialog could not be granted (deny-only); counted as no-op ` +
+        `(${this.consecutiveNoChangeCount}/${Explore.MAX_CONSECUTIVE_NO_CHANGE})`,
+    );
+    if (this.shouldBreakForSafety(observation)) {
+      logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
+      return "break";
+    }
+    return "continue";
   }
 
   /**
@@ -562,8 +620,17 @@ export class Explore extends BaseVisualChange {
 
       // Combine all interaction candidates
       const allCandidates = [...navigationElements, ...scrollableContainers];
+      // Permission handling normally consumes this screen before ordinary
+      // selection. Keep the same conservative deny-label policy at this final
+      // selection boundary too, so a recognized permission dialog can never
+      // route a lowercase machine-form denial through navigation if that
+      // fast-path cannot take an affirmative action.
+      const safeCandidates = filterPermissionNavigationCandidates(
+        allCandidates,
+        extractAllElements(viewHierarchy, this.elementParser),
+      );
 
-      if (allCandidates.length === 0) {
+      if (safeCandidates.length === 0) {
         return null;
       }
 
@@ -585,7 +652,7 @@ export class Explore extends BaseVisualChange {
         }
 
         // Find element that matches the target edge
-        const match = findElementMatchingEdge(allCandidates, targetEdge);
+        const match = findElementMatchingEdge(safeCandidates, targetEdge);
         if (!match) {
           const errorMsg =
             `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
@@ -626,7 +693,7 @@ export class Explore extends BaseVisualChange {
       // Filter out exhausted elements
       const currentScreen = this.navigationManager.getCurrentScreen();
       const unexhaustedElements = filterUnexhaustedElements(
-        allCandidates,
+        safeCandidates,
         this.exploredElements,
         currentScreen,
       );

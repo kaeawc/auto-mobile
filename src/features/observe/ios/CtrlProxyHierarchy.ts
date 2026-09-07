@@ -146,7 +146,9 @@ export class CtrlProxyHierarchy {
     minTimestamp: number = 0,
     signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchyResponse> {
-    throwIfAborted(signal);
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+    }
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
     let cachedCaptureAgeMs: number | undefined;
@@ -307,6 +309,50 @@ export class CtrlProxyHierarchy {
   }
 
   /**
+   * Connection setup can include runner provisioning and is not itself
+   * cancellable. Race its result with this request's absolute deadline so a
+   * short hierarchy search returns on time and cannot later dispatch a tap
+   * candidate after its search window closed.
+   */
+  private async ensureConnectedBeforeDeadline(
+    deadlineMs: number,
+    perf: PerformanceTracker | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    const remainingMs = deadlineMs - this.context.timer.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const settle = (result: boolean | Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.context.timer.clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        if (result instanceof Error) {
+          reject(result);
+        } else {
+          resolve(result);
+        }
+      };
+      const onAbort = () =>
+        settle(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
+      const timeout = this.context.timer.setTimeout(() => settle(false), remainingMs);
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void this.context.ensureConnected(perf).then(
+        (connected) => settle(connected),
+        (error: unknown) => settle(error instanceof Error ? error : new Error(String(error))),
+      );
+    });
+  }
+
+  /**
    * Request a synchronous hierarchy fetch from the device.
    */
   async requestHierarchySync(
@@ -322,13 +368,15 @@ export class CtrlProxyHierarchy {
   } | null> {
     const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
     throwIfAborted(signal);
-    if (!(await this.context.ensureConnected(perf))) {
+    if (!(await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal))) {
       return null;
     }
     // Connection establishment can include iOS runner setup. It is not
     // interruptible through this delegate, but it still spends this request's
     // budget: never dispatch a hierarchy extraction after that budget expired.
-    throwIfAborted(signal);
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+    }
     const remainingTimeoutMs = deadlineMs - this.context.timer.now();
     if (remainingTimeoutMs <= 0) {
       return null;

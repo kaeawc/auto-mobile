@@ -63,6 +63,30 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
     expect(harness.requestManager.getPendingCount()).toBe(0);
   });
 
+  test("returns at its deadline while connection setup is still pending", async () => {
+    const timer = new FakeTimer();
+    let sends = 0;
+    const harness = context(
+      timer,
+      async () => await new Promise<boolean>(() => {}),
+      () => {
+        sends += 1;
+      },
+    );
+
+    const request = new CtrlProxyHierarchy(harness.context).requestHierarchySync(
+      undefined,
+      false,
+      undefined,
+      50,
+    );
+    timer.advanceTime(50);
+
+    await expect(request).resolves.toBeNull();
+    expect(sends).toBe(0);
+    expect(harness.requestManager.getPendingCount()).toBe(0);
+  });
+
   test("cancels a registered hierarchy request when the caller aborts", async () => {
     const timer = new FakeTimer();
     const harness = context(
@@ -102,7 +126,9 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       10,
     );
-    await Promise.resolve();
+    for (let attempt = 0; attempt < 5 && !requestId; attempt++) {
+      await Promise.resolve();
+    }
     expect(requestId).toBeDefined();
     harness.requestManager.resolve(requestId!, { hierarchy: hierarchy() });
     timer.advanceTime(10);

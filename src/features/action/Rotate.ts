@@ -20,6 +20,15 @@ export class Rotate extends BaseVisualChange {
   // call. Deliberately NOT shared across different devices.
   private static readonly rotationLocks = new Map<string, Mutex>();
 
+  // Bounded settle-wait for the post-restore confirmation read (#6211). When
+  // the device is physically held opposite the requested orientation,
+  // WindowManager takes a moment to settle after `accelerometer_rotation` is
+  // restored, so an immediate read can catch a transient value and report a
+  // spurious "unconfirmed"/reverted result. Retry a few times, on the
+  // injected Timer, before accepting the read as final.
+  private static readonly SETTLE_WAIT_MAX_ATTEMPTS = 3;
+  private static readonly SETTLE_WAIT_POLL_INTERVAL_MS = 150;
+
   constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
   }
@@ -80,20 +89,52 @@ export class Rotate extends BaseVisualChange {
   }
 
   /**
+   * Read the live rotation after restoring auto-rotate, with a bounded
+   * settle-wait: WindowManager can take a moment to settle after
+   * `accelerometer_rotation` is restored, particularly when the device is
+   * physically held opposite the requested orientation, so an immediate read
+   * can catch a transient value. Retry (on the injected Timer) until the
+   * live read matches the requested orientation or the attempt budget is
+   * exhausted, returning the last read either way so the caller can report
+   * it honestly (#6211).
+   */
+  private async readLiveRotationWithSettleWait(
+    requestedOrientation: "portrait" | "landscape",
+  ): Promise<number | null> {
+    let lastValue: number | null = null;
+    for (let attempt = 1; attempt <= Rotate.SETTLE_WAIT_MAX_ATTEMPTS; attempt++) {
+      lastValue = await this.readLiveRotation();
+      if (lastValue !== null) {
+        const achieved = lastValue === 0 || lastValue === 2 ? "portrait" : "landscape";
+        if (achieved === requestedOrientation) {
+          return lastValue;
+        }
+      }
+      if (attempt < Rotate.SETTLE_WAIT_MAX_ATTEMPTS) {
+        await this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS);
+      }
+    }
+    return lastValue;
+  }
+
+  /**
    * After restoring auto-rotate, determine what orientation the device
    * actually ended up in. Restoring auto-rotate can let the physical sensor
    * immediately re-apply its own orientation, overriding the one just
    * forced, so this confirmation read MUST be LIVE (mRotation from dumpsys
    * window) — falling back to `user_rotation` here would just echo the
    * value this same call wrote a moment ago and silently recreate the false
-   * "requested orientation held" success this fix exists to prevent. If the
-   * live read is unavailable, the achieved orientation is reported as
-   * unconfirmed rather than guessed (#6199 review).
+   * "requested orientation held" success this fix exists to prevent. The
+   * read goes through a bounded settle-wait (#6211) so a momentarily
+   * unsettled WindowManager doesn't yield a spurious "unconfirmed"/reverted
+   * result. If the live read is still unavailable after settling, the
+   * achieved orientation is reported as unconfirmed rather than guessed
+   * (#6199 review).
    */
   private async confirmOrientationAfterAutoRotateRestore(
     requestedOrientation: "portrait" | "landscape",
   ): Promise<{ achievedOrientation: string; warning: string | undefined }> {
-    const liveRotationValue = await this.readLiveRotation();
+    const liveRotationValue = await this.readLiveRotationWithSettleWait(requestedOrientation);
     if (liveRotationValue === null) {
       return {
         achievedOrientation: "unknown",
@@ -346,7 +387,30 @@ export class Rotate extends BaseVisualChange {
       let warning: string | undefined;
 
       if (wasAutoRotateEnabled) {
-        await this.writeSystemSetting("accelerometer_rotation", "1");
+        try {
+          await this.writeSystemSetting("accelerometer_rotation", "1");
+        } catch (restoreError) {
+          // waitForRotation above already CONFIRMED the requested rotation
+          // took effect while auto-rotate was forced off. The restore write
+          // failing afterward must not discard that confirmed success — it
+          // means auto-rotate is left off (so the forced orientation is, if
+          // anything, MORE likely to still be held, not less) and the caller
+          // needs an honest warning, not a false failure (#6211).
+          logger.warn(
+            `[Rotate] Failed to restore auto-rotate after confirming rotation to ${orientation}: ${restoreError}`,
+          );
+          return {
+            success: true,
+            orientation,
+            value,
+            currentOrientation: orientation,
+            previousOrientation: currentOrientation,
+            rotationPerformed: true,
+            orientationLockHandled: wasAutoRotateEnabled,
+            warning: `Rotated to ${orientation}, but auto-rotate could not be restored (accelerometer_rotation write failed): ${restoreError}`,
+            message: `Rotated to ${orientation}, but auto-rotate could not be restored`,
+          };
+        }
         ({ achievedOrientation, warning } =
           await this.confirmOrientationAfterAutoRotateRestore(orientation));
       }

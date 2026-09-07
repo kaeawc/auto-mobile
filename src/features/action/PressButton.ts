@@ -168,6 +168,21 @@ export class PressButton extends BaseVisualChange {
       }
       throw error;
     }
+
+    // "home" is verified end-to-end (issue #6147): neither the accessibility
+    // global action above nor this ADB keyevent are trustworthy on their own
+    // self-reported success, on API 28 specifically. Other buttons (back,
+    // recent, hardware) have no equivalently cheap ground truth to check
+    // against and keep their existing dispatch-is-success behavior.
+    if (normalized === "home" && !(await this.verifyAndroidHomeForeground())) {
+      return {
+        success: false,
+        button,
+        keyCode: -1,
+        error:
+          "Home press did not background the foreground app: the ADB KEYCODE_HOME keyevent did not produce a launcher foreground window",
+      };
+    }
     return { success: true, button, keyCode };
   }
 
@@ -198,10 +213,20 @@ export class PressButton extends BaseVisualChange {
         frameContext,
       );
       if (result.success) {
-        logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
-        return { success: true, button, keyCode };
+        // "home" specifically can self-report success while leaving the
+        // foreground app unchanged on API 28 (issue #6147). Confirm the
+        // foreground actually became the launcher before trusting it; other
+        // global-action buttons (back, recent) keep the prior behavior.
+        if (normalized !== "home" || (await this.verifyAndroidHomeForeground())) {
+          logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
+          return { success: true, button, keyCode };
+        }
+        logger.debug(
+          `[PRESS_BUTTON] Global action for ${button} reported success but foreground app did not change to the launcher; falling back to ADB`,
+        );
+      } else {
+        logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
       }
-      logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
     } catch (error) {
       // The validated ADB fallback remains safe when the global-action RPC fails.
       logger.debug(

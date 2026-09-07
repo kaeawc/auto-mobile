@@ -1,6 +1,6 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
-import { BootedDevice, Element, ObserveResult } from "../../../src/models";
+import { BootedDevice, Element, ExecResult, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -31,6 +31,23 @@ import type { ElementParser } from "../../../src/utils/interfaces/ElementParser"
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
+
+// `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
+// as the launcher being foreground. Used to satisfy home-press verification
+// (issue #6147) in tests whose `adb` mock doesn't otherwise implement
+// `executeCommand`.
+const LAUNCHER_DUMPSYS_STDOUT =
+  "Window #0 Window{01234567 u0 com.android.launcher3/com.android.launcher3.Launcher}: mViewVisibility=0x0 isOnScreen=true isVisible=true";
+
+function launcherDumpsysResult(): ExecResult {
+  return {
+    stdout: LAUNCHER_DUMPSYS_STDOUT,
+    stderr: "",
+    toString: () => LAUNCHER_DUMPSYS_STDOUT,
+    trim: () => LAUNCHER_DUMPSYS_STDOUT.trim(),
+    includes: (searchString: string) => LAUNCHER_DUMPSYS_STDOUT.includes(searchString),
+  };
+}
 
 describe("Explore", () => {
   let explore: Explore;
@@ -563,6 +580,10 @@ describe("Explore", () => {
           commands.push(args.join(" "));
           return "";
         },
+        // Home-press verification (issue #6147) reads the foreground app via
+        // `dumpsys window windows` after dispatch; report the launcher so the
+        // ADB keyevent fallback is confirmed to have actually worked.
+        executeCommand: async () => launcherDumpsysResult(),
       } as AdbClient;
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
@@ -602,7 +623,12 @@ describe("Explore", () => {
         packageName: "com.test.app",
         error: "App is not installed",
       } as never);
-      const adb = { execute: async () => "" } as AdbClient;
+      const adb = {
+        execute: async () => "",
+        // Verification (issue #6147) must pass so this test exercises the
+        // relaunch failure path, not a home-press verification failure.
+        executeCommand: async () => launcherDumpsysResult(),
+      } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
       (explore as any).targetPackageName = "com.test.app";
 

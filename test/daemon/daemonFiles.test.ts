@@ -7,7 +7,9 @@ import {
   cleanupDaemonFilesSync,
   isProcessRunning,
   listDaemonPidFilesSync,
+  readDaemonPidForRetentionSync,
 } from "../../src/daemon/daemonFiles";
+import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import type { PidFileData } from "../../src/daemon/types";
 
 describe("daemon file cleanup", () => {
@@ -111,24 +113,80 @@ describe("listDaemonPidFilesSync (cross-namespace enumeration, issue #6194)", ()
     writeFileSync(join(dir, "daemon.log"), "x");
     writeFileSync(join(dir, "auto-mobile-daemon-1000.sock"), "x");
 
-    const found = listDaemonPidFilesSync(own);
-    expect(found).toContain(own);
-    expect(found).toContain(bench);
-    expect(found).not.toContain(join(dir, "daemon.log"));
-    expect(found).not.toContain(join(dir, "auto-mobile-daemon-1000.sock"));
+    const { pidFiles } = listDaemonPidFilesSync(own);
+    expect(pidFiles).toContain(own);
+    expect(pidFiles).toContain(bench);
+    expect(pidFiles).not.toContain(join(dir, "daemon.log"));
+    expect(pidFiles).not.toContain(join(dir, "auto-mobile-daemon-1000.sock"));
   });
 
   test("always includes the given pid file even when it does not match the sibling pattern", () => {
     const dir = makeDir();
     const own = join(dir, "daemon.pid"); // arbitrary non-default name
     // No file written on disk; enumeration must still include the requested path.
-    const found = listDaemonPidFilesSync(own);
-    expect(found).toContain(own);
+    const { pidFiles } = listDaemonPidFilesSync(own);
+    expect(pidFiles).toContain(own);
   });
 
-  test("degrades to just the given pid file when the directory is unreadable", () => {
+  test("degrades to just the given pid file, marked uncertain, when the directory is unreadable", () => {
     const missing = join(tmpdir(), `no-such-dir-${Date.now()}-${Math.random()}`, "daemon.pid");
-    expect(listDaemonPidFilesSync(missing)).toEqual([missing]);
+    const result = listDaemonPidFilesSync(missing);
+    expect(result.pidFiles).toEqual([missing]);
+    // A failed scan could not enumerate co-located namespaces -> fail closed.
+    expect(result.uncertain).toBe(true);
+  });
+
+  test("marks a custom (non-default) pid namespace uncertain even when its dir scans fine", () => {
+    const dir = makeDir();
+    const own = join(dir, "auto-mobile-daemon-1000.pid");
+    writeFileSync(own, "{}");
+    // The directory is readable, but a custom namespace may be shared through a
+    // common AUTOMOBILE_LOG_DIR by peers whose pid files live in OTHER dirs this
+    // scan never visits (issue #6194), so discovery is not exhaustive.
+    expect(listDaemonPidFilesSync(own).uncertain).toBe(true);
+  });
+
+  test("is confident (uncertain=false) for the default pid namespace", () => {
+    // The default namespace co-locates every daemon's pid file in one directory,
+    // so a single scan is exhaustive. The default /tmp dir is readable.
+    expect(listDaemonPidFilesSync(DEFAULT_PID_FILE_PATH).uncertain).toBe(false);
+  });
+});
+
+describe("readDaemonPidForRetentionSync (ambiguity vs absence, issue #6194)", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
+  function makeDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-pidfile-read-test-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  test("returns undefined for a confidently-absent pid file", () => {
+    const missing = join(makeDir(), "daemon.pid");
+    expect(readDaemonPidForRetentionSync(missing)).toBeUndefined();
+  });
+
+  test("returns the recorded pid for a well-formed pid file", () => {
+    const dir = makeDir();
+    const pidFile = join(dir, "daemon.pid");
+    writeFileSync(pidFile, JSON.stringify({ pid: 4321 }));
+    expect(readDaemonPidForRetentionSync(pidFile)).toBe(4321);
+  });
+
+  test("THROWS (does not swallow to undefined) on a present-but-malformed pid file", () => {
+    const dir = makeDir();
+    const pidFile = join(dir, "daemon.pid");
+    writeFileSync(pidFile, "{ this is not json");
+    // The pruner relies on this throw to fail closed and retain the launch log.
+    expect(() => readDaemonPidForRetentionSync(pidFile)).toThrow();
   });
 });
 

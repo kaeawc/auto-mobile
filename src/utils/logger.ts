@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { statAsync, renameAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
-import { pruneLogFiles } from "./logPruner";
+import { pruneLogFiles, type DaemonPidFileEnumeration } from "./logPruner";
 import {
   resolveAutomobileLogFormat,
   resolveAutomobileLogSink,
@@ -287,7 +287,13 @@ const isDaemonRunning = (): boolean => {
   try {
     const { readPidFileDataSync, isProcessRunning, listDaemonPidFilesSync } =
       require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    return listDaemonPidFilesSync().some((pidFilePath) => {
+    const { pidFiles, uncertain } = listDaemonPidFilesSync();
+    // Enumeration incomplete (custom namespace / failed scan): a live daemon may
+    // exist in a namespace we could not discover — retain rather than risk it.
+    if (uncertain) {
+      return true;
+    }
+    return pidFiles.some((pidFilePath) => {
       const data = readPidFileDataSync(pidFilePath);
       return data ? isProcessRunning(data.pid) : false;
     });
@@ -300,31 +306,33 @@ const isDaemonRunning = (): boolean => {
 };
 
 // Enumerate the daemon pid files of every namespace that could own a launch log
-// in this shared log dir, and read a pid from one. Passed to `pruneLogFiles` so
-// the namespace-aware retention decision (issue #6194) is made there against the
-// same injected liveness seam, keeping the sweep deterministic under test.
-const daemonPidFiles = (): string[] => {
+// in this shared log dir (plus whether that enumeration is complete). Passed to
+// `pruneLogFiles` as a THUNK so the enumeration — and the `daemonFiles` require
+// it drives — is evaluated LAZILY at sweep time, never during this module's own
+// init. An eager call here reached `listDaemonPidFilesSync` before `export const
+// logger` (below) was initialized; its error path then touched `logger` in its
+// TDZ and aborted the import with a ReferenceError (issue #6194).
+const daemonPidFiles = (): DaemonPidFileEnumeration => {
   try {
     const { listDaemonPidFilesSync } =
       require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
     return listDaemonPidFilesSync();
   } catch (error) {
-    // Fall back to the single-namespace `isDaemonRunning` gate (also passed) when
-    // the pidfile module can't be resolved.
+    // The pidfile module could not be resolved, so no namespace could be
+    // enumerated — carry uncertainty so `pruneLogFiles` retains launch logs.
     logger.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
-    return [];
+    return { pidFiles: [], uncertain: true };
   }
 };
 
 const readDaemonPid = (pidFilePath: string): number | undefined => {
-  try {
-    const { readPidFileDataSync } =
-      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    return readPidFileDataSync(pidFilePath)?.pid;
-  } catch (error) {
-    logger.debug(`daemon pidfile read for log pruning failed: ${error}`, error);
-    return undefined;
-  }
+  // Deliberately NOT wrapped in a swallowing catch: `readDaemonPidForRetentionSync`
+  // returns undefined only for a confidently-absent file and THROWS on an
+  // unreadable/malformed one, and that throw must propagate to `pruneLogFiles`'s
+  // retain-on-ambiguity path rather than be flattened to "absent" (issue #6194).
+  const { readDaemonPidForRetentionSync } =
+    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+  return readDaemonPidForRetentionSync(pidFilePath);
 };
 
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
@@ -342,7 +350,10 @@ const pruneOldLogFiles = (): Promise<void> => {
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
     // Namespace-aware retention: check every co-located namespace's daemon pid
     // file, with `isDaemonRunning` as the single-namespace fallback (issue #6194).
-    daemonPidFiles: daemonPidFiles(),
+    // Passed as the thunk itself (not `daemonPidFiles()`) so enumeration is
+    // deferred to sweep time — an eager call crashed the cyclic logger import
+    // before `logger` was initialized (issue #6194).
+    daemonPidFiles,
     readDaemonPid,
     isDaemonRunning,
   });

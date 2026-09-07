@@ -211,7 +211,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         abandonedMaxAgeMs: -1, // every file already stale by mtime
         // The spawning manager 4242 is dead, but daemon 5000 (namespace A) is alive.
         isProcessAlive: (pid) => pid === daemonPidA,
-        daemonPidFiles: [pidFileB, pidFileA],
+        daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonPid: (p) => (p === pidFileA ? daemonPidA : undefined),
         // Namespace B's own single-namespace view sees no daemon.
         isDaemonRunning: () => false,
@@ -233,7 +233,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
         isProcessAlive: () => false, // manager AND every namespace's daemon dead
-        daemonPidFiles: [pidFileB, pidFileA],
+        daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonPid: (p) => (p === pidFileA ? daemonPidA : undefined),
         isDaemonRunning: () => false,
       });
@@ -256,7 +256,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
         isProcessAlive: (pid) => pid === daemonPidA, // only ns A's daemon alive
-        daemonPidFiles: [pidFileB, pidFileA],
+        daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonPid: (p) => (p === pidFileA ? daemonPidA : undefined),
         isDaemonRunning: () => false,
       });
@@ -278,7 +278,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
         isProcessAlive: () => false,
-        daemonPidFiles: [pidFileA],
+        daemonPidFiles: () => ({ pidFiles: [pidFileA], uncertain: false }),
         readDaemonPid: () => {
           throw new Error("pidfile unreadable");
         },
@@ -287,6 +287,57 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
 
       const after = await readdir(dir);
       expect(after).toContain(launchLog); // err toward retaining on read failure
+    });
+  });
+});
+
+describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
+  const ownPidFile = "/tmp/auto-mobile-daemon-nsX.pid";
+
+  test("retains a launch log when enumeration reports uncertainty even though every discovered pid is dead", async () => {
+    // A custom out-of-sibling-dir namespace (e.g. /state/b/daemon.pid) sharing
+    // this log dir is undiscoverable by a single-directory scan, so enumeration
+    // marks itself uncertain. A live daemon may own the launch log, so it must be
+    // retained even though the only pid we CAN see is dead.
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "in-flight output from an undiscoverable ns");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false, // every pid we can see is dead
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
+        readDaemonPid: () => undefined, // our own namespace records no live daemon
+        isDaemonRunning: () => false,
+      });
+
+      const after = await readdir(dir);
+      expect(after).toContain(launchLog); // fail closed on incomplete discovery
+    });
+  });
+
+  test("prunes a launch log when discovery is confident (uncertain=false) and no daemon is alive", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "old bootstrap output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false,
+        // Complete enumeration and every namespace's daemon confidently dead.
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
+        readDaemonPid: () => undefined,
+        isDaemonRunning: () => false,
+      });
+
+      const after = await readdir(dir);
+      expect(after).not.toContain(launchLog); // confidently no owner -> pruned
     });
   });
 });

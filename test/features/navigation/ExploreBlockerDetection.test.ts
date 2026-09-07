@@ -718,10 +718,12 @@ describe("ExploreBlockerDetection", () => {
 
     // Machine-form negative content-desc ids ("dontAllowButton" ->
     // ["dont", "allow", "button"], "doNotAllowButton" -> ["do", "not", "allow",
-    // "button"]) carry an "allow" token but must be recognized as deny controls,
-    // not tapped (issue #6241 follow-up). The apostrophe phrase "don't allow"
-    // does not match either concatenated spelling, so both are listed explicitly.
-    test.each([["dontAllowButton"], ["doNotAllowButton"]])(
+    // "button"], "notAllowButton" -> ["not", "allow", "button"], and the fully
+    // concatenated "notallow" -> ["notallow"]) carry an "allow" token but must
+    // be recognized as deny controls, not tapped (issue #6241 follow-up). The
+    // apostrophe phrase "don't allow" does not match any of these spellings,
+    // so all are listed explicitly.
+    test.each([["dontAllowButton"], ["doNotAllowButton"], ["notAllowButton"], ["notallow"]])(
       "handlePermissionDialog does not tap machine-form negative content-desc %p",
       async (denyContentDesc: string) => {
         const { calls, restore } = captureTapOptions();

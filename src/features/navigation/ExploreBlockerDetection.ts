@@ -235,16 +235,24 @@ const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
  *     real dialog uses is listed explicitly.
  *   - Machine-form negatives. A custom/OEM control may expose its denial via a
  *     `content-desc` id like `dontAllowButton` (-> `["dont", "allow",
- *     "button"]`) or `doNotAllowButton` (-> `["do", "not", "allow",
- *     "button"]`). The apostrophe phrase "don't allow" (`["don", "t",
- *     "allow"]`) does not match either concatenated spelling, so "dont allow"
- *     and "do not allow" are listed as their own phrases. A contiguous run
- *     match (see `containsTokenSequence`) ignores any trailing "button"/"btn".
+ *     "button"]`), `doNotAllowButton` (-> `["do", "not", "allow", "button"]`),
+ *     or `notAllowButton` (-> `["not", "allow", "button"]`, the "do"-less
+ *     standalone form). The apostrophe phrase "don't allow" (`["don", "t",
+ *     "allow"]`) does not match any of these concatenated spellings, so "dont
+ *     allow", "do not allow", and "not allow" are each listed as their own
+ *     phrase. A fully lowercase id with no separator or case boundary at all,
+ *     such as `notallow` (no trailing "button"/"btn" token to split it off),
+ *     tokenizes to the single token `["notallow"]` rather than `["not",
+ *     "allow"]` — `containsTokenSequence` is exact-token, so the two-word
+ *     phrase would not match it. "notallow" is listed as its own single-token
+ *     keyword to cover exactly that fully concatenated spelling.
  */
 const DENY_KEYWORDS = [
   "don't allow",
   "dont allow",
   "do not allow",
+  "not allow",
+  "notallow",
   "deny",
   "denied",
   "block",

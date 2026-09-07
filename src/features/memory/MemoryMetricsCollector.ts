@@ -1,4 +1,7 @@
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecutor,
+  DeviceTimestampResult,
+} from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
@@ -186,6 +189,41 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   }
 
   /**
+   * Widen a device-clock GC-window boundary to compensate for a
+   * second-resolution device clock (#6212, a #6125 follow-up).
+   *
+   * {@link AdbExecutor.getDeviceTimestampMsWithSource} reports
+   * `source: "device-seconds"` when the device doesn't support the
+   * millisecond-epoch `date +%s%3N` and falls back to `date +%s`: the
+   * returned value is `floor(actualDeviceTimeMs / 1000) * 1000`, so the true
+   * boundary could be anywhere in the following 999ms. `parseGCEvents`
+   * compares that truncated bound directly against ms-resolution `logcat -v
+   * epoch` timestamps, so a real in-window GC event landing after the
+   * truncated end bound (but before the actual, unobservable end time) would
+   * otherwise be dropped — and symmetrically for the start bound.
+   *
+   * The widening is inclusive-only, matching the fix chosen in the issue:
+   * the start bound is floored to the top of its second (a no-op on an
+   * already-truncated value — kept explicit for clarity and to defend
+   * against a future non-truncated "device-seconds" source) and the end
+   * bound is pushed to the bottom of the *next* second. This can never drop
+   * a real in-window event; at most it admits a neighboring event just
+   * outside the true window, which is the accepted tradeoff on a device that
+   * cannot report sub-second time at all. Millisecond-resolution
+   * (`"device-ms"`) and host-fallback (`"host"`) sources are left untouched.
+   */
+  private widenCoarseClockBoundary(
+    result: DeviceTimestampResult,
+    direction: "floor" | "ceil",
+  ): number {
+    if (result.source !== "device-seconds") {
+      return result.timestampMs;
+    }
+    const flooredToSecond = Math.floor(result.timestampMs / 1000) * 1000;
+    return direction === "floor" ? flooredToSecond : flooredToSecond + 999;
+  }
+
+  /**
    * Capture GC events from logcat, scoped to the audited process and time window.
    *
    * `pid`, when supplied, should be resolved by the caller *before* the audited
@@ -209,6 +247,13 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    * Known limitation: if the process legitimately restarts mid-audit, GC
    * events from the *new* process are not captured — only from the pid alive
    * at audit start. Tracking a restart is left as a follow-up.
+   *
+   * The caller MUST invoke this *before* triggering its own explicit
+   * (SIGUSR1) GC (see {@link collectMetrics} / {@link triggerGC}) — this dump
+   * is what defines the window's contents, so a collector-induced GC that
+   * hasn't happened yet at call time can never leak into it, even on a
+   * coarse-clock boundary second widened by {@link widenCoarseClockBoundary}
+   * (#6212 follow-up).
    */
   async captureGCEvents(
     packageName: string,
@@ -519,25 +564,40 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     // logcat's "-v epoch" stamps each line with the device's clock, so
     // comparing these bounds against it in parseGCEvents needs no further
     // translation (see captureGCEvents / #5377).
-    const startTimestamp = await perf.track("adbDeviceTimestampStart", () =>
-      this.adb.getDeviceTimestampMs(),
+    const startResult = await perf.track("adbDeviceTimestampStart", () =>
+      this.adb.getDeviceTimestampMsWithSource(),
     );
 
     // Execute the action
     await beforeAction();
 
-    const endTimestamp = await perf.track("adbDeviceTimestampEnd", () =>
-      this.adb.getDeviceTimestampMs(),
+    const endResult = await perf.track("adbDeviceTimestampEnd", () =>
+      this.adb.getDeviceTimestampMsWithSource(),
     );
 
-    // Trigger explicit GC to ensure we get post-GC measurements
-    await this.triggerGC(packageName, perf);
+    // Widen the window when the device clock only supports second
+    // resolution (see widenCoarseClockBoundary) so a GC event landing on the
+    // boundary second isn't dropped by comparing its ms-resolution logcat
+    // timestamp against a truncated bound (#6212).
+    const startTimestamp = this.widenCoarseClockBoundary(startResult, "floor");
+    const endTimestamp = this.widenCoarseClockBoundary(endResult, "ceil");
 
-    // Take post-action snapshot (after GC)
-    const postSnapshot = await this.takeSnapshot(packageName, perf);
-
-    // Capture GC events that occurred during the action, scoped to the
-    // pre-action pid so a mid-action process restart doesn't swap it out.
+    // Capture GC events that occurred during the action BEFORE triggering our
+    // own explicit (SIGUSR1) GC below, scoped to the pre-action pid so a
+    // mid-action process restart doesn't swap it out.
+    //
+    // Ordering matters here (#6212 follow-up): on a coarse (second-resolution)
+    // device clock the widened end bound extends to the top of its truncated
+    // second (see widenCoarseClockBoundary), which can still be in the future
+    // relative to the real, unobservable end time. If the collector-induced
+    // GC triggered below happened to log within that same boundary second, a
+    // logcat dump taken *after* triggerGC would include it — and the widened
+    // bound would then admit it as if it were a genuine in-window app GC,
+    // when it is actually just an artifact of our own measurement. Dumping
+    // logcat here, before the SIGUSR1 trigger even runs, means the
+    // collector-induced GC line cannot exist yet in the buffer we read: only
+    // real app GC activity from the audited action can appear in this
+    // capture, boundary second included.
     const gcEvents = await this.captureGCEvents(
       packageName,
       startTimestamp,
@@ -545,6 +605,14 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       perf,
       auditedPid,
     );
+
+    // Trigger explicit GC to ensure we get post-GC measurements. Any GC this
+    // induces happens strictly after the logcat dump above, so it cannot be
+    // misattributed to the audited action even on a boundary second.
+    await this.triggerGC(packageName, perf);
+
+    // Take post-action snapshot (after GC)
+    const postSnapshot = await this.takeSnapshot(packageName, perf);
 
     // Get unreachable objects
     const unreachableObjects = await this.getUnreachableObjects(packageName, perf);

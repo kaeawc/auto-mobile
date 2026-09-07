@@ -424,6 +424,148 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
   });
 
+  describe("collectMetrics coarse (second-resolution) device clock (#6212)", function () {
+    test("counts a GC event landing on the boundary second instead of dropping it", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const coarseClockCollector = new MemoryMetricsCollector(
+        { deviceId: "test-device", name: "test", platform: "android" },
+        fakeAdb as any,
+        fakeTimer,
+      );
+
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1111", stderr: "" } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+
+      // The device only supports `date +%s` (second resolution): the audit
+      // actually ran from 500.000s to 501.400s, but the second boundary read
+      // truncates the end to 501.000s. The GC event fired at 501.300s — after
+      // the truncated end bound but still before the real (unobservable) end
+      // — and must not be dropped.
+      fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
+      fakeAdb.setDeviceTimestampSource("device-seconds");
+      fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
+        stdout:
+          "501.300  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
+        stderr: "",
+      } as any);
+
+      const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
+
+      expect(metrics.gcCount).toBe(1);
+      expect(metrics.gcEvents[0].freedKb).toBe(10);
+    });
+
+    test("still drops a GC event outside the widened boundary-second window", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const coarseClockCollector = new MemoryMetricsCollector(
+        { deviceId: "test-device", name: "test", platform: "android" },
+        fakeAdb as any,
+        fakeTimer,
+      );
+
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1111", stderr: "" } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+
+      // Coarse-clock widening only pushes the end bound to the top of its
+      // truncated second (501.999s here) — an event a full second later, at
+      // 502.500s, is genuinely outside the window and must still be dropped.
+      fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
+      fakeAdb.setDeviceTimestampSource("device-seconds");
+      fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
+        stdout:
+          "502.500  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
+        stderr: "",
+      } as any);
+
+      const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
+
+      expect(metrics.gcCount).toBe(0);
+    });
+
+    test("captures the GC-window logcat dump before triggering the collector's own explicit GC, so an induced GC cannot leak into the boundary-second window", async function () {
+      // Regression test for the #6212 follow-up: widening the coarse-clock
+      // end bound to the top of its truncated second (see
+      // widenCoarseClockBoundary) means the window can still admit events
+      // that happen slightly after the real audit ended. If the collector
+      // captured the GC-window logcat dump *after* triggering its own
+      // SIGUSR1 GC, a collector-induced GC landing in that same boundary
+      // second would be indistinguishable from a genuine in-window app GC
+      // and get miscounted. The fix is ordering: dump logcat before sending
+      // SIGUSR1, so the induced GC (whenever it actually logs) cannot yet
+      // exist in the buffer being read. That ordering — not response content
+      // — is what this test asserts, since a collector-induced GC that
+      // hasn't happened yet has no log line to fabricate in the fake.
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const coarseClockCollector = new MemoryMetricsCollector(
+        { deviceId: "test-device", name: "test", platform: "android" },
+        fakeAdb as any,
+        fakeTimer,
+      );
+
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1111", stderr: "" } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+
+      // Same boundary-second setup as the "counts a GC event landing on the
+      // boundary second" test above: the widened window is [500.000, 501.999].
+      fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
+      fakeAdb.setDeviceTimestampSource("device-seconds");
+      // The single logcat dump the collector is allowed to take contains
+      // only the genuine app GC that fired during the audited action — a
+      // real boundary-second app GC must still be counted (the #6212 fix).
+      fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
+        stdout:
+          "501.300  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
+        stderr: "",
+      } as any);
+
+      const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
+
+      // Genuine app GC on the boundary second IS counted.
+      expect(metrics.gcCount).toBe(1);
+      expect(metrics.gcEvents[0].freedKb).toBe(10);
+
+      // The logcat window capture must happen strictly before the
+      // collector's own SIGUSR1 trigger — a collector-induced GC cannot be
+      // counted if its log line cannot yet exist when the window is read.
+      const executed = fakeAdb.getExecutedCommands();
+      const logcatIndex = executed.findIndex((cmd) => cmd.includes("logcat -d -v epoch"));
+      const killIndex = executed.findIndex((cmd) => cmd.includes("kill -USR1"));
+      expect(logcatIndex).toBeGreaterThanOrEqual(0);
+      expect(killIndex).toBeGreaterThanOrEqual(0);
+      expect(logcatIndex).toBeLessThan(killIndex);
+
+      // The logcat window is captured exactly once — the collector never
+      // re-queries logcat after triggering its own GC, so there is no
+      // opportunity for the induced GC to be picked up at all.
+      const logcatCalls = executed.filter((cmd) => cmd.includes("logcat -d -v epoch"));
+      expect(logcatCalls.length).toBe(1);
+    });
+  });
+
   describe("parseUnreachableObjects", function () {
     test("should parse unreachable objects from dumpsys output", function () {
       const output = `

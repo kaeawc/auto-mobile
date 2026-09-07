@@ -2,6 +2,7 @@ import {
   AdbExecutor,
   type AdbExecuteOptions,
   type DeviceTimestampResult,
+  type DeviceTimestampSource,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 import type { AdbDeviceState } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -38,6 +39,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private deviceTimestampMs: number | null = null;
   private deviceTimestampMsSequence: number[] | null = null;
+  private deviceTimestampSource: DeviceTimestampSource | null = null;
   private androidApiLevel: number | null = null;
 
   /**
@@ -163,6 +165,16 @@ export class FakeAdbExecutor implements AdbExecutor {
    */
   setDeviceTimestampMsSequence(timestampsMs: number[]): void {
     this.deviceTimestampMsSequence = [...timestampsMs];
+  }
+
+  /**
+   * Configure the clock source reported by {@link getDeviceTimestampMsWithSource}
+   * (e.g. `"device-seconds"` to simulate a device that only supports the
+   * second-resolution `date +%s` fallback). Overrides the default inference
+   * from {@link setDeviceTimestampMs}. Pass `null` to restore the default.
+   */
+  setDeviceTimestampSource(source: DeviceTimestampSource | null): void {
+    this.deviceTimestampSource = source;
   }
 
   /**
@@ -373,7 +385,8 @@ export class FakeAdbExecutor implements AdbExecutor {
     const timestampMs = await this.getDeviceTimestampMs();
     return {
       timestampMs,
-      source: this.deviceTimestampMs === null ? "host" : "device-ms",
+      source:
+        this.deviceTimestampSource ?? (this.deviceTimestampMs === null ? "host" : "device-ms"),
     };
   }
 

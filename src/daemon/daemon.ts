@@ -601,7 +601,15 @@ export class Daemon {
       // interval above (issue #6232). Guarded on the committed flag so a throw
       // after the bind is committed never rewrites the file this process now owns.
       if (!this.socketBindCommitted) {
-        this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+        try {
+          this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+        } catch (restoreError) {
+          // Repairing a displaced PID record is best effort. The startup
+          // failure remains the actionable diagnostic for the operator.
+          logger.warn(
+            `Failed to restore the incumbent daemon owner record after a refused start: ${restoreError}`,
+          );
+        }
       }
       throw error;
     }

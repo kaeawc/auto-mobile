@@ -741,6 +741,9 @@ export class AdbClient implements AdbExecutor {
    *   post-abort result. Cancellation is never cached as a device verdict.
    */
   async getAndroidApiLevel(timeoutMs?: number, signal?: AbortSignal): Promise<number | null> {
+    // A cached value is still a result accepted on behalf of this call.  Do not
+    // let a cancelled request observe it after its deadline has fired.
+    signal?.throwIfAborted();
     if (this.apiLevelCache !== undefined) {
       return this.apiLevelCache;
     }

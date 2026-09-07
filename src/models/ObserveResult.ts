@@ -384,7 +384,13 @@ export interface ObserveResult {
      * activity-attribution / incomplete-capture / missing foreground window),
      * "requested_min", "no_timestamp", or "unavailable".
      */
-    category?: "cache_age" | "window_identity" | "requested_min" | "no_timestamp" | "unavailable";
+    category?:
+      | "cache_age"
+      | "window_identity"
+      | "requested_min"
+      | "no_timestamp"
+      | "unavailable"
+      | "effect_inconsistent";
   };
 
   /**

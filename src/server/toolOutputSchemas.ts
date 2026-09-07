@@ -409,7 +409,14 @@ export const freshnessSchema = z
     warning: z.string().optional(),
     /** Stable discriminant for WHY freshness failed (only when `isFresh` is false). */
     category: z
-      .enum(["cache_age", "window_identity", "requested_min", "no_timestamp", "unavailable"])
+      .enum([
+        "cache_age",
+        "window_identity",
+        "requested_min",
+        "no_timestamp",
+        "unavailable",
+        "effect_inconsistent",
+      ])
       .optional(),
   })
   .passthrough();

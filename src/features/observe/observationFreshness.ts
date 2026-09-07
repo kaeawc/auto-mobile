@@ -143,6 +143,8 @@ export interface FreshnessInputs {
  *  - `requested_min` — an explicit `minTimestamp` was not satisfied.
  *  - `no_timestamp` — the capture carried no timestamp to judge.
  *  - `unavailable` — no hierarchy could be retrieved at all.
+ *  - `effect_inconsistent` — the returned capture still describes the
+ *    pre-action screen even though the action reported a screen change.
  *
  * Only ever set when `isFresh` is false.
  */
@@ -151,7 +153,8 @@ export type FreshnessFailureCategory =
   | "window_identity"
   | "requested_min"
   | "no_timestamp"
-  | "unavailable";
+  | "unavailable"
+  | "effect_inconsistent";
 
 export interface FreshnessVerdict {
   requestedAfter?: number;

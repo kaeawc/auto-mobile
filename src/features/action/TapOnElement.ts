@@ -116,15 +116,13 @@ const POST_TAP_EFFECT_POLL_MS = 150;
 
 /**
  * Minimum wall-clock time a hierarchy-only post-tap frame must hold UNCHANGED
- * before it is accepted as the settled destination (issue #6284 P1). Set to two
- * full poll intervals so a settle can never be declared on the first, zero-
- * elapsed comparison, nor after a single interval — a real quiet period has to
- * elapse. A delayed dialog/navigation frame `B` that arrives more than one poll
- * interval after a transient `A` (the normal case for the delayed transitions
- * this settle targets) therefore resets the quiet period and is reached, rather
- * than being pre-empted by settling on `A`.
+ * before it is accepted as the settled destination (issue #6284 P1). Activity
+ * transitions commonly take 1–2 seconds, so a transient hierarchy must stay
+ * quiet for a full second before it is terminal evidence. This prevents a
+ * routine delayed destination from being pre-empted by an intermediate frame
+ * that merely survives the first few 150ms polls.
  */
-const POST_TAP_SETTLE_QUIET_PERIOD_MS = 2 * POST_TAP_EFFECT_POLL_MS;
+const POST_TAP_SETTLE_QUIET_PERIOD_MS = 1000;
 
 /** Brief debounce between the original tap and the retry tap when a ghost tap
  *  was detected. Just enough to let any inflight gesture queue drain. */
@@ -849,6 +847,7 @@ export class TapOnElement extends BaseVisualChange {
       ...(existing ?? { isFresh: true }),
       verified: false,
       isFresh: false,
+      category: "effect_inconsistent",
       warning:
         "effect.screenChanged is true, but this observation's own capture still matches the " +
         "pre-action screen — it predates the detected transition. Call observe again for the " +

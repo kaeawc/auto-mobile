@@ -121,6 +121,24 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
     expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
   });
 
+  test("waits through a routine delayed transition before accepting a quiet hierarchy", async () => {
+    const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("baseline") });
+    const transientA = makeObservation({ updatedAt: 10, viewHierarchy: makeHierarchy("A") });
+    // A remains visible at 0, 150, and 300ms. A 300ms quiet period would accept
+    // it just before B arrives at 450ms; the documented 1–2s transition window
+    // requires continued polling and therefore returns B.
+    const tap = createTapWithSettleSequence([
+      makeObservation({ updatedAt: 20, viewHierarchy: makeHierarchy("A") }),
+      makeObservation({ updatedAt: 30, viewHierarchy: makeHierarchy("A") }),
+      makeObservation({ updatedAt: 40, viewHierarchy: makeHierarchy("A") }),
+      makeObservation({ updatedAt: 50, viewHierarchy: makeHierarchy("B") }),
+    ]);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+
+    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
+  });
+
   test("a same-activity dialog (activeWindow unchanged) settles and is reported changed (#6151)", async () => {
     const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("alarm-list") });
     // Dialogs don't move activeWindow; only the hierarchy reflects them.
@@ -368,6 +386,7 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
 
     expect(result.observation.freshness?.isFresh).toBe(false);
     expect(result.observation.freshness?.verified).toBe(false);
+    expect(result.observation.freshness?.category).toBe("effect_inconsistent");
     expect(result.observation.freshness?.warning).toContain("predates the detected transition");
   });
 });

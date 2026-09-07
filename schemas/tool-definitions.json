@@ -6420,7 +6420,8 @@
                 "window_identity",
                 "requested_min",
                 "no_timestamp",
-                "unavailable"
+                "unavailable",
+                "effect_inconsistent"
               ]
             }
           },
@@ -10066,7 +10067,8 @@
                         "window_identity",
                         "requested_min",
                         "no_timestamp",
-                        "unavailable"
+                        "unavailable",
+                        "effect_inconsistent"
                       ]
                     }
                   },

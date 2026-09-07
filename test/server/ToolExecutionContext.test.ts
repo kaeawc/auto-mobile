@@ -1065,12 +1065,10 @@ describe("ToolExecutionContext", () => {
       firstController.signal,
     );
     await new Promise((resolve) => setImmediate(resolve));
-    const second = createToolExecutionContext(
-      "session-shared-flight",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+    const second = createToolExecutionContext("session-shared-flight", sessionManager, devicePool, {
+      ...sessionOptions,
+      deviceReadiness: "automationReady",
+    });
     await new Promise((resolve) => setImmediate(resolve));
     firstController.abort(new Error("first request cancelled"));
     await expect(first).rejects.toThrow("first request cancelled");

@@ -310,8 +310,17 @@ async function ensureReadinessUpgraded(
     }
 
     const controller = new AbortController();
-    let flight!: ReadinessUpgradeFlight;
-    const work = runDeviceReadinessSetup(
+    // `flight.work` is wired up after construction so `flight` itself can stay
+    // `const`: the `.finally()` callback below only ever runs once the setup
+    // promise settles, which is always after this synchronous block finishes
+    // assigning `flight.work`.
+    const flight: ReadinessUpgradeFlight = {
+      controller,
+      work: Promise.resolve(),
+      settled: false,
+      waiters: 0,
+    };
+    flight.work = runDeviceReadinessSetup(
       session,
       sessionManager,
       requiredReadiness,
@@ -322,7 +331,6 @@ async function ensureReadinessUpgraded(
         readinessUpgradeInFlight.delete(session);
       }
     });
-    flight = { controller, work, settled: false, waiters: 0 };
     readinessUpgradeInFlight.set(session, flight);
     await awaitReadinessFlight(flight, signal);
     return;

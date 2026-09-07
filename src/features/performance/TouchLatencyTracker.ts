@@ -91,6 +91,35 @@ function hasFrameActivity(before: FrameStats, current: FrameStats): boolean {
 }
 
 /**
+ * Re-derives a currently-inert synthetic-touch point immediately before each
+ * tap. The point `PerformanceAuditor` originally derived was validated against
+ * one hierarchy snapshot captured well before the tap; between that capture and
+ * the tap, `runAudit` awaits a device-capabilities query and four parallel
+ * metric collections, and each additional sample adds its own pre-tap settle
+ * delay. A carousel auto-advance, nav transition, or a snackbar/toast appearing
+ * in that window can move a real control under the chosen coordinate, so reusing
+ * the stale point risks activating it during a read-only audit (TOCTOU, issue
+ * #6228).
+ *
+ * `TouchLatencyTracker` holds only an `AdbExecutor` + `Idle`, so it cannot fetch
+ * a hierarchy itself; this seam lets the observe layer (which has that
+ * machinery) supply a freshly-derived, device-verified point per tap. The
+ * implementation MUST capture a hierarchy synchronously with (or immediately
+ * before) the request and return `null` when no inert point is currently
+ * available, so the tracker aborts the sample rather than tapping.
+ */
+export interface InertTouchPointResolver {
+  /**
+   * Capture a fresh, device-verified view hierarchy and derive a
+   * currently-inert synthetic-touch point for the audited app, or `null` when
+   * none is available (the capture wasn't reliable, or every candidate point is
+   * now obstructed). Called once immediately before each synthetic tap, outside
+   * the timed latency window.
+   */
+  resolveInertTouchPoint(): Promise<{ x: number; y: number } | null>;
+}
+
+/**
  * Measures touch input latency by injecting synthetic touches
  * and measuring the time until UI response is detected via gfxinfo
  */
@@ -99,16 +128,19 @@ export class TouchLatencyTracker {
   private device: BootedDevice;
   private idle: Idle;
   private timer: Timer;
+  private inertTouchPointResolver?: InertTouchPointResolver;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    inertTouchPointResolver?: InertTouchPointResolver,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.idle = new Idle(device, adbFactory);
     this.timer = timer;
+    this.inertTouchPointResolver = inertTouchPointResolver;
   }
 
   /**
@@ -238,7 +270,12 @@ export class TouchLatencyTracker {
     maxWaitMs: number,
     perf: PerformanceTracker,
     sampleIndex: number,
-  ): Promise<{ latencyMs: number | null; animating: boolean }> {
+  ): Promise<{
+    latencyMs: number | null;
+    animating: boolean;
+    obstructed: boolean;
+    tapPoint: { x: number; y: number };
+  }> {
     // Reset gfxinfo to get a clean counter baseline.
     await perf.track("adbGfxinfoReset", () =>
       this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
@@ -266,14 +303,37 @@ export class TouchLatencyTracker {
         `[TouchLatency] Sample ${sampleIndex + 1}: frame activity detected across two ` +
           "consecutive no-input snapshots - app is animating, skipping this sample",
       );
-      return { latencyMs: null, animating: true };
+      return { latencyMs: null, animating: true, obstructed: false, tapPoint: touchLocation };
+    }
+
+    // Re-derive a currently-inert point immediately before tapping so a point
+    // that became obstructed since it was first selected (a carousel advancing,
+    // a snackbar/dialog appearing, a nav transition) is never reused across
+    // taps - the TOCTOU this guards against (issue #6228). The re-capture runs
+    // here, BEFORE the timed `measureFrameResponse` window below, so it doesn't
+    // skew the latency being measured. When no inert point is currently
+    // available, abort this sample rather than tapping a possibly-live control.
+    let tapPoint = touchLocation;
+    if (this.inertTouchPointResolver) {
+      const freshPoint = await perf.track("touchLatencyRevalidatePoint", () =>
+        this.inertTouchPointResolver!.resolveInertTouchPoint(),
+      );
+      if (!freshPoint) {
+        logger.warn(
+          `[TouchLatency] Sample ${sampleIndex + 1}: no verified-inert touch point on a ` +
+            "freshly captured hierarchy - aborting this sample instead of tapping a possibly-" +
+            "live control (issue #6228)",
+        );
+        return { latencyMs: null, animating: false, obstructed: true, tapPoint: touchLocation };
+      }
+      tapPoint = freshPoint;
     }
 
     // Inject touch and immediately start measuring
-    await this.injectTouch(touchLocation.x, touchLocation.y, perf);
+    await this.injectTouch(tapPoint.x, tapPoint.y, perf);
 
     const latencyMs = await this.measureFrameResponse(packageName, baselineStats, maxWaitMs, perf);
-    return { latencyMs, animating: false };
+    return { latencyMs, animating: false, obstructed: false, tapPoint };
   }
 
   /**
@@ -289,18 +349,33 @@ export class TouchLatencyTracker {
     measurements: number[],
     animatingCount: number,
     otherFailureCount: number,
+    obstructedCount: number,
   ): TouchLatencyResult {
     const anySampleAnimating = animatingCount > 0;
 
     if (measurements.length === 0) {
-      const allFailuresAnimating = anySampleAnimating && otherFailureCount === 0;
+      const allFailuresAnimating =
+        anySampleAnimating && otherFailureCount === 0 && obstructedCount === 0;
+      const allFailuresObstructed =
+        obstructedCount > 0 && otherFailureCount === 0 && !anySampleAnimating;
+      let error: string;
+      if (allFailuresAnimating) {
+        error = "App renders continuously (animating); touch latency cannot be isolated";
+      } else if (allFailuresObstructed) {
+        // Every sample aborted because no verified-inert point was available on
+        // a fresh hierarchy - the safe outcome (no tap) rather than a failure to
+        // hide (issue #6228).
+        error =
+          "Touch point was no longer inert on a freshly captured hierarchy; " +
+          "aborted touch-latency measurement rather than tapping a possibly-live control";
+      } else {
+        error = "No successful measurements - UI may be frozen or gfxinfo unavailable";
+      }
       return {
         latencyMs: 0,
         touchCoordinates: touchLocation,
         success: false,
-        error: allFailuresAnimating
-          ? "App renders continuously (animating); touch latency cannot be isolated"
-          : "No successful measurements - UI may be frozen or gfxinfo unavailable",
+        error,
         sampleCount: 0,
         animating: allFailuresAnimating,
       };
@@ -358,15 +433,24 @@ export class TouchLatencyTracker {
     const measurements: number[] = [];
     let animatingCount = 0;
     let otherFailureCount = 0;
+    let obstructedCount = 0;
+    // The point actually tapped can differ per sample when an
+    // InertTouchPointResolver re-derives it before each tap; report the most
+    // recent one so `touchCoordinates` reflects a coordinate genuinely used,
+    // not a stale initial selection (issue #6228).
+    let reportedLocation = touchLocation;
 
     try {
       for (let i = 0; i < sampleCount; i++) {
         logger.debug(`[TouchLatency] Taking sample ${i + 1}/${sampleCount}`);
 
         const sampleResult = await this.takeSample(packageName, touchLocation, maxWaitMs, perf, i);
+        reportedLocation = sampleResult.tapPoint;
 
         if (sampleResult.animating) {
           animatingCount++;
+        } else if (sampleResult.obstructed) {
+          obstructedCount++;
         } else if (sampleResult.latencyMs !== null) {
           measurements.push(sampleResult.latencyMs);
           logger.debug(`[TouchLatency] Sample ${i + 1}: ${sampleResult.latencyMs}ms`);
@@ -381,7 +465,13 @@ export class TouchLatencyTracker {
         }
       }
 
-      return this.buildResult(touchLocation, measurements, animatingCount, otherFailureCount);
+      return this.buildResult(
+        reportedLocation,
+        measurements,
+        animatingCount,
+        otherFailureCount,
+        obstructedCount,
+      );
     } catch (error) {
       logger.error(`[TouchLatency] Failed to measure touch latency: ${error}`);
       return {

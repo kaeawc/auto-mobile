@@ -12,6 +12,12 @@ export interface ObserveScreenExecuteOptions {
   skipScreenshot?: boolean;
   /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
   skipAccessibilityAudit?: boolean;
+  /**
+   * Skip the performance audit for this observation. Set when re-observing from
+   * inside the performance audit itself (per-tap inert-point re-validation,
+   * issue #6228) so the nested capture cannot recurse back into the auditor.
+   */
+  skipPerformanceAudit?: boolean;
 }
 
 /**

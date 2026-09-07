@@ -553,6 +553,11 @@ export class RealObserveScreen implements ObserveScreen {
       new PerformanceAuditor({
         device,
         adbFactory: this.adbFactory,
+        // Lazy `() => this`: the auditor re-observes through this same
+        // ObserveScreen to re-validate the synthetic-tap point before each tap
+        // (issue #6228); a provider defers resolving `this` until after
+        // construction completes.
+        observeScreenProvider: () => this,
       });
     this.accessibilityAuditor =
       dependencies?.accessibilityAuditor ??
@@ -714,7 +719,9 @@ export class RealObserveScreen implements ObserveScreen {
       await RecompositionTracker.getInstance().processObservation(result, this.device);
 
       // Audits + accessibility state detection (each is config-gated; failures don't propagate)
-      await this.performanceAuditor.run(result, perf);
+      if (!options?.skipPerformanceAudit) {
+        await this.performanceAuditor.run(result, perf);
+      }
       if (!options?.skipAccessibilityAudit) {
         await this.accessibilityAuditor.run(result, perf);
       }

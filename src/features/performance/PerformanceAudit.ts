@@ -8,7 +8,7 @@ import { BootedDevice, ElementBounds, ScreenSize } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Idle } from "../observe/Idle";
 import { DeviceCapabilitiesDetector, DeviceCapabilities } from "../../utils/DeviceCapabilities";
-import { TouchLatencyTracker } from "./TouchLatencyTracker";
+import { TouchLatencyTracker, InertTouchPointResolver } from "./TouchLatencyTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -119,12 +119,28 @@ export class PerformanceAudit {
   private touchLatencyTracker: TouchLatencyTracker;
   private repository = new PerformanceAuditRepository();
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    /**
+     * Re-derives a currently-inert tap point immediately before each synthetic
+     * tap so a point that became obstructed since it was first selected is
+     * never reused (issue #6228). Supplied by `PerformanceAuditor`, which has
+     * the observe-layer machinery to capture a fresh hierarchy; omitted (e.g.
+     * in unit tests) leaves the caller-provided point in place unchanged.
+     */
+    inertTouchPointResolver?: InertTouchPointResolver,
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.idle = new Idle(device, adbFactory);
     this.capabilitiesDetector = new DeviceCapabilitiesDetector(device, adbFactory);
-    this.touchLatencyTracker = new TouchLatencyTracker(device, adbFactory);
+    this.touchLatencyTracker = new TouchLatencyTracker(
+      device,
+      adbFactory,
+      defaultTimer,
+      inertTouchPointResolver,
+    );
   }
 
   /**

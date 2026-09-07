@@ -8,8 +8,13 @@ import {
   findAppWindowBounds,
   findInertTouchPoint,
   isHierarchyReliableForTapProbe,
+  ObserveInertTouchPointResolver,
   PerformanceAuditor,
 } from "../../../../src/features/observe/audits/PerformanceAuditor";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../../../src/features/observe/interfaces/ObserveScreen";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import {
   NoOpPerformanceTracker,
@@ -843,5 +848,114 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
     expect(decision.skipTouchLatency).toBe(false);
     expect(decision.touchPoint).toBeDefined();
     expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
+  });
+});
+
+describe("ObserveInertTouchPointResolver (#6228)", () => {
+  const appId = "com.example.app";
+  const fullWindow: ViewHierarchyWindowInfo = {
+    type: 1,
+    isFocused: true,
+    bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+  } as ViewHierarchyWindowInfo;
+
+  /**
+   * Minimal ObserveScreen double that returns queued observations and records
+   * the options each `execute` was called with.
+   */
+  class FakeObserveScreen implements ObserveScreen {
+    executeOptions: ObserveScreenExecuteOptions[] = [];
+    private queue: Array<ObserveResult | Error>;
+
+    constructor(queue: Array<ObserveResult | Error>) {
+      this.queue = queue;
+    }
+
+    async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+      this.executeOptions.push(options ?? {});
+      const next = this.queue.shift();
+      if (next instanceof Error) {
+        throw next;
+      }
+      return next ?? makeResult();
+    }
+
+    async appendRawViewHierarchy(): Promise<void> {}
+
+    async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
+      return makeResult();
+    }
+  }
+
+  function resultWithControlAt(control?: Element): ObserveResult {
+    return makeResult({
+      activeWindow: { appId, activityName: "Main" } as any,
+      viewHierarchy: {
+        hierarchy: control
+          ? { node: { $: { clickable: "true", bounds: control.bounds } } }
+          : ({} as any),
+        windows: [fullWindow],
+      } as any,
+      elements: { clickable: control ? [control] : [], scrollable: [], text: [], media: [] },
+    });
+  }
+
+  test("re-captures a fresh, device-verified hierarchy without recursing into the audit", async () => {
+    const observeScreen = new FakeObserveScreen([resultWithControlAt()]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+
+    const point = await resolver.resolveInertTouchPoint();
+
+    expect(point).not.toBeNull();
+    expect(observeScreen.executeOptions).toHaveLength(1);
+    const opts = observeScreen.executeOptions[0];
+    // Genuinely device-verified, not an age-based cache hit (addendum to #6228).
+    expect(opts.skipWaitForFresh).toBe(false);
+    // Must not recurse back into the performance audit.
+    expect(opts.skipPerformanceAudit).toBe(true);
+    // The re-capture only needs the hierarchy - the rest is skipped.
+    expect(opts.skipScreenshot).toBe(true);
+    expect(opts.skipAccessibilityAudit).toBe(true);
+  });
+
+  // The core #6228 scenario: a control moved over the window center between
+  // taps. The resolver re-derives from the fresh capture and returns an inert
+  // point that is NOT under the now-covering control.
+  test("re-derives away from a control that moved under the previous point", async () => {
+    const centerControl: Element = {
+      // Covers the window center (540, 960) so the center candidate is rejected.
+      bounds: { left: 400, top: 800, right: 700, bottom: 1100 },
+      clickable: true,
+    } as Element;
+    const observeScreen = new FakeObserveScreen([resultWithControlAt(centerControl)]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+
+    const point = await resolver.resolveInertTouchPoint();
+
+    expect(point).not.toBeNull();
+    const insideControl =
+      point!.x >= centerControl.bounds!.left &&
+      point!.x < centerControl.bounds!.right &&
+      point!.y >= centerControl.bounds!.top &&
+      point!.y < centerControl.bounds!.bottom;
+    expect(insideControl).toBe(false);
+  });
+
+  test("returns null when the fresh capture has no app window (skipTouchLatency)", async () => {
+    const noWindow = makeResult({
+      activeWindow: { appId, activityName: "Main" } as any,
+      viewHierarchy: { hierarchy: {} as any } as any,
+    });
+    const observeScreen = new FakeObserveScreen([noWindow]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+
+    expect(await resolver.resolveInertTouchPoint()).toBeNull();
+  });
+
+  test("returns null (aborts the tap) when the re-capture throws", async () => {
+    const observeScreen = new FakeObserveScreen([new Error("ctrlproxy timeout")]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+
+    expect(await resolver.resolveInertTouchPoint()).toBeNull();
   });
 });

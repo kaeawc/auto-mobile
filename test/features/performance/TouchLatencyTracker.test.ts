@@ -1096,6 +1096,109 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.touchCoordinates.x).toBeLessThanOrEqual(lowerHalfWindow.right);
     });
 
+    // Regression (#6228): the inert tap point must be re-derived immediately
+    // before EACH tap. If a control moves under the originally-selected point
+    // between the first and second tap (carousel/snackbar/nav), the second tap
+    // must use the CURRENT inert point, not the stale one from the first tap.
+    test("re-derives the inert point before each tap so a moved control never reuses a stale point (#6228)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      let pollInSample = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          pollInSample = 0;
+          return { stdout: "", stderr: "" };
+        }
+        pollInSample++;
+        // Both pre-tap snapshots idle, then a real frame after the tap - every
+        // sample produces a clean measurement.
+        const totalFrames = pollInSample <= 2 ? 0 : 3;
+        return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
+      });
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      // A stale first point, then a DIFFERENT current point on the second tap -
+      // as if the audit re-observed and found the first point now obstructed and
+      // a fresh inert point elsewhere.
+      const points = [
+        { x: 111, y: 222 },
+        { x: 333, y: 444 },
+      ];
+      let resolveCallCount = 0;
+      const resolver = {
+        resolveInertTouchPoint: async () => points[resolveCallCount++] ?? null,
+      };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer, resolver);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 2, maxWaitMs: 200 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.sampleCount).toBe(2);
+      // The point was resolved once per tap, not once for the whole run.
+      expect(resolveCallCount).toBe(2);
+
+      const tapCommands = dynamicAdb.getExecutedCommands().filter((c) => c.includes("input tap"));
+      expect(tapCommands).toHaveLength(2);
+      // First tap used the first-resolved point; the second tap used the CURRENT
+      // (second) point, not the stale first one.
+      expect(tapCommands[0]).toContain("input tap 111 222");
+      expect(tapCommands[1]).toContain("input tap 333 444");
+      expect(tapCommands[1]).not.toContain("111 222");
+      // touchCoordinates reflect a coordinate genuinely tapped.
+      expect(result.touchCoordinates).toEqual({ x: 333, y: 444 });
+    });
+
+    // Regression (#6228): when the freshly captured hierarchy has no
+    // verified-inert point (a control now covers every candidate), the sample
+    // must abort WITHOUT tapping rather than reuse a stale point.
+    test("aborts the sample without tapping when no inert point is available on a fresh hierarchy (#6228)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          return { stdout: "", stderr: "" };
+        }
+        // Idle baseline snapshots so the sample reaches the re-validation step.
+        return { stdout: `Total frames rendered: 0`, stderr: "" };
+      });
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      const resolver = {
+        resolveInertTouchPoint: async () => null,
+      };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer, resolver);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 2, maxWaitMs: 50 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // No tap was ever injected - the whole point of aborting.
+      const tapCommands = dynamicAdb.getExecutedCommands().filter((c) => c.includes("input tap"));
+      expect(tapCommands).toHaveLength(0);
+
+      expect(result.success).toBe(false);
+      expect(result.sampleCount).toBe(0);
+      expect(result.animating).toBeFalsy();
+      expect(result.error?.toLowerCase()).toContain("no longer inert");
+    });
+
     test("should handle errors gracefully and return error result", async function () {
       const errorAdb = new FakeAdbExecutor();
       errorAdb.setDefaultError(new Error("ADB connection failed"));

@@ -182,6 +182,11 @@ export async function pollObserveUntil(
     throwIfAborted(options.signal);
 
     const observedMs = deviceCaptureTimestamp(observation);
+    // A timestamp alone cannot make a capture admissible. ObserveScreen marks
+    // wrong-window and incomplete hierarchies stale even when CtrlProxy was
+    // able to stamp them; those trees must neither satisfy a predicate nor
+    // advance stateful settle predicates.
+    const isExplicitlyStale = observation.freshness?.isFresh === false;
     // Unseeded: the first observation is a throwaway baseline. It establishes
     // the entering reference (and the floor) but can never itself be terminal
     // evidence — it may be the pre-call cache the loop must read past.
@@ -191,7 +196,8 @@ export async function pollObserveUntil(
     // `Math.max` guarantees a stale/cached capture can never LOWER the floor.
     const meetsPriorFloor =
       observedMs !== undefined && (deviceFloor === undefined || observedMs >= deviceFloor);
-    if (observedMs !== undefined) {
+    const isAdmissibleEvidence = meetsPriorFloor && !isExplicitlyStale;
+    if (isAdmissibleEvidence && observedMs !== undefined) {
       deviceFloor = deviceFloor === undefined ? observedMs : Math.max(deviceFloor, observedMs);
     }
     // Strictly newer than the entering/baseline capture => a genuine
@@ -200,12 +206,12 @@ export async function pollObserveUntil(
       observedMs !== undefined &&
       enteringReference !== undefined &&
       observedMs > enteringReference &&
-      meetsPriorFloor;
+      isAdmissibleEvidence;
     if (isPostInvocation) {
       hasPostInvocationEvidence = true;
     }
 
-    if (meetsPriorFloor) {
+    if (isAdmissibleEvidence) {
       newestTrustworthyObservation = observation;
     }
 
@@ -213,15 +219,17 @@ export async function pollObserveUntil(
       return { observation, polls, waitMs: timer.now() - start, stopped: false };
     }
 
-    // Always evaluate so stateful predicates (e.g. a settle's run counter)
-    // advance every poll, but only ACCEPT a stop backed by a post-invocation
-    // capture — never the entering reference re-served from cache.
-    const matched = onObservation(observation, previous, polls);
+    // Rejected observations are deliberately invisible to stateful predicates:
+    // allowing a below-floor A to update `previous` between B and a later A
+    // could manufacture a two-sample settle from regressed evidence.
+    const matched = isAdmissibleEvidence && onObservation(observation, previous, polls);
     if (matched && isPostInvocation) {
       return { observation, polls, waitMs: timer.now() - start, stopped: true };
     }
 
-    previous = observation;
+    if (isAdmissibleEvidence) {
+      previous = observation;
+    }
 
     if (timer.now() - start >= options.timeoutMs) {
       return {

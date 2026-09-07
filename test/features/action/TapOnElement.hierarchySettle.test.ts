@@ -220,6 +220,7 @@ describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
     // The result carries the device capture time, never the FakeTimer/host
     // clock used to measure the surrounding action.
     expect(observation.freshness?.actualTimestamp).toBe(42);
+    expect(observation.updatedAt).toBe(42);
   });
 
   test("replaceObservationHierarchy does not promote an incomplete live replacement", () => {

@@ -901,6 +901,13 @@ export class TapOnElement extends BaseVisualChange {
     refreshedFromDevice: boolean,
   ): void {
     observeResult.viewHierarchy = viewHierarchy;
+    // The replacement is device-authored; keep the enclosing observation in
+    // that same clock domain so later freshness floors never compare it with
+    // the host time from the cached observation it replaced.
+    const updatedAt = hierarchyUpdatedAtToMillis(viewHierarchy);
+    if (updatedAt !== undefined) {
+      observeResult.updatedAt = updatedAt;
+    }
     const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
     if (screenSize) {
       observeResult.screenSize = screenSize;

@@ -89,8 +89,9 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     // cache served by a timed-out sub-poll. The floor must stay at 30.
     fake.setObserveSequence([obs(10, "a"), obs(30, "b"), obs(20, "stale"), obs(40, "c")]);
 
-    let polls = 0;
-    await pollObserveUntil(fake, timer, { timeoutMs: 5000, pollMs: 150 }, () => ++polls >= 4);
+    await pollObserveUntil(fake, timer, { timeoutMs: 5000, pollMs: 150 }, (observation) => {
+      return (observation.viewHierarchy!.hierarchy.node as any).marker === "c";
+    });
 
     // minTimestamp: 0 (unseeded baseline) -> 11 (forced strictly past the
     // baseline 10, still no post-invocation capture) -> 30 (inclusive floor,
@@ -120,6 +121,26 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("newest");
     expect(outcome.observation.updatedAt).toBe(30);
     expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 30]);
+  });
+
+  test("does not let below-floor or explicitly stale frames advance a stateful predicate", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const stale = {
+      ...obs(20, "regressed"),
+      freshness: { isFresh: false, verified: false, category: "window_identity" },
+    } as ObserveResult;
+    fake.setObserveSequence([obs(10, "baseline"), obs(30, "B"), stale, obs(40, "A")]);
+    const seen: string[] = [];
+
+    const outcome = await pollObserveUntil(fake, timer, { timeoutMs: 450, pollMs: 150 }, (value) => {
+      seen.push((value.viewHierarchy!.hierarchy.node as any).marker);
+      return false;
+    });
+
+    expect(seen).toEqual(["baseline", "B", "A"]);
+    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("A");
   });
 
   test("does not use a host-created observation timestamp as a device floor", async () => {

@@ -139,6 +139,10 @@ export async function clearAndroidKeyValueFileDirect(
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, async () => {
+    const { exists } = await readAndroidPreferencesXmlIfExists(adb, appId, safeFileName);
+    if (!exists) {
+      return;
+    }
     const emptyDocument: AndroidPreferencesXmlDocument = { map: {} };
     await writeAndroidPreferencesXml(
       adb,
@@ -269,11 +273,13 @@ function parseAndroidBool(value: string): string {
 }
 
 function parseAndroidInt(value: string): string {
-  const trimmed = value.trim();
-  if (!/^-?\d+$/.test(trimmed)) {
+  // Keep this exact grammar aligned with Kotlin's String.toIntOrNull(): an
+  // optional sign is valid, but surrounding whitespace is not silently
+  // accepted. The fallback must not vary by inspection availability.
+  if (!/^[+-]?\d+$/.test(value)) {
     throw new ActionableError(`Expected INT key-value, got '${value}'.`);
   }
-  const parsed = Number.parseInt(trimmed, 10);
+  const parsed = Number.parseInt(value, 10);
   if (parsed < ANDROID_INT_MIN || parsed > ANDROID_INT_MAX) {
     throw new ActionableError(
       `Android INT key-values must fit in the signed 32-bit range (${ANDROID_INT_MIN} to ${ANDROID_INT_MAX}), got '${value}'.`,
@@ -307,15 +313,14 @@ export function dataStoreInspectionDisabledReason(appId: string): string {
 }
 
 function parseAndroidLong(value: string): string {
-  const trimmed = value.trim();
-  if (!/^-?\d+$/.test(trimmed)) {
+  if (!/^[+-]?\d+$/.test(value)) {
     throw new ActionableError(`Expected LONG key-value, got '${value}'.`);
   }
-  const parsed = BigInt(trimmed);
+  const parsed = BigInt(value);
   if (parsed < ANDROID_LONG_MIN || parsed > ANDROID_LONG_MAX) {
     throw new ActionableError(`Expected signed 64-bit LONG key-value, got '${value}'.`);
   }
-  return trimmed;
+  return String(parsed);
 }
 
 function parseAndroidStringSet(value: string): string[] {

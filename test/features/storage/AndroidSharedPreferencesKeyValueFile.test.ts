@@ -152,6 +152,50 @@ describe("setAndroidKeyValueDirect", () => {
     ).rejects.toThrow(/32-bit range/);
   });
 
+  test.each([
+    ["INT", "+1"],
+    ["LONG", "+1"],
+  ] as const)("accepts Kotlin-compatible signed %s values", async (type, value) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
+
+    await setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      "com.example.app",
+      "settings",
+      "signed",
+      value,
+      type,
+    );
+
+    expect(
+      decodeBase64WritePayload(
+        commandText(adb.getExecutedCommands(), "base64 -d > shared_prefs/settings.xml"),
+      ),
+    ).toContain('value="1"');
+  });
+
+  test.each([
+    ["INT", " 1"],
+    ["LONG", "1 "],
+  ] as const)("rejects whitespace around Kotlin %s values", async (type, value) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
+
+    await expect(
+      setAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        "com.example.app",
+        "settings",
+        "signed",
+        value,
+        type,
+      ),
+    ).rejects.toThrow(`Expected ${type}`);
+  });
+
   test("surfaces a non-debuggable app failure as an actionable error, not the bare run-as message", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError(
@@ -266,17 +310,32 @@ describe("removeAndroidKeyValueDirect", () => {
 });
 
 describe("clearAndroidKeyValueFileDirect", () => {
-  test("writes an empty map without needing to read the file first", async () => {
+  test("clears an existing file without creating a new preference store", async () => {
     const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
     await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
 
     const commands = adb.getExecutedCommands();
-    expect(commands.some((entry) => entry.includes("cat shared_prefs/settings.xml"))).toBe(false);
+    expect(commands.some((entry) => entry.includes("cat shared_prefs/settings.xml"))).toBe(true);
     const writeCommand = commandText(commands, "base64 -d > shared_prefs/settings.xml");
     const writtenXml = decodeBase64WritePayload(writeCommand);
     expect(writtenXml).toContain("<map");
     expect(writtenXml).not.toContain("<string");
+  });
+
+  test("does not create a missing preference store when clearing", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell run-as com.example.app cat shared_prefs/settings.xml",
+      new Error("cat: shared_prefs/settings.xml: No such file or directory"),
+    );
+
+    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
+
+    expect(adb.getExecutedCommands()).not.toContainEqual(
+      expect.stringContaining("base64 -d > shared_prefs/settings.xml"),
+    );
   });
 });
 

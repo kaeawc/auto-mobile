@@ -377,6 +377,11 @@ fun KeyValueInspector(
                                         entryToSave.type,
                                       )
                                     isSaving = false
+                                    // The user can cancel A or start editing B while A's
+                                    // asynchronous save is in flight. Its outcome belongs
+                                    // only to the editor that submitted it; otherwise A's
+                                    // fallback warning/error appears under B.
+                                    if (editingEntry != entryToSave) return@launch
                                     when (result) {
                                       is Result.Success -> {
                                         saveWarning = result.data.warning

@@ -2,6 +2,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 
 /**
  * Verify that a "go home" action actually landed on the home screen by
@@ -160,6 +161,7 @@ export async function resolveConfiguredHomePackage(
   deviceId: string,
   timer: Timer = defaultTimer,
   incarnationToken?: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   const now = timer.now();
   const cached = resolvedHomePackageCache.get(deviceId);
@@ -167,12 +169,18 @@ export async function resolveConfiguredHomePackage(
   if (freshCachedPackage !== undefined) {
     return freshCachedPackage;
   }
+  // Deadline-bounded (RESOLVE_HOME_TIMEOUT_MS) AND cancellable: combine the
+  // caller's signal with the ambient request signal so a cancelled request
+  // still aborts this resolve, then rethrow on abort so cancellation propagates
+  // instead of being swallowed into a null that downgrades to the fallback list.
+  const combinedSignal = combineWithAmbientAbort(signal);
   try {
     const result = await adb.executeCommand(
       RESOLVE_HOME_COMMAND,
       RESOLVE_HOME_TIMEOUT_MS,
       undefined,
       true,
+      combinedSignal,
     );
     const packageName = parseResolvedHomePackage(result.stdout);
     if (packageName) {
@@ -184,6 +192,9 @@ export async function resolveConfiguredHomePackage(
     }
     return packageName;
   } catch (error) {
+    if (combinedSignal?.aborted) {
+      throw error;
+    }
     logger.warn(
       `[androidLauncherPackages] Failed to resolve configured HOME launcher package: ${errorMessage(error)}`,
       error,
@@ -229,11 +240,18 @@ export async function isForegroundLauncher(
   deviceId: string,
   timer: Timer = defaultTimer,
   incarnationToken?: string,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (!appId) {
     return false;
   }
-  const configuredHome = await resolveConfiguredHomePackage(adb, deviceId, timer, incarnationToken);
+  const configuredHome = await resolveConfiguredHomePackage(
+    adb,
+    deviceId,
+    timer,
+    incarnationToken,
+    signal,
+  );
   if (configuredHome) {
     return appId === configuredHome;
   }

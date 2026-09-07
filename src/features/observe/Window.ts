@@ -12,9 +12,34 @@ import { BootedDevice } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { Window as WindowInterface } from "./interfaces/Window";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 
-// AdbExecutor extended with optional AdbClient-specific methods
-type ExtendedAdbExecutor = AdbExecutor & { getAndroidApiLevel?: () => Promise<number | null> };
+// AdbExecutor extended with optional AdbClient-specific methods. Both the
+// deadline (timeoutMs) and the cancellation signal are forwarded so the
+// getActive read cannot outlive the caller budget nor survive an abort.
+type ExtendedAdbExecutor = AdbExecutor & {
+  getAndroidApiLevel?: (timeoutMs?: number, signal?: AbortSignal) => Promise<number | null>;
+};
+
+/**
+ * Options bounding a single {@link Window.getActive} read. Both are threaded
+ * into EVERY underlying device command (the initial `dumpsys window windows`,
+ * the API-level probe, and the API-27 `dumpsys window` legacy fallback) so no
+ * sub-read can outlive `timeoutMs` or continue past `signal`'s abort.
+ */
+export interface GetActiveOptions {
+  /** Cancellation signal; combined with the ambient request signal per read. */
+  signal?: AbortSignal;
+  /** Per-read deadline in ms. Defaults to {@link DEFAULT_GET_ACTIVE_TIMEOUT_MS}. */
+  timeoutMs?: number;
+}
+
+/**
+ * Default per-read deadline for the `getActive` device commands when the caller
+ * supplies no budget. Keeps every dumpsys read bounded rather than unbounded, so
+ * a wedged adb cannot hang the foreground verification indefinitely.
+ */
+export const DEFAULT_GET_ACTIVE_TIMEOUT_MS = 5000;
 
 export class Window implements WindowInterface {
   private adb: ExtendedAdbExecutor;
@@ -140,6 +165,7 @@ export class Window implements WindowInterface {
   async getActive(
     forceRefresh: boolean = false,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    options: GetActiveOptions = {},
   ): Promise<ActiveWindowInfo> {
     // Return cached value if available and not forcing refresh
     if (!forceRefresh && this.cachedActiveWindow) {
@@ -158,15 +184,31 @@ export class Window implements WindowInterface {
       }
     }
 
+    // Bound and cancel EVERY device read below with the same budget + combined
+    // signal, so no sub-read (initial dumpsys, API-level probe, API-27 legacy
+    // fallback) can outlive the caller deadline or survive an abort. Combining
+    // with the ambient request signal is required (see combineWithAmbientAbort):
+    // passing only a private/forwarded signal would drop MCP request cancellation.
+    const timeoutMs = options.timeoutMs ?? DEFAULT_GET_ACTIVE_TIMEOUT_MS;
+    const signal = combineWithAmbientAbort(options.signal);
+
     try {
       const { stdout } = await perf.track("adbDumpsysWindowWindows", () =>
-        this.adb.executeCommand(`shell "dumpsys window windows"`),
+        this.adb.executeCommand(
+          `shell "dumpsys window windows"`,
+          timeoutMs,
+          undefined,
+          true,
+          signal,
+        ),
       );
 
-      // Detect API level for parsing strategy
+      // Detect API level for parsing strategy. An abort during this sub-read
+      // rejects out of getAndroidApiLevel (it rethrows when the signal fired)
+      // rather than resolving null and letting us parse a post-abort result.
       let apiLevel: number | null = null;
       if (typeof this.adb.getAndroidApiLevel === "function") {
-        apiLevel = await this.adb.getAndroidApiLevel();
+        apiLevel = await this.adb.getAndroidApiLevel(timeoutMs, signal);
       }
 
       let parsed: { appId: string; activityName: string } | null = null;
@@ -180,7 +222,7 @@ export class Window implements WindowInterface {
         }
         if (!parsed) {
           // Try separate dumpsys window command (shorter output)
-          parsed = await this.parseActiveWindowFromDumpsysWindow();
+          parsed = await this.parseActiveWindowFromDumpsysWindow(timeoutMs, signal);
         }
         if (!parsed) {
           // Fall through to modern as safety net
@@ -222,6 +264,12 @@ export class Window implements WindowInterface {
 
       return result;
     } catch (err) {
+      // A cancellation must PROPAGATE, never be masked as an empty window: the
+      // caller aborted (or its budget expired), so returning a synthetic
+      // `{appId:""}` would let a post-abort result be parsed/cached/acted on.
+      if (signal?.aborted) {
+        throw err;
+      }
       logger.error(`Failed to get active window information: ${err}`);
       return {
         appId: "",
@@ -232,16 +280,31 @@ export class Window implements WindowInterface {
   }
 
   /**
-   * Parse mCurrentFocus/mFocusedApp from simpler `dumpsys window` output (API 25 fallback)
+   * Parse mCurrentFocus/mFocusedApp from simpler `dumpsys window` output (API 25 fallback).
+   * Bounded by `timeoutMs` and cancelled by `signal`; an abort rethrows so it
+   * propagates out of getActive instead of being swallowed to null and letting a
+   * post-abort parse continue.
    */
-  private async parseActiveWindowFromDumpsysWindow(): Promise<{
+  private async parseActiveWindowFromDumpsysWindow(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<{
     appId: string;
     activityName: string;
   } | null> {
     try {
-      const { stdout } = await this.adb.executeCommand(`shell "dumpsys window"`);
+      const { stdout } = await this.adb.executeCommand(
+        `shell "dumpsys window"`,
+        timeoutMs,
+        undefined,
+        true,
+        signal,
+      );
       return parseDumpsysWindowFocus(stdout);
     } catch (err) {
+      if (signal?.aborted) {
+        throw err;
+      }
       logger.error(`Failed to get dumpsys window for legacy fallback: ${err}`);
       return null;
     }
@@ -304,23 +367,24 @@ export function parseActiveWindowModern(
       }
     }
 
-    // If still no match, try fallback approaches
+    // If still no match, try fallback approaches.
+    //
+    // This scan is BLOCK-BOUNDED (issue #6289): each window's visibility fields
+    // (`mViewVisibility`/`isOnScreen`/`isVisible`) are read only from within
+    // that window's own block, delimited by the next `Window #N` header. The
+    // previous single-regex form let `[\s\S]*?` run PAST the header window's
+    // block, so on API 29-30 captures lacking a parseable imeControlTarget it
+    // could pair an EARLIER hidden app's `package/activity` header with a LATER
+    // visible window's visibility fields — reporting a backgrounded app as
+    // foreground. The scan is also launcher-AWARE: a genuinely-visible launcher
+    // window is now a valid foreground result (only SystemUI overlays are
+    // excluded), so Home verification reads the launcher instead of falling
+    // through to whatever hidden app happened to appear first.
     if (!packageName || !activityName) {
-      const visibleAppMatches = stdout.matchAll(
-        /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?mViewVisibility=0x0[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs,
-      );
-
-      for (const match of visibleAppMatches) {
-        if (
-          match[1] &&
-          match[2] &&
-          !match[1].includes("android.systemui") &&
-          !match[1].includes("nexuslauncher")
-        ) {
-          packageName = match[1];
-          activityName = match[2];
-          break;
-        }
+      const visible = parseFirstVisibleModernWindow(stdout);
+      if (visible) {
+        packageName = visible.appId;
+        activityName = visible.activityName;
       }
 
       if (!packageName || !activityName) {
@@ -348,6 +412,39 @@ export function parseActiveWindowModern(
 
   if (packageName && activityName) {
     return { appId: packageName, activityName };
+  }
+  return null;
+}
+
+/**
+ * Return the first VISIBLE app window from modern (`API 26+`) `dumpsys window
+ * windows` output, scanning window-block by window-block so a window's
+ * visibility fields are never read across its block boundary (issue #6289).
+ *
+ * A block qualifies when, within its own `Window #N Window{... pkg/act}:` body,
+ * it reports `mViewVisibility=0x0`, `isOnScreen=true`, and `isVisible=true`.
+ * SystemUI overlays are skipped; the launcher is NOT skipped (launcher-aware),
+ * so a home screen reports the launcher as the reliable foreground.
+ */
+export function parseFirstVisibleModernWindow(
+  stdout: string,
+): { appId: string; activityName: string } | null {
+  const blockRegex =
+    /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:([\s\S]*?)(?=Window #\d+|$)/g;
+  for (const block of stdout.matchAll(blockRegex)) {
+    const pkg = block[1];
+    const activity = block[2];
+    const content = block[3];
+    if (!pkg || !activity || pkg.includes("android.systemui")) {
+      continue;
+    }
+    if (
+      /mViewVisibility=0x0\b/.test(content) &&
+      /isOnScreen=true/.test(content) &&
+      /isVisible=true/.test(content)
+    ) {
+      return { appId: pkg, activityName: activity };
+    }
   }
   return null;
 }

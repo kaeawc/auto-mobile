@@ -6,6 +6,7 @@ import {
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 import type { AdbDeviceState } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 
 /**
  * Fake implementation of AdbExecutor for testing
@@ -41,6 +42,23 @@ export class FakeAdbExecutor implements AdbExecutor {
   private deviceTimestampMsSequence: number[] | null = null;
   private deviceTimestampSource: DeviceTimestampSource | null = null;
   private androidApiLevel: number | null = null;
+  private apiLevelCalls: Array<{ timeoutMs?: number; signal?: AbortSignal }> = [];
+  private postCommandAborts: Array<{ pattern: string; controller: AbortController }> = [];
+  private abortAfterApiLevelController: AbortController | null = null;
+  // Off by default so existing suites that hand an already-aborted signal to a
+  // command (and assert on the returned value) keep their lenient behavior.
+  // Cancellation-propagation tests opt in via setThrowOnAbortedSignal().
+  private throwOnAbortedSignal: boolean = false;
+
+  /**
+   * When enabled, {@link executeCommand} and {@link getAndroidApiLevel} reject
+   * with a cancellation error when handed an already-aborted signal, mirroring
+   * the real AdbClient. Lets tests assert that device-read callers propagate an
+   * abort instead of masking it.
+   */
+  setThrowOnAbortedSignal(value: boolean = true): void {
+    this.throwOnAbortedSignal = value;
+  }
 
   /**
    * Create a proper ExecResult with all required methods
@@ -185,8 +203,41 @@ export class FakeAdbExecutor implements AdbExecutor {
     this.androidApiLevel = level;
   }
 
-  async getAndroidApiLevel(): Promise<number | null> {
-    return this.androidApiLevel;
+  async getAndroidApiLevel(timeoutMs?: number, signal?: AbortSignal): Promise<number | null> {
+    this.apiLevelCalls.push({ timeoutMs, signal });
+    // Mimic AdbClient.getAndroidApiLevel (opt-in): a cancelled read rejects (and
+    // never caches), so callers such as Window.getActive can propagate the abort.
+    if (this.throwOnAbortedSignal && signal?.aborted) {
+      throw new Error(OPERATION_CANCELLED_MESSAGE);
+    }
+    const level = this.androidApiLevel;
+    // Optionally trip an abort controller right AFTER this probe resolves, to
+    // simulate cancellation arriving before the next read (e.g. the API-27
+    // legacy dumpsys fallback) starts.
+    if (this.abortAfterApiLevelController) {
+      this.abortAfterApiLevelController.abort();
+    }
+    return level;
+  }
+
+  /** Recorded (timeoutMs, signal) for each getAndroidApiLevel call. */
+  getApiLevelCalls(): Array<{ timeoutMs?: number; signal?: AbortSignal }> {
+    return [...this.apiLevelCalls];
+  }
+
+  /**
+   * When a command whose text includes `pattern` executes, the command returns
+   * its configured response normally and THEN `controller` is aborted, so the
+   * NEXT device read observes a cancelled signal. Models cancellation racing in
+   * just after a read completes.
+   */
+  abortAfterCommand(pattern: string, controller: AbortController): void {
+    this.postCommandAborts.push({ pattern, controller });
+  }
+
+  /** Abort `controller` immediately after the next getAndroidApiLevel probe resolves. */
+  abortAfterApiLevel(controller: AbortController): void {
+    this.abortAfterApiLevelController = controller;
   }
 
   /**
@@ -289,6 +340,14 @@ export class FakeAdbExecutor implements AdbExecutor {
     this.executedCommands.push(command);
     this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
 
+    // Mimic AdbClient (opt-in): a command handed an already-aborted signal
+    // rejects with a cancellation error rather than executing, so device-read
+    // callers can propagate the abort instead of masking it as a synthetic
+    // empty result.
+    if (this.throwOnAbortedSignal && signal?.aborted) {
+      throw new Error(OPERATION_CANCELLED_MESSAGE);
+    }
+
     // Check for per-command errors based on pattern matching
     for (const [pattern, error] of this.commandErrors.entries()) {
       if (command.includes(pattern)) {
@@ -301,6 +360,20 @@ export class FakeAdbExecutor implements AdbExecutor {
       throw this.defaultError;
     }
 
+    const response = this.resolveCommandResponse(command);
+
+    // Post-command abort hooks: this read has "completed"; trip any registered
+    // controller so the NEXT read observes cancellation.
+    for (const { pattern, controller } of this.postCommandAborts) {
+      if (command.includes(pattern)) {
+        controller.abort();
+      }
+    }
+
+    return response;
+  }
+
+  private resolveCommandResponse(command: string): ExecResult {
     // Check for sequenced responses (consumed in order) before single responses
     for (const [pattern, responses] of this.commandResponseSequences.entries()) {
       if (command.includes(pattern) && responses.length > 0) {

@@ -4,6 +4,8 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import type { BootedDevice } from "../../../src/models";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
@@ -216,6 +218,61 @@ describe("PressButton Android keycode dispatch", () => {
       expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("keyevent"))).toEqual([
         "shell input keyevent 3",
       ]);
+    });
+  });
+
+  // Deadline/abort plumbing (issue #6289): press() accepts a signal, threaded
+  // into the ADB keyevent fallback and the home-foreground verification reads.
+  describe("AbortSignal propagation (issue #6289)", () => {
+    test("forwards the signal into the ADB keyevent fallback and home verification", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const window = launcherWindow();
+      const controller = new AbortController();
+
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = window;
+      const result = await (pressButton as any).executeAndroidButtonPress(
+        "home",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      expect(result.success).toBe(true);
+      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
+      expect(keyeventCall?.signal).toBeDefined();
+      // The verification read (getActive) also received the forwarded signal.
+      expect(window.getLastGetActiveSignal()).toBeDefined();
+    });
+
+    test("combined signal: an ambient request abort cancels the ADB keyevent fallback", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      fakeAdb.setThrowOnAbortedSignal();
+      const controller = new AbortController();
+      controller.abort();
+
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = launcherWindow();
+
+      // No explicit signal forwarded -- only the ambient request signal is
+      // aborted. Because the fallback COMBINES the (absent) forwarded signal
+      // with the ambient one, the ADB keyevent is still cancelled.
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          (pressButton as any).executeAndroidButtonPress("home"),
+        ),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
+      expect(keyeventCall?.signal?.aborted).toBe(true);
     });
   });
 

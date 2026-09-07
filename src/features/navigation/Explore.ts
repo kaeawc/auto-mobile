@@ -895,8 +895,16 @@ export class Explore extends BaseVisualChange {
 
       if (this.device.platform === "android") {
         // PressButton's Android home path retains the injected ADB/timer and
-        // performs the same accessibility-service then ADB fallback.
-        const result = await new PressButton(this.device, this.adb, this.timer).press("home");
+        // performs the same accessibility-service then ADB fallback. Forward
+        // Explore's AbortSignal (not just a remaining timeout) so a cancelled
+        // exploration aborts the home dispatch and foreground-verification reads
+        // rather than running them to completion (issue #6289).
+        const result = await new PressButton(this.device, this.adb, this.timer).press(
+          "home",
+          undefined,
+          undefined,
+          signal,
+        );
         if (!result.success) {
           throw new Error(result.error ?? "Android home navigation failed");
         }

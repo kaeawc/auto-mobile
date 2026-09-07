@@ -340,4 +340,69 @@ describe("androidLauncherPackages", () => {
       expect(fakeAdb.getExecutedCommands()).toEqual([]);
     });
   });
+
+  describe("deadline-bounding + cancellation (#6289)", () => {
+    test("resolve-activity is deadline-bounded and receives the signal", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      const controller = new AbortController();
+
+      await resolveConfiguredHomePackage(
+        fakeAdb,
+        "device-1",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      const call = fakeAdb.getCommandCalls().find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      // Bounded (RESOLVE_HOME_TIMEOUT_MS) and cancellable.
+      expect(call?.timeoutMs).toBe(5000);
+      expect(call?.noRetry).toBe(true);
+      expect(call?.signal).toBeDefined();
+    });
+
+    test("propagates an abort instead of swallowing it into a null downgrade", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      fakeAdb.setThrowOnAbortedSignal();
+      const controller = new AbortController();
+      controller.abort();
+
+      // A cancelled resolve must REJECT (propagate) rather than return null and
+      // downgrade the caller to the fallback launcher list.
+      await expect(
+        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, controller.signal),
+      ).rejects.toThrow();
+
+      // The abort must not have poisoned the cache: a later resolve with a live
+      // signal still returns the real configured launcher.
+      const later = await resolveConfiguredHomePackage(fakeAdb, "device-1");
+      expect(later).toBe("com.example.launcher");
+    });
+
+    test("isForegroundLauncher forwards the signal into the resolve read", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      const controller = new AbortController();
+
+      await isForegroundLauncher(
+        "com.example.launcher",
+        fakeAdb,
+        "device-1",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      const call = fakeAdb.getCommandCalls().find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      expect(call?.signal).toBeDefined();
+    });
+  });
 });

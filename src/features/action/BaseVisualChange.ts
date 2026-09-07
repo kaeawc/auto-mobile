@@ -570,16 +570,29 @@ export class BaseVisualChange {
    * keeps tests fast/deterministic) to tolerate the brief settle time a real
    * device needs between dispatch and the launcher taking focus.
    *
-   * @param retryDelaysMs - Backoff delays between verification attempts.
+   * @param options.signal - Cancellation signal, threaded into EVERY device read
+   *   (`getActive`'s dumpsys/api-level/legacy reads and the launcher resolve) so
+   *   an aborted request stops the verification instead of it running to
+   *   completion against a device the caller no longer cares about. An abort
+   *   rejects out of the reads and BREAKS the retry loop (it is re-thrown), so a
+   *   cancelled verification never silently reports `false` as a device verdict.
+   * @param options.timeoutMs - Per-read deadline forwarded to `getActive`.
+   * @param options.retryDelaysMs - Backoff delays between verification attempts.
    *   Defaults chosen to give a real device a couple of short chances to
    *   settle without materially slowing down a genuine failure.
    */
   protected async verifyAndroidHomeForeground(
-    retryDelaysMs: readonly number[] = [150, 300],
+    options: {
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      retryDelaysMs?: readonly number[];
+    } = {},
   ): Promise<boolean> {
+    const { signal, timeoutMs } = options;
+    const retryDelaysMs = options.retryDelaysMs ?? [150, 300];
     for (let attempt = 0; ; attempt++) {
       try {
-        const activeWindow = await this.window.getActive(true);
+        const activeWindow = await this.window.getActive(true, undefined, { signal, timeoutMs });
         if (
           await isForegroundLauncher(
             activeWindow.appId,
@@ -587,11 +600,17 @@ export class BaseVisualChange {
             this.device.deviceId,
             this.timer,
             this.device.transportId,
+            signal,
           )
         ) {
           return true;
         }
       } catch (error) {
+        // A cancellation must not be masked as "not the launcher": rethrow so the
+        // caller sees the abort rather than a false failure verdict.
+        if (signal?.aborted) {
+          throw error;
+        }
         logger.warn(
           `[BaseVisualChange] Failed to read foreground app while verifying home press: ${errorMessage(error)}`,
           error,

@@ -85,9 +85,16 @@ export class VideoCaptureStartCleanupError extends Error {
  * explicit.
  */
 export class VideoCaptureFinalizationError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  /**
+   * `true` means the backend left a recoverable device artifact behind. The
+   * service must retain its handle so a later stop can retry finalization.
+   */
+  readonly retainOwnership: boolean;
+
+  constructor(message: string, options?: ErrorOptions & { retainOwnership?: boolean }) {
     super(message, options);
     this.name = "VideoCaptureFinalizationError";
+    this.retainOwnership = options?.retainOwnership ?? false;
   }
 }
 
@@ -385,6 +392,12 @@ export class VideoRecorderService {
       );
     }
     if (error instanceof VideoCaptureFinalizationError) {
+      if (error.retainOwnership) {
+        return toActionableError(
+          error,
+          `Recording ${recordingId} stopped but its retained device artifact still needs finalization`,
+        );
+      }
       // The backend observed its capture exit before artifact finalization
       // failed. Keeping this handle would permanently block a new capture,
       // even though force-stop cannot recover the already-removed source.

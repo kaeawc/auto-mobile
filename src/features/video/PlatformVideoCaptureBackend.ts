@@ -242,7 +242,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // available to the ownership layer instead of retaining a dead handle.
       throw new VideoCaptureFinalizationError(
         `Android capture exited but finalization failed: ${errorMessage(error)}`,
-        { cause: error },
+        // An unstable on-device file is deliberately retained above. Keep the
+        // service owner too, so the public stop operation remains a reachable
+        // recovery path instead of orphaning that deviceTempPath.
+        { cause: error, retainOwnership: !deviceFileFinalized },
       );
     }
   }

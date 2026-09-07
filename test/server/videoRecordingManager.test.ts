@@ -243,6 +243,31 @@ describe("videoRecordingManager", () => {
     expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("interrupted");
   });
 
+  test("retains a recoverable device artifact owner after finalization fails", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    fakeBackend.stop = async () => {
+      throw new VideoCaptureFinalizationError("device artifact is still settling", {
+        retainOwnership: true,
+      });
+    };
+
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("recording");
+
+    fakeBackend.stop = async (handle) => ({
+      recordingId: handle.recordingId,
+      outputPath: handle.outputPath,
+      startedAt: handle.startedAt,
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+      sizeBytes: 10,
+      codec: "h264",
+    });
+    await expect(stopVideoRecording(active.recordingId)).resolves.toMatchObject({
+      metadata: { recordingId: active.recordingId },
+    });
+  });
+
   test("shares manager finalization when shutdown overlaps a user stop", async () => {
     const active = await startVideoRecording({ device: testDevice });
     const originalUpdate = fakeRepository.updateRecording.bind(fakeRepository);

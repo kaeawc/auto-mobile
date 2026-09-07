@@ -247,6 +247,13 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    * Known limitation: if the process legitimately restarts mid-audit, GC
    * events from the *new* process are not captured — only from the pid alive
    * at audit start. Tracking a restart is left as a follow-up.
+   *
+   * The caller MUST invoke this *before* triggering its own explicit
+   * (SIGUSR1) GC (see {@link collectMetrics} / {@link triggerGC}) — this dump
+   * is what defines the window's contents, so a collector-induced GC that
+   * hasn't happened yet at call time can never leak into it, even on a
+   * coarse-clock boundary second widened by {@link widenCoarseClockBoundary}
+   * (#6212 follow-up).
    */
   async captureGCEvents(
     packageName: string,
@@ -575,14 +582,22 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     const startTimestamp = this.widenCoarseClockBoundary(startResult, "floor");
     const endTimestamp = this.widenCoarseClockBoundary(endResult, "ceil");
 
-    // Trigger explicit GC to ensure we get post-GC measurements
-    await this.triggerGC(packageName, perf);
-
-    // Take post-action snapshot (after GC)
-    const postSnapshot = await this.takeSnapshot(packageName, perf);
-
-    // Capture GC events that occurred during the action, scoped to the
-    // pre-action pid so a mid-action process restart doesn't swap it out.
+    // Capture GC events that occurred during the action BEFORE triggering our
+    // own explicit (SIGUSR1) GC below, scoped to the pre-action pid so a
+    // mid-action process restart doesn't swap it out.
+    //
+    // Ordering matters here (#6212 follow-up): on a coarse (second-resolution)
+    // device clock the widened end bound extends to the top of its truncated
+    // second (see widenCoarseClockBoundary), which can still be in the future
+    // relative to the real, unobservable end time. If the collector-induced
+    // GC triggered below happened to log within that same boundary second, a
+    // logcat dump taken *after* triggerGC would include it — and the widened
+    // bound would then admit it as if it were a genuine in-window app GC,
+    // when it is actually just an artifact of our own measurement. Dumping
+    // logcat here, before the SIGUSR1 trigger even runs, means the
+    // collector-induced GC line cannot exist yet in the buffer we read: only
+    // real app GC activity from the audited action can appear in this
+    // capture, boundary second included.
     const gcEvents = await this.captureGCEvents(
       packageName,
       startTimestamp,
@@ -590,6 +605,14 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       perf,
       auditedPid,
     );
+
+    // Trigger explicit GC to ensure we get post-GC measurements. Any GC this
+    // induces happens strictly after the logcat dump above, so it cannot be
+    // misattributed to the audited action even on a boundary second.
+    await this.triggerGC(packageName, perf);
+
+    // Take post-action snapshot (after GC)
+    const postSnapshot = await this.takeSnapshot(packageName, perf);
 
     // Get unreachable objects
     const unreachableObjects = await this.getUnreachableObjects(packageName, perf);

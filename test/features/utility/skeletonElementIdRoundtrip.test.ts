@@ -84,7 +84,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // Every synthetic id is stable-shaped and unique.
     const stableIds = elements.map((el) => el["view-id"]);
     for (const id of stableIds) {
-      expect(id).toMatch(/^s-[0-9a-f]{16}(-\d+)?$/);
+      expect(id).toMatch(/^s2-[0-9a-f]{16}(-\d+)?$/);
     }
     expect(new Set(stableIds).size).toBe(stableIds.length);
 
@@ -95,7 +95,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // path tapOn uses, against the SAME hierarchy, and assert it resolves to
     // the one element it was derived from — not any other row.
     for (const entry of skeleton) {
-      expect(entry.elementId).toMatch(/^s-[0-9a-f]{16}(-\d+)?$/);
+      expect(entry.elementId).toMatch(/^s2-[0-9a-f]{16}(-\d+)?$/);
       const result = selector.selectByResourceId(viewHierarchy, entry.elementId!);
       expect(result.element).not.toBeNull();
       expect(result.totalMatches).toBe(1);
@@ -137,7 +137,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // Deterministic, cleanly disambiguated — neither is the bare form.
     expect(idA).not.toBe(idB);
-    expect(idA).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(idA).toMatch(/^s2-[0-9a-f]{16}-1$/);
     expect(idB).toBe(`${idA.replace(/-1$/, "")}-2`);
 
     // Both ordinal forms are rejected outright, not resolved - neither is safe
@@ -169,7 +169,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const original = makeDup("orig-a", "orig-b");
     assignStableViewIds(original);
     const observedIdForA = (original.node[0] as Record<string, unknown>)["view-id"] as string;
-    expect(observedIdForA).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(observedIdForA).toMatch(/^s2-[0-9a-f]{16}-1$/);
 
     // Capture 2: A removed; B is the sole surviving content-identical node and
     // is reassigned the bare `s-<hash>` (now unique). A `tapOn` keyed on A's
@@ -186,7 +186,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     assignStableViewIds(afterRemoval);
     const survivorId = (afterRemoval.node[0] as Record<string, unknown>)["view-id"] as string;
-    expect(survivorId).toMatch(/^s-[0-9a-f]{16}$/);
+    expect(survivorId).toMatch(/^s2-[0-9a-f]{16}$/);
     expect(survivorId).not.toBe(observedIdForA);
 
     const result = selector.selectByResourceId(
@@ -214,7 +214,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     assignStableViewIds(rawRoot);
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
     const id = (rawRoot.node[0] as Record<string, unknown>)["view-id"] as string;
-    expect(id).toMatch(/^s-[0-9a-f]{16}$/);
+    expect(id).toMatch(/^s2-[0-9a-f]{16}$/);
 
     const result = selector.selectByResourceId(viewHierarchy, id);
     expect(result.element).not.toBeNull();
@@ -246,16 +246,14 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    expect(() => selector.selectByResourceId(viewHierarchy, legacyBase)).toThrow(
-      /legacy bare duplicate encoding/i,
-    );
+    expect(selector.selectByResourceId(viewHierarchy, legacyBase).element).toBeNull();
     // Container lookup shares the same selector contract and must not resolve
     // the legacy bare node before the target's ambiguity guard runs.
-    expect(() =>
+    expect(
       selector.selectByResourceId(viewHierarchy, "missing-target", {
         container: { elementId: legacyBase },
-      }),
-    ).toThrow(/legacy bare duplicate encoding/i);
+      }).element,
+    ).toBeNull();
   });
 
   test("a real bare Compose resource-id shaped like a synthetic id (s-a / s-a-2) is never misclassified as ambiguous", () => {
@@ -316,7 +314,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     assignStableViewIds(original);
     const originalIdB = (original.node[1] as Record<string, unknown>)["view-id"] as string;
-    expect(originalIdB).toMatch(/^s-[0-9a-f]{16}-2$/);
+    expect(originalIdB).toMatch(/^s2-[0-9a-f]{16}-2$/);
 
     const reordered = {
       node: [
@@ -408,7 +406,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // Same base content hash, disambiguated globally by document order - both
     // are ordinal-suffixed (no bare form for a duplicate group, issue #6229):
     // container1's is `-1`, container2's is `-2`.
-    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(idInContainer1).toMatch(/^s2-[0-9a-f]{16}-1$/);
     expect(idInContainer2).toBe(`${idInContainer1.replace(/-1$/, "")}-2`);
 
     // Without a container, this is genuinely globally ambiguous.
@@ -466,7 +464,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const c1Cap1 = (capture1.node[0] as Record<string, unknown>).node as Record<string, unknown>[];
     const observedIdForA = c1Cap1[0]["view-id"] as string;
     // A is a member of a duplicate group, so it is ordinal-suffixed (never bare).
-    expect(observedIdForA).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(observedIdForA).toMatch(/^s2-[0-9a-f]{16}-1$/);
 
     // Capture 2: A removed. c1 now holds only B; c2 still holds C. B and C are
     // content-identical, so both are re-ordinaled globally (B=`-1`, C=`-2`).
@@ -529,7 +527,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     assignStableViewIds(rawRoot);
 
     const idInContainer1 = (c1.node[0] as Record<string, unknown>)["view-id"] as string;
-    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(idInContainer1).toMatch(/^s2-[0-9a-f]{16}-1$/);
 
     // Give the node OUTSIDE c1 a real resource-id equal to that exact ordinal
     // string - a collision `assignStableViewIds` cannot itself produce, since

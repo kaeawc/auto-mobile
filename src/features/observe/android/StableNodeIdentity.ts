@@ -67,8 +67,13 @@ import { createHash } from "crypto";
 export const GENERATED_VIEW_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** Prefix marking a content-derived stable id emitted by this module. */
-export const STABLE_VIEW_ID_PREFIX = "s-";
+/**
+ * Versioned prefix for content-derived ids. The previous `s-<hash>` namespace
+ * issued a bare id to the first member of a duplicate group; a later singleton
+ * can reproduce that unsafe id after an upgrade. A new namespace makes every
+ * post-upgrade selector disjoint from those legacy bare ids.
+ */
+export const STABLE_VIEW_ID_PREFIX = "s2-";
 
 /**
  * Fixed hex-character width of the content hash this module emits (see the

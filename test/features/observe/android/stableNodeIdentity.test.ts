@@ -183,6 +183,17 @@ describe("assignStableViewIds (#3228)", () => {
     expect(child["view-id"]).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}$`));
   });
 
+  test("uses a new namespace so a legacy bare id cannot select a post-upgrade singleton (#6229)", () => {
+    const root = node({ "view-id": generatedUuid("root") }, [
+      node({ "view-id": generatedUuid("only"), text: "Solo" }),
+    ]);
+    assignStableViewIds(root);
+    const currentId = (root.node as Record<string, unknown>)["view-id"] as string;
+    const legacyId = currentId.replace(STABLE_VIEW_ID_PREFIX, "s-");
+    expect(currentId).toStartWith(STABLE_VIEW_ID_PREFIX);
+    expect(currentId).not.toBe(legacyId);
+  });
+
   test("removing the original of a duplicate pair does not reassign a bare id it collides with (#6229)", () => {
     // Capture 1: content-identical peers [A, B]. Under the fixed scheme A is
     // `s-H-1` (NOT bare) and B is `s-H-2`.

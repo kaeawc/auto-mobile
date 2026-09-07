@@ -13,6 +13,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { Window as WindowInterface } from "./interfaces/Window";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 // AdbExecutor extended with optional AdbClient-specific methods. Both the
 // deadline (timeoutMs) and the cancellation signal are forwarded so the
@@ -45,16 +46,25 @@ export class Window implements WindowInterface {
   private adb: ExtendedAdbExecutor;
   private cachedActiveWindow: ActiveWindowInfo | null = null;
   private readonly device: BootedDevice;
+  private readonly timer: Timer;
   private cacheDir: string = getTempDir(TEMP_SUBDIRS.WINDOW);
 
   /**
    * Create a Window instance
    * @param device - Device to run ADB commands against
    * @param adbFactory - Factory for creating AdbClient instances
+   * @param timer - Injected clock; used to derive one absolute deadline shared
+   *   across the getActive sub-reads (kept as a seam so FakeTimer can drive the
+   *   budget deterministically in tests).
    */
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    timer: Timer = defaultTimer,
+  ) {
     this.adb = adbFactory.create(device);
     this.device = device;
+    this.timer = timer;
   }
 
   /**
@@ -184,19 +194,28 @@ export class Window implements WindowInterface {
       }
     }
 
-    // Bound and cancel EVERY device read below with the same budget + combined
+    // Bound and cancel EVERY device read below with ONE shared budget + combined
     // signal, so no sub-read (initial dumpsys, API-level probe, API-27 legacy
-    // fallback) can outlive the caller deadline or survive an abort. Combining
-    // with the ambient request signal is required (see combineWithAmbientAbort):
-    // passing only a private/forwarded signal would drop MCP request cancellation.
+    // fallback) can outlive the caller deadline or survive an abort. `timeoutMs`
+    // is the TOTAL budget for the whole getActive call, not a per-read budget:
+    // on API <= 27 the three sub-reads run sequentially, so we derive a single
+    // absolute deadline and hand each read only the time that remains — otherwise
+    // getActive({ timeoutMs: 1000 }) could take ~3s. Combining with the ambient
+    // request signal is required (see combineWithAmbientAbort): passing only a
+    // private/forwarded signal would drop MCP request cancellation.
     const timeoutMs = options.timeoutMs ?? DEFAULT_GET_ACTIVE_TIMEOUT_MS;
     const signal = combineWithAmbientAbort(options.signal);
+    const deadlineMs = this.timer.now() + timeoutMs;
+    // Never 0/negative: a 0 timeout arms NO deadline in AdbClient (its `if
+    // (timeoutMs)` guard treats 0 as falsy), which would leave a sub-read
+    // unbounded — the exact overrun this budget sharing exists to prevent.
+    const remainingMs = (): number => Math.max(1, deadlineMs - this.timer.now());
 
     try {
       const { stdout } = await perf.track("adbDumpsysWindowWindows", () =>
         this.adb.executeCommand(
           `shell "dumpsys window windows"`,
-          timeoutMs,
+          remainingMs(),
           undefined,
           true,
           signal,
@@ -208,7 +227,7 @@ export class Window implements WindowInterface {
       // rather than resolving null and letting us parse a post-abort result.
       let apiLevel: number | null = null;
       if (typeof this.adb.getAndroidApiLevel === "function") {
-        apiLevel = await this.adb.getAndroidApiLevel(timeoutMs, signal);
+        apiLevel = await this.adb.getAndroidApiLevel(remainingMs(), signal);
       }
 
       let parsed: { appId: string; activityName: string } | null = null;
@@ -222,7 +241,7 @@ export class Window implements WindowInterface {
         }
         if (!parsed) {
           // Try separate dumpsys window command (shorter output)
-          parsed = await this.parseActiveWindowFromDumpsysWindow(timeoutMs, signal);
+          parsed = await this.parseActiveWindowFromDumpsysWindow(remainingMs(), signal);
         }
         if (!parsed) {
           // Fall through to modern as safety net

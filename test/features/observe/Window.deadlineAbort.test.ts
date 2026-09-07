@@ -10,6 +10,25 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ExecResult } from "../../../src/models/ExecResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import type { Timer } from "../../../src/utils/SystemTimer";
+
+/**
+ * Deterministic clock whose `now()` returns each scripted value in order (the
+ * last value repeats once exhausted). Lets a test assert that sequential
+ * sub-reads each receive the REMAINING share of one budget rather than the full
+ * timeout, without depending on wall-clock elapsement inside the fake adb.
+ */
+function scriptedClock(nowValues: number[]): Timer {
+  let index = 0;
+  return {
+    now: () => nowValues[Math.min(index++, nowValues.length - 1)],
+    async sleep(): Promise<void> {},
+    setTimeout: () => 0 as unknown as NodeJS.Timeout,
+    clearTimeout: () => {},
+    setInterval: () => 0 as unknown as NodeJS.Timeout,
+    clearInterval: () => {},
+  };
+}
 
 /**
  * Deadline-bounding + AbortSignal-propagation coverage for Window.getActive
@@ -116,6 +135,50 @@ describe("Window.getActive deadline + abort plumbing (#6289)", () => {
       .find((c) => c.command.includes('dumpsys window"') || c.command === 'shell "dumpsys window"');
     expect(legacyCall).toBeDefined();
     expect(legacyCall?.signal?.aborted).toBe(true);
+  });
+
+  test("spends ONE budget across the API-27 sub-reads instead of the full timeout each", async () => {
+    // On API <= 27 the three sub-reads run sequentially. With a single 1000ms
+    // budget and a clock that advances 100 -> 300 -> 500ms across them, each read
+    // must receive only the REMAINING time (900, 700, 500), never a fresh 1000.
+    const clock = scriptedClock([0, 100, 300, 500]);
+    window = new Window(device, new FakeAdbClientFactory(fakeAdb), clock);
+    await window.clearCache();
+    fakeAdb.setAndroidApiLevel(27);
+    fakeAdb.setDefaultResponse(execResult("no focus, no ty=1 windows"));
+
+    await window.getActive(true, undefined, { timeoutMs: 1000 });
+
+    const dumpsysCall = fakeAdb
+      .getCommandCalls()
+      .find((c) => c.command.includes("dumpsys window windows"));
+    expect(dumpsysCall?.timeoutMs).toBe(900);
+
+    const apiCall = fakeAdb.getApiLevelCalls()[0];
+    expect(apiCall?.timeoutMs).toBe(700);
+
+    const legacyCall = fakeAdb
+      .getCommandCalls()
+      .find((c) => c.command.includes('dumpsys window"') || c.command === 'shell "dumpsys window"');
+    expect(legacyCall?.timeoutMs).toBe(500);
+  });
+
+  test("clamps an exhausted budget to a positive timeout (never 0, which arms no deadline)", async () => {
+    // If the budget is already spent when a sub-read starts, it must still be
+    // handed a positive timeout: passing 0 would leave the read unbounded.
+    const clock = scriptedClock([0, 5000]);
+    window = new Window(device, new FakeAdbClientFactory(fakeAdb), clock);
+    await window.clearCache();
+    fakeAdb.setDefaultResponse(
+      execResult("imeControlTarget in display# 0 Window{1 u0 com.example.app/.Main}"),
+    );
+
+    await window.getActive(true, undefined, { timeoutMs: 1000 });
+
+    const dumpsysCall = fakeAdb
+      .getCommandCalls()
+      .find((c) => c.command.includes("dumpsys window windows"));
+    expect(dumpsysCall?.timeoutMs).toBe(1);
   });
 
   test("a non-abort device failure still degrades to an empty window", async () => {

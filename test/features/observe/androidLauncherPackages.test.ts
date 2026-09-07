@@ -31,6 +31,36 @@ describe("androidLauncherPackages", () => {
       expect(result).toBe("com.example.launcher");
     });
 
+    test("bounds the resolve command to the caller's remaining budget when smaller (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+
+      // A shrinking home-verification deadline (e.g. 250ms left) must cap the
+      // launcher resolve so it cannot spend the full RESOLVE_HOME_TIMEOUT_MS.
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, 250);
+
+      const resolveCall = fakeAdb
+        .getCommandCalls()
+        .find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      expect(resolveCall?.timeoutMs).toBe(250);
+    });
+
+    test("clamps an exhausted remaining budget to a positive resolve timeout (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, -5);
+
+      const resolveCall = fakeAdb
+        .getCommandCalls()
+        .find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      expect(resolveCall?.timeoutMs).toBe(1);
+    });
+
     test("returns null when the device cannot resolve a HOME launcher", async () => {
       fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, { stdout: "", stderr: "" });
 

@@ -191,7 +191,18 @@ export class PressButton extends BaseVisualChange {
     // self-reported success, on API 28 specifically. Other buttons (back,
     // recent, hardware) have no equivalently cheap ground truth to check
     // against and keep their existing dispatch-is-success behavior.
-    if (normalized === "home" && !(await this.verifyAndroidHomeForeground({ signal }))) {
+    // Verify within the REMAINING budget, not a fresh full timeout: the ADB
+    // keyevent above already spent part of the caller's deadline, so re-derive
+    // the leftover and hand it to verification (which shares it across getActive,
+    // launcher lookup, and retries) rather than letting getActive fall back to
+    // its 5s default and overrun the keyed device-input op (issue #6289).
+    if (
+      normalized === "home" &&
+      !(await this.verifyAndroidHomeForeground({
+        signal,
+        timeoutMs: this.remainingMs(deadlineMs),
+      }))
+    ) {
       return {
         success: false,
         button,
@@ -235,7 +246,13 @@ export class PressButton extends BaseVisualChange {
         // foreground app unchanged on API 28 (issue #6147). Confirm the
         // foreground actually became the launcher before trusting it; other
         // global-action buttons (back, recent) keep the prior behavior.
-        if (normalized !== "home" || (await this.verifyAndroidHomeForeground({ signal }))) {
+        if (
+          normalized !== "home" ||
+          (await this.verifyAndroidHomeForeground({
+            signal,
+            timeoutMs: this.remainingMs(deadlineMs),
+          }))
+        ) {
           logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
           return { success: true, button, keyCode };
         }

@@ -22,6 +22,7 @@ import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOption
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { NodeCryptoService } from "../../utils/crypto";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -570,16 +571,27 @@ export class BaseVisualChange {
    * keeps tests fast/deterministic) to tolerate the brief settle time a real
    * device needs between dispatch and the launcher taking focus.
    *
-   * @param options.signal - Cancellation signal, threaded into EVERY device read
-   *   (`getActive`'s dumpsys/api-level/legacy reads and the launcher resolve) so
-   *   an aborted request stops the verification instead of it running to
-   *   completion against a device the caller no longer cares about. An abort
-   *   rejects out of the reads and BREAKS the retry loop (it is re-thrown), so a
-   *   cancelled verification never silently reports `false` as a device verdict.
-   * @param options.timeoutMs - Per-read deadline forwarded to `getActive`.
+   * @param options.signal - Cancellation signal. Combined ONCE at entry with the
+   *   ambient request signal (see {@link combineWithAmbientAbort}) and that
+   *   combined signal is used for EVERY device read (`getActive`'s
+   *   dumpsys/api-level/legacy reads and the launcher resolve) AND for the
+   *   abort-classification check below. This matters on the normal MCP route
+   *   where the caller passes no explicit `signal`: `getActive` combines the
+   *   ambient signal internally and rejects on cancellation, so classifying the
+   *   abort against the raw (undefined) `options.signal` would mis-log it as an
+   *   ordinary read failure and keep sleeping/retrying. An abort rejects out of
+   *   the reads and BREAKS the retry loop (it is re-thrown), so a cancelled
+   *   verification never silently reports `false` as a device verdict.
+   * @param options.timeoutMs - REMAINING budget for the whole verification, not a
+   *   per-read budget. An absolute deadline is derived once and each `getActive`
+   *   read, launcher lookup, and retry backoff spends only the time that remains,
+   *   so verification cannot overrun the caller's deadline (e.g. a home press
+   *   with one second left must not occupy the keyed device-input op for the
+   *   full 5s `getActive` default plus launcher resolution and retries).
    * @param options.retryDelaysMs - Backoff delays between verification attempts.
    *   Defaults chosen to give a real device a couple of short chances to
-   *   settle without materially slowing down a genuine failure.
+   *   settle without materially slowing down a genuine failure. A backoff is
+   *   skipped when it would push past the deadline.
    */
   protected async verifyAndroidHomeForeground(
     options: {
@@ -588,11 +600,23 @@ export class BaseVisualChange {
       retryDelaysMs?: readonly number[];
     } = {},
   ): Promise<boolean> {
-    const { signal, timeoutMs } = options;
+    // Combine explicit + ambient ONCE so the reads and the abort classification
+    // below observe the SAME signal (issue #6289): on the ambient-only route the
+    // explicit signal is undefined, so checking it alone would miss the abort.
+    const signal = combineWithAmbientAbort(options.signal);
+    const { timeoutMs } = options;
     const retryDelaysMs = options.retryDelaysMs ?? [150, 300];
+    // Single absolute deadline shared across reads, launcher lookup, and
+    // backoffs. Never 0/negative downstream: getActive/resolve clamp to >= 1ms.
+    const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
+    const remainingMs = (): number | undefined =>
+      deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        const activeWindow = await this.window.getActive(true, undefined, { signal, timeoutMs });
+        const activeWindow = await this.window.getActive(true, undefined, {
+          signal,
+          timeoutMs: remainingMs(),
+        });
         if (
           await isForegroundLauncher(
             activeWindow.appId,
@@ -601,6 +625,7 @@ export class BaseVisualChange {
             this.timer,
             this.device.transportId,
             signal,
+            remainingMs(),
           )
         ) {
           return true;
@@ -618,6 +643,12 @@ export class BaseVisualChange {
       }
       const delay = retryDelaysMs[attempt];
       if (delay === undefined) {
+        return false;
+      }
+      // Don't sleep past the shared deadline: a backoff that would overrun the
+      // remaining budget ends verification now instead of stalling the keyed op.
+      const remaining = remainingMs();
+      if (remaining !== undefined && remaining <= delay) {
         return false;
       }
       await this.timer.sleep(delay);

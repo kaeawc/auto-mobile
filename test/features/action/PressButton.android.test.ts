@@ -274,6 +274,55 @@ describe("PressButton Android keycode dispatch", () => {
       const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
       expect(keyeventCall?.signal?.aborted).toBe(true);
     });
+
+    test("home verification spends the REMAINING deadline, not a fresh full getActive timeout", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const window = launcherWindow();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = window;
+
+      // Supply a 1234ms budget: the post-keyevent home verification must forward
+      // the leftover budget into getActive rather than letting it fall back to
+      // the 5s default (which would overrun a nearly-spent caller deadline).
+      await (pressButton as any).executeAndroidButtonPress("home", 1234);
+
+      const verifyOptions = window.getGetActiveOptions();
+      expect(verifyOptions.length).toBeGreaterThan(0);
+      const verifyTimeout = verifyOptions[verifyOptions.length - 1]?.timeoutMs;
+      expect(typeof verifyTimeout).toBe("number");
+      expect(verifyTimeout!).toBeGreaterThan(0);
+      expect(verifyTimeout!).toBeLessThanOrEqual(1234);
+    });
+
+    test("classifies an ambient-only abort during verification as cancellation, not a read failure", async () => {
+      // The normal MCP route forwards no explicit signal; only the ambient
+      // request signal aborts. verifyAndroidHomeForeground must combine the two
+      // and rethrow the abort out of the retry loop instead of logging it as an
+      // ordinary read failure and sleeping/retrying to a false `false` verdict.
+      const window = new FakeWindow();
+      window.setThrowOnAbortedSignal();
+      window.configureActiveWindow({
+        appId: "com.android.settings",
+        activityName: "Settings",
+        layoutSeqSum: 0,
+      });
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = window;
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          (pressButton as any).verifyAndroidHomeForeground({}),
+        ),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      // Exactly one read attempt: the abort broke the loop, no retry backoffs ran.
+      expect(window.getGetActiveCallCount()).toBe(1);
+    });
   });
 
   test("rejects a stale context instead of falling back from a failed global action to ADB", async () => {

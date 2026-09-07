@@ -155,6 +155,10 @@ function freshCachedPackageName(
  *   within the TTL) is treated as a cache miss and re-resolved, instead of
  *   serving the previous incarnation's launcher. Omit to keep the previous
  *   serial-only keying (e.g. callers with no incarnation info available).
+ * @param timeoutMs - Optional remaining budget for the resolve command. When
+ *   provided the ADB query is bounded to `min(RESOLVE_HOME_TIMEOUT_MS,
+ *   timeoutMs)` so a caller spending a shrinking request deadline (e.g. home
+ *   verification) cannot overrun; omit to use the full default.
  */
 export async function resolveConfiguredHomePackage(
   adb: AdbExecutor,
@@ -162,6 +166,7 @@ export async function resolveConfiguredHomePackage(
   timer: Timer = defaultTimer,
   incarnationToken?: string,
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<string | null> {
   const now = timer.now();
   const cached = resolvedHomePackageCache.get(deviceId);
@@ -169,15 +174,21 @@ export async function resolveConfiguredHomePackage(
   if (freshCachedPackage !== undefined) {
     return freshCachedPackage;
   }
-  // Deadline-bounded (RESOLVE_HOME_TIMEOUT_MS) AND cancellable: combine the
-  // caller's signal with the ambient request signal so a cancelled request
-  // still aborts this resolve, then rethrow on abort so cancellation propagates
-  // instead of being swallowed into a null that downgrades to the fallback list.
+  // Deadline-bounded AND cancellable: combine the caller's signal with the
+  // ambient request signal so a cancelled request still aborts this resolve,
+  // then rethrow on abort so cancellation propagates instead of being swallowed
+  // into a null that downgrades to the fallback list. When a caller passes a
+  // remaining budget (e.g. home-press verification spending its request
+  // deadline), bound the resolve to whichever is smaller so it cannot overrun.
   const combinedSignal = combineWithAmbientAbort(signal);
+  const resolveTimeoutMs =
+    timeoutMs === undefined
+      ? RESOLVE_HOME_TIMEOUT_MS
+      : Math.max(1, Math.min(RESOLVE_HOME_TIMEOUT_MS, timeoutMs));
   try {
     const result = await adb.executeCommand(
       RESOLVE_HOME_COMMAND,
-      RESOLVE_HOME_TIMEOUT_MS,
+      resolveTimeoutMs,
       undefined,
       true,
       combinedSignal,
@@ -233,6 +244,9 @@ export function isFallbackLauncherPackage(appId: string | null | undefined): boo
  *   -- see its doc for why a device's connection-epoch discriminator (e.g.
  *   `BootedDevice.transportId`) must be supplied to avoid serving a reused
  *   serial's stale cached launcher.
+ * @param timeoutMs - Optional remaining budget forwarded to
+ *   {@link resolveConfiguredHomePackage} so the launcher lookup shares the
+ *   caller's deadline instead of always taking the full resolve default.
  */
 export async function isForegroundLauncher(
   appId: string | null | undefined,
@@ -241,6 +255,7 @@ export async function isForegroundLauncher(
   timer: Timer = defaultTimer,
   incarnationToken?: string,
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<boolean> {
   if (!appId) {
     return false;
@@ -251,6 +266,7 @@ export async function isForegroundLauncher(
     timer,
     incarnationToken,
     signal,
+    timeoutMs,
   );
   if (configuredHome) {
     return appId === configuredHome;

@@ -618,7 +618,12 @@ export class BaseVisualChange {
       deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        signal?.throwIfAborted();
+        // A cancellation is surfaced by the reads themselves: getActive combines
+        // the ambient signal and rejects on abort, and the catch below rethrows
+        // any error while `signal.aborted`. Pre-checking `throwIfAborted()` here
+        // would raise the raw AbortError before the read runs, mis-typing an
+        // ambient-only cancellation instead of letting the read's own
+        // OPERATION_CANCELLED rejection propagate (issue #6289).
         // Do not revive an expired verification budget by handing its zero value
         // to Window, which must clamp subcommand timeouts to keep those commands
         // bounded. No device read is valid once this operation's deadline passed.

@@ -220,6 +220,7 @@ function isConfirmedPermissionDialogForNavigation(elements: Element[]): boolean 
     const resourceId = element["resource-id"]?.toLowerCase() ?? "";
     return (
       resourceId.includes("permissioncontroller") ||
+      resourceId.includes("packageinstaller") ||
       matchesAnyKeywordInAnyField(DISTINCTIVE_PERMISSION_ACTION_TOKENS, element)
     );
   });

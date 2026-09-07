@@ -828,6 +828,19 @@ describe("ExploreBlockerDetection", () => {
       expect(filterPermissionNavigationCandidates([allow, deny], [allow, deny])).toEqual([allow]);
     });
 
+    test("removes a plain legacy package-installer denial from navigation candidates", () => {
+      const allow = createMockElement({
+        text: "Allow",
+        "resource-id": "com.google.android.packageinstaller:id/permission_allow_button",
+      });
+      const deny = createMockElement({
+        text: "Deny",
+        "resource-id": "com.google.android.packageinstaller:id/permission_deny_button",
+      });
+
+      expect(filterPermissionNavigationCandidates([allow, deny], [allow, deny])).toEqual([allow]);
+    });
+
     // The canonical modern layout (grant first, deny last) must keep working:
     // the grant button is tapped and the trailing "Don't allow" is ignored.
     test("handlePermissionDialog taps 'Allow' and ignores a trailing 'Don't allow'", async () => {

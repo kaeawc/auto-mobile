@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import fs, { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -620,6 +620,68 @@ describe("writes are serialized across log rotation (#6149)", () => {
       // The mid-rotation record never touched the old (now-renamed) stream.
       expect(oldStream.writes.join("")).not.toContain("record B mid-rotation");
     } finally {
+      createWriteStream.mockRestore();
+      rmSync(logDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("joined writers recover from a failed shared rotation (#6149)", () => {
+  test("a writer waiting behind a failed rotation still reaches the replacement stream", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-rotate-join-fail-"));
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
+
+    const opened: ControllableStream[] = [];
+    const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
+      const stream = new ControllableStream();
+      opened.push(stream);
+      // The recovery open happens after the deliberately failed rename. Make
+      // the next size check see a normal-sized file, so this test observes the
+      // joined writer's recovery rather than starting a second blocked fake
+      // rotation against the still-oversized file.
+      if (opened.length === 2) {
+        chmodSync(logDir, 0o700);
+        fs.truncateSync(targetLogFile, 0);
+      }
+      return stream as unknown as fs.WriteStream;
+    });
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "file", logDir);
+      const oldStream = opened[0];
+
+      let endWasCalled: () => void;
+      const endWasCalledPromise = new Promise<void>((resolve) => {
+        endWasCalled = resolve;
+      });
+      const originalEnd = oldStream.end.bind(oldStream);
+      oldStream.end = (callback?: () => void) => {
+        endWasCalled();
+        originalEnd(callback);
+      };
+
+      // A starts rotation and B joins it before the rename fails. Leaving the
+      // directory non-writable makes the real rename fail deterministically,
+      // while the stream fake keeps the assertion focused on shared-flight
+      // recovery rather than host fd timing.
+      mod.logger.info("record A starts failed rotation");
+      await endWasCalledPromise;
+      mod.logger.info("record B joined failed rotation");
+      chmodSync(logDir, 0o500);
+      oldStream.finishClose();
+
+      await mod.logger.flush();
+
+      // A opens the recovery stream. B must not let the rejected joined
+      // promise escape before writing: both records belong on that stream.
+      expect(opened.length).toBe(2);
+      const recoveredWrites = opened[1].writes.join("");
+      expect(recoveredWrites).toContain("record A starts failed rotation");
+      expect(recoveredWrites).toContain("record B joined failed rotation");
+    } finally {
+      chmodSync(logDir, 0o700);
       createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });
     }

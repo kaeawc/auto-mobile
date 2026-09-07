@@ -429,6 +429,21 @@ const beginOrJoinRotationCheck = (paths: { dir: string; path: string }): Promise
   return rotationInFlight;
 };
 
+// A failed shared rotation is observed by both the writer that started it and
+// writers that were waiting behind it. The promise's `finally` clears the
+// in-flight marker before any waiter resumes, so recovery can safely publish a
+// replacement stream here. Keep this idempotent: several joined writers can
+// observe the same failure, but only the first one needs to reopen the stream.
+const recoverFromFailedRotation = async (
+  paths: { dir: string; path: string },
+  error: unknown,
+): Promise<void> => {
+  if (logStream?.destroyed || !logStream?.writable) {
+    logStream = openLogStream(paths.path);
+  }
+  await reportLogFailure("Log rotation failed", error);
+};
+
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
   const paths = fileLogPaths();
@@ -437,15 +452,8 @@ const checkAndRotateLog = async (): Promise<void> => {
   }
   try {
     await beginOrJoinRotationCheck(paths);
-  } catch (err) {
-    // If the check/rotation failed, ensure we have a valid log stream. The
-    // in-flight cycle (if any) has already been cleared by the time this
-    // catch runs — its `finally` settles before the awaited promise above
-    // rejects — so it's safe to reopen here without racing an active rotation.
-    if (logStream?.destroyed || !logStream?.writable) {
-      logStream = openLogStream(paths.path);
-    }
-    await reportLogFailure("Log rotation failed", err);
+  } catch (error) {
+    await recoverFromFailedRotation(paths, error);
   }
 };
 
@@ -600,7 +608,18 @@ const writeToFile = async (line: string): Promise<void> => {
   // closing — the exact epoll EEXIST race rotation guards against (issue
   // #6149). Wait for rotation to publish the fresh stream, then use it.
   while (rotationInFlight) {
-    await rotationInFlight;
+    try {
+      await rotationInFlight;
+    } catch (error) {
+      // The initiating writer handles a failed rotation in checkAndRotateLog,
+      // but a writer that joined before it settled gets here first and used to
+      // escape without writing its record. Give every joiner the same
+      // recovery/degradation path so a file-only sink never silently loses it.
+      const paths = fileLogPaths();
+      if (paths) {
+        await recoverFromFailedRotation(paths, error);
+      }
+    }
   }
   if (!logStream) {
     // A prior open attempt failed — e.g. bun's transient EEXIST/epoll race

@@ -41,6 +41,15 @@ function earlyRecord(pid: number): PidFileData {
 const SELF_PID = 4242;
 const INCUMBENT_PID = 9001;
 
+function writeContenderEarlyRecord(
+  guard: IncumbentOwnerGuard,
+  file: { data: PidFileData | null },
+): void {
+  const contender = earlyRecord(SELF_PID);
+  file.data = contender;
+  guard.recordContenderEarlyOwner(contender);
+}
+
 function makeGuard(overrides: Partial<IncumbentOwnerGuardDeps> = {}): {
   guard: IncumbentOwnerGuard;
   file: { data: PidFileData | null };
@@ -76,7 +85,7 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
     // Snapshot-backed liveness still sees the live sibling, so the bind guard
     // fails closed on an inconclusive probe instead of unlinking the live socket.
     expect(guard.hasLiveForeignOwner()).toBe(true);
-    expect(guard.asSocketOwnerLiveness().hasLiveForeignOwner()).toBe(true);
+    expect(guard.asSocketOwnerLiveness().getOwnerStatus()).toBe("live");
   });
 
   test("captures no incumbent when the file already names this process", () => {
@@ -88,13 +97,14 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
     expect(guard.hasLiveForeignOwner()).toBe(false);
   });
 
-  test("captures no incumbent when the recorded foreign process is dead (stale socket stays reclaimable)", () => {
+  test("records a dead committed owner as permission to reclaim its stale socket", () => {
     const { guard, running } = makeGuard();
     running.delete(INCUMBENT_PID);
 
     guard.captureIncumbentBeforeOverwrite();
 
     expect(guard.hasLiveForeignOwner()).toBe(false);
+    expect(guard.asSocketOwnerLiveness().getOwnerStatus()).toBe("dead");
   });
 
   test("captures no incumbent when no PID file exists", () => {
@@ -120,7 +130,7 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
 
     guard.captureIncumbentBeforeOverwrite();
     // Contender overwrote the file with its own record before refusing the bind.
-    file.data = record(SELF_PID);
+    writeContenderEarlyRecord(guard, file);
 
     expect(guard.restoreIncumbentAfterRefusal()).toBe(true);
     expect(writes).toHaveLength(1);
@@ -130,13 +140,29 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
   });
 
   test("P2: does NOT restore a record for a process that died between capture and refusal", () => {
-    const { guard, running, writes } = makeGuard();
+    const { guard, file, running, writes } = makeGuard();
 
     guard.captureIncumbentBeforeOverwrite();
+    writeContenderEarlyRecord(guard, file);
     running.delete(INCUMBENT_PID);
 
     expect(guard.restoreIncumbentAfterRefusal()).toBe(false);
     expect(writes).toHaveLength(0);
+  });
+
+  test("P2: does not overwrite a replacement that claimed the PID record before restore", () => {
+    const { guard, file, writes } = makeGuard();
+    const replacement = record(7171);
+
+    guard.captureIncumbentBeforeOverwrite();
+    writeContenderEarlyRecord(guard, file);
+    // Another daemon completed startup while the refused contender was
+    // unwinding. Its committed record is authoritative and must survive.
+    file.data = replacement;
+
+    expect(guard.restoreIncumbentAfterRefusal()).toBe(false);
+    expect(writes).toHaveLength(0);
+    expect(file.data).toBe(replacement);
   });
 
   test("restore is a no-op when no live incumbent was captured", () => {
@@ -164,7 +190,7 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
       // No committed owner was proven, so the lock-less bind must refuse rather
       // than treat the contender's record as the socket owner.
       expect(guard.hasLiveForeignOwner()).toBe(true);
-      expect(guard.asSocketOwnerLiveness().hasLiveForeignOwner()).toBe(true);
+      expect(guard.asSocketOwnerLiveness().getOwnerStatus()).toBe("unknown");
     });
 
     test("P1: stays closed even after the contender exits (its death proves nothing about the winner)", () => {

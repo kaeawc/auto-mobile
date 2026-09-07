@@ -290,9 +290,9 @@ describe("DaemonManager stop", () => {
   // loser. stop()'s confirmed-dead cleanup must remove ONLY the stale PID
   // file — never the socket by pathname, which it cannot prove is still the
   // loser's (no lock held, no cheap ownership-proof mechanism, by design). A
-  // leftover socket file is harmless: the next daemon start reclaims it under
-  // the O_EXCL lock.
-  test("removes only the stale PID file for a well-formed PID file naming an already-exited daemon; the socket is left for the next locked bind to reclaim", async () => {
+  // leftover socket file is harmless: a later bind can reclaim it only after
+  // proving its recorded owner dead.
+  test("removes only the stale PID file for a well-formed PID file naming an already-exited daemon; a later guarded bind may reclaim the socket", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-already-exited-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
@@ -2585,11 +2585,15 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("start takeover does not signal transient daemon-mode candidates that are gone by liveness re-check", async () => {
+  test("start takeover neither signals transient candidates nor unlinks the socket before the shared bind guard", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-transient-takeover-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
     const pidFilePath = join(dir, "daemon.pid");
+    const socketPath = join(dir, "daemon.sock");
     writeDaemonPidFile(pidFilePath, 201);
+    // This may be a direct daemon's live socket. Manager startup must leave
+    // reclamation to the child bind guard, which has the ownership evidence.
+    writeFileSync(socketPath, "socket owned by another launcher");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
@@ -2642,7 +2646,7 @@ describe("Daemon manager process detection", () => {
         fakeTimer,
         join(dir, "daemon.lock"),
         pidFilePath,
-        join(dir, "daemon.sock"),
+        socketPath,
         processFinder,
         processSpawner,
       );
@@ -2650,6 +2654,7 @@ describe("Daemon manager process detection", () => {
       await manager.start();
 
       expect(killCalls).toEqual([]);
+      expect(existsSync(socketPath)).toBe(true);
     } finally {
       killSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });

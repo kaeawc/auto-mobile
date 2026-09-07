@@ -4,20 +4,19 @@ import { createConnection, createServer, type Server as NetServer, type Socket }
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer, type SocketOwnerLiveness } from "../../src/daemon/socketServer";
+import {
+  UnixSocketServer,
+  type SocketOwnerLiveness,
+  type SocketOwnerStatus,
+} from "../../src/daemon/socketServer";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
 
 /**
- * The bind-guard (issue #6232): a LOCK-LESS bind — a daemon launched by hand,
- * bypassing DaemonManager's O_EXCL startup lock — must refuse to unlink a live
- * sibling's socket, while a LOCK-HELD bind keeps today's unconditional
- * stale-socket reclaim. A NOT-reachable probe is treated as INCONCLUSIVE (fail
- * closed) unless no live owner is recorded. These tests drive the injected
- * liveness probe and owner-liveness check so the live/stale/inconclusive decision
- * is deterministic and needs no real socket timing.
+ * Manager and direct launches share proof-before-unlink: an unreachable socket
+ * is reclaimable only when a recorded former owner is positively dead.
  */
 function createFakeDaemonState() {
   return {
@@ -35,26 +34,19 @@ function reachability(result: boolean): DaemonSocketReachabilityLike {
   return { isReachable: async () => result };
 }
 
-function ownerLiveness(hasLiveForeignOwner: boolean): SocketOwnerLiveness {
-  return { hasLiveForeignOwner: () => hasLiveForeignOwner };
+function ownerLiveness(status: SocketOwnerStatus): SocketOwnerLiveness {
+  return { getOwnerStatus: () => status };
 }
 
-const throwingReachability: DaemonSocketReachabilityLike = {
-  isReachable: async () => {
-    throw new Error("liveness probe must not run on a lock-held bind");
-  },
-};
-
 const throwingOwnerLiveness: SocketOwnerLiveness = {
-  hasLiveForeignOwner: () => {
-    throw new Error("owner-liveness check must not run on a lock-held bind");
+  getOwnerStatus: () => {
+    throw new Error("owner-liveness check must not run when the socket is reachable");
   },
 };
 
 function makeServer(
   socketPath: string,
   bindGuard: {
-    startupLockHeld?: boolean;
     reachability?: DaemonSocketReachabilityLike;
     ownerLiveness?: SocketOwnerLiveness;
   },
@@ -97,14 +89,13 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
   });
 
   (isWindows ? test.skip : test)(
-    "lock-less bind refuses a LIVE sibling socket and does not unlink it",
+    "direct bind refuses a LIVE sibling socket and does not unlink it",
     async () => {
       const socketPath = tempSocketPath();
       const sibling = await listenOnSocket(socketPath);
       cleanups.push(() => closeServer(sibling));
 
       const server = makeServer(socketPath, {
-        startupLockHeld: false,
         reachability: reachability(true),
         // The reachable branch decides on its own; owner-liveness must not be needed.
         ownerLiveness: throwingOwnerLiveness,
@@ -121,7 +112,7 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
   );
 
   (isWindows ? test.skip : test)(
-    "lock-less bind refuses an INCONCLUSIVE probe (a live owner is still recorded) and does not unlink it",
+    "direct bind refuses an INCONCLUSIVE probe with a live recorded owner",
     async () => {
       const socketPath = tempSocketPath();
       // A socket file whose listener refuses the probe (accept backlog / mid-startup):
@@ -130,9 +121,8 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
       writeFileSync(socketPath, "");
 
       const server = makeServer(socketPath, {
-        startupLockHeld: false,
         reachability: reachability(false),
-        ownerLiveness: ownerLiveness(true),
+        ownerLiveness: ownerLiveness("live"),
       });
 
       await expect(server.start()).rejects.toThrow(/Refusing to bind/);
@@ -145,16 +135,35 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
   );
 
   (isWindows ? test.skip : test)(
-    "lock-held bind reclaims a stale socket and binds without probing",
+    "manager bind refuses a LIVE sibling socket and does not unlink it",
     async () => {
       const socketPath = tempSocketPath();
-      // A leftover post-crash socket file with no live listener behind it.
+      const sibling = await listenOnSocket(socketPath);
+      cleanups.push(() => closeServer(sibling));
+
+      const server = makeServer(socketPath, {
+        reachability: reachability(true),
+        ownerLiveness: throwingOwnerLiveness,
+      });
+
+      await expect(server.start()).rejects.toThrow(/Refusing to bind/);
+
+      expect(existsSync(socketPath)).toBe(true);
+      const client = await connectClient(socketPath);
+      expect(client.destroyed).toBe(false);
+      client.destroy();
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "bind reclaims a socket only when the recorded former owner is dead",
+    async () => {
+      const socketPath = tempSocketPath();
       writeFileSync(socketPath, "");
 
       const server = makeServer(socketPath, {
-        startupLockHeld: true,
-        reachability: throwingReachability,
-        ownerLiveness: throwingOwnerLiveness,
+        reachability: reachability(false),
+        ownerLiveness: ownerLiveness("dead"),
       });
       cleanups.push(() => server.close());
 
@@ -168,25 +177,17 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
   );
 
   (isWindows ? test.skip : test)(
-    "lock-less bind reclaims a genuinely stale (dead) socket and binds",
+    "refuses an unreachable socket when ownership is unknown",
     async () => {
       const socketPath = tempSocketPath();
       writeFileSync(socketPath, "");
-
       const server = makeServer(socketPath, {
-        startupLockHeld: false,
         reachability: reachability(false),
-        // No live owner recorded: the socket is confidently dead and reclaimable.
-        ownerLiveness: ownerLiveness(false),
+        ownerLiveness: ownerLiveness("unknown"),
       });
-      cleanups.push(() => server.close());
 
-      await server.start();
-
-      expect(server.isListening()).toBe(true);
-      const client = await connectClient(socketPath);
-      expect(client.destroyed).toBe(false);
-      client.destroy();
+      await expect(server.start()).rejects.toThrow(/positively known to be dead/);
+      expect(existsSync(socketPath)).toBe(true);
     },
   );
 });

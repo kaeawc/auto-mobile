@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PID_FILE_PATH } from "./constants";
 import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
-import type { SocketOwnerLiveness } from "./socketServer";
+import type { SocketOwnerLiveness, SocketOwnerStatus } from "./socketServer";
 import type { PidFileData } from "./types";
 import { logger } from "../utils/logger";
 
@@ -58,6 +58,7 @@ export interface IncumbentOwnerGuardDeps {
  */
 export class IncumbentOwnerGuard {
   private incumbent: PidFileData | null = null;
+  private contenderEarlyOwner: PidFileData | null = null;
   /**
    * Latched when the on-disk record at capture time named a LIVE foreign process
    * that had NOT committed the socket bind — i.e. another hand-launched contender
@@ -83,30 +84,31 @@ export class IncumbentOwnerGuard {
   }
 
   /**
-   * Snapshot a live foreign incumbent's PID record. MUST be called BEFORE the
+   * Snapshot a foreign committed owner's PID record. MUST be called BEFORE the
    * caller overwrites the shared PID file with its own early-owner record;
    * afterwards the on-disk record names the caller and the incumbent is lost.
-   * A record that is absent, ours, or names a dead process is captured as "no
-   * incumbent" so a stale socket stays reclaimable.
+   * A dead committed owner proves a leftover socket reclaimable; an absent,
+   * self, or uncommitted record remains unknown and fails closed.
    */
   captureIncumbentBeforeOverwrite(): void {
     this.incumbent = null;
+    this.contenderEarlyOwner = null;
     this.sawLiveContender = false;
     const record = this.deps.readPidFile();
-    if (!this.isLiveForeign(record)) {
-      // Absent, ours, or dead: a genuinely stale (post-crash) socket stays
-      // reclaimable and there is no live sibling to preserve.
-      return;
-    }
-    if (isCommittedOwnerRecord(record)) {
+    if (record && record.pid !== this.deps.selfPid && isCommittedOwnerRecord(record)) {
       // Only a record written AFTER a committed socket bind carries build
       // identity (issue #2871's pre-bind early record never does), so its
-      // presence proves the named process actually owned the socket. This is the
-      // one record we trust enough to snapshot for liveness AND to restore.
+      // presence proves the named process actually owned the socket. This is
+      // the only record trusted enough to authorize stale reclaim or restore.
       this.incumbent = record;
-      logger.info(
-        `Captured live incumbent daemon owner record (pid ${record.pid}) before overwriting it (issue #6232)`,
-      );
+      if (this.isLiveForeign(record)) {
+        logger.info(
+          `Captured live incumbent daemon owner record (pid ${record.pid}) before overwriting it (issue #6232)`,
+        );
+      }
+      return;
+    }
+    if (!this.isLiveForeign(record)) {
       return;
     }
     // A LIVE foreign process left only an EARLY owner record: another
@@ -129,7 +131,7 @@ export class IncumbentOwnerGuard {
    * early-owner record now sits in the PID file.
    */
   asSocketOwnerLiveness(): SocketOwnerLiveness {
-    return { hasLiveForeignOwner: () => this.hasLiveForeignOwner() };
+    return { getOwnerStatus: () => this.getOwnerStatus() };
   }
 
   /**
@@ -141,6 +143,21 @@ export class IncumbentOwnerGuard {
     return this.sawLiveContender || this.isLiveForeign(this.incumbent);
   }
 
+  private getOwnerStatus(): SocketOwnerStatus {
+    if (this.sawLiveContender) {
+      return "unknown";
+    }
+    if (this.incumbent === null) {
+      return "unknown";
+    }
+    return this.isLiveForeign(this.incumbent) ? "live" : "dead";
+  }
+
+  /** Record the exact early-owner record this contender successfully published. */
+  recordContenderEarlyOwner(record: PidFileData): void {
+    this.contenderEarlyOwner = record;
+  }
+
   /**
    * Restore the captured incumbent's record after a refused bind so
    * `status()` / `--daemon stop` keep naming the live winner instead of the
@@ -150,7 +167,13 @@ export class IncumbentOwnerGuard {
    */
   restoreIncumbentAfterRefusal(): boolean {
     const incumbent = this.incumbent;
-    if (!this.isLiveForeign(incumbent)) {
+    // A later daemon can legitimately replace this contender before its failure
+    // path runs. Compare the current record with the exact early record we wrote
+    // before restoring, so a stale loser never overwrites that replacement.
+    if (
+      !this.isLiveForeign(incumbent) ||
+      !sameOwnerRecord(this.deps.readPidFile(), this.contenderEarlyOwner)
+    ) {
       return false;
     }
     this.deps.persistPidFile(incumbent);
@@ -165,6 +188,17 @@ export class IncumbentOwnerGuard {
       record !== null && record.pid !== this.deps.selfPid && this.deps.isProcessRunning(record.pid)
     );
   }
+}
+
+function sameOwnerRecord(a: PidFileData | null, b: PidFileData | null): boolean {
+  return (
+    a !== null &&
+    b !== null &&
+    a.pid === b.pid &&
+    a.startedAt === b.startedAt &&
+    a.socketPath === b.socketPath &&
+    a.dbPath === b.dbPath
+  );
 }
 
 /**

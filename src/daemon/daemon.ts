@@ -26,7 +26,7 @@ import {
 import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { PID_FILE_PATH, DAEMON_VERSION, DAEMON_LAUNCHED_UNDER_STARTUP_LOCK } from "./constants";
+import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
@@ -581,7 +581,6 @@ export class Daemon {
         // incumbent snapshot, not the PID file we already overwrote above, so an
         // inconclusive probe still sees the live sibling.
         {
-          startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK,
           ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
         },
       );
@@ -1119,6 +1118,7 @@ export class Daemon {
     // record on refusal instead of unlinking/orphaning it (issue #6232).
     this.incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
     await this.persistPidFileData(pidData);
+    this.incumbentOwnerGuard.recordContenderEarlyOwner(pidData);
     logger.info(`Early daemon owner record written to ${PID_FILE_PATH} (dbPath ${pidData.dbPath})`);
   }
 
@@ -2189,10 +2189,10 @@ export class Daemon {
           FeatureFlagService.getInstance(),
           undefined,
           this.idGenerator,
-          // Same launch-derived authorization as the initial bind (issue #6232):
-          // an in-process recovery rebind reclaims only its own now-dead socket,
-          // and a hand-launched daemon still must not clobber a live sibling.
-          { startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK },
+          // Recovery reuses the same ownership evidence as initial startup. A
+          // replacement socket is never reclaimed merely because this daemon
+          // previously held the namespace.
+          { ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness() },
         );
         try {
           await this.socketServer.start();

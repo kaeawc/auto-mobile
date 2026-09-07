@@ -90,6 +90,37 @@ class WaitForToolRedactionTest {
     }
 
   @Test
+  fun `AutoMobileMCPToolFactory preserves the original one-argument JVM constructor`() {
+    // Issue #6145 P2 — binary compatibility: a bare Kotlin default parameter
+    // (`rawMcpClient: MCPClient = mcpClient`) only generates a synthetic mask/marker
+    // constructor, not the original `<init>(MCPClient)V` descriptor, so an already-compiled
+    // consumer that directly instantiates `AutoMobileMCPToolFactory(mcpClient)` would fail
+    // with NoSuchMethodError once the primary constructor grew a second parameter. Assert the
+    // one-argument descriptor is actually present on the compiled class (not just that calling
+    // it from source compiles, which would pass even without @JvmOverloads since source callers
+    // are recompiled against the new descriptor).
+    val ctor =
+      AutoMobileAgent.AutoMobileMCPToolFactory::class
+        .java
+        .getDeclaredConstructor(AutoMobileAgent.MCPClient::class.java)
+
+    assertEquals(1, ctor.parameterCount)
+
+    // And it must behave like the pre-#6145 factory: WaitForTool gets the same (single) client
+    // as every pass-through tool when the raw client isn't supplied.
+    val secret = "TOKEN-OK-123"
+    val client = FixedResultClient("""{"elements":[{"text":"$secret"}]}""")
+    val factory: AutoMobileAgent.AutoMobileMCPToolFactory = ctor.newInstance(client)
+
+    val waitForTool =
+      factory.createAllTools().filterIsInstance<AutoMobileAgent.WaitForTool>().single()
+    val result = runBlocking {
+      waitForTool.execute(AutoMobileAgent.WaitForTool.Args(text = "OK", timeout = 2000))
+    }
+    assertEquals("Element with text 'OK' found", result)
+  }
+
+  @Test
   fun `secrets stay redacted in the pass-through observe result the model sees`() = runBlocking {
     // The other half of #6145: fixing WaitForTool's local check must not reopen the #6094 leak —
     // ObserveTool (and the rest of the pass-through tools) still go through the redacting client.

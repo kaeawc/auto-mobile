@@ -897,8 +897,19 @@ open class AutoMobileAgent(
    * locally only produces false timeouts, not a leak (issue #6145) — though a FAILED call is still
    * redacted before it can be logged (see [FailureRedactingMCPClient]). Defaults to [mcpClient] so
    * non-recovery callers (no secrets, no wrapper) are unaffected.
+   *
+   * `@JvmOverloads` on the primary constructor (issue #6145 P2 — binary compatibility): a bare
+   * Kotlin default parameter only generates a synthetic mask/marker constructor, not the original
+   * one-argument JVM descriptor. Replacing the old `(MCPClient)` constructor with a defaulted
+   * two-argument one therefore removed `<init>(MCPClient)V` entirely, breaking already-compiled
+   * consumers that call `AutoMobileMCPToolFactory(mcpClient)` directly with `NoSuchMethodError`.
+   * `@JvmOverloads` makes Kotlin emit the original one-argument constructor (delegating to the
+   * two-argument one with `rawMcpClient` defaulted to [mcpClient], the pre-#6145 behavior) in
+   * addition to the two-argument one, so both descriptors exist.
    */
-  class AutoMobileMCPToolFactory(
+  class AutoMobileMCPToolFactory
+  @JvmOverloads
+  constructor(
     private val mcpClient: MCPClient,
     private val rawMcpClient: MCPClient = mcpClient,
   ) {

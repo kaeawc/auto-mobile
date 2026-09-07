@@ -33,6 +33,7 @@ import {
   TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
   TAP_ANY_ORDINARY_TAP_DURATION_MS,
   TAP_ANY_DOUBLE_TAP_GAP_MS,
+  TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS,
 } from "../../src/features/action/TapAnyElement";
 import {
   FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
@@ -527,6 +528,15 @@ describe("resolveMcpRequestTimeoutMs", () => {
     // phase was budgeted at all.
     expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
       5000 + 15000 + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
+
+  test("tapAny budget includes a queued terminal screenshot after an asynchronous observe", () => {
+    // `ObserveScreen.execute` can leave a 10s screenshot in flight. Terminal
+    // evidence then queues a second 10s fresh capture behind it.
+    expect(TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS).toBe(20_000);
+    expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
+      TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS,
     );
   });
 

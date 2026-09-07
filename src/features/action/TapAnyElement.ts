@@ -261,7 +261,12 @@ export const TAP_ANY_LONG_PRESS_PRE_ACTION_OBSERVE_MS =
  * blow the budget and force yet another review round (issue #6248 review,
  * P2).
  */
-const TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS = 10_000;
+// The terminal screenshot is queued behind an observation's fire-and-forget
+// capture. Each CtrlProxy screenshot has a ten-second request budget, so the
+// terminal evidence can spend two full requests (the already pending one plus
+// its own fresh capture). Budget both instead of treating the first as free.
+export const TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS = 20_000;
+const TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS = TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS;
 
 /**
  * Consolidated overhead for every non-press phase of a tapAny action (both

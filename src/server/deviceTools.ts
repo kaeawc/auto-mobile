@@ -3303,6 +3303,7 @@ async function rebootAndroidAfterSystemUiAnr(
   timer: Timer,
   signal: AbortSignal | undefined,
   progress: { report: ProgressCallback } | undefined,
+  publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
 ): Promise<{
   boot: DeviceBootResult;
   preservedSessionId?: string;
@@ -3353,6 +3354,7 @@ async function rebootAndroidAfterSystemUiAnr(
       shutdownReservation,
       adoptedReplacementBoot,
       sourceImage,
+      publishReplacementReadinessMarker,
     );
     keepReadinessReservation = true;
     return {
@@ -3462,6 +3464,7 @@ async function handoffSystemUiAnrReplacement(
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   replacementBoot: DeviceBootResult,
   sourceImage: DeviceInfo,
+  publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
 ): Promise<Awaited<ReturnType<DevicePool["replaceDeviceForSystemUiAnrRecovery"]>> | undefined> {
   if (!devicePool || !shutdownReservation) {
     return undefined;
@@ -3471,6 +3474,7 @@ async function handoffSystemUiAnrReplacement(
     replacementBoot.device,
     sourceImage,
     replacementBoot.processHandle,
+    () => publishReplacementReadinessMarker?.(replacementBoot.device),
   );
 }
 
@@ -3542,7 +3546,6 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
   boot: DeviceBootResult,
   ensureRunnerReady: (candidate: DeviceBootResult) => Promise<void>,
   rebootAfterSystemUiAnr: (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult>,
-  publishRecoveredReadinessMarker?: (candidate: DeviceBootResult) => void,
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   try {
     await ensureRunnerReady(boot);
@@ -3556,11 +3559,6 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
     }
     const recovery = await rebootAfterSystemUiAnr(boot);
     try {
-      // The replacement's runner readiness lock can release before this async
-      // function resumes. Publish the acquisition marker under its new device
-      // key before starting that readiness attempt so a queued session upgrade
-      // cannot observe an unrecorded replacement and start duplicate setup.
-      publishRecoveredReadinessMarker?.(recovery.boot);
       await ensureRunnerReady(recovery.boot);
     } catch (readinessError) {
       try {
@@ -3667,7 +3665,6 @@ async function prepareStartDeviceRunnerReadiness(
     input.boot,
     createRunnerReadinessAttempt(input),
     createSystemUiAnrRebooter(input, devicePool),
-    (replacement) => input.publishRecoveredReadinessMarker?.(replacement.device),
   );
   if (readinessResult.recovered) {
     try {
@@ -3769,6 +3766,7 @@ function createSystemUiAnrRebooter(
       input.timer,
       input.signal,
       input.progress ? { report: input.progress } : undefined,
+      (replacement) => input.publishRecoveredReadinessMarker?.(replacement),
     );
 }
 
@@ -5208,6 +5206,17 @@ export function registerDeviceTools() {
 
   // Compatibility implementation. New callers use getAndroid/getApple so their
   // platform identity and readiness budgets are explicit.
+  const stripInternalAcquisitionParams = (rawArgs: object) => {
+    const externalArgs = { ...rawArgs } as Record<string, unknown>;
+    delete externalArgs.__mcpSessionId;
+    delete externalArgs.__executionId;
+    delete externalArgs.__executionStartTime;
+    delete externalArgs.__mcpRequestTimeoutMs;
+    delete externalArgs.__mcpRequestDeadlineMs;
+    delete externalArgs.__mcpLiveDeadlineKey;
+    return externalArgs;
+  };
+
   const startDeviceHandler = async (
     rawArgs: StartDeviceArgs,
     progress?: ProgressCallback,
@@ -5215,7 +5224,7 @@ export function registerDeviceTools() {
   ) => {
     const internalSessionId = rawArgs.__mcpSessionId;
     const args = {
-      ...startDeviceSchema.parse(rawArgs),
+      ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
@@ -5244,10 +5253,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
-    const externalArgs = { ...rawArgs };
-    delete externalArgs.__mcpSessionId;
-    delete externalArgs.__executionId;
-    delete externalArgs.__executionStartTime;
+    const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAndroidSchema.parse(externalArgs);
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const automationReadyTimeoutMs =
@@ -5298,10 +5304,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
-    const externalArgs = { ...rawArgs };
-    delete externalArgs.__mcpSessionId;
-    delete externalArgs.__executionId;
-    delete externalArgs.__executionStartTime;
+    const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAppleSchema.parse(externalArgs);
     // #5870: `deviceId` is an accepted alias for `udid` on iOS.
     const udid = args.udid ?? args.deviceId!;

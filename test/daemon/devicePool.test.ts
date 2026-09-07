@@ -2317,12 +2317,21 @@ describe("DevicePool", () => {
           ...device,
           deviceId: "emulator-5556",
         };
+        let readinessMarkerPublished = false;
         const handoff = await devicePool.replaceDeviceForSystemUiAnrRecovery(
           shutdownReservation.device,
           replacement,
           sourceImage,
+          undefined,
+          () => {
+            // Session work can discover the replacement inside addDevice, so
+            // the marker must exist before that publication point.
+            expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
+            readinessMarkerPublished = true;
+          },
         );
 
+        expect(readinessMarkerPublished).toBe(true);
         expect(handoff.preservedSessionId).toBe("owner-session");
         expect(devicePool.getDevice(device.deviceId)).toBeNull();
         expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({

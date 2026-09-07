@@ -4587,8 +4587,13 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
+    beforeReplacementPublishes?: () => void,
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.assignmentMutex.runExclusive(async () => {
+      // The caller's marker must cover the entire visible replacement
+      // lifecycle, including a replacement that another pool path has already
+      // discovered. It is moved before any session rebind or addDevice call.
+      beforeReplacementPublishes?.();
       const currentExpectedDevice = this.devices.get(expectedDevice.id);
       const existingReplacement = this.devices.get(replacement.deviceId);
       if (
@@ -4610,6 +4615,7 @@ export class DevicePool {
           expectedDevice,
           replacement,
           sourceImage,
+          beforeReplacementPublishes,
         );
         await this.trackStartedDeviceProcess(replacement, childProcess);
         if (this.devices.get(replacementDevice.id) !== replacementDevice) {
@@ -4727,6 +4733,7 @@ export class DevicePool {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
+    beforeReplacementPublishes?: () => void,
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;

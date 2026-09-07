@@ -369,6 +369,7 @@ private class FakeAIAgentFactory : AutoMobileAgent.AIAgentFactory {
     config: AutoMobileAgent.ModelConfig,
     mcpClient: AutoMobileAgent.MCPClient,
     maxToolCalls: Int,
+    rawMcpClient: AutoMobileAgent.MCPClient,
   ): ai.koog.agents.core.agent.AIAgent<String, String> {
     throw UnsupportedOperationException("Not used in recovery tests")
   }

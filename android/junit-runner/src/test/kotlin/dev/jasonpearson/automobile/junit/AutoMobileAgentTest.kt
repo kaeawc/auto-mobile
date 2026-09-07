@@ -207,8 +207,9 @@ class AutoMobileAgentTest {
     every { mockMcpClient.connect("http://localhost:3000") } just runs
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5) } returns
-      mockAIAgent
+    every {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
+    } returns mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
 
     coEvery { mockAIAgent.run(any()) } returns "Recovery actions taken"
@@ -258,7 +259,12 @@ class AutoMobileAgentTest {
       """{"elements":{"field":"token $secret"},"env":"$visible"}"""
     every { mockMcpClient.callTool("tapOn", any()) } returns """{"status":"typed $secret"}"""
     every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, capture(agentClientSlot), 5)
+      mockAiAgentFactory.createAIAgentWithMCPTools(
+        modelConfig,
+        capture(agentClientSlot),
+        5,
+        mockMcpClient,
+      )
     } returns mockAIAgent
     coEvery { mockAIAgent.run(any()) } returns "done"
 
@@ -329,7 +335,7 @@ class AutoMobileAgentTest {
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5) } returns
+    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5, any()) } returns
       mockAIAgent
     coEvery { mockAIAgent.run(capture(promptSlot)) } returns "done"
 
@@ -374,7 +380,12 @@ class AutoMobileAgentTest {
     // The JSON observe result carries the secret in its escaped form (a `"` becomes `\"`).
     every { mockMcpClient.callTool("observe", any()) } returns """{"field":"token pa\"ss-TOKEN"}"""
     every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, capture(agentClientSlot), 5)
+      mockAiAgentFactory.createAIAgentWithMCPTools(
+        modelConfig,
+        capture(agentClientSlot),
+        5,
+        mockMcpClient,
+      )
     } returns mockAIAgent
     coEvery { mockAIAgent.run(any()) } returns "done"
 
@@ -452,8 +463,9 @@ class AutoMobileAgentTest {
     every { mockMcpClient.connect("http://localhost:3000") } just runs
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5) } returns
-      mockAIAgent
+    every {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
+    } returns mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
     coEvery { mockAIAgent.run(capture(promptSlot)) } returns "Dismissed the dialog"
 
@@ -516,8 +528,9 @@ class AutoMobileAgentTest {
     every { mockMcpClient.connect("http://localhost:3000") } just runs
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5) } returns
-      mockAIAgent
+    every {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
+    } returns mockAIAgent
 
     coEvery { mockAIAgent.run(any()) } throws RuntimeException("AI failed")
 
@@ -586,7 +599,12 @@ class AutoMobileAgentTest {
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
     every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, customMaxToolCalls)
+      mockAiAgentFactory.createAIAgentWithMCPTools(
+        modelConfig,
+        mockMcpClient,
+        customMaxToolCalls,
+        mockMcpClient,
+      )
     } returns mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
 
@@ -597,7 +615,12 @@ class AutoMobileAgentTest {
 
     // Assert - verify factory was called with the custom max tool calls
     verify {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, customMaxToolCalls)
+      mockAiAgentFactory.createAIAgentWithMCPTools(
+        modelConfig,
+        mockMcpClient,
+        customMaxToolCalls,
+        mockMcpClient,
+      )
     }
   }
 

@@ -134,11 +134,13 @@ open class AutoMobileAgent(
       // prompt is already redacted by the executor (#6092); this closes the loop channel. With no
       // secrets the raw client is used unchanged (no wrapper allocated).
       //
-      // Known limitation (follow-up): the wrapper also redacts the intermediate observe result that
-      // the composite WaitForTool searches locally — its own output to the model is synthesized and
-      // safe, so there is no leak, but a wait target that is a substring of an on-screen secret can
-      // falsely time out. A clean fix hands composite tools the raw client; deferred to keep this
-      // security change scoped.
+      // #6145 fix: the wrapper also redacts the intermediate observe result that the composite
+      // WaitForTool searches locally. Its own output to the model is synthesized ("found" /
+      // "timeout") and never leaks that observe text, so redacting the copy it searches only
+      // produces a false timeout when the wait target is a substring of an on-screen secret value
+      // — it buys no security. So WaitForTool is wired to the RAW (unwrapped) client below via
+      // createAIAgentWithMCPTools's rawMcpClient param, while every pass-through tool (whose result
+      // DOES reach the model) keeps using agentMcpClient, the redacting wrapper.
       //
       // Normalize the incoming concrete secret values into every scrub form (NFC/NFD + the
       // transport-encoding depths) HERE, at the public recovery entry point, so the loop is safe
@@ -149,7 +151,12 @@ open class AutoMobileAgent(
       val agentMcpClient =
         if (redactionValues.isEmpty()) mcpClient else RedactingMCPClient(mcpClient, redactionValues)
       val aiAgent =
-        aiAgentFactory.createAIAgentWithMCPTools(modelConfig, agentMcpClient, maxToolCalls)
+        aiAgentFactory.createAIAgentWithMCPTools(
+          modelConfig,
+          agentMcpClient,
+          maxToolCalls,
+          mcpClient,
+        )
 
       // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
       // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path;
@@ -680,7 +687,15 @@ open class AutoMobileAgent(
     }
   }
 
-  /** Wait for elements to appear or conditions to be met */
+  /**
+   * Wait for elements to appear or conditions to be met.
+   *
+   * A composite tool: unlike the pass-through tools above, its RESULT to the model is a synthesized
+   * "found"/"timeout" string, never the observe text it searches. So [AutoMobileMCPToolFactory]
+   * wires this to the RAW (unredacted) client — searching a redacted copy would falsely time out
+   * whenever the wait target is a substring of an on-screen secret value, with no security benefit
+   * (issue #6145; the intermediate observe text itself never reaches the model through this tool).
+   */
   class WaitForTool(private val mcpClient: MCPClient) :
     SimpleTool<WaitForTool.Args>(
       argsType = typeToken<Args>(),
@@ -857,8 +872,19 @@ open class AutoMobileAgent(
     }
   }
 
-  /** Helper to create all MCP tools for an agent */
-  class AutoMobileMCPToolFactory(private val mcpClient: MCPClient) {
+  /**
+   * Helper to create all MCP tools for an agent.
+   *
+   * [mcpClient] backs every pass-through tool (its result reaches the model, so during recovery
+   * this is the redacting wrapper). [rawMcpClient] backs [WaitForTool] alone — a composite tool
+   * whose model-facing result is a synthesized string, so redacting the observe text it searches
+   * locally only produces false timeouts, not a leak (issue #6145). Defaults to [mcpClient] so
+   * non-recovery callers (no secrets, no wrapper) are unaffected.
+   */
+  class AutoMobileMCPToolFactory(
+    private val mcpClient: MCPClient,
+    private val rawMcpClient: MCPClient = mcpClient,
+  ) {
     fun createAllTools(): List<SimpleTool<*>> =
       listOf(
         ObserveTool(mcpClient),
@@ -867,7 +893,7 @@ open class AutoMobileAgent(
         InputTextTool(mcpClient),
         SwipeTool(mcpClient),
         ScrollTool(mcpClient),
-        WaitForTool(mcpClient),
+        WaitForTool(rawMcpClient),
         GoBackTool(mcpClient),
         PressButtonTool(mcpClient),
         ClearTextTool(mcpClient),
@@ -906,6 +932,7 @@ open class AutoMobileAgent(
       config: ModelConfig,
       mcpClient: MCPClient,
       maxToolCalls: Int = 5,
+      rawMcpClient: MCPClient = mcpClient,
     ): AIAgent<String, String>
   }
 
@@ -1020,12 +1047,15 @@ open class AutoMobileAgent(
       config: ModelConfig,
       mcpClient: MCPClient,
       maxToolCalls: Int,
+      rawMcpClient: MCPClient,
     ): AIAgent<String, String> {
       val executor = createPromptExecutor(config)
       val model = selectModel(config.provider)
 
-      // Create AutoMobile MCP tools using class-based pattern (no reflection)
-      val toolFactory = AutoMobileMCPToolFactory(mcpClient)
+      // Create AutoMobile MCP tools using class-based pattern (no reflection). WaitForTool gets the
+      // raw client (#6145); every other, pass-through tool gets mcpClient (the redacting wrapper
+      // during recovery).
+      val toolFactory = AutoMobileMCPToolFactory(mcpClient, rawMcpClient)
       val toolRegistry = ToolRegistry { toolFactory.createAllTools().forEach { tool(it) } }
 
       val systemPrompt =

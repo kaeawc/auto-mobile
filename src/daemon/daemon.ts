@@ -260,6 +260,7 @@ export class Daemon {
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
+  private socketBindCommitted = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
@@ -565,6 +566,14 @@ export class Daemon {
     logger.info("Starting Unix socket server...");
     startupBenchmark.startPhase("socketServerStart");
     await this.socketServer.start();
+    // We now hold the socket bind. Only past this point may this process's exit /
+    // shutdown cleanup delete the shared socket/PID files: before it, the early
+    // owner record (issue #2871) makes the `expectedPid` self-check pass even
+    // though we do not own the socket, so a lock-less contender refused over a
+    // live sibling (issue #6232) must NOT clean up on exit and brick the winner
+    // (the #6140 failure mode via a bypassed launch). The socket bind is the
+    // single event that authorizes destructive cleanup.
+    this.socketBindCommitted = true;
     startupBenchmark.endPhase("socketServerStart");
     logger.info("Unix socket server started");
 
@@ -2575,12 +2584,25 @@ export class Daemon {
     reportFailures(await settled);
   }
 
-  private getDaemonFileCleanupOptions(): { expectedPid?: number } {
+  private getDaemonFileCleanupOptions(): {
+    expectedPid?: number;
+    socketBindCommitted: boolean;
+  } {
+    // Gate destructive cleanup on actually holding the socket bind. A lock-less
+    // contender refused over a live sibling (issue #6232) has written its early
+    // owner record (issue #2871) — so `pidFileWritten` is already true and the
+    // `expectedPid` self-check would authorize deletion — yet it never bound the
+    // socket. Threading `socketBindCommitted` through makes the cleanup a no-op
+    // for that loser, so the live winner's socket/PID files survive its exit
+    // (the #6140 brick, prevented here rather than reached).
+    const socketBindCommitted = this.socketBindCommitted;
     if (this.pidFileWritten) {
-      return { expectedPid: process.pid };
+      return { expectedPid: process.pid, socketBindCommitted };
     }
     const pidData = readPidFileDataSync();
-    return pidData && pidData.pid !== process.pid ? { expectedPid: process.pid } : {};
+    return pidData && pidData.pid !== process.pid
+      ? { expectedPid: process.pid, socketBindCommitted }
+      : { socketBindCommitted };
   }
 
   /**

@@ -41,6 +41,7 @@ import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
+import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
 import {
   ListChangedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
@@ -159,7 +160,46 @@ export interface SocketBindGuardOptions {
    * socket; defaults to the real {@link DaemonSocketReachability}.
    */
   reachability?: DaemonSocketReachabilityLike;
+  /**
+   * Observation-only owner-liveness check used by a lock-less bind to
+   * disambiguate a NOT-reachable probe (issue #6232). A probe that fails to
+   * connect is NOT proof the socket is dead — a live daemon can transiently
+   * refuse or time out under an accept backlog or mid-startup (see
+   * {@link DaemonManager.status}). Consulting whether a live process is still
+   * recorded as the socket's owner lets the guard fail CLOSED on that
+   * inconclusive case instead of unlinking a live daemon's socket. Injected so a
+   * test can drive the outcome deterministically without a real PID file;
+   * defaults to reading the daemon PID record.
+   */
+  ownerLiveness?: SocketOwnerLiveness;
 }
+
+/**
+ * Observation-only check for whether a live daemon process (other than this one)
+ * is still recorded as the control socket's owner (issue #6232). Reads the PID
+ * record only — it never touches the socket file, so it introduces no new
+ * destructive actor on the path.
+ */
+export interface SocketOwnerLiveness {
+  hasLiveForeignOwner(): boolean;
+}
+
+/**
+ * Default {@link SocketOwnerLiveness}: the socket has a live foreign owner when
+ * the daemon PID record names a running process that is NOT this process. A
+ * record naming this process (our own early owner record, issue #2871) or a dead
+ * process is not a live foreign owner, so a genuinely stale socket stays
+ * reclaimable.
+ */
+const defaultSocketOwnerLiveness: SocketOwnerLiveness = {
+  hasLiveForeignOwner(): boolean {
+    const pidData = readPidFileDataSync();
+    if (!pidData || pidData.pid === process.pid) {
+      return false;
+    }
+    return isProcessRunning(pidData.pid);
+  },
+};
 
 /**
  * Resolve {@link SocketBindGuardOptions} to their concrete defaults (issue #6232).
@@ -169,10 +209,12 @@ export interface SocketBindGuardOptions {
 function resolveSocketBindGuard(bindGuard: SocketBindGuardOptions): {
   startupLockHeld: boolean;
   reachability: DaemonSocketReachabilityLike;
+  ownerLiveness: SocketOwnerLiveness;
 } {
   return {
     startupLockHeld: bindGuard.startupLockHeld ?? true,
     reachability: bindGuard.reachability ?? new DaemonSocketReachability(),
+    ownerLiveness: bindGuard.ownerLiveness ?? defaultSocketOwnerLiveness,
   };
 }
 
@@ -402,6 +444,8 @@ export class UnixSocketServer {
   private readonly startupLockHeld: boolean;
   /** Observation-only liveness probe used before a LOCK-LESS bind's reclaim (issue #6232). */
   private readonly socketReachability: DaemonSocketReachabilityLike;
+  /** Observation-only owner-liveness check that fails a LOCK-LESS bind closed on an inconclusive probe (issue #6232). */
+  private readonly socketOwnerLiveness: SocketOwnerLiveness;
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
@@ -483,6 +527,7 @@ export class UnixSocketServer {
     const resolvedBindGuard = resolveSocketBindGuard(bindGuard);
     this.startupLockHeld = resolvedBindGuard.startupLockHeld;
     this.socketReachability = resolvedBindGuard.reachability;
+    this.socketOwnerLiveness = resolvedBindGuard.ownerLiveness;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -571,10 +616,18 @@ export class UnixSocketServer {
    * A LOCK-LESS bind (a hand-launched daemon) first runs an observation-only
    * liveness probe. If a daemon is still accepting on the path, it throws an
    * ActionableError rather than unlinking — only the locked bind is allowed to
-   * remove a live socket. If the probe finds no live listener the socket is
-   * genuinely stale, so it is safe to unlink and bind. The probe itself never
-   * touches the socket file, so this introduces no new destructive actor on the
-   * path (the #6140 brick class stays fixed).
+   * remove a live socket.
+   *
+   * A probe that does NOT get a connection is treated as INCONCLUSIVE, not as
+   * proof the socket is dead: a live daemon can transiently refuse or time out a
+   * probe under an accept backlog or mid-startup (see {@link DaemonManager}'s
+   * `status()` note). Mapping every such refusal to "dead" and unlinking would
+   * brick that live daemon's clients (the #6140 failure mode). So the guard fails
+   * CLOSED — it reclaims (unlinks) ONLY when no live process is recorded as the
+   * socket's owner. If a live owner is still recorded, the refusal is inconclusive
+   * and the bind is refused with an actionable error. Both checks are
+   * observation-only (they never touch the socket file), so this introduces no new
+   * destructive actor on the path (the #6140 brick class stays fixed).
    */
   private async reclaimExistingSocketBeforeBind(): Promise<void> {
     if (!this.startupLockHeld) {
@@ -587,6 +640,18 @@ export class UnixSocketServer {
           `Refusing to bind: another AutoMobile daemon is already listening on ${this.socketPath}. ` +
             "This process did not acquire the daemon startup lock, so it must not unlink a live daemon's " +
             "socket out from under its clients. Stop the running daemon or run `--daemon restart` to replace it.",
+        );
+      }
+      // Not reachable is NOT the same as confidently dead. Fail closed: only a
+      // socket with no live recorded owner may be reclaimed. A live owner that
+      // merely refused the probe (accept backlog / mid-startup) is inconclusive.
+      if (this.socketOwnerLiveness.hasLiveForeignOwner()) {
+        throw new ActionableError(
+          `Refusing to bind: the AutoMobile daemon socket ${this.socketPath} did not answer a liveness probe, ` +
+            "but a live daemon process is still recorded as its owner, so the probe is inconclusive (e.g. a " +
+            "transient refusal under an accept backlog) rather than proof the socket is dead. This process did not " +
+            "acquire the daemon startup lock, so it must not unlink a socket that may still be live. Stop the running " +
+            "daemon or run `--daemon restart` to replace it.",
         );
       }
     }

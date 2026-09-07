@@ -16,20 +16,29 @@ class AsyncFailStream extends EventEmitter {
   }
 
   end(callback?: () => void): void {
-    queueMicrotask(() => callback?.());
+    queueMicrotask(() => {
+      callback?.();
+      // Model the fd release so closeLogStream (which awaits `close`, not the
+      // end callback) resolves on a clean close — issue #6149.
+      this.emit("close");
+    });
   }
 }
 
 /** A stream whose close is driven manually by the test, so ordering between
  * "old stream asked to close" and "replacement stream constructed" can be
- * asserted deterministically instead of racing real fs/epoll timing. */
+ * asserted deterministically instead of racing real fs/epoll timing.
+ * `finish` (writable drained) and `close` (fd released) are modelled
+ * separately, since closeLogStream must wait for the latter (issue #6149). */
 class ControllableStream extends EventEmitter {
   destroyed = false;
   writable = true;
   ended = false;
+  readonly writes: string[] = [];
   private endCallback: (() => void) | undefined;
 
-  write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
+  write(chunk: unknown, callback?: (error: Error | null) => void): boolean {
+    this.writes.push(String(chunk));
     queueMicrotask(() => callback?.(null));
     return true;
   }
@@ -39,11 +48,15 @@ class ControllableStream extends EventEmitter {
     this.endCallback = callback;
   }
 
-  /** Simulates the stream's fd having actually finished closing. */
+  /** Simulates the stream's fd having actually finished closing: writable
+   * completion (`finish`, plus any end callback) followed by fd release
+   * (`close`), which is what closeLogStream actually awaits. */
   finishClose(): void {
     const callback = this.endCallback;
     this.endCallback = undefined;
     callback?.();
+    this.emit("finish");
+    this.emit("close");
   }
 }
 
@@ -512,6 +525,86 @@ describe("rotation waits for the old stream to fully close before reopening (#61
 
       expect(flushSettled).toBeTrue();
       expect(opened.length).toBe(2);
+    } finally {
+      createWriteStream.mockRestore();
+      rmSync(logDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("writes are serialized across log rotation (#6149)", () => {
+  test("a write arriving mid-rotation waits and lands on the NEW stream, never opening its own", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "am-logger-rotate-serialize-"));
+    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
+    // Pre-seed past the 10MiB threshold so the first write triggers real
+    // rotation (see the neighbouring #6149 test for why this uses a real file).
+    writeFileSync(targetLogFile, Buffer.alloc(11 * 1024 * 1024, "x"));
+
+    const opened: ControllableStream[] = [];
+    const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
+      const stream = new ControllableStream();
+      opened.push(stream);
+      return stream as unknown as fs.WriteStream;
+    });
+
+    // Real fs I/O (stat/rename on a tmp file) resolves via the libuv
+    // threadpool, so drain with a macrotask tick rather than a microtask.
+    const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+    let mod: typeof import("../../src/utils/logger") | undefined;
+    try {
+      mod = await loggerWithEnv("text", "file", logDir);
+      expect(opened.length).toBe(1);
+      const oldStream = opened[0];
+
+      // Observe, event-driven, when rotation asks the old stream to close —
+      // real stat/existsSync I/O ahead of it can outlast any fixed tick budget.
+      let endWasCalled: () => void;
+      const endWasCalledPromise = new Promise<void>((resolve) => {
+        endWasCalled = resolve;
+      });
+      const originalEnd = oldStream.end.bind(oldStream);
+      oldStream.end = (callback?: () => void) => {
+        endWasCalled();
+        originalEnd(callback);
+      };
+
+      // Record A triggers rotation; its close is withheld (finishClose deferred),
+      // pinning rotation mid-flight with `logStream` cleared.
+      mod.logger.info("record A triggers rotation");
+      const flushA = mod.logger.flush();
+
+      await endWasCalledPromise;
+      expect(oldStream.ended).toBeTrue();
+      expect(opened.length).toBe(1);
+
+      // Record B arrives while rotation is still blocked on the withheld close.
+      // It must NOT open its own stream at the same path — it must wait.
+      mod.logger.info("record B mid-rotation");
+      const flushB = mod.logger.flush();
+      let flushBSettled = false;
+      void flushB.then(() => {
+        flushBSettled = true;
+      });
+
+      for (let i = 0; i < 20; i++) {
+        await tick();
+      }
+      // Still blocked: no second stream opened, B parked behind rotation.
+      expect(opened.length).toBe(1);
+      expect(flushBSettled).toBeFalse();
+
+      // Release the old fd's close; rotation opens exactly one replacement and
+      // both records drain to it.
+      oldStream.finishClose();
+      await Promise.all([flushA, flushB]);
+
+      expect(opened.length).toBe(2);
+      const newStreamWrites = opened[1].writes.join("");
+      expect(newStreamWrites).toContain("record A triggers rotation");
+      expect(newStreamWrites).toContain("record B mid-rotation");
+      // The mid-rotation record never touched the old (now-renamed) stream.
+      expect(oldStream.writes.join("")).not.toContain("record B mid-rotation");
     } finally {
       createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });

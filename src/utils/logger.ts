@@ -240,23 +240,43 @@ function fileLogPaths(): { dir: string; path: string } | undefined {
 }
 
 interface EndableLogStream {
-  end(callback: () => void): void;
-  once(event: "error", listener: (error: Error) => void): void;
-  off(event: "error", listener: (error: Error) => void): void;
+  end(callback?: () => void): void;
+  once(event: "error" | "close", listener: (...args: any[]) => void): void;
+  off(event: "error" | "close", listener: (...args: any[]) => void): void;
 }
 
-/** Resolves when a log stream has finished, or rejects if closing it fails. */
+/**
+ * Resolves once a log stream has ACTUALLY closed (its file descriptor
+ * released), or rejects if closing it fails.
+ *
+ * `WriteStream.end(callback)` fires its callback on writable completion — the
+ * same moment as the `finish` event — but the underlying fd is only released
+ * later, on the `close` event. On Bun (and Node) the observed order is: end
+ * callback, then `finish`, then `close`. Reopening the same path on the earlier
+ * `finish` signal therefore still races bun's epoll registration for the not-
+ * yet-released fd and can throw `EEXIST: ... epoll_ctl` on the replacement
+ * stream's construction — the exact race rotation exists to avoid (issue
+ * #6149). So we drive `end()` to start the shutdown but wait for `close`.
+ */
 export function closeLogStream(stream: EndableLogStream): Promise<void> {
   return new Promise((resolve, reject) => {
-    const onError = (error: Error): void => {
+    let settled = false;
+    const settle = (run: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       stream.off("error", onError);
-      reject(error);
+      stream.off("close", onClose);
+      run();
     };
+    const onError = (error: Error): void => settle(() => reject(error));
+    const onClose = (): void => settle(() => resolve());
     stream.once("error", onError);
-    stream.end(() => {
-      stream.off("error", onError);
-      resolve();
-    });
+    stream.once("close", onClose);
+    // Start the shutdown; the `close` listener above (not end()'s finish-time
+    // callback) is what actually resolves this promise once the fd is released.
+    stream.end();
   });
 }
 
@@ -342,6 +362,27 @@ const rotateLogFile = async (paths: { dir: string; path: string }): Promise<void
   await pruneOldLogFiles();
 };
 
+// A single rotation runs at a time, and every write serializes against it (see
+// writeToFile). While it is set, `logStream` is briefly undefined — the old
+// stream is closing and the replacement is not yet open — so a concurrent
+// write that opened its own stream at the same path would recreate the very
+// epoll EEXIST race rotation's close-before-reopen exists to avoid (issue
+// #6149). Sharing this promise makes back-to-back writes join the in-flight
+// rotation instead of starting a second close/reopen.
+let rotationInFlight: Promise<void> | undefined;
+
+// Start a rotation if none is running, and return the shared promise so
+// concurrent callers JOIN the in-flight rotation instead of starting a second
+// close/reopen at the same path (issue #6149).
+const beginOrJoinRotation = (paths: { dir: string; path: string }): Promise<void> => {
+  if (!rotationInFlight) {
+    rotationInFlight = rotateLogFile(paths).finally(() => {
+      rotationInFlight = undefined;
+    });
+  }
+  return rotationInFlight;
+};
+
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
   const paths = fileLogPaths();
@@ -352,12 +393,13 @@ const checkAndRotateLog = async (): Promise<void> => {
     if (fs.existsSync(paths.path)) {
       const stats = await statAsync(paths.path);
       if (stats.size >= MAX_LOG_SIZE) {
-        await rotateLogFile(paths);
+        await beginOrJoinRotation(paths);
       }
     }
   } catch (err) {
-    // If rotation fails, ensure we have a valid log stream
-    if (logStream?.destroyed || !logStream?.writable) {
+    // If rotation fails, ensure we have a valid log stream — but never reopen
+    // underneath an in-flight rotation, which owns the stream lifecycle.
+    if (!rotationInFlight && (logStream?.destroyed || !logStream?.writable)) {
       logStream = openLogStream(paths.path);
     }
     await reportLogFailure("Log rotation failed", err);
@@ -507,6 +549,15 @@ const writeToFile = async (line: string): Promise<void> => {
   if (!logFilePath) {
     // Stderr-only sink: no file stream is ever expected here.
     return;
+  }
+  // Serialize this write against any in-flight rotation. During rotation
+  // `logStream` is transiently undefined (old stream closing, replacement not
+  // yet open); without this wait, the lazy reopen below would observe that gap
+  // and open a second stream at the same path while the old fd is still
+  // closing — the exact epoll EEXIST race rotation guards against (issue
+  // #6149). Wait for rotation to publish the fresh stream, then use it.
+  while (rotationInFlight) {
+    await rotationInFlight;
   }
   if (!logStream) {
     // A prior open attempt failed — e.g. bun's transient EEXIST/epoll race

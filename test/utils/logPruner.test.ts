@@ -340,6 +340,58 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
       expect(after).not.toContain(launchLog); // confidently no owner -> pruned
     });
   });
+
+  test("retains an uncertain launch log within the default 7-day horizon even though abandonedMaxAgeMs is effectively 0", async () => {
+    // Decoupling check: a caller that shrinks the ordinary sweep window
+    // (abandonedMaxAgeMs: -1, i.e. "always past threshold") must NOT also
+    // shrink the fail-closed uncertain horizon — it defaults independently.
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "in-flight output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false,
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
+        readDaemonPid: () => undefined,
+        isDaemonRunning: () => false,
+      });
+
+      const after = await readdir(dir);
+      expect(after).toContain(launchLog); // freshly written -> well within 7 days
+    });
+  });
+
+  test("eventually prunes an uncertain launch log once it exceeds uncertainAbandonedMaxAgeMs (issue #6194, round 3)", async () => {
+    // Regression for the round-3 finding: marking discovery `uncertain`
+    // unconditionally (to close the prior default-namespace gap) must not
+    // retain every uncertain namespace's launch logs FOREVER — that reopens
+    // the unbounded-growth problem the abandoned-log sweep exists to prevent.
+    // An uncertain namespace still gets swept, just past a longer, dedicated
+    // horizon instead of the ordinary `abandonedMaxAgeMs`.
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "long-abandoned output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: 1000 * 60 * 60 * 24 * 365, // ordinary window: effectively "never"
+        uncertainAbandonedMaxAgeMs: -1, // extended window: treat as already past
+        isProcessAlive: () => false,
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
+        readDaemonPid: () => undefined,
+        isDaemonRunning: () => false,
+      });
+
+      const after = await readdir(dir);
+      expect(after).not.toContain(launchLog); // past the extended uncertain horizon -> pruned
+    });
+  });
 });
 
 describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {

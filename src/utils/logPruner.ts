@@ -8,18 +8,37 @@ import { readdirAsync, statAsync, unlinkAsync } from "./io";
  * `uncertain` is the fail-closed signal (issue #6194): it is set when daemon
  * discovery could not be exhaustive — a custom pid-file namespace whose siblings
  * may live in directories this scan can't see, or a failed directory scan. When
- * uncertain, a launch log is RETAINED even if none of the discovered pids is
- * alive, because a live daemon in an undiscoverable namespace may still hold the
- * inherited fd. A stale launch log is unlinked only when it is CONFIDENTLY
- * established (uncertain === false and no discovered/own daemon alive) that no
- * live daemon owns it.
+ * uncertain, a launch log is retained past the ordinary {@link LogPruneOptions.abandonedMaxAgeMs}
+ * even if none of the discovered pids is alive, because a live daemon in an
+ * undiscoverable namespace may still hold the inherited fd. It is NOT retained
+ * forever, though: the production enumerator (`listDaemonPidFilesSync`) can
+ * never resolve `uncertain` to `false` for a custom pid-file namespace, so
+ * treating uncertainty as permanent retention would leak one launch log per
+ * daemon start, unbounded, on every host that uses a custom namespace — see
+ * {@link LogPruneOptions.uncertainAbandonedMaxAgeMs}. A launch log is unlinked
+ * on the ordinary, shorter horizon only when it is CONFIDENTLY established
+ * (uncertain === false and no discovered/own daemon alive) that no live daemon
+ * owns it.
  */
 export interface DaemonPidFileEnumeration {
   /** Daemon pid files this enumeration could discover (always includes the caller's own). */
   pidFiles: readonly string[];
-  /** True when discovery is incomplete/failed — retain launch logs (fail closed). */
+  /** True when discovery is incomplete/failed — retain launch logs past the extended horizon. */
   uncertain: boolean;
 }
+
+/**
+ * Extended retention horizon applied to a `daemon-launch-*.log` when daemon
+ * discovery is UNCERTAIN rather than confidently clear. A custom pid-file
+ * namespace can never make `uncertain` resolve to `false` (its siblings may
+ * live in a directory a scan never visits), so gating cleanup on `uncertain`
+ * alone — as the prior fix for issue #6194 did — retains every uncertain
+ * namespace's launch logs forever and reopens the unbounded-growth problem the
+ * ordinary `abandonedMaxAgeMs` sweep exists to prevent (issue #6194, round 3).
+ * Seven days is long enough that no real daemon session plausibly still holds
+ * the fd, while still bounding disk usage on a long-lived host.
+ */
+const DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface LogPruneOptions {
   /** Directory containing the `.log` files. */
@@ -30,6 +49,15 @@ export interface LogPruneOptions {
   maxOwnFiles: number;
   /** Other processes' files older than this (by mtime) are swept once their owner has exited. */
   abandonedMaxAgeMs: number;
+  /**
+   * Age threshold applied to a `daemon-launch-*.log` specifically when daemon
+   * discovery reports `uncertain` (not confidently clear, not confidently
+   * alive) — see {@link DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS}. Defaults to
+   * that 7-day constant when unset; independent of `abandonedMaxAgeMs` so a
+   * caller (e.g. a test) can shrink the ordinary sweep window without also
+   * shortening the fail-closed uncertain horizon.
+   */
+  uncertainAbandonedMaxAgeMs?: number;
   /** Injectable clock for testing. */
   now?: number;
   /** Injectable liveness check for testing; defaults to a signal-0 probe. */
@@ -164,7 +192,14 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   // (issue #6194). Consider every co-located namespace's pid file, treating a
   // launch log as protected if ANY of those daemons is alive; fall back to the
   // single-namespace `isDaemonRunning` when no pid files were enumerated.
-  const computeAnyDaemonHoldsLaunchLog = (): boolean => {
+  //
+  // Tri-state rather than boolean: "alive" (skip unconditionally — a confirmed
+  // live daemon may hold the fd), "clear" (confidently no daemon anywhere —
+  // ordinary `abandonedMaxAgeMs` sweep applies), or "uncertain" (discovery could
+  // not be exhaustive — swept only past the longer
+  // `uncertainAbandonedMaxAgeMs` horizon, not retained forever; see
+  // {@link DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS}).
+  const computeDaemonLaunchLogProtection = (): "alive" | "uncertain" | "clear" => {
     const enumerate = opts.daemonPidFiles;
     const readDaemonPid = opts.readDaemonPid;
     if (enumerate && readDaemonPid) {
@@ -181,22 +216,23 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
           return pid !== undefined && Number.isInteger(pid) && pid > 0 && isAlive(pid);
         });
         if (anyAlive) {
-          return true;
+          return "alive";
         }
         // Discovery was incomplete (an undiscoverable custom namespace, a failed
         // scan): a live daemon we could not enumerate may still hold the fd, so
-        // retain the launch log rather than unlink it on an unproven absence.
+        // retain past the extended horizon rather than the ordinary one.
         if (uncertain) {
-          return true;
+          return "uncertain";
         }
+        return "clear";
       } catch (error) {
         // A pidfile enumeration/read/probe failure must not green-light unlinking
         // a launch log a live daemon may still hold — retain on ambiguity (#6194).
         opts.logger?.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
-        return true;
+        return "uncertain";
       }
     }
-    return isDaemonRunning();
+    return isDaemonRunning() ? "alive" : "clear";
   };
 
   // The retention decision above is invariant for the whole sweep: it depends
@@ -206,12 +242,12 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   // O(launch logs × pid files) synchronous filesystem work blocking the event
   // loop. Compute it at most once, lazily (only if a launch log is actually
   // encountered), and reuse the cached verdict for the rest of this sweep.
-  let cachedAnyDaemonHoldsLaunchLog: boolean | undefined;
-  const anyDaemonHoldsLaunchLog = (): boolean => {
-    if (cachedAnyDaemonHoldsLaunchLog === undefined) {
-      cachedAnyDaemonHoldsLaunchLog = computeAnyDaemonHoldsLaunchLog();
+  let cachedProtection: "alive" | "uncertain" | "clear" | undefined;
+  const daemonLaunchLogProtection = (): "alive" | "uncertain" | "clear" => {
+    if (cachedProtection === undefined) {
+      cachedProtection = computeDaemonLaunchLogProtection();
     }
-    return cachedAnyDaemonHoldsLaunchLog;
+    return cachedProtection;
   };
 
   let entries: string[];
@@ -252,15 +288,26 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     // A daemon-launch log's fd is held by the detached daemon, not the manager
     // named in the filename. While a daemon is running it may still be writing
     // to that inherited fd, so unlinking on the manager's exit + stale mtime
-    // would silently drop live daemon output (issue #6194). Retain all launch
-    // logs until no daemon is running.
-    if (isDaemonLaunchLog(file) && anyDaemonHoldsLaunchLog()) {
-      continue;
+    // would silently drop live daemon output (issue #6194). A CONFIRMED live
+    // daemon retains the log unconditionally; UNCERTAIN discovery retains it
+    // only past a much longer horizon rather than forever, so a genuinely
+    // undiscoverable custom namespace still gets swept eventually instead of
+    // leaking one launch log per daemon start (issue #6194, round 3).
+    let effectiveMaxAgeMs = opts.abandonedMaxAgeMs;
+    if (isDaemonLaunchLog(file)) {
+      const protection = daemonLaunchLogProtection();
+      if (protection === "alive") {
+        continue;
+      }
+      if (protection === "uncertain") {
+        effectiveMaxAgeMs =
+          opts.uncertainAbandonedMaxAgeMs ?? DEFAULT_UNCERTAIN_ABANDONED_MAX_AGE_MS;
+      }
     }
     const full = path.join(opts.dir, file);
     try {
       const stats = await statAsync(full);
-      if (now - stats.mtimeMs > opts.abandonedMaxAgeMs) {
+      if (now - stats.mtimeMs > effectiveMaxAgeMs) {
         await unlinkAsync(full).catch(() => {
           /* best effort */
         });

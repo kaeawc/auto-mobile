@@ -225,7 +225,14 @@ function isReadinessSatisfied(
  * its own flights, and the predecessor's entry becomes eligible for GC once
  * nothing else references that stale `Session`.
  */
-const readinessUpgradeInFlight = new WeakMap<Session, Promise<void>>();
+interface ReadinessUpgradeFlight {
+  controller: AbortController;
+  work: Promise<void>;
+  settled: boolean;
+  waiters: number;
+}
+
+const readinessUpgradeInFlight = new WeakMap<Session, ReadinessUpgradeFlight>();
 
 async function ensureReadinessUpgraded(
   session: Session,
@@ -263,7 +270,7 @@ async function ensureReadinessUpgraded(
       // Another caller is already upgrading this session's readiness — wait
       // for it rather than racing a second `runDeviceReadinessSetup` call,
       // then loop back to re-check whether it reached the level we need.
-      await awaitReadinessWork(inFlight, signal);
+      await awaitReadinessFlight(inFlight, signal);
       continue;
     }
 
@@ -283,19 +290,43 @@ async function ensureReadinessUpgraded(
       continue;
     }
 
-    const setupPromise = runDeviceReadinessSetup(
+    const controller = new AbortController();
+    let flight!: ReadinessUpgradeFlight;
+    const work = runDeviceReadinessSetup(
       session,
       sessionManager,
       requiredReadiness,
-      signal,
+      controller.signal,
     ).finally(() => {
-      if (readinessUpgradeInFlight.get(session) === setupPromise) {
+      flight.settled = true;
+      if (readinessUpgradeInFlight.get(session) === flight) {
         readinessUpgradeInFlight.delete(session);
       }
     });
-    readinessUpgradeInFlight.set(session, setupPromise);
-    await awaitReadinessWork(setupPromise, signal);
+    flight = { controller, work, settled: false, waiters: 0 };
+    readinessUpgradeInFlight.set(session, flight);
+    await awaitReadinessFlight(flight, signal);
     return;
+  }
+}
+
+/**
+ * A request may stop waiting for shared readiness work without cancelling a
+ * still-interested joiner. If every subscriber leaves, stop the background
+ * setup instead of continuing a cancelled request's device mutation.
+ */
+async function awaitReadinessFlight(
+  flight: ReadinessUpgradeFlight,
+  signal?: AbortSignal,
+): Promise<void> {
+  flight.waiters += 1;
+  try {
+    await awaitReadinessWork(flight.work, signal);
+  } finally {
+    flight.waiters -= 1;
+    if (flight.waiters === 0 && !flight.settled && !flight.controller.signal.aborted) {
+      flight.controller.abort(signal?.reason);
+    }
   }
 }
 

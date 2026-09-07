@@ -214,9 +214,21 @@ export async function trackDeviceAcquisitionReadiness<T>(
     return await fn();
   } finally {
     settle();
-    if (deviceAcquisitionReadiness.get(key) === marker) {
-      deviceAcquisitionReadiness.delete(key);
+    // A recovery can replace a device serial after this acquisition begins.
+    // Clear every alias of this marker, not only its original key.
+    for (const [markerKey, current] of deviceAcquisitionReadiness) {
+      if (current === marker) {
+        deviceAcquisitionReadiness.delete(markerKey);
+      }
     }
+  }
+}
+
+/** Move an in-flight acquisition marker to a replacement device identity. */
+export function moveDeviceAcquisitionReadiness(fromKey: string, toKey: string): void {
+  const marker = deviceAcquisitionReadiness.get(fromKey);
+  if (marker && fromKey !== toKey) {
+    deviceAcquisitionReadiness.set(toKey, marker);
   }
 }
 

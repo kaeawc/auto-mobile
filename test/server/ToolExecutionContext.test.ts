@@ -1004,7 +1004,7 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(0);
   });
 
-  test("runs session readiness setup with the request abort signal in its ambient context (#6280)", async () => {
+  test("runs session readiness setup with a flight signal that is independent of one requester (#6280)", async () => {
     let setupSignal: AbortSignal | undefined;
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
       resetSetupState: () => {},
@@ -1030,7 +1030,53 @@ describe("ToolExecutionContext", () => {
       controller.signal,
     );
 
-    expect(setupSignal).toBe(controller.signal);
+    expect(setupSignal).toBeDefined();
+    expect(setupSignal).not.toBe(controller.signal);
+    expect(setupSignal!.aborted).toBe(false);
+  });
+
+  test("does not let a cancelled readiness-flight initiator cancel a live joiner (#6280)", async () => {
+    let resolveSetup!: () => void;
+    const setupStarted = new Promise<void>((resolve) => {
+      resolveSetup = resolve;
+    });
+    let setupCalls = 0;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        await setupStarted;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-shared-flight", "device-1", "android");
+    const firstController = new AbortController();
+    const first = createToolExecutionContext(
+      "session-shared-flight",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+      undefined,
+      undefined,
+      false,
+      firstController.signal,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = createToolExecutionContext(
+      "session-shared-flight",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    firstController.abort(new Error("first request cancelled"));
+    await expect(first).rejects.toThrow("first request cancelled");
+    resolveSetup();
+    await expect(second).resolves.toMatchObject({ deviceId: "device-1" });
+    expect(setupCalls).toBe(1);
   });
 
   test("should not run accessibility setup for existing sessions", async () => {

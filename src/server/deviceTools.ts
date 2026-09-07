@@ -75,6 +75,7 @@ import {
 } from "../utils/RunnerReadinessService";
 import {
   deviceReadinessLockKey,
+  moveDeviceAcquisitionReadiness,
   trackDeviceAcquisitionReadiness,
 } from "../utils/deviceReadinessLock";
 import {
@@ -5049,6 +5050,10 @@ export function registerDeviceTools() {
         releaseReadinessReservations,
       });
       state.boot = readinessResult.boot;
+      moveDeviceAcquisitionReadiness(
+        acquisitionReadinessKey,
+        deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
+      );
       sourceImage = state.boot.sourceImage ?? sourceImage;
       // Re-check under the later binding lock because pool identity can change
       // while runner setup is in flight.

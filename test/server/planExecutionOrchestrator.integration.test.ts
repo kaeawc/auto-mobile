@@ -17,7 +17,6 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
 import { ExecutionTracker } from "../../src/server/executionTracker";
-import { stubCtrlProxySetup } from "../helpers/stubCtrlProxySetup";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -314,12 +313,10 @@ steps:
     // directly above / by the `assignMultipleDevices` override), and an
     // `existingSession` with no recorded readiness no longer short-circuits
     // setup. This test exercises session-assignment survival through expiry
-    // cleanup, not the accessibility-setup mechanism itself, so stub the
-    // underlying CtrlProxy calls to succeed immediately instead of hitting
-    // the real device (which has no real `adb`/network backing it and can
-    // block well past the test timeout) — see test/helpers/stubCtrlProxySetup.ts.
-    const ctrlProxyStub = stubCtrlProxySetup();
-
+    // cleanup, not the accessibility-setup mechanism itself. The shared test
+    // preload (test/setup/testPreload.ts) installs a no-op readiness driver so
+    // that setup succeeds immediately instead of hitting the real device (which
+    // has no real `adb`/network backing it and can block past the test timeout).
     const multiDevicePlan = `
 name: multi-device-test
 devices:
@@ -363,7 +360,6 @@ steps:
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();
-      ctrlProxyStub.restore();
     }
   });
 

@@ -3,6 +3,7 @@ import {
   getNoOpTelemetryRepository,
 } from "../../src/features/telemetry/TelemetryRecorder";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { setDeviceReadinessProxyDriverProviderForTesting } from "../../src/server/deviceReadinessProxyProvider";
 
 /**
  * Globally neutralize the {@link TelemetryRecorder} for the whole suite so a
@@ -28,3 +29,29 @@ TelemetryRecorder.setDefaultRepositoryOverride(getNoOpTelemetryRepository());
 AndroidEmulatorClient.setHostPortAvailabilityCheckerForTesting({
   isAvailable: async () => true,
 });
+
+/**
+ * Globally neutralize the per-session Android accessibility-service readiness
+ * setup for the whole `bun test` process (issue #6227).
+ *
+ * `createToolExecutionContext`'s device-readiness upgrade runs real
+ * `AndroidCtrlProxyManager.getInstance(device).setup()` /
+ * `AndroidCtrlProxyClient.getInstance(device).waitForConnection()` for any
+ * existing session with no recorded readiness — including sessions created
+ * directly via `SessionManager.createSession` / `DevicePool` in integration
+ * tests that bypass the `deviceTools.ts` acquisition recorder. Against a fake
+ * device that setup blocks on unbounded real host I/O past bun's 5000ms
+ * timeout; a timed-out test skips its `finally` cleanup and leaks process-wide
+ * singletons into every later test. Installing a fast no-op driver here means
+ * NO test can hang on this path, regardless of which file creates the session.
+ *
+ * This is scoped to the readiness driver only, so the dedicated CtrlProxy
+ * manager/client suites keep exercising the real `getInstance`/`setup` code.
+ * Tests that must assert this path ran (e.g. readiness call counts) install
+ * their own counting provider via `test/helpers/stubCtrlProxySetup.ts`.
+ */
+setDeviceReadinessProxyDriverProviderForTesting(() => ({
+  resetSetupState: () => {},
+  setup: async () => ({ success: true, message: "ok" }),
+  waitForConnection: async () => true,
+}));

@@ -10,6 +10,10 @@ import { classifyDisplayCutout } from "../../src/utils/displayCutout";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import {
+  installNoOpReadinessDriver,
+  setDeviceReadinessProxyDriverProviderForTesting,
+} from "../helpers/stubCtrlProxySetup";
 import type {
   ExactDeviceProvisionRequest,
   ExactDeviceProvisioner,
@@ -846,6 +850,11 @@ describe("provisionDevice handler", () => {
       close: async () => {},
     })) as any;
     AndroidCtrlProxyClient.resetInstances();
+    // This test drives the real `ensureAccessibilityServiceReady` path and
+    // counts setup via the `getInstance` overrides above; restore the real
+    // readiness driver so those overrides take effect (the shared preload's
+    // no-op driver is re-installed in `finally`) — #6227.
+    setDeviceReadinessProxyDriverProviderForTesting(null);
 
     try {
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -894,6 +903,7 @@ describe("provisionDevice handler", () => {
       AndroidCtrlProxyManager.getInstance = originalGetInstance;
       AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
       AndroidCtrlProxyClient.resetInstances();
+      installNoOpReadinessDriver();
       sessionManager.stopCleanupTimer();
     }
   });

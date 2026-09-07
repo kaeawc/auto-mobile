@@ -5319,9 +5319,14 @@ export function registerDeviceTools() {
           device,
           readinessReservationOwners,
           verifiedAndroidAvdIdentity,
+          achievedReadiness,
         );
       if (autolockSessionId) {
-        recordAcquiredSessionReadiness(daemonState, autolockSessionId, achievedReadiness);
+        // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before
+        // it publishes the session to the `mcpSessionAutolockMap` route, so a
+        // concurrent tool call from the same MCP client cannot observe an
+        // unrecorded readiness. Recording here (after exposure) would reopen
+        // that race, so it must not move back out.
         return autolockSessionId;
       }
     }

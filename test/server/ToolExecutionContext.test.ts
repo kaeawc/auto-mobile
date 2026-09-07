@@ -4,6 +4,10 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createToolExecutionContext } from "../../src/server/ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import {
+  installNoOpReadinessDriver,
+  setDeviceReadinessProxyDriverProviderForTesting,
+} from "../helpers/stubCtrlProxySetup";
 import { KeepScreenAwakeManager } from "../../src/utils/KeepScreenAwakeManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -44,6 +48,14 @@ describe("ToolExecutionContext", () => {
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
     originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
 
+    // These tests exercise the real `ensureAccessibilityServiceReady` path and
+    // stub setup via the `AndroidCtrlProxyManager`/`AndroidCtrlProxyClient`
+    // `getInstance` statics per test. Restore the real readiness driver (which
+    // routes through those statics) so the overrides take effect; the shared
+    // preload's no-op driver (#6227) is re-installed in `afterEach` so the rest
+    // of the process stays neutralized.
+    setDeviceReadinessProxyDriverProviderForTesting(null);
+
     // Reset AndroidCtrlProxyClient instances for clean test state
     AndroidCtrlProxyClient.resetInstances();
   });
@@ -53,6 +65,7 @@ describe("ToolExecutionContext", () => {
     AndroidCtrlProxyManager.getInstance = originalGetInstance;
     AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
     AndroidCtrlProxyClient.resetInstances();
+    installNoOpReadinessDriver();
   });
 
   test("should run accessibility setup when creating a new session", async () => {

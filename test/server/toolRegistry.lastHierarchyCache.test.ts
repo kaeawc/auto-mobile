@@ -15,7 +15,6 @@ import {
   stringifyToolResponse,
 } from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
-import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 
 /**
  * Integration coverage for the `lastHierarchy` session-cache write. The
@@ -33,7 +32,6 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
-  let ctrlProxyStub: CtrlProxySetupStub;
 
   function makeObserveResult(): ObserveResult {
     return {
@@ -91,9 +89,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     // #6227: `setupAutolockedSession` creates its session directly via
     // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
     // recorder), so it drives real per-session accessibility-service setup
-    // against a fake device with no real `adb`/network backing it — see
-    // test/helpers/stubCtrlProxySetup.ts.
-    ctrlProxyStub = stubCtrlProxySetup();
+    // against a fake device. The shared test preload (test/setup/testPreload.ts)
+    // installs a no-op readiness driver so that setup cannot block on real
+    // `adb`/network.
   });
 
   afterEach(() => {
@@ -103,7 +101,6 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     daemonSessionManager?.stopCleanupTimer();
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
-    ctrlProxyStub.restore();
   });
 
   const toolSchema = z.object({

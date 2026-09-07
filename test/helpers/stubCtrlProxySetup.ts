@@ -1,59 +1,61 @@
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { setDeviceReadinessProxyDriverProviderForTesting } from "../../src/server/deviceReadinessProxyProvider";
+
+export { setDeviceReadinessProxyDriverProviderForTesting };
 
 /**
  * #6227: `createToolExecutionContext`'s device-readiness upgrade
  * (`ensureReadinessUpgraded` -> `runDeviceReadinessSetup` ->
- * `ensureAccessibilityServiceReady`) now runs for ANY `existingSession` with
- * no recorded readiness, including sessions minted directly via
- * `SessionManager.createSession` / `DevicePool` in integration tests — which
- * bypass the `deviceTools.ts` acquisition recorder that would otherwise have
- * recorded a readiness level.
+ * `ensureAccessibilityServiceReady`) runs a real Android accessibility-service
+ * setup for ANY `existingSession` with no recorded readiness — including
+ * sessions minted directly via `SessionManager.createSession` / `DevicePool` in
+ * integration tests, which bypass the `deviceTools.ts` acquisition recorder.
  *
- * Against these tests' fake Android device there is no real `adb` (or
- * network) backing `AndroidCtrlProxyManager.getInstance(device).setup()`, so
- * that call can block on a real, unbounded host command / download well
- * past bun's default 5000ms test timeout. A timed-out test skips its
- * `finally` cleanup, leaking process-wide singletons (e.g. `DaemonState`)
- * into every later test in the same `bun test` process — a cascade of
- * unrelated failures.
- *
- * Any integration test that drives a real `ToolRegistry`/`SessionManager`
- * path for an android device MUST call this in `beforeEach` (and
- * `.restore()` in `afterEach`) so accessibility-service setup resolves
- * immediately instead of touching real `adb`.
+ * The shared test preload (`test/setup/testPreload.ts`) already installs a fast
+ * no-op readiness driver process-wide, so no integration test needs to stub this
+ * path itself. This helper remains ONLY for the few tests that must ASSERT the
+ * readiness path ran (via {@link CtrlProxySetupStub.setupCallCount}); it swaps in
+ * a counting no-op driver and, on `restore()`, re-installs the preload's plain
+ * no-op default so later tests in the same process stay neutralized.
  */
 export interface CtrlProxySetupStub {
-  /** Restore the original `getInstance` statics. Call in `afterEach`. */
+  /** Restore the process-wide no-op readiness driver. Call in `afterEach`. */
   restore(): void;
-  /** Number of times the stubbed `setup()` was invoked. */
+  /** Number of times the stubbed readiness `setup()` was invoked. */
   setupCallCount(): number;
 }
 
+/**
+ * Re-install the plain no-op readiness driver used by the shared test preload.
+ *
+ * Test files that need the REAL readiness path (so their own
+ * `AndroidCtrlProxyManager.getInstance` / `AndroidCtrlProxyClient.getInstance`
+ * overrides take effect) call
+ * `setDeviceReadinessProxyDriverProviderForTesting(null)` in `beforeEach` and
+ * this in `afterEach`, so the rest of the `bun test` process stays neutralized.
+ */
+export function installNoOpReadinessDriver(): void {
+  setDeviceReadinessProxyDriverProviderForTesting(() => ({
+    resetSetupState: () => {},
+    setup: async () => ({ success: true, message: "ok" }),
+    waitForConnection: async () => true,
+  }));
+}
+
 export function stubCtrlProxySetup(): CtrlProxySetupStub {
-  const originalGetInstance = AndroidCtrlProxyManager.getInstance;
-  const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
   let calls = 0;
 
-  AndroidCtrlProxyManager.getInstance = () =>
-    ({
-      resetSetupState: () => {},
-      setup: async () => {
-        calls += 1;
-        return { success: true, message: "ok" };
-      },
-    }) as any;
-  AndroidCtrlProxyClient.getInstance = (() => ({
+  setDeviceReadinessProxyDriverProviderForTesting(() => ({
+    resetSetupState: () => {},
+    setup: async () => {
+      calls += 1;
+      return { success: true, message: "ok" };
+    },
     waitForConnection: async () => true,
-    close: async () => {},
-  })) as any;
-  AndroidCtrlProxyClient.resetInstances();
+  }));
 
   return {
     restore(): void {
-      AndroidCtrlProxyManager.getInstance = originalGetInstance;
-      AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
-      AndroidCtrlProxyClient.resetInstances();
+      installNoOpReadinessDriver();
     },
     setupCallCount: () => calls,
   };

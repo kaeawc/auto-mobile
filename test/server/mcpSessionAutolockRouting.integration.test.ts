@@ -9,7 +9,6 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { stubCtrlProxySetup } from "../helpers/stubCtrlProxySetup";
 
 const captureSchema = z
   .object({
@@ -113,11 +112,10 @@ describe("MCP session autolock routing", () => {
 
     // #6227: `pool.autolockDevice` creates its session directly (bypassing the
     // `deviceTools.ts` acquisition recorder), so routing the `tools/call`
-    // request below through `captureAutolockOwnership` drives real
-    // per-session accessibility-service setup against a fake device with no
-    // real `adb`/network backing it — see test/helpers/stubCtrlProxySetup.ts.
-    const ctrlProxyStub = stubCtrlProxySetup();
-
+    // request below through `captureAutolockOwnership` drives real per-session
+    // accessibility-service setup against a fake device. The shared test
+    // preload (test/setup/testPreload.ts) installs a no-op readiness driver so
+    // that setup cannot block on real `adb`/network.
     ToolRegistry.clearTools();
     ToolRegistry.registerDeviceAware(
       "captureAutolockOwnership",
@@ -169,7 +167,6 @@ describe("MCP session autolock routing", () => {
       DaemonState.getInstance().reset();
       delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       delete process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT;
-      ctrlProxyStub.restore();
     }
   });
 

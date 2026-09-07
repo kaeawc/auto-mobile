@@ -1,12 +1,11 @@
 import { SessionManager } from "../daemon/sessionManager";
 import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
+import { getDeviceReadinessProxyDriver } from "./deviceReadinessProxyProvider";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
@@ -376,9 +375,9 @@ async function ensureAccessibilityServiceReady(
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityServiceReady");
 
-    const serviceManager = AndroidCtrlProxyManager.getInstance(device);
-    serviceManager.resetSetupState();
-    const setupResult = await serviceManager.setup(false, perf);
+    const readinessDriver = getDeviceReadinessProxyDriver(device);
+    readinessDriver.resetSetupState();
+    const setupResult = await readinessDriver.setup(false, perf);
 
     if (!setupResult.success) {
       perf.end();
@@ -407,9 +406,8 @@ async function ensureAccessibilityServiceReady(
       logger.info(`[A11yRetry] Setup succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
     }
 
-    const accessibilityClient = AndroidCtrlProxyClient.getInstance(device);
     const connected = await perf.track("waitForConnection", () =>
-      accessibilityClient.waitForConnection(),
+      readinessDriver.waitForConnection(),
     );
 
     perf.end();

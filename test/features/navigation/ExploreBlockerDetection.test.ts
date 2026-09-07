@@ -146,6 +146,8 @@ describe("ExploreBlockerDetection", () => {
       ["donotallow", true],
       ["not allow", true],
       ["notallow", true],
+      ["never allow", true],
+      ["neverallow", true],
       ["block", false],
       ["reject", false],
       ["disallow", false],
@@ -653,6 +655,7 @@ describe("ExploreBlockerDetection", () => {
       ["Don't Allow"],
       ["DON'T ALLOW"],
       ["Don’t allow"], // curly apostrophe
+      ["Never allow"],
     ])(
       "handlePermissionDialog excludes deny label %p and taps the affirmative option",
       async (denyText: string) => {
@@ -684,6 +687,8 @@ describe("ExploreBlockerDetection", () => {
     // permission and (previously) reporting success.
     test.each([
       ["Don't allow"],
+      ["Never allow"],
+      ["neverallow"],
       ["Deny"],
       ["Block"],
       // Inflected deny forms tokenize distinctly from their stems ("Blocked" ->
@@ -761,6 +766,8 @@ describe("ExploreBlockerDetection", () => {
       ["notallow"],
       ["dontallow"],
       ["donotallow"],
+      ["Never allow"],
+      ["neverallow"],
     ])(
       "handlePermissionDialog does not tap machine-form negative content-desc %p",
       async (denyContentDesc: string) => {
@@ -793,11 +800,12 @@ describe("ExploreBlockerDetection", () => {
     test("classifies reported lowercase concatenated deny labels without broad substring matching", () => {
       expect(isPermissionDenyElement(createMockElement({ text: "dontallow" }))).toBe(true);
       expect(isPermissionDenyElement(createMockElement({ text: "donotallow" }))).toBe(true);
+      expect(isPermissionDenyElement(createMockElement({ text: "neverallow" }))).toBe(true);
       expect(isPermissionDenyElement(createMockElement({ text: "Allow" }))).toBe(false);
       expect(isPermissionDenyElement(createMockElement({ text: "Allowance" }))).toBe(false);
     });
 
-    test.each(["dontallow", "donotallow"])(
+    test.each(["dontallow", "donotallow", "neverallow"])(
       "does not select lowercase concatenated deny label %p through ordinary navigation",
       (denyLabel: string) => {
         const deny = createMockElement({ text: denyLabel });

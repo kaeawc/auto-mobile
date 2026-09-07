@@ -154,7 +154,7 @@ const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
  *
  * Also includes the "allow"-family machine-form negatives that `DENY_KEYWORDS`
  * (below) exists to catch — "dont allow", "do not allow", "not allow", and the
- * fully concatenated "notallow", "dontallow", and "donotallow" — because a
+ * fully concatenated "notallow", "dontallow", "donotallow", and "neverallow" — because a
  * deny-only dialog whose only text is one of these (e.g. a custom/OEM control
  * with `content-desc="notallow"`
  * and no separate "permission"/"access" label) previously failed detection
@@ -182,6 +182,8 @@ const PERMISSION_KEYWORDS = [
   "donotallow",
   "not allow",
   "notallow",
+  "never allow",
+  "neverallow",
   "while using",
   "only this time",
 ];
@@ -268,7 +270,7 @@ const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
  *     "allow"]` — `containsTokenSequence` is exact-token, so the two-word
  *     phrase would not match it. "notallow" is listed as its own single-token
  *     keyword to cover exactly that fully concatenated spelling. Likewise the
- *     reported lowercase `dontallow` and `donotallow` forms are explicit
+ *     reported lowercase `dontallow`, `donotallow`, and `neverallow` forms are explicit
  *     single-token entries. This is normalization for known machine labels,
  *     not generic stemming or substring matching.
  */
@@ -280,6 +282,8 @@ const DENY_KEYWORDS = [
   "donotallow",
   "not allow",
   "notallow",
+  "never allow",
+  "neverallow",
   "deny",
   "denied",
   "block",

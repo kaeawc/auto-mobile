@@ -377,7 +377,10 @@ class RealStorageDataSource(
     }
   }
 
-  override suspend fun removeKeyValue(fileName: String, key: String): Result<StorageMutationResult> {
+  override suspend fun removeKeyValue(
+    fileName: String,
+    key: String,
+  ): Result<StorageMutationResult> {
     val provider =
       clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))

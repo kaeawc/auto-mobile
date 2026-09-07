@@ -69,7 +69,9 @@ private data class EditingEntryIdentity(
 fun KeyValueInspector(
   keyValueFiles: List<KeyValueFile>,
   onSetValue:
-    (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<StorageMutationResult>)? =
+    (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<
+        StorageMutationResult
+      >)? =
     null,
   recentlyChangedKeys: Set<String> = emptySet(),
   modifier: Modifier = Modifier,

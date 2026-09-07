@@ -24,19 +24,22 @@ class FakeStorageDataSource : StorageDataSource {
     key: String,
     value: String?,
     type: KeyValueType,
-  ): Result<Unit> {
+  ): Result<StorageMutationResult> {
     delay(100)
-    return Result.Success(Unit)
+    return Result.Success(StorageMutationResult())
   }
 
-  override suspend fun removeKeyValue(fileName: String, key: String): Result<Unit> {
+  override suspend fun removeKeyValue(
+    fileName: String,
+    key: String,
+  ): Result<StorageMutationResult> {
     delay(100)
-    return Result.Success(Unit)
+    return Result.Success(StorageMutationResult())
   }
 
-  override suspend fun clearKeyValueFile(fileName: String): Result<Unit> {
+  override suspend fun clearKeyValueFile(fileName: String): Result<StorageMutationResult> {
     delay(100)
-    return Result.Success(Unit)
+    return Result.Success(StorageMutationResult())
   }
 
   override suspend fun getTableData(

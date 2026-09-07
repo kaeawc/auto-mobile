@@ -78,6 +78,13 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { ToolRegistry } from "../server/toolRegistry";
 import { validateTypeForPlatform } from "../server/storageTools";
+import {
+  clearAndroidKeyValueFileDirect,
+  directFileFallbackRelaunchWarning,
+  removeAndroidKeyValueDirect,
+  setAndroidKeyValueDirect,
+  withAndroidSharedPreferencesInspectionFallback,
+} from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -101,7 +108,10 @@ import {
   isInputKeyName,
   type InputKeyName,
 } from "../features/action/InputKey";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
@@ -451,6 +461,7 @@ export class UnixSocketServer {
   private closing = false;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
+  private readonly adbClientFactory: AdbClientFactory;
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
@@ -558,6 +569,7 @@ export class UnixSocketServer {
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
     bindGuard: SocketBindGuardOptions = {},
+    adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
@@ -576,6 +588,7 @@ export class UnixSocketServer {
     this.socketReachability = resolvedBindGuard.reachability;
     this.socketOwnerLiveness = resolvedBindGuard.ownerLiveness;
     this.socketReclaimLock = resolvedBindGuard.bindLock;
+    this.adbClientFactory = adbClientFactory;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -2740,26 +2753,43 @@ export class UnixSocketServer {
           throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-        const { platform, client } = await this.resolveKeyValueMutationClient(
+        const { platform, client, device } = await this.resolveKeyValueMutationClient(
           args.platform,
           args.deviceId,
         );
+        const appId = args.appId;
+        const fileName = args.fileName;
+        const key = args.key;
+        let usedDirectFileFallback = false;
         if (args.value === null || args.value === undefined) {
-          await client.removePreference(args.appId, args.fileName, args.key);
+          ({ usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+            platform,
+            device,
+            appId,
+            fileName,
+            () => client.removePreference(appId, fileName, key),
+            (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          ));
         } else {
           // Enforce the same cross-platform type guidance as the MCP-tool path
           // (storageTools.ts) before dispatch, so a platform-incompatible type
           // fails with an actionable error rather than deeper in the client (#5022).
           validateTypeForPlatform(platform, args.type as KeyValueType);
-          await client.setPreference(
-            args.appId,
-            args.fileName,
-            args.key,
-            args.value,
-            args.type as KeyValueType,
-          );
+          const value = args.value;
+          const type = args.type as KeyValueType;
+          ({ usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+            platform,
+            device,
+            appId,
+            fileName,
+            () => client.setPreference(appId, fileName, key, value, type),
+            (adb) =>
+              setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+          ));
         }
-        return { success: true };
+        return usedDirectFileFallback
+          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
+          : { success: true };
       }
       case "ide/removeKeyValue": {
         const args = request.params as {
@@ -2773,9 +2803,24 @@ export class UnixSocketServer {
           throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-        const { client } = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
-        await client.removePreference(args.appId, args.fileName, args.key);
-        return { success: true };
+        const { platform, client, device } = await this.resolveKeyValueMutationClient(
+          args.platform,
+          args.deviceId,
+        );
+        const appId = args.appId;
+        const fileName = args.fileName;
+        const key = args.key;
+        const { usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+          platform,
+          device,
+          appId,
+          fileName,
+          () => client.removePreference(appId, fileName, key),
+          (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+        );
+        return usedDirectFileFallback
+          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
+          : { success: true };
       }
       case "ide/clearKeyValueFile": {
         const args = request.params as {
@@ -2788,9 +2833,23 @@ export class UnixSocketServer {
           throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-        const { client } = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
-        await client.clearPreferenceStore(args.appId, args.fileName);
-        return { success: true };
+        const { platform, client, device } = await this.resolveKeyValueMutationClient(
+          args.platform,
+          args.deviceId,
+        );
+        const appId = args.appId;
+        const fileName = args.fileName;
+        const { usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+          platform,
+          device,
+          appId,
+          fileName,
+          () => client.clearPreferenceStore(appId, fileName),
+          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+        );
+        return usedDirectFileFallback
+          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
+          : { success: true };
       }
       default:
         return undefined;
@@ -2806,7 +2865,11 @@ export class UnixSocketServer {
   private async resolveKeyValueMutationClient(
     platformValue: string | undefined,
     deviceId: string,
-  ): Promise<{ platform: "android" | "ios"; client: KeyValueMutationClient }> {
+  ): Promise<{
+    platform: "android" | "ios";
+    client: KeyValueMutationClient;
+    device: BootedDevice;
+  }> {
     const platform = platformValue ?? "android";
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
@@ -2820,8 +2883,38 @@ export class UnixSocketServer {
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
-        : AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-    return { platform, client };
+        : AndroidCtrlProxyClient.getInstance(targetDevice, this.adbClientFactory);
+    return { platform, client, device: targetDevice };
+  }
+
+  /**
+   * Run a key-value mutation from an `ide/*` route through the shared SharedPreferences
+   * inspection-disabled fallback (issue #6292). On Android, if the SDK ContentProvider path
+   * is gated because inspection is disabled, this falls back to the same direct-file
+   * `adb shell run-as` XML edit the MCP `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`
+   * tools use — so the desktop Storage pane can write/delete/clear even when inspection is
+   * off, exactly like the MCP path. iOS has no on-device XML fallback, so `viaSdk` runs alone.
+   * Returns whether the direct-file fallback ran, so the caller can surface a relaunch warning.
+   */
+  private async runIdeKeyValueMutation(
+    platform: "android" | "ios",
+    device: BootedDevice,
+    appId: string,
+    fileName: string,
+    viaSdk: () => Promise<void>,
+    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
+  ): Promise<{ usedDirectFileFallback: boolean }> {
+    if (platform !== "android") {
+      await viaSdk();
+      return { usedDirectFileFallback: false };
+    }
+    return withAndroidSharedPreferencesInspectionFallback(
+      appId,
+      fileName,
+      () => this.adbClientFactory.create(device),
+      viaSdk,
+      viaDirectFile,
+    );
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {

@@ -154,8 +154,9 @@ const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
  *
  * Also includes the "allow"-family machine-form negatives that `DENY_KEYWORDS`
  * (below) exists to catch — "dont allow", "do not allow", "not allow", and the
- * fully concatenated "notallow" — because a deny-only dialog whose only text
- * is one of these (e.g. a custom/OEM control with `content-desc="notallow"`
+ * fully concatenated "notallow", "dontallow", and "donotallow" — because a
+ * deny-only dialog whose only text is one of these (e.g. a custom/OEM control
+ * with `content-desc="notallow"`
  * and no separate "permission"/"access" label) previously failed detection
  * here entirely: `isPermissionDialog` returned false, so the permission
  * fast-path returned "none" and the control fell through to ordinary
@@ -176,7 +177,9 @@ const PERMISSION_KEYWORDS = [
   "deny",
   "don't allow",
   "dont allow",
+  "dontallow",
   "do not allow",
+  "donotallow",
   "not allow",
   "notallow",
   "while using",
@@ -264,12 +267,17 @@ const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
  *     tokenizes to the single token `["notallow"]` rather than `["not",
  *     "allow"]` — `containsTokenSequence` is exact-token, so the two-word
  *     phrase would not match it. "notallow" is listed as its own single-token
- *     keyword to cover exactly that fully concatenated spelling.
+ *     keyword to cover exactly that fully concatenated spelling. Likewise the
+ *     reported lowercase `dontallow` and `donotallow` forms are explicit
+ *     single-token entries. This is normalization for known machine labels,
+ *     not generic stemming or substring matching.
  */
 const DENY_KEYWORDS = [
   "don't allow",
   "dont allow",
+  "dontallow",
   "do not allow",
+  "donotallow",
   "not allow",
   "notallow",
   "deny",
@@ -289,10 +297,27 @@ const DENY_KEYWORD_TOKENS = toKeywordTokenLists(DENY_KEYWORDS);
  * True when an element is a safe affirmative grant target: it matches an
  * "Allow" keyword AND does not match any deny/negative label (issue #6241).
  */
+export function isPermissionDenyElement(element: Element): boolean {
+  return matchesAnyKeywordInAnyField(DENY_KEYWORD_TOKENS, element);
+}
+
+/**
+ * Applies permission-denial safety policy at ordinary navigation selection.
+ * Keep non-permission screens untouched: labels such as "Block" remain valid
+ * app navigation outside a recognized permission dialog.
+ */
+export function filterPermissionNavigationCandidates(
+  candidates: Element[],
+  screenElements: Element[],
+): Element[] {
+  return isPermissionDialog(screenElements)
+    ? candidates.filter((element) => !isPermissionDenyElement(element))
+    : candidates;
+}
+
 function isAffirmativeGrantElement(element: Element): boolean {
   return (
-    matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element) &&
-    !matchesAnyKeywordInAnyField(DENY_KEYWORD_TOKENS, element)
+    matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element) && !isPermissionDenyElement(element)
   );
 }
 

@@ -61,6 +61,7 @@ import {
 // Import blocker detection functions
 import {
   detectAndHandleBlockers,
+  filterPermissionNavigationCandidates,
   isPermissionDialog,
   handlePermissionDialog,
 } from "./ExploreBlockerDetection";
@@ -615,8 +616,17 @@ export class Explore extends BaseVisualChange {
 
       // Combine all interaction candidates
       const allCandidates = [...navigationElements, ...scrollableContainers];
+      // Permission handling normally consumes this screen before ordinary
+      // selection. Keep the same conservative deny-label policy at this final
+      // selection boundary too, so a recognized permission dialog can never
+      // route a lowercase machine-form denial through navigation if that
+      // fast-path cannot take an affirmative action.
+      const safeCandidates = filterPermissionNavigationCandidates(
+        allCandidates,
+        extractAllElements(viewHierarchy, this.elementParser),
+      );
 
-      if (allCandidates.length === 0) {
+      if (safeCandidates.length === 0) {
         return null;
       }
 
@@ -638,7 +648,7 @@ export class Explore extends BaseVisualChange {
         }
 
         // Find element that matches the target edge
-        const match = findElementMatchingEdge(allCandidates, targetEdge);
+        const match = findElementMatchingEdge(safeCandidates, targetEdge);
         if (!match) {
           const errorMsg =
             `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
@@ -679,7 +689,7 @@ export class Explore extends BaseVisualChange {
       // Filter out exhausted elements
       const currentScreen = this.navigationManager.getCurrentScreen();
       const unexhaustedElements = filterUnexhaustedElements(
-        allCandidates,
+        safeCandidates,
         this.exploredElements,
         currentScreen,
       );

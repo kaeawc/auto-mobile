@@ -7,7 +7,9 @@ import {
   isLoginScreen,
   isRatingDialog,
   detectAndHandleBlockers,
+  filterPermissionNavigationCandidates,
   handlePermissionDialog,
+  isPermissionDenyElement,
 } from "../../../src/features/navigation/ExploreBlockerDetection";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
@@ -139,7 +141,9 @@ describe("ExploreBlockerDetection", () => {
       // (see PERMISSION_KEYWORDS). Generic deny words unrelated to "allow"
       // are deliberately excluded from detection, so they stay `false` here.
       ["dont allow", true],
+      ["dontallow", true],
       ["do not allow", true],
+      ["donotallow", true],
       ["not allow", true],
       ["notallow", true],
       ["block", false],
@@ -750,7 +754,14 @@ describe("ExploreBlockerDetection", () => {
     // be recognized as deny controls, not tapped (issue #6241 follow-up). The
     // apostrophe phrase "don't allow" does not match any of these spellings,
     // so all are listed explicitly.
-    test.each([["dontAllowButton"], ["doNotAllowButton"], ["notAllowButton"], ["notallow"]])(
+    test.each([
+      ["dontAllowButton"],
+      ["doNotAllowButton"],
+      ["notAllowButton"],
+      ["notallow"],
+      ["dontallow"],
+      ["donotallow"],
+    ])(
       "handlePermissionDialog does not tap machine-form negative content-desc %p",
       async (denyContentDesc: string) => {
         const { calls, restore } = captureTapOptions();
@@ -778,6 +789,27 @@ describe("ExploreBlockerDetection", () => {
         expect(calls).toEqual([]);
       },
     );
+
+    test("classifies reported lowercase concatenated deny labels without broad substring matching", () => {
+      expect(isPermissionDenyElement(createMockElement({ text: "dontallow" }))).toBe(true);
+      expect(isPermissionDenyElement(createMockElement({ text: "donotallow" }))).toBe(true);
+      expect(isPermissionDenyElement(createMockElement({ text: "Allow" }))).toBe(false);
+      expect(isPermissionDenyElement(createMockElement({ text: "Allowance" }))).toBe(false);
+    });
+
+    test.each(["dontallow", "donotallow"])(
+      "does not select lowercase concatenated deny label %p through ordinary navigation",
+      (denyLabel: string) => {
+        const deny = createMockElement({ text: denyLabel });
+        expect(filterPermissionNavigationCandidates([deny], [deny])).toEqual([]);
+      },
+    );
+
+    test("keeps a valid affirmative permission label selectable", () => {
+      const allow = createMockElement({ text: "Allow" });
+      const deny = createMockElement({ text: "dontallow" });
+      expect(filterPermissionNavigationCandidates([allow, deny], [allow, deny])).toEqual([allow]);
+    });
 
     // The canonical modern layout (grant first, deny last) must keep working:
     // the grant button is tapped and the trailing "Don't allow" is ignored.

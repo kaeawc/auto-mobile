@@ -100,12 +100,34 @@ function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
   const spans: GenerationSpan[] = [];
   for (let remaining = arrivals.length; remaining > 0; remaining -= consistentCount) {
     const nextArrivals = [...tracks.entries()]
-      .map(([device, track]) => ({ device, arrival: track[consumed.get(device) ?? 0] }))
+      .map(([device, track]) => ({
+        device,
+        arrival: track[consumed.get(device) ?? 0],
+        // Arrivals remaining on this device's track AFTER the candidate one,
+        // used to prioritize devices with more outstanding work (see sort
+        // comment below).
+        remainingAfter: track.length - (consumed.get(device) ?? 0) - 1,
+      }))
       .filter(
-        (candidate): candidate is { device: string; arrival: Arrival } =>
+        (candidate): candidate is { device: string; arrival: Arrival; remainingAfter: number } =>
           candidate.arrival !== undefined,
       )
-      .sort((a, b) => a.arrival.planIndex - b.arrival.planIndex);
+      .sort((a, b) => {
+        // Prefer devices with the MOST outstanding arrivals first (a
+        // Havel-Hakimi-style greedy for realizing the per-device arrival-count
+        // sequence as deviceCount-sized generations). Picking by earliest plan
+        // index alone can strand a low-count device's only candidate for a
+        // later round — e.g. arrivals B,C,A,A,A,D (deviceCount 2): taking the
+        // earliest two (B,C) first leaves only A's track for round two and
+        // falsely reports the validator-accepted plan as unrecoverable, when
+        // {A,B},{A,C},{A,D} is a valid grouping. Saturating the
+        // most-outstanding device (A) every round reaches that grouping.
+        // Ties break on plan index for determinism.
+        if (a.remainingAfter !== b.remainingAfter) {
+          return b.remainingAfter - a.remainingAfter;
+        }
+        return a.arrival.planIndex - b.arrival.planIndex;
+      });
     if (nextArrivals.length < consistentCount) {
       throw invalidBarrierRecoveryShape(
         lock,
@@ -257,6 +279,104 @@ function collectGenerationSpans(plan: Plan): GenerationSpan[] {
 }
 
 /**
+ * Detect a circular-wait risk among the arrivals still to run at/after `safe`:
+ * two (or more) devices whose remaining tracks visit the same pair of locks in
+ * OPPOSITE order. Per-lock generation spans (`spansForLock`) only prove that a
+ * single lock's own generations are not split; they say nothing about the
+ * order in which a device visits *different* locks. If device D1's remaining
+ * track visits lock X before lock Y while device D2's visits Y before X, each
+ * can block waiting for a partner that is itself stuck at the other lock —
+ * e.g. `A:X, B:X, A:Y, A:X, C:X, C:Y` (all deviceCount 2): resuming at 2 skips
+ * B entirely but leaves A on `Y→X` and C on `X→Y`; A waits alone at Y for C,
+ * who is waiting alone at X for A (issue #6234 cross-lock P1). Neither lock's
+ * own span is split, so the per-lock check alone misses it.
+ *
+ * A single device revisiting the same two locks in both orders over time is
+ * NOT itself a deadlock risk (nothing else waits on that device while it does
+ * so), so a conflict is only real when it involves two DIFFERENT devices.
+ */
+function hasCrossLockCycle(plan: Plan, safe: number): boolean {
+  const deviceLockOrder = collectDeviceLockOrder(plan, safe);
+  return hasOpposingLockPair(deviceLockOrder);
+}
+
+/**
+ * For each device, the distinct locks it still visits at/after `safe`, in
+ * track order (consecutive repeats of the same lock collapsed to one entry).
+ */
+function collectDeviceLockOrder(plan: Plan, safe: number): Map<string, string[]> {
+  const deviceLockOrder = new Map<string, string[]>();
+  for (let planIndex = safe; planIndex < plan.steps.length; planIndex++) {
+    const step = plan.steps[planIndex];
+    if (!COORDINATION_TOOLS.has(step.tool)) {
+      continue;
+    }
+    const lock = effectiveField(step, "lock");
+    const device = readDevice(step);
+    if (typeof lock !== "string" || lock.length === 0 || device === undefined) {
+      continue;
+    }
+    const order = deviceLockOrder.get(device) ?? [];
+    if (order[order.length - 1] !== lock) {
+      order.push(lock);
+    }
+    deviceLockOrder.set(device, order);
+  }
+  return deviceLockOrder;
+}
+
+/**
+ * True when two DIFFERENT devices' lock orders assert opposite directions for
+ * the same unordered lock pair (see `hasCrossLockCycle`). A single device
+ * revisiting a pair in both orders never conflicts with itself.
+ */
+function hasOpposingLockPair(deviceLockOrder: Map<string, string[]>): boolean {
+  // For each unordered lock pair (keyed by the lexicographically smaller lock
+  // name, then the larger — a nested map avoids gluing lock names into one
+  // string key, which could collide if a name contained the delimiter),
+  // remember the first direction seen and which device established it. A
+  // later, different device asserting the opposite direction for the same
+  // pair is a genuine circular-wait risk.
+  const directionByPair = new Map<string, Map<string, { forward: boolean; device: string }>>();
+  for (const [device, order] of deviceLockOrder.entries()) {
+    for (let i = 0; i + 1 < order.length; i++) {
+      if (opposesEarlierDevice(directionByPair, order[i], order[i + 1], device)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Records (or checks) the direction of one from->to transition for `device`
+ * against the first direction seen for that unordered pair. Returns true only
+ * when a DIFFERENT device already recorded the opposite direction.
+ */
+function opposesEarlierDevice(
+  directionByPair: Map<string, Map<string, { forward: boolean; device: string }>>,
+  from: string,
+  to: string,
+  device: string,
+): boolean {
+  if (from === to) {
+    return false;
+  }
+  const lesser = from < to ? from : to;
+  const greater = from < to ? to : from;
+  const forward = from === lesser;
+  const byGreater =
+    directionByPair.get(lesser) ?? new Map<string, { forward: boolean; device: string }>();
+  directionByPair.set(lesser, byGreater);
+  const existing = byGreater.get(greater);
+  if (existing === undefined) {
+    byGreater.set(greater, { forward, device });
+    return false;
+  }
+  return existing.forward !== forward && existing.device !== device;
+}
+
+/**
  * Compute a resume step that never lands *inside* a barrier/criticalSection
  * generation.
  *
@@ -300,8 +420,18 @@ export function computeSafeBarrierResumeStep(plan: Plan, startStep: number): num
       }
     }
     if (earliest === safe) {
-      return safe;
+      break;
     }
     safe = earliest;
   }
+
+  // No single lock's generation is split at `safe`, but the survivors could
+  // still deadlock on a cross-lock circular wait (see hasCrossLockCycle). That
+  // risk cannot be fixed by rewinding to any one span's start — the safe
+  // fallback is to replay the whole plan, which is known deadlock-free because
+  // it passed barrier validation as originally written.
+  if (safe > 0 && hasCrossLockCycle(plan, safe)) {
+    return 0;
+  }
+  return safe;
 }

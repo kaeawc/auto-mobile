@@ -220,4 +220,70 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
     // one-arrival generation.
     expect(computeSafeBarrierResumeStep(p, 1)).toBe(1);
   });
+
+  test("saturates the device with the most outstanding arrivals first, not the earliest plan index (#6234 P2 follow-up)", () => {
+    // Arrivals B,C,A,A,A,D (deviceCount 2): the full plan can execute as
+    // {A,B},{A,C},{A,D}. Greedily taking the earliest two arrivals each round
+    // (B@0,C@1) strands A alone for round two and falsely rejects this
+    // validator-accepted plan. Saturating A (the device with the most
+    // outstanding arrivals) every round reaches the valid grouping instead.
+    const p: Plan = {
+      name: "changing-participants-saturating",
+      mcpVersion: "1.0",
+      devices: ["A", "B", "C", "D"],
+      steps: [
+        barrierStep("B", "L", 2), // 0
+        barrierStep("C", "L", 2), // 1
+        barrierStep("A", "L", 2), // 2  gen0 = {A@2,B@0}
+        barrierStep("A", "L", 2), // 3  gen1 = {A@3,C@1}
+        barrierStep("A", "L", 2), // 4  gen2 = {A@4,D@5}
+        barrierStep("D", "L", 2), // 5
+      ],
+    };
+    // Does not throw, and 4 is exactly the start of the last generation
+    // (no participants skipped, no destructive work replayed).
+    expect(() => computeSafeBarrierResumeStep(p, 4)).not.toThrow();
+    expect(computeSafeBarrierResumeStep(p, 4)).toBe(4);
+  });
+
+  test("rewinds to 0 when surviving devices would circular-wait across two locks (#6234 P1 cross-lock)", () => {
+    // A:X, B:X, A:Y, A:X, C:X, C:Y (all deviceCount 2). Resuming at 2 splits no
+    // single lock's own generation (X gets {A@0,B@1} then {A@3,C@4}; Y gets
+    // {A@2,C@5}), so the per-lock check alone reports 2 as clean. But resuming
+    // at 2 skips B's only arrival entirely, leaving A's remaining track as
+    // Y->X and C's as X->Y: A blocks alone at Y waiting for a partner while C
+    // blocks alone at X waiting for a partner who is itself stuck at Y. Both
+    // barriers time out. The only safe answer is to replay the whole plan.
+    const p: Plan = {
+      name: "cross-lock-circular-wait",
+      mcpVersion: "1.0",
+      devices: ["A", "B", "C"],
+      steps: [
+        barrierStep("A", "X", 2), // 0
+        barrierStep("B", "X", 2), // 1
+        barrierStep("A", "Y", 2), // 2
+        barrierStep("A", "X", 2), // 3
+        barrierStep("C", "X", 2), // 4
+        barrierStep("C", "Y", 2), // 5
+      ],
+    };
+    expect(computeSafeBarrierResumeStep(p, 2)).toBe(0);
+  });
+
+  test("does not flag a single device revisiting two locks in both orders as a cross-lock cycle", () => {
+    // Only device A ever alternates between X and Y; nothing else depends on
+    // A while it does so, so there is no partner to deadlock against.
+    const p: Plan = {
+      name: "single-device-revisit",
+      mcpVersion: "1.0",
+      devices: ["A", "B"],
+      steps: [
+        barrierStep("A", "X", 1), // 0
+        barrierStep("A", "Y", 1), // 1
+        barrierStep("A", "X", 1), // 2
+        barrierStep("B", "X", 1), // 3
+      ],
+    };
+    expect(computeSafeBarrierResumeStep(p, 1)).toBe(1);
+  });
 });

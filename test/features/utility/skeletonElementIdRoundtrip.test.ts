@@ -3,7 +3,10 @@ import { DefaultElementFinder } from "../../../src/features/utility/ElementFinde
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
 import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
-import { assignStableViewIds } from "../../../src/features/observe/android/StableNodeIdentity";
+import {
+  assignStableViewIds,
+  STABLE_VIEW_ID_PREFIX,
+} from "../../../src/features/observe/android/StableNodeIdentity";
 import { toSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import type { ViewHierarchyResult } from "../../../src/models";
 import type { Element } from "../../../src/models/Element";
@@ -256,9 +259,9 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     ).toBeNull();
   });
 
-  test("a real bare Compose resource-id shaped like a synthetic id (s-a / s-a-2) is never misclassified as ambiguous", () => {
+  test("a real bare Compose resource-id shaped like a synthetic id is never misclassified as ambiguous", () => {
     // Review thread PRRT_kwDOP-GF5M6fomgA: `SYNTHETIC_STABLE_VIEW_ID_PATTERN`
-    // must require the producer's EXACT hash width, not merely the `s-`
+    // must require the producer's EXACT hash width, not merely the stable
     // prefix, or a real short Compose testTag colliding with that prefix
     // would be wrongly rejected as an ambiguous synthetic ordinal.
     const rawRoot = {
@@ -266,25 +269,25 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         {
           class: "androidx.compose.ui.platform.ComposeView",
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-          "resource-id": "s-a",
+          "resource-id": `${STABLE_VIEW_ID_PREFIX}a`,
           clickable: "true",
         },
         {
           class: "androidx.compose.ui.platform.ComposeView",
           bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-          "resource-id": "s-a-2",
+          "resource-id": `${STABLE_VIEW_ID_PREFIX}a-2`,
           clickable: "true",
         },
       ],
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    const result = selector.selectByResourceId(viewHierarchy, "s-a-2");
+    const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a-2`);
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!.bounds).toEqual({ left: 0, top: 60, right: 100, bottom: 110 });
 
-    const resultBase = selector.selectByResourceId(viewHierarchy, "s-a");
+    const resultBase = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
     expect(resultBase.element).not.toBeNull();
     expect(resultBase.totalMatches).toBe(1);
     expect(resultBase.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
@@ -618,7 +621,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // `syntheticStableViewIdBase` - is the sharpest test of precedence: a real
     // field match must win even when it superficially resembles the
     // synthetic shape.
-    const collidingId = "s-9fb4b913ae97b1c1";
+    const collidingId = `${STABLE_VIEW_ID_PREFIX}9fb4b913ae97b1c1`;
 
     test("a real resource-id control is selected over a smaller id-less node sharing the same synthetic view-id, regardless of relative area", () => {
       // Previously the matcher UNIONED resource-id matches and synthetic
@@ -747,11 +750,11 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     });
   });
 
-  test("a real bare id (view-id: 's-a') that does not match the strict synthetic shape is treated as a plain resource-id, not a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip)", () => {
+  test("a real bare id with the stable prefix but no synthetic shape is treated as a plain resource-id, not a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip)", () => {
     // Review thread PRRT_kwDOP-GF5M6fo2Ip: recognition of a synthetic id must
     // be gated on the STRICT producer shape (`syntheticStableViewIdBase`)
     // everywhere a selector is matched against `view-id`, not merely on an
-    // `s-` prefix. "s-a" is far short of the producer's 16-hex-character
+    // stable prefix. The short value is far short of the producer's 16-hex-character
     // hash, so it must never trigger the synthetic view-id fallback: a
     // separate node whose `view-id` merely happens to equal "s-a" (with no
     // matching `resource-id` of its own) must NOT be treated as a match.
@@ -760,7 +763,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         {
           class: "android.widget.Button",
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-          "resource-id": "s-a",
+          "resource-id": `${STABLE_VIEW_ID_PREFIX}a`,
           text: "Real Short Id",
           clickable: "true",
         },
@@ -768,13 +771,13 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
           class: "android.view.View",
           bounds: { left: 0, top: 100, right: 300, bottom: 300 }, // much larger
           clickable: "true",
-          "view-id": "s-a", // superficially resembles the prefix, wrong shape
+          "view-id": `${STABLE_VIEW_ID_PREFIX}a`, // superficially resembles the prefix, wrong shape
         },
       ],
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    const result = selector.selectByResourceId(viewHierarchy, "s-a");
+    const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!.text).toBe("Real Short Id");

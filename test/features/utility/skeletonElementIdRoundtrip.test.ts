@@ -105,18 +105,16 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     }
   });
 
-  test("content-identical duplicate nodes get distinct ids, but BOTH the bare first-occurrence id and its ordinal-suffixed peer are rejected as capture-local", () => {
+  test("content-identical duplicate nodes get distinct ordinal ids (NO bare form) and both are rejected as capture-local", () => {
     // Two nodes with completely identical stable content (same class, no
     // text/content-desc/resource-id) — `assignStableViewIds` disambiguates them
-    // with a `-2` ordinal suffix rather than colliding on one hash. The FIRST
-    // occurrence gets the bare `s-<hash>` id (implicitly ordinal 1) - that
-    // bare/ordinal split is assigned by document order AT CAPTURE TIME (see
-    // `StableNodeIdentity.ts`), so BOTH forms are capture-local whenever a
-    // duplicate exists: an insert or reorder before a later capture can hand
-    // the bare id to a different node entirely. Resolving either form here
-    // would therefore risk silently acting on the wrong element - worse than
-    // a clear failure (issue #6218 review threads PRRT_kwDOP-GF5M6foer0 and
-    // follow-up PRRT_kwDOP-GF5M6fomf-).
+    // with document-order ordinals. Under the #6229 fix EVERY member of a
+    // duplicate group is suffixed, so the first is `s-<hash>-1` (NOT bare) and
+    // the second is `s-<hash>-2`; the bare form is reserved for unique content.
+    // Both ordinal forms are still capture-local whenever a duplicate exists,
+    // so resolving either while both peers are present risks silently acting on
+    // the wrong element — worse than a clear failure (issue #6218 review
+    // threads PRRT_kwDOP-GF5M6foer0 and follow-up PRRT_kwDOP-GF5M6fomf-).
     const nodeA = {
       class: "android.view.View",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
@@ -137,16 +135,66 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const idA = (nodeA as Record<string, unknown>)["view-id"] as string;
     const idB = (nodeB as Record<string, unknown>)["view-id"] as string;
 
-    // Deterministic, cleanly disambiguated — not the same value.
+    // Deterministic, cleanly disambiguated — neither is the bare form.
     expect(idA).not.toBe(idB);
-    expect(idA.startsWith("s-")).toBe(true);
-    expect(idB).toBe(`${idA}-2`);
+    expect(idA).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(idB).toBe(`${idA.replace(/-1$/, "")}-2`);
 
-    // Both the bare first-occurrence id and its ordinal-suffixed peer are
-    // rejected outright, not resolved - neither is safe to trust across a
-    // capture boundary while a content-identical duplicate exists.
+    // Both ordinal forms are rejected outright, not resolved - neither is safe
+    // to trust across a capture boundary while a content-identical duplicate
+    // exists.
     expect(() => selector.selectByResourceId(viewHierarchy, idA)).toThrow(/ambiguous/i);
     expect(() => selector.selectByResourceId(viewHierarchy, idB)).toThrow(/ambiguous/i);
+  });
+
+  test("a suffixed id observed for a duplicate does NOT retarget the content-identical survivor after the original is removed (issue #6229)", () => {
+    // Capture 1: content-identical peers [A, B]. A is `s-<hash>-1`, B is
+    // `s-<hash>-2` — A is NOT bare, which is the crux of the #6229 fix.
+    const makeDup = (seedA: string, seedB: string) => ({
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+          clickable: "true",
+          "view-id": generatedViewId(seedA),
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 50, right: 40, bottom: 90 },
+          clickable: "true",
+          "view-id": generatedViewId(seedB),
+        },
+      ],
+    });
+    const original = makeDup("orig-a", "orig-b");
+    assignStableViewIds(original);
+    const observedIdForA = (original.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(observedIdForA).toMatch(/^s-[0-9a-f]{16}-1$/);
+
+    // Capture 2: A removed; B is the sole surviving content-identical node and
+    // is reassigned the bare `s-<hash>` (now unique). A `tapOn` keyed on A's
+    // observed `s-<hash>-1` must NOT silently land on B — it finds nothing.
+    const afterRemoval = {
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 50, right: 40, bottom: 90 },
+          clickable: "true",
+          "view-id": generatedViewId("orig-b"),
+        },
+      ],
+    };
+    assignStableViewIds(afterRemoval);
+    const survivorId = (afterRemoval.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(survivorId).toMatch(/^s-[0-9a-f]{16}$/);
+    expect(survivorId).not.toBe(observedIdForA);
+
+    const result = selector.selectByResourceId(
+      { hierarchy: afterRemoval } as ViewHierarchyResult,
+      observedIdForA,
+    );
+    expect(result.element).toBeNull();
+    expect(result.totalMatches).toBe(0);
   });
 
   test("a bare s-<hash> id with no content-identical peer still resolves normally", () => {
@@ -260,11 +308,13 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const reorderedIds = (reordered.node as Record<string, unknown>[]).map(
       (n) => n["view-id"] as string,
     );
-    // Same base hash for all three (content-identical) - inserted node now
-    // owns the un-suffixed base id, and A/B ordinals both shifted by one.
-    expect(reorderedIds[0]).toBe(originalIdB.replace(/-2$/, ""));
+    // Same base hash for all three (content-identical) - every member is
+    // ordinal-suffixed (no bare form for a duplicate group, issue #6229), and
+    // the inserted node now owns `-1` while A/B ordinals both shifted by one.
+    const reorderedBase = originalIdB.replace(/-2$/, "");
+    expect(reorderedIds[0]).toBe(`${reorderedBase}-1`);
     expect(reorderedIds[1]).toBe(originalIdB);
-    expect(reorderedIds[2]).toBe(`${originalIdB.replace(/-2$/, "")}-3`);
+    expect(reorderedIds[2]).toBe(`${reorderedBase}-3`);
 
     const reorderedViewHierarchy: ViewHierarchyResult = { hierarchy: reordered };
 
@@ -314,10 +364,11 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const idInContainer1 = (container1.node[0] as Record<string, unknown>)["view-id"] as string;
     const idInContainer2 = (container2.node[0] as Record<string, unknown>)["view-id"] as string;
 
-    // Same base content hash, disambiguated globally by document order - the
-    // first (container1's) is bare, the second (container2's) is suffixed.
-    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}$/);
-    expect(idInContainer2).toBe(`${idInContainer1}-2`);
+    // Same base content hash, disambiguated globally by document order - both
+    // are ordinal-suffixed (no bare form for a duplicate group, issue #6229):
+    // container1's is `-1`, container2's is `-2`.
+    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}-1$/);
+    expect(idInContainer2).toBe(`${idInContainer1.replace(/-1$/, "")}-2`);
 
     // Without a container, this is genuinely globally ambiguous.
     expect(() => selector.selectByResourceId(viewHierarchy, idInContainer1)).toThrow(/ambiguous/i);

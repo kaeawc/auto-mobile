@@ -15,16 +15,18 @@ import { ActionableError } from "../../models/ActionableError";
 
 /**
  * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
- * ordinal `-<k>` suffix (`s-<hash>-2`, `s-<hash>-3`, ...) assigned by document
- * order AT CAPTURE TIME (`StableNodeIdentity.ts`) - the FIRST occurrence gets
- * the bare, un-suffixed `s-<hash>` (implicitly ordinal 1). Both forms are
- * therefore capture-local whenever a duplicate exists: an insert or reorder
- * between the capture an id was observed from and the fresh capture a later
- * `tapOn`/`inputText` resolves it against can hand the bare id to a DIFFERENT
- * node (the new first occurrence) and push the original to `-2`, or shift
+ * ordinal `-<k>` suffix (`s-<hash>-1`, `s-<hash>-2`, ...) assigned by document
+ * order AT CAPTURE TIME (`StableNodeIdentity.ts`) - EVERY member of a duplicate
+ * group is suffixed, including the first (`-1`), and the bare, un-suffixed
+ * `s-<hash>` is emitted only for a hash that is UNIQUE in the capture (issue
+ * #6229). The ordinal forms are still capture-local whenever a duplicate
+ * exists: an insert or reorder between the capture an id was observed from and
+ * the fresh capture a later `tapOn`/`inputText` resolves it against can shift
  * which node an existing `-<k>` lands on - silently resolving to the WRONG
  * node rather than the one the caller meant (issue #6218 review thread
- * PRRT_kwDOP-GF5M6foer0, follow-up PRRT_kwDOP-GF5M6fomf-).
+ * PRRT_kwDOP-GF5M6foer0, follow-up PRRT_kwDOP-GF5M6fomf-). The bare form, by
+ * contrast, now means "this content was unique when observed", so it cannot be
+ * silently reassigned to a since-removed peer (issue #6229).
  *
  * This pattern requires the producer's EXACT shape - the `s-` prefix plus
  * exactly `STABLE_VIEW_ID_HASH_LENGTH` hex characters, with an optional
@@ -562,16 +564,22 @@ export class DefaultElementFinder implements ElementFinder {
    * string matching at most one node inside the container, which the normal
    * exact-match lookup resolves safely (or returns no-match) on its own.
    *
-   * KNOWN LIMITATION (issue #6229, review thread PRRT_kwDOP-GF5M6fouI8): this
-   * guard is only as good as what a single, fresh capture can reveal. If node
-   * `A` (bare `s-H`) is REMOVED before the next capture and content-identical
-   * `B` (previously `s-H-2`) is now the sole survivor, `B` is reassigned the
-   * bare `s-H` id and `duplicateCount` here is 1 — the guard cannot tell that
-   * apart from an id that was always unique, so it passes and a selector
-   * meant for `A` silently resolves to `B` instead. A correct fix needs the
-   * id to carry capture-origin provenance (which generation/session it was
-   * observed in), a design change spanning the observe layer and this finder
-   * - out of scope for the current-capture-only check implemented here.
+   * The since-removed-peer retarget (issue #6229, review thread
+   * PRRT_kwDOP-GF5M6fouI8) is closed at the PRODUCER, not here.
+   * `assignStableViewIds` no longer hands the first of a content-identical
+   * duplicate group the bare `s-H`; every member takes a `-<k>` ordinal (the
+   * first `-1`), and the bare form is reserved for content that was unique when
+   * observed. So a caller who observed `A` in a `[A, B]` group holds `s-H-1`,
+   * never bare `s-H`. If `A` is then removed and `B` becomes the sole survivor,
+   * `B` is reassigned the bare `s-H` (now unique) — which no longer equals the
+   * caller's `s-H-1`, so resolution MISSES instead of silently landing on `B`.
+   * While ≥2 content-identical peers still remain, `duplicateCount > 1` below
+   * rejects the stale selector as ambiguous. The residual gap this
+   * current-capture-only check still cannot see is narrower: a bare id whose
+   * once-unique node was removed and independently REPLACED by a brand-new
+   * content-identical node (still exactly one in the fresh capture) — closing
+   * that needs capture-origin provenance (which generation/session an id was
+   * observed in), a design change spanning the observe layer and this finder.
    *
    * KNOWN LIMITATION (issue #6230, review thread PRRT_kwDOP-GF5M6fo-Pb): a
    * synthetic id is a Merkle hash over a node's OWN content fields plus every

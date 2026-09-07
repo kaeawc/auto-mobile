@@ -365,29 +365,17 @@ export class VideoRecorderService {
   private handleStopFailure(active: ActiveRecordingState, error: unknown): unknown {
     const recordingId = active.recordingId;
     if (error instanceof ProcessTeardownUnconfirmedError) {
-      // waitForExit escalated to SIGKILL but never observed the capture
-      // process exit — it may still be alive. Unlike a genuine `adb pull`
-      // failure below (where the device-side process is already confirmed
-      // gone), dropping ownership here would let a caller start a second
-      // recording against a device that may still have the old capture
-      // process running underneath it. Keep the handle in `activeRecordings`
-      // so a later teardown/cleanup pass (shutdown, forceStop) can still
-      // reach it and retry reaping the process; only release ownership once
-      // exit is actually confirmed.
       return toActionableError(
         error,
         `Recording ${recordingId} could not be confirmed stopped; the capture ` +
           `process may still be running on the device`,
       );
     }
-    // The backend's stop() already tore down the device-side process before
-    // this failure (e.g. a genuine `adb pull` failure, issue #6291) — the
-    // capture is no longer live, so retaining ownership here would
-    // permanently block a new recording on this device with "Video
-    // recording already active for device X".
-    if (this.activeRecordings.get(recordingId) === active) {
-      this.activeRecordings.delete(recordingId);
-    }
+    // A backend may fail before, during, or after its platform teardown. A raw
+    // generic error carries no proof that the device capture exited, so it must
+    // not be interpreted as the older Android pull-after-exit case. Retain the
+    // exact handle and durable active state for force-stop/shutdown retry; this
+    // also prevents a second capture against a possibly-live device process.
     return error;
   }
 

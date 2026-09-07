@@ -148,11 +148,7 @@ describe("videoRecordingManager", () => {
     expect(fakeBackend.stopCalls.length).toBe(1);
   });
 
-  // issue #6291: stopping right after start can race the backend's own file
-  // finalization; when the backend's stop() genuinely fails (after its own
-  // retries), the manager must not leak the raw error or leave the recording
-  // stuck in "recording" status forever.
-  test("cleans up an orphaned recording and throws an ActionableError when the backend stop fails (issue #6291)", async () => {
+  test("retains durable ownership when a generic backend stop failure has no exit confirmation", async () => {
     const active = await startVideoRecording({ device: testDevice });
 
     fakeBackend.stop = async () => {
@@ -170,11 +166,10 @@ describe("videoRecordingManager", () => {
     expect((caught as Error).message).not.toBe("adb pull failed with exit code 1");
 
     const record = await fakeRepository.getRecording(active.recordingId);
-    expect(record?.status).toBe("interrupted");
+    expect(record?.status).toBe("recording");
 
-    // Ownership of the device was released along with the DB cleanup, so a
-    // new recording can start on the same device instead of being blocked by
-    // the orphaned one.
+    // The raw error did not prove teardown. Keep the durable row and service
+    // handle so a retry can reach the same capture instead of starting another.
     fakeBackend.stop = async (handle) => ({
       recordingId: handle.recordingId,
       outputPath: handle.outputPath,
@@ -183,8 +178,9 @@ describe("videoRecordingManager", () => {
       sizeBytes: 10,
       codec: "h264",
     });
-    await expect(startVideoRecording({ device: testDevice })).resolves.toMatchObject({
-      recordingId: expect.any(String),
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow();
+    await expect(stopVideoRecording(active.recordingId)).resolves.toMatchObject({
+      metadata: { recordingId: active.recordingId },
     });
   });
 

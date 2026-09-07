@@ -328,7 +328,7 @@ describe("VideoRecorderService", () => {
     });
   });
 
-  test("releases device ownership when the backend stop fails with a confirmed teardown", async () => {
+  test("retains device ownership when a generic backend stop failure has no exit confirmation", async () => {
     const recording = await service.startRecording({
       device: { deviceId: "test-device", platform: "android", name: "Android" },
     });
@@ -340,10 +340,11 @@ describe("VideoRecorderService", () => {
       "adb pull failed with exit code 1",
     );
 
-    // The backend already tore down the device-side process before this
-    // failure, so ownership was released and a new recording is allowed.
-    expect(service.listActiveRecordingIds()).toEqual([]);
-    expect(service.hasActiveRecordingForDevice("test-device")).toBe(false);
+    // A raw backend error is not evidence that the device process exited. The
+    // exact handle remains available for a later force-stop retry and blocks a
+    // second capture against the same device.
+    expect(service.listActiveRecordingIds()).toEqual([recording.recordingId]);
+    expect(service.hasActiveRecordingForDevice("test-device")).toBe(true);
   });
 
   test("retains device ownership when the backend stop cannot confirm process teardown", async () => {

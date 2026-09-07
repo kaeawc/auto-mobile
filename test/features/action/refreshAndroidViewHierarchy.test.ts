@@ -68,4 +68,30 @@ describe("refreshAndroidViewHierarchy", () => {
     // the fallback and returns the incomplete hierarchy straight through.
     expect(result).toEqual(incompleteResult);
   });
+
+  test("forwards the timeoutMs argument positionally to requestHierarchySync", async () => {
+    // Issue #6252's old signature was
+    // `refreshAndroidViewHierarchy(accessibilityService, viewHierarchy, timeoutMs, signal)`.
+    // Calling the *new* two-arg signature `(accessibilityService, timeoutMs)`
+    // against the *old* implementation silently mis-binds positionally: the
+    // literal `1000` below lands in the old `viewHierarchy` parameter and the
+    // old `timeoutMs` parameter is left `undefined` — so `undefined`, not
+    // `1000`, would reach `requestHierarchySync`. The two return-value-only
+    // tests above can't see this: FakeCtrlProxy.requestHierarchySync ignores
+    // its arguments and returns the same configured hierarchy regardless of
+    // what (or whether) `timeoutMs` was passed, and the old code's dead
+    // uiautomator-fallback throw is silently swallowed either way, so both
+    // implementations produce an identical return value. Only inspecting what
+    // was actually passed to requestHierarchySync tells old and new apart.
+    const fakeCtrlProxy = new FakeCtrlProxy();
+    fakeCtrlProxy.setHierarchyData({
+      updatedAt: Date.now(),
+      packageName: "com.test.app",
+      hierarchy: { $: {} },
+    });
+
+    await refreshAndroidViewHierarchy(asClient(fakeCtrlProxy), 1000);
+
+    expect(fakeCtrlProxy.getLastRequestHierarchySyncArgs()?.timeoutMs).toBe(1000);
+  });
 });

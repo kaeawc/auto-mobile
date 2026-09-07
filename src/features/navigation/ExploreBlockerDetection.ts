@@ -224,8 +224,37 @@ const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
  * Listed as exact tokens/phrases (see `tokenize`): "don't allow" ->
  * `["don", "t", "allow"]`, "deny", "block", "reject", "disallow", plus the
  * dismissive "no thanks". Matched independently on `text` and `content-desc`.
+ *
+ * Two gaps this set must close by hand, because matching is whole-token and
+ * carries no stemming:
+ *   - Inflected deny forms. "block" tokenizes to `["block"]` and so does NOT
+ *     match "Blocked" (`["blocked"]`); likewise "reject"/"rejected" and
+ *     "disallow"/"disallowed". A control that carries an allow token in one
+ *     field and "Blocked" in another would otherwise pass
+ *     `isAffirmativeGrantElement` and be tapped, so every inflected deny form a
+ *     real dialog uses is listed explicitly.
+ *   - Machine-form negatives. A custom/OEM control may expose its denial via a
+ *     `content-desc` id like `dontAllowButton` (-> `["dont", "allow",
+ *     "button"]`) or `doNotAllowButton` (-> `["do", "not", "allow",
+ *     "button"]`). The apostrophe phrase "don't allow" (`["don", "t",
+ *     "allow"]`) does not match either concatenated spelling, so "dont allow"
+ *     and "do not allow" are listed as their own phrases. A contiguous run
+ *     match (see `containsTokenSequence`) ignores any trailing "button"/"btn".
  */
-const DENY_KEYWORDS = ["don't allow", "deny", "denied", "block", "reject", "disallow", "no thanks"];
+const DENY_KEYWORDS = [
+  "don't allow",
+  "dont allow",
+  "do not allow",
+  "deny",
+  "denied",
+  "block",
+  "blocked",
+  "reject",
+  "rejected",
+  "disallow",
+  "disallowed",
+  "no thanks",
+];
 
 const DENY_KEYWORD_TOKENS = toKeywordTokenLists(DENY_KEYWORDS);
 

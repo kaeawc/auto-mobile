@@ -651,12 +651,86 @@ describe("ExploreBlockerDetection", () => {
     // No false grant: a dialog offering ONLY deny/negative controls must never
     // be tapped — the handler takes no action rather than denying the
     // permission and (previously) reporting success.
-    test.each([["Don't allow"], ["Deny"], ["Block"], ["Reject"], ["Disallow"]])(
+    test.each([
+      ["Don't allow"],
+      ["Deny"],
+      ["Block"],
+      // Inflected deny forms tokenize distinctly from their stems ("Blocked" ->
+      // ["blocked"] != ["block"]), so each must be listed explicitly in the deny
+      // set or it would slip through the token match (issue #6241 follow-up).
+      ["Blocked"],
+      ["Reject"],
+      ["Rejected"],
+      ["Disallow"],
+      ["Disallowed"],
+    ])(
       "handlePermissionDialog does not tap when only a deny control %p is present",
       async (denyText: string) => {
         const { calls, restore } = captureTapOptions();
         const elements = [
           createMockElement({ text: denyText, "resource-id": "com.test:id/deny_button" }),
+        ];
+
+        let handled: boolean;
+        try {
+          handled = await handlePermissionDialog(
+            elements,
+            hierarchyOf(elements),
+            androidDevice,
+            null,
+          );
+        } finally {
+          restore();
+        }
+
+        expect(handled).toBe(false);
+        expect(calls).toEqual([]);
+      },
+    );
+
+    // A "Blocked" label in one field must veto an "allow" token carried in the
+    // other, so a mixed control is never treated as an affirmative grant.
+    test("handlePermissionDialog does not tap a control mixing an allow token with 'Blocked'", async () => {
+      const { calls, restore } = captureTapOptions();
+      const elements = [
+        createMockElement({
+          text: "Allow",
+          "content-desc": "Blocked",
+          "resource-id": "com.test:id/mixed",
+        }),
+      ];
+
+      let handled: boolean;
+      try {
+        handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+        );
+      } finally {
+        restore();
+      }
+
+      expect(handled).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    // Machine-form negative content-desc ids ("dontAllowButton" ->
+    // ["dont", "allow", "button"], "doNotAllowButton" -> ["do", "not", "allow",
+    // "button"]) carry an "allow" token but must be recognized as deny controls,
+    // not tapped (issue #6241 follow-up). The apostrophe phrase "don't allow"
+    // does not match either concatenated spelling, so both are listed explicitly.
+    test.each([["dontAllowButton"], ["doNotAllowButton"]])(
+      "handlePermissionDialog does not tap machine-form negative content-desc %p",
+      async (denyContentDesc: string) => {
+        const { calls, restore } = captureTapOptions();
+        const elements = [
+          createMockElement({
+            text: "",
+            "content-desc": denyContentDesc,
+            "resource-id": "com.test:id/deny",
+          }),
         ];
 
         let handled: boolean;

@@ -190,6 +190,15 @@ export interface SocketOwnerLiveness {
  * record naming this process (our own early owner record, issue #2871) or a dead
  * process is not a live foreign owner, so a genuinely stale socket stays
  * reclaimable.
+ *
+ * IMPORTANT: this default reads the CURRENT on-disk record. A caller that
+ * overwrites the shared PID file with its own record BEFORE it reaches the bind
+ * guard (as `Daemon.start()` does via its early-owner record) MUST NOT rely on
+ * this default — by then the file names the caller, so a live sibling reads back
+ * as `pid === process.pid` and this returns `false`, which would authorize
+ * unlinking the live socket. Such a caller injects an
+ * {@link import("./incumbentOwnerGuard").IncumbentOwnerGuard}-backed liveness that
+ * consults an incumbent snapshot captured before the overwrite (issue #6232).
  */
 const defaultSocketOwnerLiveness: SocketOwnerLiveness = {
   hasLiveForeignOwner(): boolean {

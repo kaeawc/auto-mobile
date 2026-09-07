@@ -29,6 +29,7 @@ import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION, DAEMON_LAUNCHED_UNDER_STARTUP_LOCK } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
+import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import { executionTracker } from "../server/executionTracker";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -261,6 +262,10 @@ export class Daemon {
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
   private socketBindCommitted = false;
+  // Preserves a live incumbent daemon's PID record across our own early-owner
+  // overwrite so the lock-less bind guard can (a) still see the live sibling on
+  // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
+  private readonly incumbentOwnerGuard = new IncumbentOwnerGuard();
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
@@ -560,12 +565,26 @@ export class Daemon {
       this.idGenerator,
       // A hand-launched daemon (no startup lock) must refuse to unlink a live
       // sibling's socket; only a manager-launched, lock-protected daemon may
-      // reclaim it (issue #6232).
-      { startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK },
+      // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
+      // incumbent snapshot, not the PID file we already overwrote above, so an
+      // inconclusive probe still sees the live sibling.
+      {
+        startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK,
+        ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
+      },
     );
     logger.info("Starting Unix socket server...");
     startupBenchmark.startPhase("socketServerStart");
-    await this.socketServer.start();
+    try {
+      await this.socketServer.start();
+    } catch (error) {
+      // The bind guard refused a live sibling. Our early-owner overwrite left the
+      // shared PID file naming this (about-to-exit) contender; restore the live
+      // incumbent's record so status()/`--daemon stop` still find the winner
+      // (issue #6232).
+      this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+      throw error;
+    }
     // We now hold the socket bind. Only past this point may this process's exit /
     // shutdown cleanup delete the shared socket/PID files: before it, the early
     // owner record (issue #2871) makes the `expectedPid` self-check pass even
@@ -1083,6 +1102,10 @@ export class Daemon {
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       options: this.options,
     };
+    // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
+    // so the lock-less bind guard can still see the live sibling and restore its
+    // record on refusal instead of unlinking/orphaning it (issue #6232).
+    this.incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
     await this.persistPidFileData(pidData);
     logger.info(`Early daemon owner record written to ${PID_FILE_PATH} (dbPath ${pidData.dbPath})`);
   }

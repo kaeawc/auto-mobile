@@ -13,6 +13,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
+  trackDeviceAcquisitionReadiness,
 } from "../../src/utils/deviceReadinessLock";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -902,6 +903,69 @@ describe("ToolExecutionContext", () => {
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(1);
     expect(sessionManager.getDeviceReadiness("session-device-lock")).toBe("automationReady");
+  });
+
+  // #6280 P2 review follow-up: a device acquisition (startDevice/getAndroid)
+  // releases the per-device readiness lock as soon as CtrlProxy setup
+  // finishes — well before it goes on to bind/reuse the session and record
+  // its achieved readiness. A concurrent upgrade for that SAME (already
+  // reused, post-restart recovered) session must not race a second setup in
+  // that gap; it must join the acquisition's marker and observe the recorded
+  // readiness once the acquisition finishes.
+  test("joins an in-flight device acquisition instead of redoing CtrlProxy setup for a reused session (#6280)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // A post-restart recovered session: already tracked, readiness never
+    // recorded — mirrors a session reused by a concurrent acquisition.
+    await sessionManager.createSession("session-acquisition-race", "device-1", "android");
+
+    // Stand in for a device acquisition that has already released the
+    // per-device readiness lock (CtrlProxy setup finished) but has not yet
+    // bound/recorded readiness for the reused session.
+    let resolveAcquisition!: () => void;
+    const acquisitionDone = new Promise<void>((resolve) => {
+      resolveAcquisition = resolve;
+    });
+    const acquisitionPromise = trackDeviceAcquisitionReadiness(
+      deviceReadinessLockKey("android", "device-1"),
+      async () => {
+        await acquisitionDone;
+        sessionManager.setDeviceReadiness("session-acquisition-race", "automationReady");
+      },
+    );
+
+    const upgrade = createToolExecutionContext(
+      "session-acquisition-race",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+    );
+
+    // While the acquisition marker is set, the upgrade must wait on it
+    // instead of racing its own CtrlProxy setup on the device just prepared.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(setupCalls).toBe(0);
+
+    resolveAcquisition();
+    await acquisitionPromise;
+    const context = await upgrade;
+
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(0);
+    expect(sessionManager.getDeviceReadiness("session-acquisition-race")).toBe("automationReady");
   });
 
   test("should not run accessibility setup for existing sessions", async () => {

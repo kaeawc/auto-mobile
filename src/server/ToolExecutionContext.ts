@@ -8,7 +8,11 @@ import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
-import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
+import {
+  deviceReadinessLockKey,
+  getDeviceAcquisitionReadiness,
+  withDeviceReadinessLock,
+} from "../utils/deviceReadinessLock";
 import { serverConfig } from "../utils/ServerConfig";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 
@@ -251,6 +255,22 @@ async function ensureReadinessUpgraded(
       // for it rather than racing a second `runDeviceReadinessSetup` call,
       // then loop back to re-check whether it reached the level we need.
       await inFlight;
+      continue;
+    }
+
+    // #6280 P2 follow-up: a device acquisition (`startDevice`/`getAndroid`)
+    // can still be binding/recording readiness for THIS session even after it
+    // has released the per-device readiness lock — that lock only covers the
+    // CtrlProxy setup itself, not the bind/record that follows. Racing our
+    // own `runDeviceReadinessSetup` here would acquire the now-free lock and
+    // redundantly reset/rerun CtrlProxy on the device the acquisition just
+    // prepared. Await the acquisition's marker instead, then loop back to
+    // re-check — by the time it settles, readiness has been recorded.
+    const acquisitionInFlight = getDeviceAcquisitionReadiness(
+      deviceReadinessLockKey(session.platform, session.assignedDevice),
+    );
+    if (acquisitionInFlight) {
+      await acquisitionInFlight;
       continue;
     }
 

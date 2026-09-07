@@ -167,3 +167,59 @@ function cleanupReadinessWaiter(waiter: ReadinessWaiter): void {
     waiter.signal?.removeEventListener("abort", waiter.abortListener);
   }
 }
+
+/**
+ * Device-scoped "acquisition is recording readiness" marker (#6280 P2
+ * follow-up).
+ *
+ * The acquisition path (`startDevice`/`getAndroid`) releases the readiness
+ * lock above as soon as `RunnerReadinessService.ensureReady` finishes CtrlProxy
+ * setup — well before it goes on to bind (or reuse) the device's session and
+ * record the achieved readiness on it (`recordAcquiredSessionReadiness` in
+ * `deviceTools.ts`). For a device whose session already existed before this
+ * acquisition started (a post-restart recovered session, reused rather than
+ * freshly created), that session is addressable by UUID throughout this gap.
+ * A concurrent tool call on that UUID can queue behind the readiness lock,
+ * acquire it the instant CtrlProxy setup finishes, observe the still-`undefined`
+ * readiness (not recorded yet), and redundantly reset/rerun CtrlProxy on the
+ * device that was just prepared.
+ *
+ * This map lets that concurrent caller (`ensureReadinessUpgraded` in
+ * `ToolExecutionContext`) detect the in-flight acquisition and await its
+ * completion instead of racing a second setup: once the marker settles,
+ * readiness has been recorded and the caller's own satisfaction check
+ * (re-run in a loop) passes without redoing setup.
+ */
+const deviceAcquisitionReadiness = new Map<string, Promise<void>>();
+
+/**
+ * Run `fn` while `key` is marked as having readiness acquisition in flight.
+ * Callers awaiting {@link getDeviceAcquisitionReadiness} for the same key
+ * resolve once `fn` settles (successfully or not) and the marker is cleared.
+ */
+export async function trackDeviceAcquisitionReadiness<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let settle!: () => void;
+  const marker = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  deviceAcquisitionReadiness.set(key, marker);
+  try {
+    return await fn();
+  } finally {
+    settle();
+    if (deviceAcquisitionReadiness.get(key) === marker) {
+      deviceAcquisitionReadiness.delete(key);
+    }
+  }
+}
+
+/**
+ * The in-flight acquisition-readiness marker for `key`, if any device
+ * acquisition is currently binding/recording readiness for it.
+ */
+export function getDeviceAcquisitionReadiness(key: string): Promise<void> | undefined {
+  return deviceAcquisitionReadiness.get(key);
+}

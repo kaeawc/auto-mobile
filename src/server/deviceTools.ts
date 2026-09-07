@@ -74,6 +74,10 @@ import {
   SystemUiAnrRecoveryRequiredError,
 } from "../utils/RunnerReadinessService";
 import {
+  deviceReadinessLockKey,
+  trackDeviceAcquisitionReadiness,
+} from "../utils/deviceReadinessLock";
+import {
   DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
@@ -5007,70 +5011,91 @@ export function registerDeviceTools() {
     clearColdBootShutdownMarker(state.boot.source, state.boot.device.deviceId);
 
     const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-    const readinessResult = await prepareStartDeviceRunnerReadiness({
-      boot: state.boot,
-      args,
-      bootService,
-      deviceUtils,
-      daemonState,
-      totalDeadlineMs: budgets.automationDeadlineMs,
-      readinessTimeoutMs: budgets.automationReadyTimeoutMs,
-      timer: deps.timer,
-      signal,
-      progress,
-      perf,
-      requestedIdentity,
-      ensureCtrlProxyReady: ctrlProxySetup,
-      releaseReadinessReservations,
-    });
-    state.boot = readinessResult.boot;
-    sourceImage = state.boot.sourceImage ?? sourceImage;
-    // Re-check under the later binding lock because pool identity can change
-    // while runner setup is in flight.
-    validatePooledDeviceMapping(state.boot.device, requestedIdentity);
-
-    // Publish only after runner health passes. Readiness remains per-device,
-    // so 20-40 concurrent emulators do not serialize on a host-wide gate.
-    publishWarmDeviceReady(state.boot.source, state.boot.device.deviceId);
-    await validatePreservedSystemUiAnrRecoverySession(
-      readinessResult.preservedSessionId,
-      readinessResult.validatePreservedSession,
-      readinessResult.retireReplacement,
+    // #6280 P2 follow-up: mark this device's readiness lock key as having an
+    // acquisition in flight for the ENTIRE span from runner setup through
+    // session bind/record, not just while the readiness lock itself is held.
+    // `RunnerReadinessService.ensureReady` (invoked inside
+    // `prepareStartDeviceRunnerReadiness`) releases that lock the instant
+    // CtrlProxy setup finishes — well before this function goes on to bind
+    // (or reuse) the session and record its achieved readiness below. A
+    // concurrent tool call on an already-known session UUID (a post-restart
+    // recovered session reused rather than freshly created here) can queue
+    // behind the readiness lock and acquire it in that gap; without this
+    // marker it would observe still-unrecorded readiness and redundantly
+    // reset/rerun CtrlProxy on the device just prepared.
+    // `ensureReadinessUpgraded` in `ToolExecutionContext` awaits this marker
+    // instead of racing a second setup.
+    const acquisitionReadinessKey = deviceReadinessLockKey(
+      state.boot.device.platform,
+      state.boot.device.deviceId,
     );
-    const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
-      state.boot,
-      sourceImage,
-    );
-    const sessionId =
-      readinessResult.preservedSessionId ??
-      (await bindBootedDeviceSession(
-        state.boot.device,
+    const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
+      const readinessResult = await prepareStartDeviceRunnerReadiness({
+        boot: state.boot!,
         args,
-        state.boot.source === "cold-boot" ? sourceImage : undefined,
-        state.boot.processHandle,
-        new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-        verifiedWarmAndroidAvdIdentity,
-      ));
-    if (readinessResult.preservedSessionId) {
-      // #6227 round 7: the System UI ANR recovery path above bypasses
-      // `bindBootedDeviceSession` (and therefore its own
-      // `recordAcquiredSessionReadiness` call) entirely when a preserved
-      // session is being reused. But by this point
-      // `prepareStartDeviceRunnerReadiness` has already run the *same*
-      // `ensureCtrlProxyReady` setup this function always awaits for a
-      // freshly-bound session — recovery re-verified runner readiness on the
-      // replacement device before handing back `preservedSessionId` (see
-      // `ensureRunnerReadyWithSystemUiAnrRecovery`) — so the achieved level
-      // here is unconditionally `automationReady`, exactly like the
-      // freshly-bound branch. Recording it here closes the gap where a
-      // recovered session's readiness cache stayed `undefined` and the first
-      // `automationReady` tool after recovery redundantly re-ran setup.
-      recordAcquiredSessionReadiness(
+        bootService,
+        deviceUtils,
         daemonState,
+        totalDeadlineMs: budgets.automationDeadlineMs,
+        readinessTimeoutMs: budgets.automationReadyTimeoutMs,
+        timer: deps.timer,
+        signal,
+        progress,
+        perf,
+        requestedIdentity,
+        ensureCtrlProxyReady: ctrlProxySetup,
+        releaseReadinessReservations,
+      });
+      state.boot = readinessResult.boot;
+      sourceImage = state.boot.sourceImage ?? sourceImage;
+      // Re-check under the later binding lock because pool identity can change
+      // while runner setup is in flight.
+      validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+
+      // Publish only after runner health passes. Readiness remains per-device,
+      // so 20-40 concurrent emulators do not serialize on a host-wide gate.
+      publishWarmDeviceReady(state.boot.source, state.boot.device.deviceId);
+      await validatePreservedSystemUiAnrRecoverySession(
         readinessResult.preservedSessionId,
-        "automationReady",
+        readinessResult.validatePreservedSession,
+        readinessResult.retireReplacement,
       );
-    }
+      const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
+        state.boot,
+        sourceImage,
+      );
+      const boundSessionId =
+        readinessResult.preservedSessionId ??
+        (await bindBootedDeviceSession(
+          state.boot.device,
+          args,
+          state.boot.source === "cold-boot" ? sourceImage : undefined,
+          state.boot.processHandle,
+          new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+          verifiedWarmAndroidAvdIdentity,
+        ));
+      if (readinessResult.preservedSessionId) {
+        // #6227 round 7: the System UI ANR recovery path above bypasses
+        // `bindBootedDeviceSession` (and therefore its own
+        // `recordAcquiredSessionReadiness` call) entirely when a preserved
+        // session is being reused. But by this point
+        // `prepareStartDeviceRunnerReadiness` has already run the *same*
+        // `ensureCtrlProxyReady` setup this function always awaits for a
+        // freshly-bound session — recovery re-verified runner readiness on the
+        // replacement device before handing back `preservedSessionId` (see
+        // `ensureRunnerReadyWithSystemUiAnrRecovery`) — so the achieved level
+        // here is unconditionally `automationReady`, exactly like the
+        // freshly-bound branch. Recording it here closes the gap where a
+        // recovered session's readiness cache stayed `undefined` and the first
+        // `automationReady` tool after recovery redundantly re-ran setup.
+        recordAcquiredSessionReadiness(
+          daemonState,
+          readinessResult.preservedSessionId,
+          "automationReady",
+        );
+      }
+      return boundSessionId;
+    });
     state.ownershipTransferred = true;
 
     await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);

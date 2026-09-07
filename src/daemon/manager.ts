@@ -55,7 +55,11 @@ import {
 } from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { cleanupDaemonFiles, isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
+import {
+  cleanupDaemonFiles,
+  clearDaemonLaunchLogOwnerTombstoneSync,
+  isProcessRunning as isDaemonProcessRunning,
+} from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
@@ -1014,6 +1018,11 @@ export class DaemonManager implements DaemonManagerLike {
     childEnv[DAEMON_LAUNCH_LOG_PATH_ENV] = capturesLaunchOutput ? logPath : "";
     if (capturesLaunchOutput) {
       ensureSecureLogsDirSync();
+      // `openSync(..., "w")` below starts a new launch-log generation. A
+      // same-PID manager reuse can otherwise leave a dead prior generation's
+      // exact-owner sidecar behind and let pruning delete this fresh file while
+      // its child still holds the descriptor.
+      clearDaemonLaunchLogOwnerTombstoneSync(logPath);
     }
     // Open with restricted permissions (0o600 = owner read/write only).
     // Stderr-only containers deliberately skip the file capture and do not need

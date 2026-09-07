@@ -109,6 +109,22 @@ export function daemonLaunchLogOwnerTombstonePath(launchLogPath: string): string
 }
 
 /**
+ * A launch log is a new file generation whenever its manager opens it with
+ * truncation. Remove the previous generation's owner evidence first so a PID
+ * reuse cannot make a later sweep treat that stale tombstone as an exact claim
+ * for the newly-created file.
+ */
+export function clearDaemonLaunchLogOwnerTombstoneSync(launchLogPath: string): void {
+  try {
+    unlinkSync(daemonLaunchLogOwnerTombstonePath(launchLogPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+/**
  * Preserve the exact launch-log association before deleting the PID record.
  * The PID record is deliberately transient liveness state, but its association
  * is also the conclusive evidence a later prune needs once shutdown has

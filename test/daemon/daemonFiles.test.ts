@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
   cleanupDaemonFiles,
   cleanupDaemonFilesSync,
+  clearDaemonLaunchLogOwnerTombstoneSync,
   daemonLaunchLogOwnerTombstonePath,
   isProcessRunning,
   listDaemonPidFilesSync,
@@ -81,6 +82,19 @@ describe("daemon file cleanup", () => {
       pid: 12345,
       launchLogPath,
     });
+  });
+
+  test("clears stale owner evidence before reusing a launch-log path", () => {
+    const { dir } = createTempFiles();
+    const launchLogPath = join(dir, "daemon-launch-123.log");
+    writeFileSync(
+      daemonLaunchLogOwnerTombstonePath(launchLogPath),
+      JSON.stringify({ pid: 12345, launchLogPath }),
+    );
+
+    clearDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+
+    expect(existsSync(daemonLaunchLogOwnerTombstonePath(launchLogPath))).toBe(false);
   });
 
   test("cleanupDaemonFilesSync skips cleanup when PID file belongs to another process", () => {

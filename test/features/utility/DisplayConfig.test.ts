@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BootedDevice, ExecResult } from "../../../src/models";
+import type { BootedDevice } from "../../../src/models";
 import {
   DisplayConfig,
   parseFontScale,
@@ -7,7 +7,7 @@ import {
   parseWmDensity,
 } from "../../../src/features/utility/DisplayConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
 const androidEmulator: BootedDevice = {
   name: "Pixel",
@@ -34,16 +34,6 @@ const iosPhysical: BootedDevice = {
   deviceId: "00008130-001234567890ABCD",
   iosVersion: "17.5",
 };
-
-function execResult(stdout: string, stderr = ""): ExecResult {
-  return {
-    stdout,
-    stderr,
-    toString: () => stdout,
-    trim: () => stdout.trim(),
-    includes: (s: string) => stdout.includes(s),
-  };
-}
 
 const FONT_GET = "shell settings get system font_scale";
 const DENSITY_GET = "shell wm density";
@@ -85,6 +75,13 @@ describe("DisplayConfig parsers", () => {
     expect(parseNightMode("Night mode: no\n")).toBe("light");
     expect(parseNightMode("Night mode: auto\n")).toBe("system");
     expect(parseNightMode("Night mode: bogus\n")).toBeUndefined();
+  });
+
+  test("parseNightMode keeps custom distinct from system so restore does not write auto", () => {
+    // A device on a custom schedule must round-trip as "custom", not "system":
+    // collapsing it would make a later restore emit `cmd uimode night auto` and
+    // destroy the user's schedule (#6096 review).
+    expect(parseNightMode("Night mode: custom\n")).toBe("custom");
   });
 });
 
@@ -228,6 +225,83 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).toContain("shell cmd uimode night no");
   });
 
+  test("restores a custom night-mode schedule via cmd uimode night custom, not auto", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory);
+
+    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "custom" });
+
+    const commands = adbFactory
+      .getFakeClient()
+      .getCommandCalls()
+      .map((c) => c.command);
+    expect(commands).toContain("shell cmd uimode night custom");
+    expect(commands).not.toContain("shell cmd uimode night auto");
+  });
+
+  test("captures a custom device's theme as custom in previous, so a restore is faithful", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { night: "Night mode: custom\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2.0,
+    });
+
+    // The device was on a custom schedule before the change; previous must
+    // preserve that as "custom" (not "system") so the client can restore it.
+    expect(result.previous?.theme).toBe("custom");
+  });
+
+  test("rejects reset combined with an explicit theme (contradictory request)", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory);
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      reset: true,
+      theme: "dark",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("reset cannot be combined");
+    // No mutation should have run — the contradiction is caught before any write.
+    const commands = adbFactory
+      .getFakeClient()
+      .getCommandCalls()
+      .map((c) => c.command);
+    expect(commands.some((c) => c.startsWith("shell cmd uimode night"))).toBe(false);
+    expect(commands.some((c) => c.startsWith("shell settings put"))).toBe(false);
+    expect(commands.some((c) => c.startsWith("shell wm density"))).toBe(false);
+  });
+
+  test("preserves previous + applied state when a later mutation rejects mid-sequence", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    // Pre-read reflects the starting state; the font write succeeds, but the
+    // density write rejects at the ADB layer. The already-applied font change
+    // must not sink the restoration bookkeeping (#6096 review).
+    client.setCommandResultSequence(FONT_GET, [
+      { stdout: "1.0\n", stderr: "" },
+      { stdout: "2.0\n", stderr: "" },
+    ]);
+    client.setCommandResult(DENSITY_GET, "Physical density: 440\n");
+    client.setCommandResult(NIGHT_GET, "Night mode: no\n");
+    client.setCommandError("shell wm density 560", new Error("adb: device offline"));
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2.0,
+      density: 560,
+    });
+
+    expect(result.success).toBe(false);
+    // Restoration state is retained despite the mid-sequence failure.
+    expect(result.previous?.fontScale).toBe(1.0);
+    expect(result.applied?.fontScale).toBe(2.0);
+    expect(result.error).toContain("wm density 560");
+    // The earlier (successful) font mutation was still issued.
+    const commands = client.getCommandCalls().map((c) => c.command);
+    expect(commands).toContain("shell settings put system font_scale 2");
+  });
+
   test("rejects an empty set request", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
@@ -254,125 +328,127 @@ describe("DisplayConfig setConfig", () => {
   });
 });
 
+/** Argv arrays actually issued to simctl (each recorded call's `args`). */
+function simctlArgvCalls(simctl: FakeSimCtlClient): string[][] {
+  return simctl.getMethodCalls("executeCommandArgs").map((c) => c.args as string[]);
+}
+
 describe("DisplayConfig platform gating", () => {
   test("reports physical iOS as fully unsupported for reads without issuing commands", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    const result = await new DisplayConfig(iosPhysical, { processExecutor }).getConfig();
+    const simctl = new FakeSimCtlClient();
+    const result = await new DisplayConfig(iosPhysical, { simctl }).getConfig();
 
     expect(result.success).toBe(false);
     expect(result.platform).toBe("ios");
     expect(result.supported).toEqual({ fontScale: false, density: false, theme: false });
     expect(result.error).toContain("iOS");
-    expect(processExecutor.getExecutedCommands()).toEqual([]);
+    expect(simctlArgvCalls(simctl)).toEqual([]);
   });
 
   test("reports physical iOS as fully unsupported for writes without issuing commands", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    const result = await new DisplayConfig(iosPhysical, { processExecutor }).setConfig({
+    const simctl = new FakeSimCtlClient();
+    const result = await new DisplayConfig(iosPhysical, { simctl }).setConfig({
       fontScale: 2.0,
     });
 
     expect(result.success).toBe(false);
     expect(result.platform).toBe("ios");
     expect(result.error).toContain("iOS");
-    expect(processExecutor.getExecutedCommands()).toEqual([]);
+    expect(simctlArgvCalls(simctl)).toEqual([]);
   });
 });
 
 describe("DisplayConfig iOS Simulator theme support", () => {
   test("reports theme (only) as supported on an iOS Simulator", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).getConfig();
+    const simctl = new FakeSimCtlClient();
+    const result = await new DisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
   });
 
-  test("reads the current appearance via simctl ui appearance", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    processExecutor.setCommandResponse(
-      `ui ${iosSimulator.deviceId} appearance`,
-      execResult("dark\n"),
-    );
+  test("reads the current appearance through the SimCtlClient seam", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "dark\n");
 
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).getConfig();
+    const result = await new DisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.success).toBe(true);
     expect(result.current).toEqual({ theme: "dark" });
+    // The read is issued as an argv array via the seam, not a raw simctl spawn.
+    expect(simctlArgvCalls(simctl)).toContainEqual(["ui", iosSimulator.deviceId, "appearance"]);
   });
 
-  test("sets the appearance via simctl ui appearance <value>", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    processExecutor.setCommandResponse(
-      `ui ${iosSimulator.deviceId} appearance`,
-      execResult("light\n"),
-    );
+  test("sets the appearance through the SimCtlClient seam", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "light\n");
 
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       theme: "dark",
     });
 
     expect(result.success).toBe(true);
     expect(result.previous).toEqual({ theme: "light" });
-    expect(
-      processExecutor.wasCommandExecuted(
-        `xcrun simctl ui ${iosSimulator.deviceId} appearance dark`,
-      ),
-    ).toBe(true);
+    expect(simctlArgvCalls(simctl)).toContainEqual([
+      "ui",
+      iosSimulator.deviceId,
+      "appearance",
+      "dark",
+    ]);
   });
 
   test("reset restores light appearance", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    processExecutor.setCommandResponse(
-      `ui ${iosSimulator.deviceId} appearance`,
-      execResult("dark\n"),
-    );
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "dark\n");
 
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       reset: true,
     });
 
     expect(result.success).toBe(true);
-    expect(
-      processExecutor.wasCommandExecuted(
-        `xcrun simctl ui ${iosSimulator.deviceId} appearance light`,
-      ),
-    ).toBe(true);
+    expect(simctlArgvCalls(simctl)).toContainEqual([
+      "ui",
+      iosSimulator.deviceId,
+      "appearance",
+      "light",
+    ]);
   });
 
-  test("rejects theme 'system' as an honest per-field refusal, issuing no command", async () => {
-    const processExecutor = new FakeProcessExecutor();
-    processExecutor.setCommandResponse(
-      `ui ${iosSimulator.deviceId} appearance`,
-      execResult("light\n"),
-    );
+  test("rejects theme 'system' as an honest per-field refusal, issuing no appearance write", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "light\n");
 
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       theme: "system",
     });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("'system'");
-    expect(processExecutor.wasCommandExecuted("appearance system")).toBe(false);
+    expect(simctlArgvCalls(simctl)).not.toContainEqual([
+      "ui",
+      iosSimulator.deviceId,
+      "appearance",
+      "system",
+    ]);
   });
 
   test("rejects fontScale on the iOS Simulator without issuing a simctl appearance write", async () => {
-    const processExecutor = new FakeProcessExecutor();
+    const simctl = new FakeSimCtlClient();
 
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       fontScale: 1.3,
     });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("fontScale");
-    expect(processExecutor.getExecutedCommands().some((c) => c.includes("appearance "))).toBe(
-      false,
-    );
+    expect(
+      simctlArgvCalls(simctl).some((args) => args.length >= 4 && args[2] === "appearance"),
+    ).toBe(false);
   });
 
   test("rejects density on the iOS Simulator", async () => {
-    const processExecutor = new FakeProcessExecutor();
+    const simctl = new FakeSimCtlClient();
 
-    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
       density: 480,
     });
 

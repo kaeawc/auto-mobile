@@ -7,11 +7,17 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import type { BootedDevice } from "../../models";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../../utils/logger";
-import {
-  DefaultHostCommandExecutor,
-  type HostCommandExecutor,
-} from "../../utils/HostCommandExecutor";
+import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+
+/**
+ * The argv-shaped slice of the simctl client this feature needs. Routing
+ * simulator appearance reads/writes through this seam (rather than a raw
+ * `xcrun simctl` process spawn) reuses the existing SimCtlClient plumbing that
+ * consumes the ambient abort signal and is covered by the repo's direct-simctl
+ * guard (issue #6096 review).
+ */
+type SimctlAppearanceRunner = Pick<SimCtl, "executeCommandArgs">;
 
 /**
  * The visual display configuration that reshapes an app's layout without changing
@@ -26,7 +32,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
  * have no simctl/defaults equivalent. Physical iOS devices support none of the
  * three — there is no automatable, per-device control for any of them.
  */
-export type DisplayTheme = "light" | "dark" | "system";
+export type DisplayTheme = "light" | "dark" | "system" | "custom";
 
 /** Relative density buckets, resolved against the device's physical density. */
 export type DensityBucket = "smaller" | "default" | "larger";
@@ -88,7 +94,8 @@ export interface SetDisplayConfigInput {
 
 export interface DisplayConfigDependencies {
   adbFactory?: AdbClientFactory;
-  processExecutor?: HostCommandExecutor;
+  /** iOS Simulator appearance seam; defaults to a `SimCtlClient` for the device. */
+  simctl?: SimctlAppearanceRunner;
 }
 
 const IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR =
@@ -151,8 +158,13 @@ export function parseWmDensity(raw: string): { physical?: number; effective?: nu
 }
 
 /**
- * Parse `cmd uimode night` output ("Night mode: yes|no|auto"). `yes` is dark,
- * `no` is light, `auto` follows the system, mapped to the tool's `system`.
+ * Parse `cmd uimode night` output ("Night mode: yes|no|auto|custom"). `yes` is
+ * dark, `no` is light, `auto` follows the system (mapped to the tool's
+ * `system`). `custom` (a user-defined schedule / bedtime mode) is kept as its
+ * OWN distinct value rather than collapsed into `system`: collapsing it would
+ * make a later restore of `previous.theme` write `cmd uimode night auto`,
+ * silently destroying the user's custom schedule instead of restoring it
+ * (issue #6096 review).
  */
 export function parseNightMode(raw: string): DisplayTheme | undefined {
   const match = raw.match(/Night mode:\s*(\w+)/i);
@@ -163,8 +175,9 @@ export function parseNightMode(raw: string): DisplayTheme | undefined {
     case "no":
       return "light";
     case "auto":
-    case "custom":
       return "system";
+    case "custom":
+      return "custom";
     default:
       return undefined;
   }
@@ -179,6 +192,10 @@ function nightModeArg(theme: DisplayTheme): string {
       return "no";
     case "system":
       return "auto";
+    // Restores the device's custom night-mode schedule rather than clobbering it
+    // with `auto`; `cmd uimode night custom` re-selects the custom schedule mode.
+    case "custom":
+      return "custom";
   }
 }
 
@@ -187,12 +204,12 @@ export class DisplayConfig {
 
   private adbFactory: AdbClientFactory;
 
-  private processExecutor: HostCommandExecutor;
+  private simctl: SimctlAppearanceRunner;
 
   constructor(device: BootedDevice, dependencies: DisplayConfigDependencies = {}) {
     this.device = device;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
-    this.processExecutor = dependencies.processExecutor ?? new DefaultHostCommandExecutor();
+    this.simctl = dependencies.simctl ?? new SimCtlClient(device);
   }
 
   /** iOS simulators expose `simctl`/`defaults`; physical iOS devices expose neither. */
@@ -227,37 +244,27 @@ export class DisplayConfig {
 
   /** Read the current iOS Simulator theme via `simctl ui appearance` (no value = get). */
   private async readIosTheme(): Promise<DisplayTheme | undefined> {
-    const result = await this.processExecutor.executeCommand("xcrun", [
-      "simctl",
-      "ui",
-      this.device.deviceId,
-      "appearance",
-    ]);
+    const result = await this.simctl.executeCommandArgs(["ui", this.device.deviceId, "appearance"]);
     const value = (result.stdout ?? "").trim();
     return value === "light" || value === "dark" ? value : undefined;
   }
 
   /**
    * Set the iOS Simulator appearance via `simctl ui appearance <light|dark>`.
-   * `system` has no simulator equivalent — there is no "auto" appearance mode
-   * outside physical hardware — so it is reported as an honest per-field
-   * refusal rather than silently coerced to light or dark.
+   * `system` and `custom` have no simulator equivalent — there is no "auto" or
+   * custom-schedule appearance mode outside physical hardware — so they are
+   * reported as an honest per-field refusal rather than silently coerced to
+   * light or dark.
    */
   private async setIosAppearance(theme: DisplayTheme): Promise<string[]> {
-    if (theme === "system") {
+    if (theme !== "light" && theme !== "dark") {
       return [
-        "Cannot set theme 'system' on the iOS Simulator: 'simctl ui appearance' only accepts " +
+        `Cannot set theme '${theme}' on the iOS Simulator: 'simctl ui appearance' only accepts ` +
           "'light' or 'dark'.",
       ];
     }
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "ui",
-        this.device.deviceId,
-        "appearance",
-        theme,
-      ]);
+      await this.simctl.executeCommandArgs(["ui", this.device.deviceId, "appearance", theme]);
       return [];
     } catch (error) {
       return [`'simctl ui appearance ${theme}' failed: ${errorMessage(error)}`];
@@ -387,8 +394,32 @@ export class DisplayConfig {
     }
   }
 
+  private invalidRequest(error: string): DisplayConfigResult {
+    return {
+      success: false,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      error,
+    };
+  }
+
   /** Apply a font scale, density, and/or theme change, or reset to defaults. */
   async setConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+    // `reset` restores every field to its device default, so pairing it with an
+    // explicit fontScale/density/theme is contradictory — the explicit value
+    // would be silently dropped (reset wins) or race the reset. Reject it up
+    // front rather than half-honoring the request (issue #6096 review).
+    if (
+      input.reset === true &&
+      (input.fontScale !== undefined || input.density !== undefined || input.theme !== undefined)
+    ) {
+      return this.invalidRequest(
+        "reset cannot be combined with an explicit fontScale, density, or theme: reset restores " +
+          "all three to their device defaults. Send reset on its own, or send only the explicit " +
+          "fields you want to change.",
+      );
+    }
     if (this.device.platform === "ios") {
       if (!this.isIosSimulator()) {
         return this.unsupported(IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR);
@@ -398,6 +429,10 @@ export class DisplayConfig {
     if (this.device.platform !== "android") {
       return this.unsupported(ANDROID_UNSUPPORTED_PLATFORM_ERROR);
     }
+    return this.setAndroidConfig(input);
+  }
+
+  private async setAndroidConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
     if (
       !input.reset &&
       input.fontScale === undefined &&
@@ -414,25 +449,18 @@ export class DisplayConfig {
       };
     }
 
+    const adb = this.adbFactory.create(this.device);
+
+    // Read the pre-change state first. If this fails, no mutation has run, so
+    // there is nothing to restore and no `previous` to advertise.
+    let previous: DisplayConfigValues;
+    let physicalDensity: number | undefined;
     try {
-      const adb = this.adbFactory.create(this.device);
-      const { values: previous, physicalDensity } = await this.readRawValues(adb);
-      const errors = input.reset
-        ? await this.applyReset(adb)
-        : await this.applyChanges(adb, input, physicalDensity);
-      const applied = await this.readValues(adb);
-      const error = errors.length > 0 ? errors.join("; ") : undefined;
-      return {
-        success: error === undefined,
-        deviceId: this.device.deviceId,
-        platform: this.device.platform,
-        supported: this.support(),
-        applied,
-        previous,
-        ...(error ? { error } : {}),
-      };
+      const raw = await this.readRawValues(adb);
+      previous = raw.values;
+      physicalDensity = raw.physicalDensity;
     } catch (error) {
-      logger.warn(`[DisplayConfig] setConfig failed: ${errorMessage(error)}`, error);
+      logger.warn(`[DisplayConfig] setConfig pre-read failed: ${errorMessage(error)}`, error);
       return {
         success: false,
         deviceId: this.device.deviceId,
@@ -441,6 +469,37 @@ export class DisplayConfig {
         error: errorMessage(error),
       };
     }
+
+    // Mutations are applied per-field and any failure (a shell-reported error OR
+    // a rejected `adb.executeCommand`) is collected into `errors` by `runChecked`
+    // rather than thrown, so an earlier field that already changed the device is
+    // never dropped from the restoration state (issue #6096 review). The device
+    // may now be partially modified, so we still read post-mutation state and
+    // always return `previous` so the caller can restore what changed.
+    const errors = input.reset
+      ? await this.applyReset(adb)
+      : await this.applyChanges(adb, input, physicalDensity);
+
+    let applied: DisplayConfigValues | undefined;
+    let readError: string | undefined;
+    try {
+      applied = await this.readValues(adb);
+    } catch (error) {
+      logger.warn(`[DisplayConfig] setConfig post-read failed: ${errorMessage(error)}`, error);
+      readError = `failed to read applied values: ${errorMessage(error)}`;
+    }
+
+    const allErrors = readError ? [...errors, readError] : errors;
+    const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
+    return {
+      success: error === undefined,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      ...(applied ? { applied } : {}),
+      previous,
+      ...(error ? { error } : {}),
+    };
   }
 
   private async readValues(adb: AdbExecutor): Promise<DisplayConfigValues> {
@@ -547,14 +606,25 @@ export class DisplayConfig {
     return result.stdout ?? "";
   }
 
-  /** Run a mutating command, returning an error fragment when the shell reports failure. */
+  /**
+   * Run a mutating command, returning an error fragment when the shell reports
+   * failure OR when the ADB invocation itself rejects. Catching the rejection
+   * here (instead of letting it propagate) keeps a multi-field set atomic in its
+   * bookkeeping: a later field's failure never discards the `previous`/`applied`
+   * restoration state for an earlier field that already changed the device
+   * (issue #6096 review).
+   */
   private async runChecked(adb: AdbExecutor, command: string): Promise<string[]> {
-    const result = await adb.executeCommand(command, undefined, undefined, true);
-    const stdout = result.stdout ?? "";
-    const stderr = result.stderr ?? "";
-    if (outputLooksLikeShellFailure(stdout, stderr)) {
-      return [`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`];
+    try {
+      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const stdout = result.stdout ?? "";
+      const stderr = result.stderr ?? "";
+      if (outputLooksLikeShellFailure(stdout, stderr)) {
+        return [`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`];
+      }
+      return [];
+    } catch (error) {
+      return [`'${command}' failed: ${errorMessage(error)}`];
     }
-    return [];
   }
 }

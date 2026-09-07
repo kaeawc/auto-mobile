@@ -1105,9 +1105,9 @@
           ]
         },
         "theme": {
-          "description": "Light, dark, or system (follow-device) theme / night mode. Supported on Android and the iOS Simulator; 'system' has no iOS Simulator equivalent. Omit to leave unchanged.",
+          "description": "Light, dark, system (follow-device), or custom (Android user-defined night-mode schedule) theme / night mode. Supported on Android; the iOS Simulator supports only 'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
           "type": "string",
-          "enum": ["light", "dark", "system"]
+          "enum": ["light", "dark", "system", "custom"]
         },
         "reset": {
           "description": "Restore font scale, density, and theme to device defaults.",

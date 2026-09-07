@@ -243,11 +243,13 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
           "leave unchanged.",
       ),
     theme: z
-      .enum(["light", "dark", "system"])
+      .enum(["light", "dark", "system", "custom"])
       .optional()
       .describe(
-        "Light, dark, or system (follow-device) theme / night mode. Supported on Android and " +
-          "the iOS Simulator; 'system' has no iOS Simulator equivalent. Omit to leave unchanged.",
+        "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
+          "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
+          "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
+          "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
       ),
     reset: z
       .boolean()

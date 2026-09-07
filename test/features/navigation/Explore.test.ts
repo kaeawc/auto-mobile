@@ -433,6 +433,47 @@ describe("Explore", () => {
       sleepSpy.mockRestore();
     });
 
+    // Regression: a grant used to report "continue" without clearing the
+    // no-change streak accrued by earlier ungrantable dialogs. In a
+    // multi-permission flow, a first prompt that racks up the streak before
+    // being granted left it elevated, so a single unrelated no-change
+    // observation on the next prompt could immediately trip the stuck-screen
+    // stop despite the intervening successful grant.
+    test("resets the no-change streak after granting a permission", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+
+      const grantDialog = createMockObservation([
+        createMockViewHierarchyNode({
+          class: "android.widget.Button",
+          text: "Allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+          clickable: "true",
+        }),
+        createMockViewHierarchyNode({
+          class: "android.widget.TextView",
+          text: "This app needs camera permission",
+          clickable: "false",
+        }),
+      ]);
+
+      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
+        success: true,
+      } as never);
+      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
+
+      // Simulate a streak accrued by an earlier, unrelated ungrantable dialog.
+      (explore as any).consecutiveNoChangeCount = 39;
+
+      const outcome = await (explore as any).handlePermissionDialogFastPath(grantDialog);
+
+      expect(outcome).toBe("continue");
+      expect((explore as any).consecutiveNoChangeCount).toBe(0);
+      expect(tapSpy).toHaveBeenCalledTimes(1);
+
+      tapSpy.mockRestore();
+      sleepSpy.mockRestore();
+    });
+
     test("should detect login screens", async () => {
       const elements = [
         createMockElement({ text: "Sign in", class: "android.widget.Button" }),

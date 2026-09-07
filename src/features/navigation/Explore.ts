@@ -521,6 +521,7 @@ export class Explore extends BaseVisualChange {
       progress,
     );
     if (granted) {
+      this.consecutiveNoChangeCount = 0;
       return "continue";
     }
 

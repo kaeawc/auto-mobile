@@ -1,4 +1,7 @@
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecutor,
+  DeviceTimestampResult,
+} from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
@@ -183,6 +186,41 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       this.adb.executeCommand(`shell pidof ${packageName}`),
     );
     return stdout.trim().split(/\s+/)[0] || undefined;
+  }
+
+  /**
+   * Widen a device-clock GC-window boundary to compensate for a
+   * second-resolution device clock (#6212, a #6125 follow-up).
+   *
+   * {@link AdbExecutor.getDeviceTimestampMsWithSource} reports
+   * `source: "device-seconds"` when the device doesn't support the
+   * millisecond-epoch `date +%s%3N` and falls back to `date +%s`: the
+   * returned value is `floor(actualDeviceTimeMs / 1000) * 1000`, so the true
+   * boundary could be anywhere in the following 999ms. `parseGCEvents`
+   * compares that truncated bound directly against ms-resolution `logcat -v
+   * epoch` timestamps, so a real in-window GC event landing after the
+   * truncated end bound (but before the actual, unobservable end time) would
+   * otherwise be dropped — and symmetrically for the start bound.
+   *
+   * The widening is inclusive-only, matching the fix chosen in the issue:
+   * the start bound is floored to the top of its second (a no-op on an
+   * already-truncated value — kept explicit for clarity and to defend
+   * against a future non-truncated "device-seconds" source) and the end
+   * bound is pushed to the bottom of the *next* second. This can never drop
+   * a real in-window event; at most it admits a neighboring event just
+   * outside the true window, which is the accepted tradeoff on a device that
+   * cannot report sub-second time at all. Millisecond-resolution
+   * (`"device-ms"`) and host-fallback (`"host"`) sources are left untouched.
+   */
+  private widenCoarseClockBoundary(
+    result: DeviceTimestampResult,
+    direction: "floor" | "ceil",
+  ): number {
+    if (result.source !== "device-seconds") {
+      return result.timestampMs;
+    }
+    const flooredToSecond = Math.floor(result.timestampMs / 1000) * 1000;
+    return direction === "floor" ? flooredToSecond : flooredToSecond + 999;
   }
 
   /**
@@ -519,16 +557,23 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     // logcat's "-v epoch" stamps each line with the device's clock, so
     // comparing these bounds against it in parseGCEvents needs no further
     // translation (see captureGCEvents / #5377).
-    const startTimestamp = await perf.track("adbDeviceTimestampStart", () =>
-      this.adb.getDeviceTimestampMs(),
+    const startResult = await perf.track("adbDeviceTimestampStart", () =>
+      this.adb.getDeviceTimestampMsWithSource(),
     );
 
     // Execute the action
     await beforeAction();
 
-    const endTimestamp = await perf.track("adbDeviceTimestampEnd", () =>
-      this.adb.getDeviceTimestampMs(),
+    const endResult = await perf.track("adbDeviceTimestampEnd", () =>
+      this.adb.getDeviceTimestampMsWithSource(),
     );
+
+    // Widen the window when the device clock only supports second
+    // resolution (see widenCoarseClockBoundary) so a GC event landing on the
+    // boundary second isn't dropped by comparing its ms-resolution logcat
+    // timestamp against a truncated bound (#6212).
+    const startTimestamp = this.widenCoarseClockBoundary(startResult, "floor");
+    const endTimestamp = this.widenCoarseClockBoundary(endResult, "ceil");
 
     // Trigger explicit GC to ensure we get post-GC measurements
     await this.triggerGC(packageName, perf);

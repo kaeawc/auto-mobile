@@ -424,6 +424,81 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
   });
 
+  describe("collectMetrics coarse (second-resolution) device clock (#6212)", function () {
+    test("counts a GC event landing on the boundary second instead of dropping it", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const coarseClockCollector = new MemoryMetricsCollector(
+        { deviceId: "test-device", name: "test", platform: "android" },
+        fakeAdb as any,
+        fakeTimer,
+      );
+
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1111", stderr: "" } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+
+      // The device only supports `date +%s` (second resolution): the audit
+      // actually ran from 500.000s to 501.400s, but the second boundary read
+      // truncates the end to 501.000s. The GC event fired at 501.300s — after
+      // the truncated end bound but still before the real (unobservable) end
+      // — and must not be dropped.
+      fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
+      fakeAdb.setDeviceTimestampSource("device-seconds");
+      fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
+        stdout:
+          "501.300  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
+        stderr: "",
+      } as any);
+
+      const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
+
+      expect(metrics.gcCount).toBe(1);
+      expect(metrics.gcEvents[0].freedKb).toBe(10);
+    });
+
+    test("still drops a GC event outside the widened boundary-second window", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const coarseClockCollector = new MemoryMetricsCollector(
+        { deviceId: "test-device", name: "test", platform: "android" },
+        fakeAdb as any,
+        fakeTimer,
+      );
+
+      fakeAdb.setCommandResponse("pidof com.example.app", { stdout: "1111", stderr: "" } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable com.example.app", {
+        stdout: "",
+        stderr: "",
+      } as any);
+
+      // Coarse-clock widening only pushes the end bound to the top of its
+      // truncated second (501.999s here) — an event a full second later, at
+      // 502.500s, is genuinely outside the window and must still be dropped.
+      fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
+      fakeAdb.setDeviceTimestampSource("device-seconds");
+      fakeAdb.setCommandResponse("logcat -d -v epoch --pid=1111", {
+        stdout:
+          "502.500  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
+        stderr: "",
+      } as any);
+
+      const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
+
+      expect(metrics.gcCount).toBe(0);
+    });
+  });
+
   describe("parseUnreachableObjects", function () {
     test("should parse unreachable objects from dumpsys output", function () {
       const output = `

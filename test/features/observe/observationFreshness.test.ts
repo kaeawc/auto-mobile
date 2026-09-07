@@ -280,6 +280,108 @@ describe("computeFreshness", () => {
     });
   });
 
+  // --- issue #6184: the incomplete-capture warning must diagnose the ACTUAL
+  // cause. CtrlProxy emits one generic `ctrlProxyIncomplete` flag for several
+  // causes; only a genuinely null (withheld) focused root is recoverable by an
+  // isAccessibilityTool build, so the "no root / isAccessibilityTool" advice must
+  // NOT be attached to a discarded-windows or extraction-throw capture. ---
+  describe("incomplete-capture cause diagnosis (issue #6184)", () => {
+    describe("on the unavailable path (rootless payload)", () => {
+      test("genuine null root on API 34+ keeps the 'no root' + isAccessibilityTool diagnosis", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW,
+          now: NOW,
+          unavailable: true,
+          incompleteCapture: { sdkInt: 34, reason: "null_root" },
+        });
+        expect(v.isFresh).toBe(false);
+        expect(v.warning).toContain("no root node");
+        expect(v.warning).toContain("isAccessibilityTool");
+      });
+
+      test("an absent reason (pre-#6172 runner) preserves the historical null-root diagnosis", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW,
+          now: NOW,
+          unavailable: true,
+          incompleteCapture: { sdkInt: 34 },
+        });
+        expect(v.warning).toContain("no root node");
+        expect(v.warning).toContain("isAccessibilityTool");
+      });
+
+      test("discarded zero-area/offscreen windows get a cause-specific message, NOT 'no root'", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW,
+          now: NOW,
+          unavailable: true,
+          incompleteCapture: { sdkInt: 34, reason: "discarded_windows" },
+        });
+        expect(v.isFresh).toBe(false);
+        expect(v.warning).not.toContain("no root node");
+        expect(v.warning).not.toContain("isAccessibilityTool");
+        expect(v.warning).toContain("zero-area");
+        expect(v.warning).toContain("offscreen");
+      });
+
+      test("an extraction throw gets a cause-specific message, NOT 'no root'", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW,
+          now: NOW,
+          unavailable: true,
+          incompleteCapture: { sdkInt: 34, reason: "extraction_error" },
+        });
+        expect(v.isFresh).toBe(false);
+        expect(v.warning).not.toContain("no root node");
+        expect(v.warning).not.toContain("isAccessibilityTool");
+        expect(v.warning).toContain("extraction threw");
+      });
+    });
+
+    describe("on the readable-but-incomplete path", () => {
+      test("genuine null root on API 34+ keeps the null-root diagnosis + isAccessibilityTool advice", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW - 50,
+          now: NOW,
+          verified: true,
+          unavailable: false,
+          incompleteCapture: { sdkInt: 34, reason: "null_root" },
+        });
+        expect(v.isFresh).toBe(false);
+        expect(v.warning).toContain("could not read the focused application's root window");
+        expect(v.warning).toContain("isAccessibilityTool");
+      });
+
+      test("discarded zero-area/offscreen windows do NOT claim 'no root' or isAccessibilityTool", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW - 50,
+          now: NOW,
+          verified: true,
+          unavailable: false,
+          incompleteCapture: { sdkInt: 34, reason: "discarded_windows" },
+        });
+        expect(v.isFresh).toBe(false);
+        expect(v.warning).not.toContain("could not read the focused application's root window");
+        expect(v.warning).not.toContain("isAccessibilityTool");
+        expect(v.warning).toContain("zero-area");
+      });
+
+      test("an extraction throw does NOT claim 'no root' or isAccessibilityTool", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW - 50,
+          now: NOW,
+          verified: true,
+          unavailable: false,
+          incompleteCapture: { sdkInt: 34, reason: "extraction_error" },
+        });
+        expect(v.isFresh).toBe(false);
+        expect(v.warning).not.toContain("could not read the focused application's root window");
+        expect(v.warning).not.toContain("isAccessibilityTool");
+        expect(v.warning).toContain("extraction threw");
+      });
+    });
+  });
+
   // --- issue #6220: no foreground window at all (status-bar-only / empty appId) ---
   describe("missing foreground window (issue #6220)", () => {
     test("a status-bar-only hierarchy with no foreground window is NOT verified or fresh", () => {

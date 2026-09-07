@@ -9,6 +9,28 @@ import type { ObservationInsets } from "./ObservationInsets";
 export type HierarchySource = "control-proxy" | "uiautomator";
 
 /**
+ * Why CtrlProxy marked a capture incomplete (`ctrlProxyIncomplete`). The single
+ * boolean flag is emitted for several distinct causes (issue #6184), and the
+ * recovery advice differs by cause — only a genuinely null (withheld) focused
+ * root is recoverable by an `isAccessibilityTool` build:
+ *
+ * - `null_root` — the focused application window's root node was null: the
+ *   framework withheld it (transient, app-restricted, or — on Android 14+ —
+ *   accessibility-data-sensitive). This is the ONLY case the "no root /
+ *   isAccessibilityTool" diagnosis applies to.
+ * - `discarded_windows` — the window(s) had a non-null root, but every extracted
+ *   node was discarded as zero-area or entirely offscreen, leaving the capture
+ *   empty. Not a withheld root; an `isAccessibilityTool` build does not recover it.
+ * - `extraction_error` — extraction threw before any window could be assembled.
+ *   Not a withheld root; retrying is the recovery, not an `isAccessibilityTool` build.
+ *
+ * Additive and optional: pre-#6172 runners send only `ctrlProxyIncomplete` with
+ * no reason, so consumers must treat an absent reason as the historical
+ * (`null_root`) default to preserve behavior.
+ */
+export type CtrlProxyIncompleteReason = "null_root" | "discarded_windows" | "extraction_error";
+
+/**
  * Represents the ViewHierarchy dump result from a device.
  */
 export interface ViewHierarchyResult {
@@ -53,6 +75,12 @@ export interface ViewHierarchyResult {
    * This indicates that uiautomator fallback may have been used.
    */
   ctrlProxyIncomplete?: boolean;
+  /**
+   * The specific cause behind {@link ctrlProxyIncomplete} (issue #6184), used to
+   * emit cause-appropriate recovery advice instead of always claiming a null
+   * (withheld) focused root. Absent on pre-#6172 runners — treat as `null_root`.
+   */
+  ctrlProxyIncompleteReason?: CtrlProxyIncompleteReason;
   /**
    * Sources that contributed to this hierarchy result.
    * When both sources are present, the hierarchy was merged from accessibility service + uiautomator.

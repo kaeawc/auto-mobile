@@ -8,6 +8,7 @@
 import type {
   BootedDevice,
   ContentHiddenRegion,
+  CtrlProxyIncompleteReason,
   RecompositionNodeInfo,
   SemanticLink,
   ViewHierarchyWindowInfo,
@@ -116,6 +117,12 @@ export interface AccessibilityHierarchy {
    * or only system UI windows were accessible.
    */
   ctrlProxyIncomplete?: boolean;
+  /**
+   * The specific cause behind `ctrlProxyIncomplete` (issue #6184): a genuinely
+   * null (withheld) focused root, windows discarded as zero-area/offscreen, or an
+   * extraction throw. Absent on pre-#6172 runners — treated as `null_root`.
+   */
+  ctrlProxyIncompleteReason?: CtrlProxyIncompleteReason;
   error?: string;
   /** Screen width from accessibility service (eliminates need for dumpsys) */
   screenWidth?: number;

@@ -1,6 +1,12 @@
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { BootedDevice, ObserveResult, ScreenIdentity, ViewHierarchyWindowInfo } from "../../models";
+import {
+  BootedDevice,
+  type CtrlProxyIncompleteReason,
+  ObserveResult,
+  ScreenIdentity,
+  ViewHierarchyWindowInfo,
+} from "../../models";
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
@@ -342,7 +348,7 @@ function describeStatusBarOnlyCapture(
 function describeIncompleteCapture(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string | undefined,
-): { sdkInt: number | undefined } | undefined {
+): { sdkInt: number | undefined; reason: CtrlProxyIncompleteReason | undefined } | undefined {
   if (hierarchy?.ctrlProxyIncomplete !== true) {
     return undefined;
   }
@@ -350,7 +356,10 @@ function describeIncompleteCapture(
   if (foreground !== undefined && observed !== undefined && observed === foreground) {
     return undefined;
   }
-  return { sdkInt: hierarchy.sdkInt };
+  // `ctrlProxyIncompleteReason` names the actual cause so the freshness warning can
+  // give cause-appropriate advice (issue #6184); pre-#6172 runners omit it, and the
+  // freshness layer treats an absent reason as the historical `null_root` default.
+  return { sdkInt: hierarchy.sdkInt, reason: hierarchy.ctrlProxyIncompleteReason };
 }
 
 function isAccessibilityViewClass(foregroundActivity: string): boolean {

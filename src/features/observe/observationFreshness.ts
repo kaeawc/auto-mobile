@@ -14,6 +14,8 @@
  * hierarchy cache could serve a tree that was minutes old under that label.
  */
 
+import type { CtrlProxyIncompleteReason } from "../../models";
+
 /**
  * How old a captured tree may be before it must be re-verified against the
  * device rather than served from cache.
@@ -96,8 +98,14 @@ export interface FreshnessInputs {
    * or a dialog transition can leave a non-error hierarchy for another window while the focused
    * application's root was still null, which trips neither `unavailable` nor
    * `statusBarOnlyHierarchy`. Either way freshness is retracted (issue #6151).
+   *
+   * `reason` names the actual cause of the incomplete capture (issue #6184) so the
+   * warning does not misdiagnose every cause as a null (withheld) focused root: a
+   * discarded-windows or extraction-throw capture is NOT recoverable by an
+   * `isAccessibilityTool` build, so it must not carry that advice. Absent on
+   * pre-#6172 runners — treated as the historical `null_root` default.
    */
-  incompleteCapture?: { sdkInt?: number };
+  incompleteCapture?: { sdkInt?: number; reason?: CtrlProxyIncompleteReason };
   /**
    * ADB and CtrlProxy disagree about the current activity within the same
    * application, and a forced recapture could not safely reconcile them.
@@ -207,21 +215,49 @@ const ACCESSIBILITY_DATA_SENSITIVE_MIN_SDK = 34;
  * which a CtrlProxy update (not home/relaunch) recovers.
  */
 function unreadableFocusedWindowWarning(foreground: string, sdkInt: number | undefined): string {
-  return `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete rather than a stale window: the foreground window's content did not reach the service. ${incompleteCaptureGuidance(sdkInt)}`;
+  return `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}, and the accessibility service reported the focused application window as unreadable (no root node). This capture is incomplete rather than a stale window: the foreground window's content did not reach the service. ${incompleteCaptureGuidance(sdkInt, "null_root")}`;
 }
 
 /**
- * Recovery guidance shared by every incomplete-capture verdict: retry first
- * (the null root can be transient), and on Android 14+ name the data-sensitive
- * withholding that only a CtrlProxy update recovers.
+ * Recovery guidance for an incomplete capture, keyed on the actual cause (issue
+ * #6184). Only a genuinely null (withheld) focused root — `null_root`, and the
+ * historical default when a pre-#6172 runner carries no reason — retries first
+ * and, on Android 14+, points at the data-sensitive withholding that only a
+ * CtrlProxy `isAccessibilityTool` build recovers. The other causes had a non-null
+ * root, so that advice is a dead end for them and must not appear.
  */
-function incompleteCaptureGuidance(sdkInt: number | undefined): string {
+function incompleteCaptureGuidance(
+  sdkInt: number | undefined,
+  reason: CtrlProxyIncompleteReason | undefined,
+): string {
+  if (reason === "discarded_windows") {
+    return "The focused window's root was present, but every extracted node was discarded as zero-area or entirely offscreen, so the capture came back empty. This is not a withheld or null root, so updating CtrlProxy does not recover it; observe again once the window has laid out on-screen content.";
+  }
+  if (reason === "extraction_error") {
+    return "Hierarchy extraction threw before any window could be assembled, so no content was captured. This is not a withheld or null root, so updating CtrlProxy does not recover it; observe again.";
+  }
   const generic =
     "Observe again; if it stays unreadable after relaunching the app, the window's content is being withheld from the service.";
   if (sdkInt === undefined || sdkInt < ACCESSIBILITY_DATA_SENSITIVE_MIN_SDK) {
     return generic;
   }
   return `${generic} On Android 14+ a persistently unreadable focused window is the shape of an accessibility-data-sensitive surface (a runtime permission dialog, the Settings Wi-Fi picker) read by a CtrlProxy build that does not declare isAccessibilityTool; pressing home or relaunching does not recover that case. Update CtrlProxy to a build that declares isAccessibilityTool (fix for #6151) and observe again.`;
+}
+
+/**
+ * The lead clause of an incomplete-capture warning — what actually happened —
+ * keyed on cause (issue #6184). Only `null_root` (and the pre-#6172 default)
+ * asserts a null/unreadable root; the others name their real cause so the verdict
+ * never claims "no root" for a capture whose root was present.
+ */
+function incompleteCaptureLead(reason: CtrlProxyIncompleteReason | undefined): string {
+  if (reason === "discarded_windows") {
+    return "the capture came back empty because every extracted window was discarded as zero-area or entirely offscreen (the focused window's root was present, not withheld)";
+  }
+  if (reason === "extraction_error") {
+    return "hierarchy extraction threw before any window could be assembled";
+  }
+  return "it could not read the focused application window (no root node)";
 }
 
 function resolveIdentityMismatch(
@@ -272,13 +308,20 @@ function resolveIdentityMismatch(
   // the tree is honest about SOME window, but not about the focused
   // application (issue #6151).
   if (inputs.incompleteCapture) {
+    const { sdkInt, reason } = inputs.incompleteCapture;
+    const lead =
+      reason === "discarded_windows"
+        ? "every window it extracted was discarded as zero-area or entirely offscreen, even though another window's content was readable"
+        : reason === "extraction_error"
+          ? "extraction threw before the focused application's window could be assembled, even though another window's content was readable"
+          : "it could not read the focused application's root window, even though another window's content was readable";
     return {
       requestedAfter,
       actualTimestamp,
       ageMs,
       verified: false,
       isFresh: false,
-      warning: `The accessibility service reported the capture as incomplete: it could not read the focused application's root window, even though another window's content was readable. ${incompleteCaptureGuidance(inputs.incompleteCapture.sdkInt)}`,
+      warning: `The accessibility service reported the capture as incomplete: ${lead}. ${incompleteCaptureGuidance(sdkInt, reason)}`,
     };
   }
   // Lowest-priority fallback (issue #6220): none of the device-confirmed gates
@@ -313,7 +356,8 @@ function unavailableWarning(incompleteCapture: FreshnessInputs["incompleteCaptur
   if (!incompleteCapture) {
     return "View hierarchy could not be retrieved, so its freshness cannot be established.";
   }
-  return `View hierarchy could not be retrieved: the accessibility service reported the capture as incomplete because it could not read the focused application window (no root node). ${incompleteCaptureGuidance(incompleteCapture.sdkInt)}`;
+  const { sdkInt, reason } = incompleteCapture;
+  return `View hierarchy could not be retrieved: the accessibility service reported the capture as incomplete because ${incompleteCaptureLead(reason)}. ${incompleteCaptureGuidance(sdkInt, reason)}`;
 }
 
 /**

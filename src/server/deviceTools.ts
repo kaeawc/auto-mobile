@@ -5107,6 +5107,17 @@ export function registerDeviceTools() {
 
   // Compatibility implementation. New callers use getAndroid/getApple so their
   // platform identity and readiness budgets are explicit.
+  const stripInternalAcquisitionParams = (rawArgs: object) => {
+    const externalArgs = { ...rawArgs } as Record<string, unknown>;
+    delete externalArgs.__mcpSessionId;
+    delete externalArgs.__executionId;
+    delete externalArgs.__executionStartTime;
+    delete externalArgs.__mcpRequestTimeoutMs;
+    delete externalArgs.__mcpRequestDeadlineMs;
+    delete externalArgs.__mcpLiveDeadlineKey;
+    return externalArgs;
+  };
+
   const startDeviceHandler = async (
     rawArgs: StartDeviceArgs,
     progress?: ProgressCallback,
@@ -5114,7 +5125,7 @@ export function registerDeviceTools() {
   ) => {
     const internalSessionId = rawArgs.__mcpSessionId;
     const args = {
-      ...startDeviceSchema.parse(rawArgs),
+      ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
@@ -5143,10 +5154,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
-    const externalArgs = { ...rawArgs };
-    delete externalArgs.__mcpSessionId;
-    delete externalArgs.__executionId;
-    delete externalArgs.__executionStartTime;
+    const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAndroidSchema.parse(externalArgs);
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const automationReadyTimeoutMs =
@@ -5197,10 +5205,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
-    const externalArgs = { ...rawArgs };
-    delete externalArgs.__mcpSessionId;
-    delete externalArgs.__executionId;
-    delete externalArgs.__executionStartTime;
+    const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAppleSchema.parse(externalArgs);
     // #5870: `deviceId` is an accepted alias for `udid` on iOS.
     const udid = args.udid ?? args.deviceId!;

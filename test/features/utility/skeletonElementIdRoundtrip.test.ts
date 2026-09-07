@@ -325,12 +325,17 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     );
   });
 
-  test("identical controls in two distinct, uniquely-identified containers resolve via tapOn({elementId, container}) instead of being rejected as ambiguous", () => {
-    // Review thread PRRT_kwDOP-GF5M6fouI_: the ambiguity check must be scoped
-    // to the RESOLVED container, not the whole capture. Two containers each
-    // hold one content-identical target node - globally ambiguous (2 nodes
-    // share the base hash), but each container's own subtree contains only
-    // ONE of them, so a `container`-scoped selector must resolve cleanly.
+  test("an ordinal id for identical controls in two containers is rejected as ambiguous even WITH a container selector (issue #6229, review thread PRRT_kwDOP-GF5M6f1gS0)", () => {
+    // Ordinals are assigned by GLOBAL document order (`assignStableViewIds`),
+    // but the ambiguity guard used to count only within the resolved container
+    // (review thread PRRT_kwDOP-GF5M6fouI_). That was unsound: a content-
+    // identical peer OUTSIDE the container still makes an in-container ordinal
+    // capture-local, because removing the in-container original globally
+    // re-ordinals the id onto a surviving peer. A single fresh capture cannot
+    // tell a genuine "one identical target per container" layout apart from a
+    // post-removal reassignment, so the guard now counts over the WHOLE capture
+    // and rejects a globally-ambiguous ordinal even when a container isolates a
+    // single peer. The caller must disambiguate with text/content-desc/bounds.
     const container1 = {
       class: "android.view.ViewGroup",
       bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -373,38 +378,81 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // Without a container, this is genuinely globally ambiguous.
     expect(() => selector.selectByResourceId(viewHierarchy, idInContainer1)).toThrow(/ambiguous/i);
 
-    // Scoped to its OWN container, each resolves cleanly - the peer outside
-    // the container does not block or misdirect resolution inside it.
-    const resultInContainer1 = selector.selectByResourceId(viewHierarchy, idInContainer1, {
-      container: { elementId: "com.app:id/container1" },
-    });
-    expect(resultInContainer1.element).not.toBeNull();
-    expect(resultInContainer1.totalMatches).toBe(1);
-    expect(resultInContainer1.element!.bounds).toEqual({
-      left: 10,
-      top: 10,
-      right: 90,
-      bottom: 40,
-    });
+    // Scoped to its OWN container, it is STILL rejected: the peer in the other
+    // container keeps the ordinal capture-local, so the guard cannot safely
+    // resolve it. (Previously this resolved cleanly, which is exactly the
+    // silent-retarget vector #6229 targets once a peer is removed.)
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, idInContainer1, {
+        container: { elementId: "com.app:id/container1" },
+      }),
+    ).toThrow(/ambiguous/i);
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, idInContainer2, {
+        container: { elementId: "com.app:id/container2" },
+      }),
+    ).toThrow(/ambiguous/i);
+  });
 
-    const resultInContainer2 = selector.selectByResourceId(viewHierarchy, idInContainer2, {
-      container: { elementId: "com.app:id/container2" },
+  test("a suffixed id does NOT silently retarget a content-identical peer in ANOTHER container after the original is removed (issue #6229, review thread PRRT_kwDOP-GF5M6f1gS0)", () => {
+    // Cross-container retarget: content-identical [A, B] in container c1 and an
+    // identical C in c2. Capture 1 assigns global ordinals A=`-1`, B=`-2`,
+    // C=`-3`. A caller observes A as `s-H-1` and scopes a later tapOn to c1.
+    // A is then removed; global re-ordinaling makes surviving B the new `s-H-1`
+    // (and C `s-H-2`). A container-local ambiguity count would see only B in c1
+    // and silently land the caller's stale `s-H-1` on B - a content-identical
+    // peer the caller never selected. The whole-capture count sees B AND C and
+    // rejects it as ambiguous instead.
+    const buildRow = (tag: string) => ({
+      class: "android.view.View",
+      "content-desc": "identical-row",
+      clickable: "true",
+      "view-id": generatedViewId(tag),
     });
-    expect(resultInContainer2.element).not.toBeNull();
-    expect(resultInContainer2.totalMatches).toBe(1);
-    expect(resultInContainer2.element!.bounds).toEqual({
-      left: 10,
-      top: 210,
-      right: 90,
-      bottom: 240,
-    });
+    const makeHierarchy = (rows1: unknown[], rows2: unknown[]) => {
+      const c1 = {
+        class: "android.view.ViewGroup",
+        "resource-id": "com.app:id/c1",
+        node: rows1,
+      };
+      const c2 = {
+        class: "android.view.ViewGroup",
+        "resource-id": "com.app:id/c2",
+        node: rows2,
+      };
+      const root = { node: [c1, c2] };
+      assignStableViewIds(root);
+      return root;
+    };
 
-    // The peer's id, scoped to the WRONG container, correctly finds nothing -
-    // not a misdirected match onto that container's own (different) node.
-    const wrongContainerResult = selector.selectByResourceId(viewHierarchy, idInContainer2, {
-      container: { elementId: "com.app:id/container1" },
-    });
-    expect(wrongContainerResult.element).toBeNull();
+    // Capture 1: [A, B] in c1, C in c2.
+    const capture1 = makeHierarchy([buildRow("A"), buildRow("B")], [buildRow("C")]);
+    const c1Cap1 = (capture1.node[0] as Record<string, unknown>).node as Record<string, unknown>[];
+    const observedIdForA = c1Cap1[0]["view-id"] as string;
+    // A is a member of a duplicate group, so it is ordinal-suffixed (never bare).
+    expect(observedIdForA).toMatch(/^s-[0-9a-f]{16}-1$/);
+
+    // Capture 2: A removed. c1 now holds only B; c2 still holds C. B and C are
+    // content-identical, so both are re-ordinaled globally (B=`-1`, C=`-2`).
+    const capture2 = makeHierarchy([buildRow("B")], [buildRow("C")]);
+    const c1Cap2 = (capture2.node[0] as Record<string, unknown>).node as Record<string, unknown>[];
+    const survivorIdInC1 = c1Cap2[0]["view-id"] as string;
+    // The surviving in-c1 peer inherits the exact string the caller observed.
+    expect(survivorIdInC1).toBe(observedIdForA);
+
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: capture2 };
+
+    // Resolving the caller's stale `s-H-1` scoped to c1 must NOT land on B: the
+    // still-present identical C in c2 keeps the ordinal capture-local, so the
+    // guard raises ambiguity rather than silently retargeting the wrong peer.
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, observedIdForA, {
+        container: { elementId: "com.app:id/c1" },
+      }),
+    ).toThrow(/ambiguous/i);
+
+    // Same rejection without a container - globally ambiguous either way.
+    expect(() => selector.selectByResourceId(viewHierarchy, observedIdForA)).toThrow(/ambiguous/i);
   });
 
   test("recomputing the synthetic id over a fresh capture of the same hierarchy is deterministic", () => {

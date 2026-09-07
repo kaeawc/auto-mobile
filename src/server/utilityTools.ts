@@ -224,38 +224,62 @@ const networkConditionInputSchema = z
 // client can restore. Android supports all three fields; the iOS Simulator
 // supports theme only (via `simctl ui appearance`); physical iOS has no
 // automatable per-device control for any field.
-export const displayConfigSchema = addDeviceTargetingToSchema(
-  z.object({
-    fontScale: z
-      .number()
-      .min(0.1)
-      .max(10)
-      .optional()
-      .describe(
-        "System text scale, e.g. 1.0 (default), 1.3, 2.0. Android only. Omit to leave unchanged.",
-      ),
-    density: z
-      .union([z.number().min(1), z.enum(["smaller", "default", "larger"])])
-      .optional()
-      .describe(
-        "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-          "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
-          "leave unchanged.",
-      ),
-    theme: z
-      .enum(["light", "dark", "system", "custom"])
-      .optional()
-      .describe(
-        "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
-          "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
-          "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
-          "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
-      ),
-    reset: z
-      .boolean()
-      .optional()
-      .describe("Restore font scale, density, and theme to device defaults."),
+export const displayConfigSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z.object({
+      fontScale: z
+        .union([z.number().min(0.1).max(10), z.literal("default")])
+        .optional()
+        .describe(
+          "System text scale, or 'default' to remove Android's explicit override and restore " +
+            "its inherited default. Android only. Omit to leave unchanged.",
+        ),
+      density: z
+        .union([z.number().min(1), z.enum(["smaller", "default", "larger"])])
+        .optional()
+        .describe(
+          "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
+            "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
+            "leave unchanged.",
+        ),
+      theme: z
+        .enum(["light", "dark", "system", "custom"])
+        .optional()
+        .describe(
+          "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
+            "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
+            "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
+            "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
+        ),
+      reset: z
+        .boolean()
+        .optional()
+        .describe("Restore font scale, density, and theme to device defaults."),
+    }),
+  ).superRefine((values, ctx) => {
+    if (
+      values.reset === true &&
+      (values.fontScale !== undefined || values.density !== undefined || values.theme !== undefined)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reset"],
+        message:
+          "reset cannot be combined with fontScale, density, or theme; send reset on its own.",
+      });
+    }
   }),
+  (jsonSchema) => {
+    // The runtime refinement above protects direct callers. Repeat the
+    // reset=true exclusivity in the advertised JSON schema so generated tool
+    // clients cannot construct a request that will only fail after dispatch.
+    jsonSchema.allOf = ["fontScale", "density", "theme"].map((field) => ({
+      not: {
+        properties: { reset: { const: true } },
+        required: ["reset", field],
+      },
+    }));
+  },
 );
 
 export const getDeviceStateSchema = addDeviceTargetingToSchema(

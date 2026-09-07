@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../../src/models";
 import {
   DisplayConfig,
   parseFontScale,
+  parseFontScaleSnapshot,
   parseNightMode,
   parseWmDensity,
 } from "../../../src/features/utility/DisplayConfig";
@@ -56,6 +57,12 @@ describe("DisplayConfig parsers", () => {
     expect(parseFontScale("null")).toBe(1.0);
     expect(parseFontScale("")).toBe(1.0);
     expect(parseFontScale("garbage")).toBeUndefined();
+  });
+
+  test("parseFontScaleSnapshot preserves unset separately from explicit 1", () => {
+    expect(parseFontScaleSnapshot("null")).toBe("default");
+    expect(parseFontScaleSnapshot("")).toBe("default");
+    expect(parseFontScaleSnapshot("1.0")).toBe(1.0);
   });
 
   test("parseWmDensity prefers override over physical", () => {
@@ -223,7 +230,7 @@ describe("DisplayConfig setConfig", () => {
       .getFakeClient()
       .getCommandCalls()
       .map((c) => c.command);
-    expect(commands).toContain("shell settings put system font_scale 1");
+    expect(commands).toContain("shell settings delete system font_scale");
     expect(commands).toContain("shell wm density reset");
     expect(commands).toContain("shell cmd uimode night no");
   });
@@ -339,6 +346,28 @@ describe("DisplayConfig setConfig", () => {
       .map((c) => c.command);
     expect(commands).toContain("shell wm density reset");
     expect(commands).not.toContain("shell wm density 440");
+  });
+
+  test("replaying an unset font scale deletes the override instead of writing explicit 1", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { fontScale: "null\n" });
+
+    const first = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      theme: "dark",
+    });
+    const restorableFontScale = first.previous?.fontScale;
+    expect(restorableFontScale).toBe("default");
+
+    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: restorableFontScale,
+    });
+
+    const commands = adbFactory
+      .getFakeClient()
+      .getCommandCalls()
+      .map((c) => c.command);
+    expect(commands).toContain("shell settings delete system font_scale");
+    expect(commands).not.toContain("shell settings put system font_scale 1");
   });
 
   test("still captures an overridden density as its explicit dpi number", async () => {
@@ -504,6 +533,22 @@ describe("DisplayConfig iOS Simulator theme support", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("density");
+  });
+
+  test("fails closed when the iOS Simulator snapshot is unreadable before mutation", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "unknown\n");
+
+    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("readable Simulator appearance");
+    expect(simctlArgvCalls(simctl)).not.toContainEqual([
+      "ui",
+      iosSimulator.deviceId,
+      "appearance",
+      "dark",
+    ]);
   });
 
   test("preserves previous state when the post-mutation appearance read fails", async () => {

@@ -1086,10 +1086,18 @@
       "type": "object",
       "properties": {
         "fontScale": {
-          "description": "System text scale, e.g. 1.0 (default), 1.3, 2.0. Android only. Omit to leave unchanged.",
-          "type": "number",
-          "minimum": 0.1,
-          "maximum": 10
+          "description": "System text scale, or 'default' to remove Android's explicit override and restore its inherited default. Android only. Omit to leave unchanged.",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 10
+            },
+            {
+              "type": "string",
+              "const": "default"
+            }
+          ]
         },
         "density": {
           "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Android only; best-effort on physical devices. Omit to leave unchanged.",
@@ -1129,7 +1137,39 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "properties": {
+              "reset": {
+                "const": true
+              }
+            },
+            "required": ["reset", "fontScale"]
+          }
+        },
+        {
+          "not": {
+            "properties": {
+              "reset": {
+                "const": true
+              }
+            },
+            "required": ["reset", "density"]
+          }
+        },
+        {
+          "not": {
+            "properties": {
+              "reset": {
+                "const": true
+              }
+            },
+            "required": ["reset", "theme"]
+          }
+        }
+      ]
     }
   },
   {

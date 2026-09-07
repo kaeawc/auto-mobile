@@ -34,6 +34,13 @@ type SimctlAppearanceRunner = Pick<SimCtl, "executeCommandArgs">;
  */
 export type DisplayTheme = "light" | "dark" | "system" | "custom";
 
+/**
+ * `"default"` means the Android font-scale setting is absent, which differs
+ * from an explicit `1`: restoring it must delete the override rather than
+ * silently replacing an inherited/default value with a concrete setting.
+ */
+export type FontScaleInput = number | "default";
+
 /** Relative density buckets, resolved against the device's physical density. */
 export type DensityBucket = "smaller" | "default" | "larger";
 
@@ -50,8 +57,8 @@ const DENSITY_BUCKET_FACTORS: Record<Exclude<DensityBucket, "default">, number> 
 export const DEFAULT_FONT_SCALE = 1.0;
 
 export interface DisplayConfigValues {
-  /** System text scale, e.g. 1.0 (default), 1.3, 2.0. */
-  fontScale?: number;
+  /** System text scale, or `"default"` when Android has no explicit override. */
+  fontScale?: FontScaleInput;
   /**
    * Effective display density: an explicit dpi when the device carries a `wm
    * density` override, or the `"default"` bucket when it does not. `"default"`
@@ -91,7 +98,7 @@ export interface DisplayConfigResult {
 }
 
 export interface SetDisplayConfigInput {
-  fontScale?: number;
+  fontScale?: FontScaleInput;
   density?: DensityInput;
   theme?: DisplayTheme;
   /** Restore font scale, density, and theme to device defaults. */
@@ -137,6 +144,16 @@ export function parseFontScale(raw: string): number | undefined {
   }
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/**
+ * Preserve the difference between an absent Android setting and an explicit
+ * `1.0` value for restore payloads. `parseFontScale` remains the value parser
+ * for callers that only need the effective scale.
+ */
+export function parseFontScaleSnapshot(raw: string): FontScaleInput | undefined {
+  const value = raw.trim();
+  return !value || value === "null" ? "default" : parseFontScale(value);
 }
 
 /**
@@ -327,7 +344,10 @@ export class DisplayConfig {
   /** Shape a single `readIosTheme()` call into a `DisplayConfigValues` snapshot. */
   private async readIosThemeSnapshot(): Promise<DisplayConfigValues> {
     const theme = await this.readIosTheme();
-    return theme !== undefined ? { theme } : {};
+    if (theme === undefined) {
+      throw new Error("simctl did not report a readable Simulator appearance");
+    }
+    return { theme };
   }
 
   /** Build the failure response for a pre-read that rejects before any mutation ran. */
@@ -381,6 +401,18 @@ export class DisplayConfig {
         error:
           "At least one of fontScale, density, theme, or reset must be provided to set display config.",
       };
+    }
+
+    // A request containing only an unsupported field cannot produce a useful
+    // Simulator mutation. Reject it before requiring a theme snapshot, while a
+    // supported theme mutation still fails closed if its baseline is unreadable.
+    if (!input.reset && input.theme === undefined) {
+      if (input.fontScale !== undefined) {
+        return this.unsupported(IOS_FONT_SCALE_UNSUPPORTED_ERROR);
+      }
+      if (input.density !== undefined) {
+        return this.unsupported(IOS_DENSITY_UNSUPPORTED_ERROR);
+      }
     }
 
     // Read the pre-change state first. If this fails, no mutation has run, so
@@ -574,7 +606,7 @@ export class DisplayConfig {
     ]);
     const parsedDensity = parseWmDensity(densityRaw);
     const values: DisplayConfigValues = {};
-    const fontScale = parseFontScale(fontRaw);
+    const fontScale = parseFontScaleSnapshot(fontRaw);
     if (fontScale !== undefined) {
       values.fontScale = fontScale;
     }
@@ -598,9 +630,11 @@ export class DisplayConfig {
   ): Promise<string[]> {
     const errors: string[] = [];
     if (input.fontScale !== undefined) {
-      errors.push(
-        ...(await this.runChecked(adb, `shell settings put system font_scale ${input.fontScale}`)),
-      );
+      const command =
+        input.fontScale === "default"
+          ? "shell settings delete system font_scale"
+          : `shell settings put system font_scale ${input.fontScale}`;
+      errors.push(...(await this.runChecked(adb, command)));
     }
     if (input.density !== undefined) {
       const command = this.resolveDensityCommand(input.density, physicalDensity);
@@ -623,9 +657,7 @@ export class DisplayConfig {
 
   private async applyReset(adb: AdbExecutor): Promise<string[]> {
     const errors: string[] = [];
-    errors.push(
-      ...(await this.runChecked(adb, `shell settings put system font_scale ${DEFAULT_FONT_SCALE}`)),
-    );
+    errors.push(...(await this.runChecked(adb, "shell settings delete system font_scale")));
     errors.push(...(await this.runChecked(adb, "shell wm density reset")));
     // `no` is the AOSP default (light); an app can still opt into `system` itself.
     errors.push(...(await this.runChecked(adb, "shell cmd uimode night no")));

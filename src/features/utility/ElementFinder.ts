@@ -549,6 +549,31 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
+   * Detect the pre-#6229 duplicate encoding: its first member used the bare
+   * `s-<hash>` id while later members started at `-2`. The current producer
+   * assigns `-1` to every first duplicate, so a bare member plus a later
+   * ordinal but no `-1` is a recognizable legacy (or malformed) family.
+   */
+  private hasLegacyBareStableViewIdFamily(searchRoots: ViewHierarchyNode[], base: string): boolean {
+    let hasBare = false;
+    let hasFirstOrdinal = false;
+    let hasLaterOrdinal = false;
+    for (const root of searchRoots) {
+      this.parser.traverseNode(root, (node: any) => {
+        const viewId = this.parser.extractNodeProperties(node)["view-id"];
+        if (viewId === base) {
+          hasBare = true;
+        } else if (viewId === `${base}-1`) {
+          hasFirstOrdinal = true;
+        } else if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
+          hasLaterOrdinal = true;
+        }
+      });
+    }
+    return hasBare && hasLaterOrdinal && !hasFirstOrdinal;
+  }
+
+  /**
    * Reject a synthetic stable-view-id selector (`s-<hash>` bare OR
    * `s-<hash>-<k>` ordinal-suffixed) when MORE THAN ONE node in the WHOLE
    * capture shares its base content hash — i.e. it has content-identical peers,
@@ -634,6 +659,13 @@ export class DefaultElementFinder implements ElementFinder {
     }
     if (this.hasExactResourceIdFieldMatch(activeScopeRoots, id)) {
       return;
+    }
+    if (id === base && this.hasLegacyBareStableViewIdFamily(fullCaptureRoots, base)) {
+      throw new ActionableError(
+        `Skeleton element id "${id}" uses the legacy bare duplicate encoding in this capture. ` +
+          "Re-observe the screen and use a current selector; legacy bare stable ids cannot safely " +
+          "identify a content-identical element.",
+      );
     }
     const duplicateCount = this.countNodesSharingStableViewIdBase(fullCaptureRoots, base);
     if (duplicateCount > 1) {

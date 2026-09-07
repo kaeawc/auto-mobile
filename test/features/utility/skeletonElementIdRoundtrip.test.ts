@@ -222,6 +222,42 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(result.element!["content-desc"]).toBe("solo-row");
   });
 
+  test("rejects a detectable legacy bare duplicate id instead of treating it as a current singleton", () => {
+    // Before #6229, a duplicate family's first member was bare and later
+    // members started at -2. The new producer reserves -1 for that first
+    // member, so this missing `-1` shape is an explicit legacy signature. It
+    // must not silently resolve as if the bare id meant unique content.
+    const legacyBase = "s-0123456789abcdef";
+    const rawRoot = {
+      node: [
+        {
+          class: "android.view.ViewGroup",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          clickable: "true",
+          "view-id": legacyBase,
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 110, right: 100, bottom: 160 },
+          clickable: "true",
+          "view-id": `${legacyBase}-2`,
+        },
+      ],
+    };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    expect(() => selector.selectByResourceId(viewHierarchy, legacyBase)).toThrow(
+      /legacy bare duplicate encoding/i,
+    );
+    // Container lookup shares the same selector contract and must not resolve
+    // the legacy bare node before the target's ambiguity guard runs.
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, "missing-target", {
+        container: { elementId: legacyBase },
+      }),
+    ).toThrow(/legacy bare duplicate encoding/i);
+  });
+
   test("a real bare Compose resource-id shaped like a synthetic id (s-a / s-a-2) is never misclassified as ambiguous", () => {
     // Review thread PRRT_kwDOP-GF5M6fomgA: `SYNTHETIC_STABLE_VIEW_ID_PATTERN`
     // must require the producer's EXACT hash width, not merely the `s-`

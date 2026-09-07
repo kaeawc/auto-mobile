@@ -14,6 +14,24 @@ export interface LogPruneOptions {
   now?: number;
   /** Injectable liveness check for testing; defaults to a signal-0 probe. */
   isProcessAlive?: (pid: number) => boolean;
+  /**
+   * Whether a daemon is currently running (owns the pidfile and is alive).
+   *
+   * A `daemon-launch-<pid>.log` names the spawning MANAGER's pid, but the fd on
+   * that file is inherited by the detached DAEMON child, which keeps writing to
+   * it (e.g. an uncaught exception) long after the manager exits — the manager
+   * routinely exits right after the daemon reports ready. So the manager pid
+   * being dead says nothing about whether the daemon still holds that fd, and
+   * the launch log's mtime goes stale quickly even while the daemon is live
+   * (steady-state logging goes to `daemon.log`). Unlinking it under those
+   * conditions silently loses output the running daemon is still capturing
+   * (issue #6194). While a daemon is running, no `daemon-launch-*.log` is swept;
+   * once no daemon is running, they become eligible for the ordinary dead-owner
+   * + stale-mtime sweep (preserving issue #2724's leak cleanup). Injectable so
+   * this module stays decoupled from the daemon pidfile module. Defaults to
+   * treating no daemon as running when unset.
+   */
+  isDaemonRunning?: () => boolean;
   /** Optional diagnostic sink. Kept injectable so log pruning does not import the logger that calls it. */
   logger?: { debug(message: string, ...args: unknown[]): void };
 }
@@ -63,6 +81,15 @@ function ownerPid(file: string): number | undefined {
 }
 
 /**
+ * Whether `file` is a daemon launch-capture log (`daemon-launch-<pid>.log`).
+ * The `<pid>` is the spawning manager, but the detached daemon inherits the fd,
+ * so these must not be swept purely on the manager's exit (issue #6194).
+ */
+function isDaemonLaunchLog(file: string): boolean {
+  return /^daemon-launch-\d+(?:-.*)?\.log$/.test(file);
+}
+
+/**
  * Prune log files for a directory shared by many parallel processes (one stdio
  * client per agent + the daemon).
  *
@@ -79,6 +106,7 @@ function ownerPid(file: string): number | undefined {
 export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   const now = opts.now ?? Date.now();
   const isAlive = opts.isProcessAlive ?? defaultIsProcessAlive;
+  const isDaemonRunning = opts.isDaemonRunning ?? (() => false);
 
   let entries: string[];
   try {
@@ -114,6 +142,14 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     }
     if (isAlive(pid)) {
       continue; // live peer — never touch its log, even if its mtime is old.
+    }
+    // A daemon-launch log's fd is held by the detached daemon, not the manager
+    // named in the filename. While a daemon is running it may still be writing
+    // to that inherited fd, so unlinking on the manager's exit + stale mtime
+    // would silently drop live daemon output (issue #6194). Retain all launch
+    // logs until no daemon is running.
+    if (isDaemonLaunchLog(file) && isDaemonRunning()) {
+      continue;
     }
     const full = path.join(opts.dir, file);
     try {

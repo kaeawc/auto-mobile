@@ -269,9 +269,30 @@ const MAX_LOG_FILES = 10;
 // host. A live process's active log has a recent mtime and is never touched.
 const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+// Whether a daemon is currently running (owns the pidfile and is alive). A
+// `daemon-launch-<pid>.log`'s fd is inherited by the detached daemon child, so
+// it must not be swept while that daemon is live even though the manager named
+// in the filename has exited (issue #6194). The daemon pidfile module is
+// required lazily so this foundational logger module keeps no static import of
+// it (daemonFiles.ts imports THIS module) and it is resolved only at sweep time.
+const isDaemonRunning = (): boolean => {
+  try {
+    const { readPidFileDataSync, isProcessRunning } =
+      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+    const data = readPidFileDataSync();
+    return data ? isProcessRunning(data.pid) : false;
+  } catch (error) {
+    // If the daemon pidfile can't be resolved, keep launch logs rather than
+    // risk unlinking one a live daemon still holds — the safe direction here.
+    logger.debug(`daemon liveness probe for log pruning failed: ${error}`, error);
+    return true;
+  }
+};
+
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
 // beyond the cap, and (b) other processes' logs that are stale by mtime — never
-// another live process's current file. See logPruner.ts.
+// another live process's current file, nor a daemon-launch log while a daemon is
+// running (its inherited fd). See logPruner.ts.
 const pruneOldLogFiles = (): Promise<void> => {
   if (!logsDir) {
     return Promise.resolve();
@@ -281,6 +302,7 @@ const pruneOldLogFiles = (): Promise<void> => {
     ownPrefix: ownLogPrefix,
     maxOwnFiles: MAX_LOG_FILES,
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
+    isDaemonRunning,
   });
 };
 

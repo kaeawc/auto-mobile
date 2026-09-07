@@ -121,3 +121,70 @@ describe("logPruner isOwnedBy (via pruneLogFiles)", () => {
     });
   });
 });
+
+describe("logPruner daemon-launch inherited-fd guard (issue #6194)", () => {
+  test("does NOT unlink daemon-launch-<dead manager pid>.log while a daemon is running", async () => {
+    await withTempLogDir(async (dir) => {
+      // The spawning manager (pid 4242) has exited, and the launch log's mtime is
+      // stale, but the detached daemon it spawned is still running and holds the
+      // inherited fd on this file — so it must be retained.
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "in-flight daemon output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1, // every file is already stale by mtime
+        isProcessAlive: () => false, // spawning manager 4242 has exited
+        isDaemonRunning: () => true, // ...but the daemon it spawned is still alive
+      });
+
+      const after = await readdir(dir);
+      expect(after).toContain(launchLog);
+    });
+  });
+
+  test("DOES prune daemon-launch-<dead manager pid>.log once no daemon is running", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "old bootstrap output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false, // manager exited
+        isDaemonRunning: () => false, // no daemon holds the fd anymore
+      });
+
+      const after = await readdir(dir);
+      expect(after).not.toContain(launchLog);
+    });
+  });
+
+  test("still prunes a non-launch dead peer's stale log even while a daemon is running", async () => {
+    await withTempLogDir(async (dir) => {
+      // A daemon running must not exempt an ordinary exited stdio peer's log:
+      // that fd is not inherited by the daemon.
+      const stalePeer = "stdio-777.log";
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, stalePeer), "x");
+      await writeFile(path.join(dir, launchLog), "x");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false, // both owners exited
+        isDaemonRunning: () => true, // guards only daemon-launch logs
+      });
+
+      const after = await readdir(dir);
+      expect(after).not.toContain(stalePeer); // ordinary peer swept as before
+      expect(after).toContain(launchLog); // launch log retained (fd may be held)
+    });
+  });
+});

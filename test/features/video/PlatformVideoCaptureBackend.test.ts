@@ -10,6 +10,7 @@ import type {
   RecordingHandle,
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
+import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
@@ -512,7 +513,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         caught = error;
       }
 
-      expect(caught).toBeInstanceOf(ActionableError);
+      expect(caught).toBeInstanceOf(VideoCaptureFinalizationError);
       expect((caught as Error).message).not.toBe("adb pull failed with exit code 1");
       expect((caught as Error).message).toContain("after 3 attempts");
       expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(3);

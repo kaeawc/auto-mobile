@@ -16,7 +16,7 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { VideoRecorderService } from "../../src/features/video";
+import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/features/video";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
@@ -219,6 +219,28 @@ describe("videoRecordingManager", () => {
     // device must still be blocked.
     expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
     await expect(startVideoRecording({ device: testDevice })).rejects.toThrow();
+  });
+
+  test("keeps safety timers armed when a stop retains an unconfirmed capture", async () => {
+    const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 3 });
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+    fakeBackend.stop = async () => {
+      throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+    };
+
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+  });
+
+  test("interrupts a row after a backend confirms capture exit but finalization fails", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    fakeBackend.stop = async () => {
+      throw new VideoCaptureFinalizationError("capture exited but adb pull failed");
+    };
+
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("interrupted");
   });
 
   test("shares manager finalization when shutdown overlaps a user stop", async () => {

@@ -20,6 +20,7 @@ import type {
   VideoCaptureBackend,
   VideoCaptureConfig,
 } from "./VideoRecorderService";
+import { VideoCaptureFinalizationError } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 
@@ -157,79 +158,74 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       `[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`,
     );
 
-    // Give screenrecord extra time to finalize the file on device
-    // Even though the process has exited, file writes may still be in progress
-    logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
-    await this.timer.sleep(1000);
-
     const adb = this.adbFactory.create(backendHandle.device);
-
-    // A stop immediately after start can still race the finalize wait above:
-    // poll the device-side file size until it stops growing before pulling
-    // (issue #6291). Best-effort — an unstable size after the budget just
-    // means "pull it anyway and let the retry loop below absorb a transient
-    // failure".
-    await this.waitForDeviceFileToFinalize(adb, backendHandle.deviceTempPath);
-
-    // Pull the file from the device
-    logger.info(
-      `[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`,
-    );
-    const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
     try {
-      await this.pullRecordingFileWithRetry(adb, pullArgs, handle.recordingId);
-    } finally {
-      // Always clean up the /sdcard temp file, even when the pull failed —
-      // otherwise a failed pull leaks the temp recording on the device on
-      // every stop (issue #4170).
-      logger.info(`[VideoCapture] Cleaning up temp file on device`);
-      const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
       try {
-        const rmProcess = await adb.spawn(rmArgs);
+        // Give screenrecord extra time to finalize the file on device. Even
+        // though the process has exited, file writes may still be in progress.
+        logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
+        await this.timer.sleep(1000);
+        await this.waitForDeviceFileToFinalize(adb, backendHandle.deviceTempPath);
 
-        await new Promise<void>((resolve) => {
-          rmProcess.once("exit", () => {
-            logger.info(`[VideoCapture] Temp file cleaned up`);
-            resolve();
+        logger.info(
+          `[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`,
+        );
+        await this.pullRecordingFileWithRetry(
+          adb,
+          ["pull", backendHandle.deviceTempPath, handle.outputPath],
+          handle.recordingId,
+        );
+      } finally {
+        // Always clean up the /sdcard temp file, even when the pull failed.
+        logger.info(`[VideoCapture] Cleaning up temp file on device`);
+        const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+        try {
+          const rmProcess = await adb.spawn(rmArgs);
+          await new Promise<void>((resolve) => {
+            rmProcess.once("exit", () => {
+              logger.info(`[VideoCapture] Temp file cleaned up`);
+              resolve();
+            });
+            rmProcess.once("error", (err) => {
+              logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+              resolve();
+            });
           });
-          rmProcess.once("error", (err) => {
-            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-            resolve();
-          });
-        });
-      } catch (err) {
-        logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+        } catch (err) {
+          logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+        }
       }
-    }
 
-    const sizeBytes = await getFileSize(handle.outputPath);
-    logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
-    // Absolute host path leaks the local username; keep it diagnostic-only.
-    logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
+      const sizeBytes = await getFileSize(handle.outputPath);
+      logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
+      logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
+      const codec = await this.codecProbe.codec(handle.outputPath);
 
-    // Android `screenrecord` emits H.264, so this path was coincidentally
-    // correct — but probe the finalized file rather than trusting a constant, so
-    // the two backends stay honest through the same seam (#4965).
-    const codec = await this.codecProbe.codec(handle.outputPath);
-
-    if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
-      logger.warn(
-        `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
+      if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
+        logger.warn(
+          `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
+        );
+      }
+      if (backendHandle.stderr.length > 0) {
+        logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
+      }
+      return {
+        recordingId: handle.recordingId,
+        outputPath: handle.outputPath,
+        startedAt: handle.startedAt,
+        endedAt: backendHandle.exitState.endedAt ?? new Date().toISOString(),
+        sizeBytes,
+        codec,
+      };
+    } catch (error) {
+      // This point is reached only after awaiting the tracked host exit above.
+      // Artifact finalization cannot revive that process, so make the proof
+      // available to the ownership layer instead of retaining a dead handle.
+      throw new VideoCaptureFinalizationError(
+        `Android capture exited but finalization failed: ${errorMessage(error)}`,
+        { cause: error },
       );
     }
-
-    if (backendHandle.stderr.length > 0) {
-      logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
-    }
-
-    return {
-      recordingId: handle.recordingId,
-      outputPath: handle.outputPath,
-      startedAt: handle.startedAt,
-      endedAt: backendHandle.exitState.endedAt ?? new Date().toISOString(),
-      sizeBytes,
-      codec,
-    };
   }
 
   /**

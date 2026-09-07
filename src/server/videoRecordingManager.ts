@@ -1028,9 +1028,6 @@ export async function stopVideoRecording(recordingId?: string): Promise<StopVide
 async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRecordingResult> {
   const { videoRecorderService, recordingRepository, now } = await getVideoRecordingDependencies();
 
-  clearAutoStop(resolvedId);
-  clearInProgressSizeCap(resolvedId);
-
   let metadata: VideoRecordingMetadata;
   try {
     metadata = await videoRecorderService.stopRecording(resolvedId);
@@ -1075,6 +1072,11 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
     // either way.
     throw toActionableError(error, `Failed to stop video recording ${resolvedId}`);
   }
+  // A failed stop that retained ownership must keep its original bounded
+  // safety work armed. Clear it only after the backend confirmed success;
+  // confirmed-finalization failures reach interruptVideoRecording above.
+  clearAutoStop(resolvedId);
+  clearInProgressSizeCap(resolvedId);
   const highlightSession = disposeHighlightSession(resolvedId);
   if (highlightSession) {
     const finalizedHighlights = finalizeHighlightSession(

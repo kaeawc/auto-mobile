@@ -78,6 +78,19 @@ export class VideoCaptureStartCleanupError extends Error {
   }
 }
 
+/**
+ * A backend can prove that its capture process exited while still failing to
+ * finalize its artifact.  This is deliberately distinct from an ordinary
+ * stop error: callers may release the capture owner only when that proof is
+ * explicit.
+ */
+export class VideoCaptureFinalizationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "VideoCaptureFinalizationError";
+  }
+}
+
 export interface RecordingResult {
   recordingId: string;
   outputPath: string;
@@ -369,6 +382,16 @@ export class VideoRecorderService {
         error,
         `Recording ${recordingId} could not be confirmed stopped; the capture ` +
           `process may still be running on the device`,
+      );
+    }
+    if (error instanceof VideoCaptureFinalizationError) {
+      // The backend observed its capture exit before artifact finalization
+      // failed. Keeping this handle would permanently block a new capture,
+      // even though force-stop cannot recover the already-removed source.
+      this.activeRecordings.delete(recordingId);
+      return toActionableError(
+        error,
+        `Recording ${recordingId} stopped but could not be finalized`,
       );
     }
     // A backend may fail before, during, or after its platform teardown. A raw

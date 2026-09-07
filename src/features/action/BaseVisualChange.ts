@@ -7,7 +7,7 @@ import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { Window } from "../observe/Window";
-import { isLauncherPackage } from "../observe/androidLauncherPackages";
+import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../utils/constants";
@@ -560,10 +560,11 @@ export class BaseVisualChange {
 
   /**
    * Confirm that a "go home" action actually backgrounded the foreground app
-   * by re-reading the foreground window and checking it against known
-   * launcher packages, instead of trusting a dispatch method's self-reported
-   * success (issue #6147: on API 28 the accessibility global action for
-   * "home" can report success while the foreground app is unchanged).
+   * by re-reading the foreground window and checking it against the
+   * device's actually-configured HOME launcher, instead of trusting a
+   * dispatch method's self-reported success (issue #6147: on API 28 the
+   * accessibility global action for "home" can report success while the
+   * foreground app is unchanged).
    *
    * Retries with short backoffs (via the injected `Timer`, so `FakeTimer`
    * keeps tests fast/deterministic) to tolerate the brief settle time a real
@@ -579,7 +580,15 @@ export class BaseVisualChange {
     for (let attempt = 0; ; attempt++) {
       try {
         const activeWindow = await this.window.getActive(true);
-        if (isLauncherPackage(activeWindow.appId)) {
+        if (
+          await isForegroundLauncher(
+            activeWindow.appId,
+            this.adb,
+            this.device.deviceId,
+            this.timer,
+            this.device.transportId,
+          )
+        ) {
           return true;
         }
       } catch (error) {

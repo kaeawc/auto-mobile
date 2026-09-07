@@ -156,7 +156,11 @@ describe("PressButton Android keycode dispatch", () => {
       const result = await press("home", launcherWindow());
 
       expect(result).toEqual({ success: true, button: "home", keyCode: 3 });
-      expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent 3"]);
+      // Filter out the configured-HOME-launcher resolution call (issue #6147
+      // review, P1) that verification now performs alongside the keyevent.
+      expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("keyevent"))).toEqual([
+        "shell input keyevent 3",
+      ]);
     });
 
     // API 28 repro: the accessibility global action for "home" reports
@@ -183,7 +187,11 @@ describe("PressButton Android keycode dispatch", () => {
 
       expect(result).toEqual({ success: true, button: "home", keyCode: 3 });
       // The inert global action must not short-circuit the ADB fallback.
-      expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent 3"]);
+      // Filter out the configured-HOME-launcher resolution calls (issue #6147
+      // review, P1) that verification now performs alongside the keyevent.
+      expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("keyevent"))).toEqual([
+        "shell input keyevent 3",
+      ]);
     });
 
     test("surfaces failure instead of false success when neither path reaches the launcher", async () => {
@@ -203,7 +211,11 @@ describe("PressButton Android keycode dispatch", () => {
       expect(result.keyCode).toBe(-1);
       expect(result.error).toContain("did not background the foreground app");
       // The ADB fallback must actually have been attempted, not skipped.
-      expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent 3"]);
+      // Filter out the configured-HOME-launcher resolution calls (issue #6147
+      // review, P1) that verification now performs alongside the keyevent.
+      expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("keyevent"))).toEqual([
+        "shell input keyevent 3",
+      ]);
     });
   });
 

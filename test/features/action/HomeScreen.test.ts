@@ -227,7 +227,10 @@ describe("HomeScreen", () => {
       const result = await homeScreen.execute();
 
       expect(result.success).toBe(true);
-      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      // No ADB keyevent fallback is needed -- the only ADB traffic is the
+      // configured-HOME-launcher resolution that verification now performs
+      // (issue #6147 review, P1).
+      expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("keyevent"))).toEqual([]);
     });
 
     test("falls back to the ADB keyevent when the global action is inert (API 28) but the foreground never changes", async () => {

@@ -51,6 +51,7 @@ import {
   type DeviceProvisioner,
 } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
+import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
@@ -4651,6 +4652,9 @@ export function registerDeviceTools() {
         },
         provisioned.device,
         boot.processHandle,
+        undefined,
+        undefined,
+        resolveProvisionDeviceAchievedReadiness(args.readiness),
       );
       ownershipTransferred = true;
       return { device: boot.device, sessionId, source: boot.source };
@@ -4662,6 +4666,19 @@ export function registerDeviceTools() {
     } finally {
       await releaseReadinessReservation?.();
     }
+  }
+
+  /**
+   * The `DeviceReadinessLevel` actually achieved by `provisionDevice` for the
+   * requested `readiness` option. `"automation"` runs `ensureCtrlProxyReady`
+   * in `ensureProvisionDeviceReadiness` and reaches `automationReady`;
+   * `"none"` deliberately skips that setup, leaving the device merely booted
+   * (#6227 round 6).
+   */
+  function resolveProvisionDeviceAchievedReadiness(
+    readiness: ProvisionDeviceArgs["readiness"],
+  ): DeviceReadinessLevel {
+    return readiness === "automation" ? "automationReady" : "booted";
   }
 
   async function reserveProvisionDeviceReadiness(
@@ -5246,6 +5263,7 @@ export function registerDeviceTools() {
     childProcess?: ChildProcess | null,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
+    achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string> {
     // Reserve the exact ready device before resource notifications publish it
     // to concurrent allocators.
@@ -5264,7 +5282,7 @@ export function registerDeviceTools() {
           verifiedAndroidAvdIdentity,
         );
       if (autolockSessionId) {
-        recordAcquiredSessionReadiness(daemonState, autolockSessionId);
+        recordAcquiredSessionReadiness(daemonState, autolockSessionId, achievedReadiness);
         return autolockSessionId;
       }
     }
@@ -5287,20 +5305,24 @@ export function registerDeviceTools() {
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
       );
-    recordAcquiredSessionReadiness(daemonState, boundSessionId);
+    recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
     return boundSessionId;
   }
 
   /**
-   * Record `automationReady` for a session bound by `bindBootedDeviceSession`
-   * (#6227 P1 follow-up). By the time that function runs, the caller
-   * (`bootAndPrepareDevice`) has already awaited
-   * `prepareStartDeviceRunnerReadiness` successfully for this device — CtrlProxy
-   * / accessibility-service setup for android is genuinely done, not merely
-   * assumed. Without recording it here, the session's `deviceReadiness` slot
-   * stays `undefined` and the first subsequent `automationReady` tool call
-   * (e.g. `observe`) sees that as unsatisfied and redundantly reruns setup via
-   * `ToolExecutionContext`'s `existingSession` upgrade path.
+   * Record the readiness level actually ACHIEVED by acquisition for a session
+   * bound by `bindBootedDeviceSession` (#6227 P1 follow-up, round 6 fix). By
+   * the time that function runs, the caller has already awaited whatever
+   * readiness setup it chose to run for this device: normal `getAndroid` /
+   * `startDevice` acquisition always awaits `prepareStartDeviceRunnerReadiness`
+   * successfully, so CtrlProxy / accessibility-service setup is genuinely done
+   * and `automationReady` is correct. But `provisionDevice({ readiness: "none" })`
+   * deliberately SKIPS that setup in `ensureProvisionDeviceReadiness` — for that
+   * path recording a hardcoded `automationReady` would be a lie: a later
+   * `observe` (or any other `automationReady`-requiring tool) would see the
+   * session's `deviceReadiness` slot already satisfied and skip the setup it
+   * still needs. Callers must pass the readiness level actually achieved
+   * (`achievedReadiness`), not assume the highest one.
    *
    * This is only reached for a freshly-bound (non-recovered) session: the
    * `readinessResult.preservedSessionId` recovery path in `bootAndPrepareDevice`
@@ -5309,8 +5331,12 @@ export function registerDeviceTools() {
    * and still runs setup on next use, preserving the concurrency-hole fix in
    * `isReadinessSatisfied`.
    */
-  function recordAcquiredSessionReadiness(daemonState: DaemonState, sessionId: string): void {
-    daemonState.getSessionManager().setDeviceReadiness(sessionId, "automationReady");
+  function recordAcquiredSessionReadiness(
+    daemonState: DaemonState,
+    sessionId: string,
+    achievedReadiness: DeviceReadinessLevel,
+  ): void {
+    daemonState.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
   }
 
   async function buildBootedResponse(

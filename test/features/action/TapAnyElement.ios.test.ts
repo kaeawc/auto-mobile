@@ -224,7 +224,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 6000 });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 6000, 8000);
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 6000, 8000, undefined, undefined, undefined);
   });
 
   // Issue #6276 (follow-up to #6248 review thread funaf): an ordinary
@@ -244,7 +244,47 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 50, TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS);
+    expect(tapSpy).toHaveBeenCalledWith(
+      42,
+      84,
+      50,
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
+  // Issue #6306 review (P1/P2): the outer MCP request signal previously never
+  // reached the VoiceOver-detection probe or the coordinate-tap gesture, so a
+  // caller deadline that expired while CtrlProxy was reconnecting could still
+  // let the tap dispatch after the caller had already received a timeout.
+  // `sendCommand` (invoked by both `requestVoiceOverState` and
+  // `requestTapCoordinates`) enforces the actual abort-before-dispatch
+  // behavior — see `SharedGestureDelegate.test.ts` and
+  // `CtrlProxyVoiceOver.test.ts` for that mechanism's own regression
+  // coverage; this test only verifies `execute()`'s `signal` reaches the
+  // gesture call.
+  test("threads the caller's abort signal into requestTapCoordinates", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+    const controller = new AbortController();
+
+    const result = await tapAny.execute({ action: "tap" }, undefined, controller.signal);
+
+    expect(result.success).toBe(true);
+    const [, , , , , , signalArg] = tapSpy.mock.calls[0] ?? [];
+    expect(signalArg).toBe(controller.signal);
+  });
+
+  test("threads the caller's abort signal into the VoiceOver-detection probe", async () => {
+    const probeSpy = spyOn(fakeVoiceOverDetector, "isVoiceOverActiveOrUnknown");
+    const controller = new AbortController();
+
+    await tapAny.execute({ action: "tap" }, undefined, controller.signal);
+
+    const [, , , , signalArg] = probeSpy.mock.calls[0] ?? [];
+    expect(signalArg).toBe(controller.signal);
   });
 
   test("doubleTap sizes an explicit requestTapCoordinates timeout for both presses, floored at the established 5s default", async () => {
@@ -261,6 +301,9 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       84,
       50,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      undefined,
+      undefined,
+      undefined,
     );
     expect(tapSpy).toHaveBeenNthCalledWith(
       2,
@@ -268,6 +311,9 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       84,
       50,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      undefined,
+      undefined,
+      undefined,
     );
   });
 
@@ -378,7 +424,15 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, duration, duration + 2000);
+    expect(tapSpy).toHaveBeenCalledWith(
+      42,
+      84,
+      duration,
+      duration + 2000,
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 
   test("VoiceOver longPress duration just over TAP_ANY_LONG_PRESS_MAX_DURATION_MS is REJECTED, not clamped-and-sent", async () => {
@@ -429,7 +483,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     // Normalized to 1501ms — used verbatim for the request payload, and the
     // timeout is sized from that same normalized value (1501 + 2000 headroom).
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1501, 3501);
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1501, 3501, undefined, undefined, undefined);
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1501 }]);
   });
 
@@ -447,7 +501,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     // Floored to 1ms — still a long press (duration > 0), not a tap — and the
     // timeout is sized from that same floored value (1 + 2000 headroom).
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1, 2001);
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1, 2001, undefined, undefined, undefined);
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1 }]);
   });
 

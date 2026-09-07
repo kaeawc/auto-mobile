@@ -595,7 +595,20 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     duration: number = 0,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyTapResult> {
+    // Mirrors the real `sendCommand`'s pre-dispatch abort check (#6306
+    // review): an already-expired caller deadline must never reach the
+    // device.
+    if (signal?.aborted) {
+      return {
+        success: false,
+        totalTimeMs: 0,
+        error: "Request aborted before dispatch",
+      };
+    }
+
     await this.applyDelay("tap");
     this.checkFailure("tap");
 
@@ -969,7 +982,19 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   async requestVoiceOverState(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult> {
+    // Mirrors the real `sendCommand`'s pre-dispatch abort check (#6306
+    // review): an already-expired caller deadline must never reach the
+    // device.
+    if (signal?.aborted) {
+      return {
+        success: false,
+        enabled: false,
+        error: "Request aborted before dispatch",
+      };
+    }
+
     await this.applyDelay("voiceOverState");
     this.checkFailure("voiceOverState");
 

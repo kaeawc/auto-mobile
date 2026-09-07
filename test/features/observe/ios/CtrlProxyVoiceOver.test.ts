@@ -202,6 +202,42 @@ describe("CtrlProxyVoiceOver", function () {
     // deleted here (issue #4174, item 14) — it asserted only `sentMsg.type`, a
     // strict subset of "returns enabled=true when VoiceOver is running", which
     // already asserts the type AND the requestId AND the decoded result.
+
+    // The VoiceOver-detection probe runs before EVERY tapAny/tapOn iOS tap
+    // (VoiceOver on or off). A caller's outer deadline can expire while the
+    // connection is still opening (a reconnect/auto-setup is not itself
+    // cancellable) -- `sendCommand` checks the signal right after
+    // `ensureConnected()` resolves and before dispatch, so an already-expired
+    // probe is never sent to the device (issue #6306 review, P1).
+    test("never dispatches when the caller's signal is already aborted", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      const controller = new AbortController();
+      controller.abort(new Error("outer deadline exceeded"));
+
+      try {
+        const result = await client.requestVoiceOverState(5000, undefined, controller.signal);
+        // `sendCommand` checks the signal right after `ensureConnected()`
+        // resolves and before dispatch (issue #6306 review, P1): the probe
+        // must never reach the device once the caller's deadline is spent,
+        // even though the connection itself opened successfully (the
+        // connection handshake itself may still send its own unrelated
+        // setup messages, e.g. `set_network_error_simulation`).
+        const socket = getSocket();
+        const sentTypes = (socket?.sentMessages ?? []).map(
+          (raw) => (JSON.parse(raw) as { type?: string }).type,
+        );
+        expect(sentTypes).not.toContain("get_voiceover_state");
+        expect(result.success).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
   });
 
   describe("requestVoiceOverActivate", function () {

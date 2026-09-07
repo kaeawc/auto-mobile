@@ -39,6 +39,7 @@ export class CtrlProxyVoiceOver {
   async requestVoiceOverState(
     timeoutMs: number = IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult> {
     return sendCommand<CtrlProxyVoiceOverResult>(this.context, {
       idPrefix: "voiceover",
@@ -47,6 +48,10 @@ export class CtrlProxyVoiceOver {
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
+      // See SharedGestureDelegate.requestTapCoordinates: an already-expired
+      // caller deadline must not dispatch this probe after `ensureConnected()`
+      // resolves (issue #6306 review).
+      abortSignal: signal,
       notConnectedError: () => ({
         success: false,
         enabled: false,

@@ -580,15 +580,22 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     longPressDuration: number,
     element?: Element,
+    signal?: AbortSignal,
   ): Promise<void> {
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     // Fail-safe tap-bias variant (#6267): an indeterminate probe must route
     // through the VoiceOver activation gesture rather than a plain
     // coordinate touch that would get reported as a successful activation.
+    // `signal` is threaded through so a caller deadline that already expired
+    // while `ensureConnected()`/auto-setup was resolving aborts this probe
+    // before dispatch, rather than after the caller has given up (issue
+    // #6306 review).
     const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
       this.device.deviceId,
       xcTestClient,
       this.featureFlags,
+      undefined,
+      signal,
     );
 
     if (isVoiceOverEnabled && element) {
@@ -596,7 +603,7 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
 
-    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
+    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, signal);
   }
 
   /**
@@ -618,6 +625,7 @@ export class TapAnyElement extends BaseVisualChange {
     x: number,
     y: number,
     longPressDuration: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     // Short fixed duration for tap/doubleTap, caller-supplied duration for longPress.
     const tapDuration =
@@ -627,20 +635,50 @@ export class TapAnyElement extends BaseVisualChange {
         ? resolveTapAnyCtrlProxyTimeoutMs(tapDuration)
         : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(tapDuration);
 
+    // `signal` reaches `sendCommand` as `abortSignal`: a caller deadline that
+    // already fired while `ensureConnected()` was resolving a reconnect/
+    // auto-setup (not itself cancellable) is checked right after that await
+    // and before dispatch, so the gesture is never sent to the device after
+    // the caller has already given up and returned a timeout (issue #6306
+    // review, P1/P2).
     if (action === "doubleTap") {
-      const firstResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
+      const firstResult = await xcTestClient.requestTapCoordinates(
+        x,
+        y,
+        tapDuration,
+        timeoutMs,
+        undefined,
+        undefined,
+        signal,
+      );
       if (!firstResult.success) {
         throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
       }
       await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
-      const secondResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
+      const secondResult = await xcTestClient.requestTapCoordinates(
+        x,
+        y,
+        tapDuration,
+        timeoutMs,
+        undefined,
+        undefined,
+        signal,
+      );
       if (!secondResult.success) {
         throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
       }
       return;
     }
 
-    const result = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
+    const result = await xcTestClient.requestTapCoordinates(
+      x,
+      y,
+      tapDuration,
+      timeoutMs,
+      undefined,
+      undefined,
+      signal,
+    );
     if (!result.success) {
       throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
     }
@@ -876,7 +914,14 @@ export class TapAnyElement extends BaseVisualChange {
               }
               break;
             case "ios":
-              await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration, element);
+              await this.executeIosTap(
+                action,
+                tapPoint.x,
+                tapPoint.y,
+                longPressDuration,
+                element,
+                signal,
+              );
               break;
             default:
               throw new ActionableError(`Unsupported platform: ${this.device.platform}`);

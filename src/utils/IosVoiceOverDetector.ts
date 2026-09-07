@@ -47,8 +47,15 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<boolean> {
-    const state = await this.resolveVoiceOverState(deviceId, client, featureFlags, timeoutMs);
+    const state = await this.resolveVoiceOverState(
+      deviceId,
+      client,
+      featureFlags,
+      timeoutMs,
+      signal,
+    );
     return state === true;
   }
 
@@ -72,8 +79,15 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<boolean> {
-    const state = await this.resolveVoiceOverState(deviceId, client, featureFlags, timeoutMs);
+    const state = await this.resolveVoiceOverState(
+      deviceId,
+      client,
+      featureFlags,
+      timeoutMs,
+      signal,
+    );
     if (state === null) {
       logger.warn(
         `[IosVoiceOverDetector] VoiceOver state for device ${deviceId} could not be determined; ` +
@@ -95,6 +109,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<boolean | null> {
     // Check feature flag override first
     if (featureFlags?.isEnabled("force-accessibility-mode")) {
@@ -122,7 +137,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     // Detect current state
     logger.debug(`[IosVoiceOverDetector] Detecting VoiceOver state for device ${deviceId}`);
     const startTime = this.timer.now();
-    const detected = await this.detectVoiceOverState(deviceId, client, timeoutMs);
+    const detected = await this.detectVoiceOverState(deviceId, client, timeoutMs, signal);
     const detectionTime = this.timer.now() - startTime;
 
     if (detectionTime > 50) {
@@ -173,9 +188,10 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     deviceId: string,
     client: IOSCtrlProxy,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<boolean | null> {
     try {
-      const result = await client.requestVoiceOverState(timeoutMs);
+      const result = await client.requestVoiceOverState(timeoutMs, undefined, signal);
       if (!result.success) {
         logger.warn(
           `[IosVoiceOverDetector] VoiceOver detection failed for ${deviceId}: ${result.error}`,

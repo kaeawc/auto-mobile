@@ -191,14 +191,12 @@ export class Explore extends BaseVisualChange {
           signal,
         });
 
-        const viewHierarchy = observation.viewHierarchy;
-        if (viewHierarchy && !viewHierarchy.hierarchy.error) {
-          const elements = extractAllElements(viewHierarchy, this.elementParser);
-          if (isPermissionDialog(elements)) {
-            logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-            await handlePermissionDialog(elements, viewHierarchy, this.device, this.adb, progress);
-            continue;
-          }
+        const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
+        if (permissionOutcome === "break") {
+          break;
+        }
+        if (permissionOutcome === "continue") {
+          continue;
         }
 
         if (!this.targetPackageName) {
@@ -482,6 +480,60 @@ export class Explore extends BaseVisualChange {
       observation,
       durationMs: this.timer.now() - startTime,
     };
+  }
+
+  /**
+   * Detect and act on a permission dialog at the top of the exploration loop.
+   *
+   * Returns:
+   * - `"continue"` when the dialog was granted (screen changed) or the no-op of
+   *   an ungrantable dialog was accounted for and the loop should re-observe;
+   * - `"break"` when an ungrantable (e.g. deny-only) dialog has stalled the
+   *   screen long enough to trip the stuck-screen accounting;
+   * - `"none"` when no permission dialog is present.
+   *
+   * A dialog exposing no safe affirmative control (e.g. only "Don't allow") can
+   * neither be granted nor have its deny control tapped (issue #6241). The
+   * previous fast-path discarded that outcome and always continued, so
+   * exploration re-observed the same unchanged dialog until the timeout. Counting
+   * the no-op lets the existing stuck-screen accounting stop the run instead
+   * (partially addresses issue #6169).
+   */
+  private async handlePermissionDialogFastPath(
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+  ): Promise<"continue" | "break" | "none"> {
+    const viewHierarchy = observation.viewHierarchy;
+    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
+      return "none";
+    }
+    const elements = extractAllElements(viewHierarchy, this.elementParser);
+    if (!isPermissionDialog(elements)) {
+      return "none";
+    }
+
+    logger.info("[Explore] Detected permission dialog, attempting to dismiss");
+    const granted = await handlePermissionDialog(
+      elements,
+      viewHierarchy,
+      this.device,
+      this.adb,
+      progress,
+    );
+    if (granted) {
+      return "continue";
+    }
+
+    this.consecutiveNoChangeCount++;
+    logger.warn(
+      `[Explore] Permission dialog could not be granted (deny-only); counted as no-op ` +
+        `(${this.consecutiveNoChangeCount}/${Explore.MAX_CONSECUTIVE_NO_CHANGE})`,
+    );
+    if (this.shouldBreakForSafety(observation)) {
+      logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
+      return "break";
+    }
+    return "continue";
   }
 
   /**

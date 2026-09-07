@@ -29,6 +29,10 @@ import {
   TAP_ANY_SEARCH_UNTIL_MAX_MS,
   TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
   TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS,
+  TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS,
+  TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+  TAP_ANY_ORDINARY_TAP_DURATION_MS,
+  TAP_ANY_DOUBLE_TAP_GAP_MS,
 } from "../../src/features/action/TapAnyElement";
 import {
   FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
@@ -713,6 +717,32 @@ describe("resolveMcpRequestTimeoutMs", () => {
       TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
         TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
         TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  // Issue #6306 review, P2: an earlier round of this arithmetic charged only
+  // the doubleTap's on-device press time (2 * 50ms + 200ms gap = 300ms) even
+  // though each of its two sequential CtrlProxy requests can independently
+  // consume its own full per-request deadline before replying -- with
+  // near-deadline observations that undersizing let the outer floor expire
+  // even though the CtrlProxy requests were still within their own
+  // established timeout. The gesture term must derive from the REAL
+  // per-request deadline (floored at the established 5s default, issue #6306
+  // review P1), not just the press duration.
+  test("tapAny ordinary-tap gesture worst case derives from the actual per-request CtrlProxy deadline, not just on-device press time (#6306 review, P2)", () => {
+    expect(TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS).toBe(
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+    );
+    expect(TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS).toBeGreaterThan(
+      TAP_ANY_ORDINARY_TAP_DURATION_MS,
+    );
+    expect(TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS).toBe(
+      2 * TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS + TAP_ANY_DOUBLE_TAP_GAP_MS,
+    );
+    // Would have been 300ms (2 * 50ms press + 200ms gap) before the fix --
+    // now at least 2 * the established 5s CtrlProxy floor.
+    expect(TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS).toBeGreaterThanOrEqual(
+      2 * TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
     );
   });
 

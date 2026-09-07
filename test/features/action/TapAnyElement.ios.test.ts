@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
   TapAnyElement,
   TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
+  TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
 } from "../../../src/features/action/TapAnyElement";
 import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -230,19 +231,23 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   // tap/doubleTap previously passed `timeoutMs: undefined`, falling through
   // to `requestTapCoordinates`'s own generic default with no tapAny-specific
   // floor/ceiling. It must now size an explicit timeout from its fixed press
-  // duration, the same way longPress does.
-  test("tap sizes an explicit requestTapCoordinates timeout instead of relying on the client default", async () => {
+  // duration, the same way longPress does -- floored at
+  // TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS (5000ms) so it never drops
+  // BELOW the established default `requestTapCoordinates` already applied
+  // (issue #6306 review, P1): the raw duration+headroom arithmetic alone
+  // (50ms + 2000ms = 2050ms) would otherwise cut a legitimate 2.05-5s
+  // CtrlProxy round trip short.
+  test("tap sizes an explicit requestTapCoordinates timeout, floored at the established 5s default", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
 
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    // 50ms fixed tap duration + the same 2000ms headroom longPress uses.
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 50, 2050);
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 50, TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS);
   });
 
-  test("doubleTap sizes an explicit requestTapCoordinates timeout for both presses", async () => {
+  test("doubleTap sizes an explicit requestTapCoordinates timeout for both presses, floored at the established 5s default", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
 
@@ -250,18 +255,73 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(true);
     expect(tapSpy).toHaveBeenCalledTimes(2);
-    expect(tapSpy).toHaveBeenNthCalledWith(1, 42, 84, 50, 2050);
-    expect(tapSpy).toHaveBeenNthCalledWith(2, 42, 84, 50, 2050);
+    expect(tapSpy).toHaveBeenNthCalledWith(
+      1,
+      42,
+      84,
+      50,
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+    );
+    expect(tapSpy).toHaveBeenNthCalledWith(
+      2,
+      42,
+      84,
+      50,
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+    );
   });
 
-  test("VoiceOver enabled + tap sizes an explicit requestVoiceOverActivate timeout", async () => {
+  test("VoiceOver enabled + tap sizes an explicit requestVoiceOverActivate timeout, floored at the established 5s default", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(true);
     const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");
 
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(activateSpy).toHaveBeenCalledWith("Target Button", "activate", 2050);
+    expect(activateSpy).toHaveBeenCalledWith(
+      "Target Button",
+      "activate",
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+    );
+  });
+
+  // Issue #6306 review, P2: the pre-tap search loop's per-iteration hierarchy
+  // refresh must be constrained to the search loop's OWN remaining budget --
+  // an unconstrained refresh could independently run for the full generic
+  // default (`IOS_HIERARCHY_REQUEST_TIMEOUT_MS`, ~15s) regardless of how much
+  // of `searchUntil.duration` is actually left, letting the outer MCP floor
+  // expire mid-search even though this call would eventually have returned.
+  test("search loop constrains each hierarchy refresh to its own remaining budget, not the client default", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    fakeIosClient.setHierarchyData({ packageName: "com.test.app", updatedAt: Date.now() });
+    // First selectClickable call (before the search loop) reports nothing
+    // found; the fake element selector's default (call-through) behavior on
+    // every later call keeps returning the configured clickable element, so
+    // the search loop finds it on its first iteration.
+    spyOn(fakeElementSelector, "selectClickable").mockImplementationOnce(() => ({
+      element: null,
+      indexInMatches: -1,
+      totalMatches: 0,
+      strategy: "first",
+    }));
+
+    const result = await tapAny.execute({
+      action: "tap",
+      searchUntil: { duration: 500 },
+    });
+
+    expect(result.success).toBe(true);
+    const timeouts = fakeIosClient.getHierarchyRequestTimeouts();
+    // At least one refresh happened during the search loop, and every one of
+    // them was bounded to (at most) the search window -- never left
+    // `undefined`, which is what let the old code fall through to
+    // `getAccessibilityHierarchy`'s own unconstrained default.
+    expect(timeouts.length).toBeGreaterThan(0);
+    for (const timeoutMs of timeouts) {
+      expect(timeoutMs).toBeDefined();
+      expect(timeoutMs as number).toBeGreaterThan(0);
+      expect(timeoutMs as number).toBeLessThanOrEqual(500);
+    }
   });
 
   // Thread PRRT_kwDOP-GF5M6fuZRt (#6248 review, terminal round): an earlier
@@ -385,7 +445,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "activate",
       "com.test.app:id/submit_button",
       undefined,
-      2050,
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
@@ -433,7 +493,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "activate",
       "com.test.app:id/submit_button",
       undefined,
-      2050,
+      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },

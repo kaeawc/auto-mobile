@@ -2044,6 +2044,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
     return this.hierarchy.getAccessibilityHierarchy(
       queryOptions,
@@ -2051,6 +2053,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       skipWaitForFresh,
       minTimestamp,
       disableAllFiltering,
+      signal,
+      timeoutMs,
     );
   }
 

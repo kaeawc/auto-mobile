@@ -11,6 +11,7 @@ import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
+import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
 import { maxObservationAgeMs } from "../observationFreshness";
 import type {
@@ -79,6 +80,20 @@ export class CtrlProxyHierarchy {
 
   /**
    * Get the accessibility hierarchy converted to ViewHierarchyResult format.
+   *
+   * @param signal - Optional abort signal, checked before the synchronous fetch starts.
+   *   Parameter POSITION (6th, before `timeoutMs`) mirrors Android's `getAccessibilityHierarchy`
+   *   exactly (`CtrlProxyHierarchy`/`AndroidCtrlProxyClient` in `../android/`) and the shared
+   *   `ReadinessClient.getAccessibilityHierarchy` interface (`RunnerReadinessService.ts`) both
+   *   platform clients must satisfy -- swapping the two would compile (both optional) but break
+   *   any caller passing both positionally.
+   * @param timeoutMs - Per-request timeout forwarded to `getLatestHierarchy`'s synchronous
+   *   fetch, defaulting to `IOS_HIERARCHY_REQUEST_TIMEOUT_MS` when omitted. A caller polling
+   *   against its OWN outer deadline (e.g. `TapAnyElement`'s pre-tap search loop) must pass its
+   *   remaining budget here -- otherwise this call ignores that budget entirely and can block
+   *   for the full default even after the caller's own deadline has passed (issue #6306 review,
+   *   P2). Mirrors the `timeoutMs` parameter Android's `getAccessibilityHierarchy` already
+   *   honours.
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
@@ -86,13 +101,16 @@ export class CtrlProxyHierarchy {
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
     const response = await this.getLatestHierarchy(
       !skipWaitForFresh,
-      IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
+      timeoutMs ?? IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
       perf,
       skipWaitForFresh,
       minTimestamp,
+      signal,
     );
 
     if (!response.hierarchy) {
@@ -114,6 +132,11 @@ export class CtrlProxyHierarchy {
 
   /**
    * Get the latest hierarchy, optionally waiting for fresh data.
+   *
+   * @param signal - Optional abort signal. Checked once up front, then forwarded to the
+   *   synchronous sync fetch below (`requestHierarchySync`, which already honours it) so a
+   *   caller's cancellation is not silently dropped on the one path this delegate can actually
+   *   interrupt.
    */
   async getLatestHierarchy(
     waitForFresh: boolean = false,
@@ -121,7 +144,9 @@ export class CtrlProxyHierarchy {
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchyResponse> {
+    throwIfAborted(signal);
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
     let cachedCaptureAgeMs: number | undefined;
@@ -190,7 +215,7 @@ export class CtrlProxyHierarchy {
           `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
         );
       }
-      const result = await this.requestHierarchySync(perf, false, undefined, timeout);
+      const result = await this.requestHierarchySync(perf, false, signal, timeout);
       if (result) {
         if (result.hierarchy.packageName) {
           this.lastKnownPackageName = result.hierarchy.packageName;

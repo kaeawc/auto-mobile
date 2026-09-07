@@ -13,6 +13,7 @@ import { ResourceRegistry } from "./resourceRegistry";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import {
   clearAndroidKeyValueFileDirect,
+  dataStoreInspectionDisabledReason,
   directFileFallbackRelaunchWarning,
   isSharedPreferencesInspectionDisabledError,
   removeAndroidKeyValueDirect,
@@ -265,11 +266,7 @@ function buildEntriesUri(deviceId: string, packageName: string, fileName: string
  * instead of surfacing the SDK's bare "SharedPreferences inspection is disabled".
  */
 function dataStoreInspectionDisabledError(appId: string): ActionableError {
-  return new ActionableError(
-    `SharedPreferences inspection is disabled for ${appId}, so its DataStore adapter is unreachable. ` +
-      "Enable it in the app's debug build by calling SharedPreferencesInspector.setEnabled(true) " +
-      "(dev.jasonpearson.automobile.sdk.storage) during initialization, typically in Application.onCreate().",
-  );
+  return new ActionableError(dataStoreInspectionDisabledReason(appId));
 }
 
 /**

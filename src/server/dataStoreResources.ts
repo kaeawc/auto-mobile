@@ -12,6 +12,10 @@ import {
   type OperationCapability,
 } from "../features/storage/storageCapabilities";
 import { resolveStorageCapabilityContext } from "./storageCapabilityResources";
+import {
+  dataStoreInspectionDisabledReason,
+  isSharedPreferencesInspectionDisabledError,
+} from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 
 /**
  * MCP resources that project delivered Android Jetpack DataStore reads into the
@@ -279,6 +283,7 @@ async function getDataStoresResource(
     // A registered adapter that fails to answer (absent app integration, no
     // adapter under this name) surfaces here as a bounded read failure.
     logger.warn(`[DataStoreResources] Failed to list data stores: ${error}`);
+    const inspectionDisabled = isSharedPreferencesInspectionDisabledError(error);
     return jsonContent(uri, {
       status: "unavailable",
       kind: RESOURCE_KIND,
@@ -286,7 +291,9 @@ async function getDataStoresResource(
       packageName,
       adapterName,
       platform: device.platform,
-      reason: `Failed to list data stores (adapter or app integration may be absent): ${error}`,
+      reason: inspectionDisabled
+        ? dataStoreInspectionDisabledReason(packageName)
+        : `Failed to list data stores (adapter or app integration may be absent): ${error}`,
     });
   }
 }
@@ -337,6 +344,7 @@ async function getDataStoreEntriesResource(
     });
   } catch (error) {
     logger.warn(`[DataStoreResources] Failed to get data store entries: ${error}`);
+    const inspectionDisabled = isSharedPreferencesInspectionDisabledError(error);
     return jsonContent(uri, {
       status: "unavailable",
       kind: RESOURCE_KIND,
@@ -345,7 +353,9 @@ async function getDataStoreEntriesResource(
       adapterName,
       name: storeName,
       platform: device.platform,
-      reason: `Failed to read data store (adapter or app integration may be absent): ${error}`,
+      reason: inspectionDisabled
+        ? dataStoreInspectionDisabledReason(packageName)
+        : `Failed to read data store (adapter or app integration may be absent): ${error}`,
     });
   }
 }

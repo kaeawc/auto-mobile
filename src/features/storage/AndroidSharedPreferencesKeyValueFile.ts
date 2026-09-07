@@ -280,6 +280,12 @@ function parseAndroidInt(value: string): string {
 
 function parseAndroidFloat(value: string): string {
   const trimmed = value.trim();
+  // Kotlin's String.toFloatOrNull accepts these IEEE-754 spellings. The SDK
+  // path therefore accepts them too; the direct XML fallback must not change
+  // its input language merely because inspection is disabled.
+  if (["NaN", "Infinity", "+Infinity", "-Infinity"].includes(trimmed)) {
+    return trimmed;
+  }
   if (!/^-?(?:\d+|\d*\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
     throw new ActionableError(`Expected FLOAT key-value, got '${value}'.`);
   }
@@ -288,6 +294,15 @@ function parseAndroidFloat(value: string): string {
     throw new ActionableError(`Expected FLOAT key-value, got '${value}'.`);
   }
   return String(parsed);
+}
+
+/** Shared actionable guidance for DataStore paths, which have no XML fallback. */
+export function dataStoreInspectionDisabledReason(appId: string): string {
+  return (
+    `SharedPreferences inspection is disabled for ${appId}, so its DataStore adapter is unreachable. ` +
+    "Enable it in the app's debug build by calling SharedPreferencesInspector.setEnabled(true) " +
+    "(dev.jasonpearson.automobile.sdk.storage) during initialization, typically in Application.onCreate()."
+  );
 }
 
 function parseAndroidLong(value: string): string {

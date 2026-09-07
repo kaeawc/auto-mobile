@@ -899,13 +899,17 @@ export class DaemonMcpProxy {
     }
     logger.info("[DaemonMcpProxy] Connected to daemon");
 
-    // Deliver the ownership heartbeat FIRST — before the best-effort notification
-    // subscription (issue #5637). subscribeToNotifications() is a daemon RPC that
-    // can stall up to the connection timeout; awaiting it before the heartbeat
-    // would let the pre-first-heartbeat reclaim reap a bound session near the
-    // grace edge before the heartbeat is even sent. The notification handler is
-    // already registered above (before connect), so a session-released frame is
-    // still handled during the heartbeat even without the opt-in subscription.
+    // Start notification opt-in BEFORE awaiting the ownership heartbeat so a
+    // shutdown that releases the initial binding during that round trip cannot
+    // publish to an unsubscribed socket (#6336). Do not await the subscription
+    // yet: it is a best-effort daemon RPC that can stall up to the connection
+    // timeout, while the time-critical first heartbeat must still be dispatched
+    // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
+    const notificationSubscription = supportsNotifications
+      ? client.subscribeToNotifications!().catch((error) => {
+          logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+        })
+      : Promise.resolve();
     //
     // On the FIRST establishment mark the proxy `connected` only AFTER the
     // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
@@ -929,16 +933,10 @@ export class DaemonMcpProxy {
     this.connected = true;
     this.cancelBackgroundConnectRetry();
 
-    if (supportsNotifications) {
-      try {
-        await client.subscribeToNotifications!();
-      } catch (error) {
-        // Best-effort: without the subscription the proxy degrades to the old
-        // cached behavior instead of failing the connection. Unexpected against
-        // a same-version daemon (the handshake gate pins versions), so warn.
-        logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
-      }
-    }
+    // Connection establishment still waits for the already-running subscription
+    // so callers do not race later requests ahead of notification opt-in. Failure
+    // was converted to a warning above and preserves the prior best-effort policy.
+    await notificationSubscription;
 
     // If a client `tools/list` was served statically before this connection
     // existed (issue #5879), prompt it to re-fetch now that the daemon can

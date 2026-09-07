@@ -472,11 +472,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
-      await sessionManager.createSession(
-        "blocked-terminal-session",
-        "emulator-5560",
-        "android",
-      );
+      await sessionManager.createSession("blocked-terminal-session", "emulator-5560", "android");
       const terminalRelease = sessionManager.releaseSession(
         "blocked-terminal-session",
         "heartbeat-timeout",
@@ -495,9 +491,9 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       persistence.resolve();
       await terminalRelease;
       expect(events.filter((event) => event === fallback)).toHaveLength(1);
-      expect(events.filter((event) => event.startsWith("release:blocked-terminal-session:"))).toEqual(
-        [fallback],
-      );
+      expect(
+        events.filter((event) => event.startsWith("release:blocked-terminal-session:")),
+      ).toEqual([fallback]);
     } finally {
       persistence.resolve();
       markReleasedSpy.mockRestore();

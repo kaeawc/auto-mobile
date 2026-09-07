@@ -226,6 +226,44 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(tapSpy).toHaveBeenCalledWith(42, 84, 6000, 8000);
   });
 
+  // Issue #6276 (follow-up to #6248 review thread funaf): an ordinary
+  // tap/doubleTap previously passed `timeoutMs: undefined`, falling through
+  // to `requestTapCoordinates`'s own generic default with no tapAny-specific
+  // floor/ceiling. It must now size an explicit timeout from its fixed press
+  // duration, the same way longPress does.
+  test("tap sizes an explicit requestTapCoordinates timeout instead of relying on the client default", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(true);
+    // 50ms fixed tap duration + the same 2000ms headroom longPress uses.
+    expect(tapSpy).toHaveBeenCalledWith(42, 84, 50, 2050);
+  });
+
+  test("doubleTap sizes an explicit requestTapCoordinates timeout for both presses", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(false);
+    const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
+
+    const result = await tapAny.execute({ action: "doubleTap" });
+
+    expect(result.success).toBe(true);
+    expect(tapSpy).toHaveBeenCalledTimes(2);
+    expect(tapSpy).toHaveBeenNthCalledWith(1, 42, 84, 50, 2050);
+    expect(tapSpy).toHaveBeenNthCalledWith(2, 42, 84, 50, 2050);
+  });
+
+  test("VoiceOver enabled + tap sizes an explicit requestVoiceOverActivate timeout", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    const activateSpy = spyOn(fakeIosClient, "requestVoiceOverActivate");
+
+    const result = await tapAny.execute({ action: "tap" });
+
+    expect(result.success).toBe(true);
+    expect(activateSpy).toHaveBeenCalledWith("Target Button", "activate", 2050);
+  });
+
   // Thread PRRT_kwDOP-GF5M6fuZRt (#6248 review, terminal round): an earlier
   // round merely CLAMPED the inner/outer timers while still forwarding the
   // full absurd `duration` to XCTest -- a clamp-vs-duration mismatch that
@@ -347,7 +385,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "activate",
       "com.test.app:id/submit_button",
       undefined,
-      undefined,
+      2050,
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
@@ -395,7 +433,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "activate",
       "com.test.app:id/submit_button",
       undefined,
-      undefined,
+      2050,
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },

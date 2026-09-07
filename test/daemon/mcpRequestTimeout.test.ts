@@ -28,6 +28,7 @@ import {
   TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
   TAP_ANY_SEARCH_UNTIL_MAX_MS,
   TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
+  TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS,
 } from "../../src/features/action/TapAnyElement";
 import {
   FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
@@ -652,7 +653,14 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(resolveMcpRequestTimeoutMs(request)).toBe(300_000);
   });
 
-  test("a normal tapAny tap keeps the standard default timeout", () => {
+  // Issue #6276 (follow-up to #6248 review thread funaf): ordinary tap/doubleTap
+  // previously had NO tapAny-specific outer floor at all -- this fell straight
+  // through to `DEFAULT_MCP_REQUEST_TIMEOUT_MS` regardless of the call's real
+  // worst-case pipeline cost. It must now budget the same non-press overhead
+  // the longPress floor does (every tapAny action shares the same pre/post
+  // observation pipeline), plus the ordinary gesture's own worst case and the
+  // effective search window.
+  test("a normal tapAny tap gets a tapAny-specific outer floor, not just the standard default (#6276)", () => {
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
@@ -663,7 +671,119 @@ describe("resolveMcpRequestTimeoutMs", () => {
       },
     };
 
-    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+        TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+    expect(resolved).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("an omitted tapAny action (schema defaults to tap) gets the same ordinary-tap floor (#6276)", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: {},
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+        TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  test("tapAny doubleTap budgets the same ordinary-tap floor as a plain tap (#6276)", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "doubleTap" },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+        TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  test("tapAny ordinary tap budgets pre-gesture searchUntil.duration ahead of the fixed gesture cost (#6276)", () => {
+    const searchUntilDuration = 12_000;
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "tap", searchUntil: { duration: searchUntilDuration } },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+        searchUntilDuration +
+        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  test("tapAny ordinary tap honours an outer timeoutMs already above the derived floor (#6276)", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "tapAny",
+        arguments: { action: "tap" },
+      },
+      // Must exceed the derived floor for this test to actually exercise "an
+      // outer timeoutMs already above the floor" rather than being silently
+      // overridden by a larger floor.
+      timeoutMs:
+        TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+        TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS +
+        60_000,
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+        TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS +
+        60_000,
+    );
+  });
+
+  // Item 2 of issue #6276: the outer budget must also cover the SEPARATE
+  // pre-action `ObserveScreen.execute` call `BaseVisualChange.observedInteraction`
+  // performs BEFORE the gesture, not just the post-gesture final-observation
+  // retry loop -- an earlier round of this budget was blind to that call.
+  test("tapAny non-press overhead includes the pre-action observation on top of the post-action retry loop (#6276)", () => {
+    const observeAttempts = 1 + FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
+    const perAttemptPipelineMs =
+      IOS_HIERARCHY_REQUEST_TIMEOUT_MS + IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS;
+    const postActionWorstCaseMs =
+      observeAttempts * perAttemptPipelineMs +
+      FINAL_OBSERVATION_RETRY_BACKOFF_MS.reduce((sum, delayMs) => sum + delayMs, 0);
+    // The SEPARATE pre-action observation runs the same per-attempt pipeline
+    // (hierarchy + a11y detection) exactly once, in addition to the
+    // post-action retry loop above.
+    const preActionObserveMs = perAttemptPipelineMs;
+
+    expect(TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS).toBeGreaterThanOrEqual(
+      IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS /* pre-gesture VoiceOver probe */ +
+        preActionObserveMs +
+        postActionWorstCaseMs +
+        TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
+    );
   });
 
   test("a tapAny longPress with omitted duration still budgets the effective default press (#6248 review)", () => {

@@ -18,6 +18,7 @@ import {
   ScreenshotJobTracker,
 } from "../../utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screenshotCacheEviction";
@@ -53,6 +54,41 @@ async function writeFileSecure(filePath: string, data: Buffer): Promise<void> {
 
 function replaceScreenshotExtension(filePath: string, extension: string): string {
   return filePath.replace(/\.[^.]+$/, `.${extension}`);
+}
+
+/**
+ * Let a caller-owned deadline end an automatic screenshot even while iOS is
+ * reconnecting or auto-setting up CtrlProxy. Those operations do not accept a
+ * cancellation signal, but the result must never keep an already-expired MCP
+ * request alive or dispatch a follow-up capture after its deadline.
+ */
+async function awaitWhileRequestIsLive<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  throwIfAborted(signal);
+  if (!signal) {
+    return await operation;
+  }
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      try {
+        throwIfAborted(signal);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 export interface ScreenshotOptions {
@@ -326,18 +362,16 @@ export class TakeScreenshot implements ScreenshotService {
       const client = IOSCtrlProxyClient.getInstance(this.device);
 
       // Ensure connected before requesting screenshot
-      if (!(await client.ensureConnected())) {
+      if (!(await awaitWhileRequestIsLive(client.ensureConnected(), signal))) {
         return {
           success: false,
           error: "Failed to connect to CtrlProxy iOS",
         };
       }
-      if (signal?.aborted) {
-        return { success: false, error: OPERATION_CANCELLED_MESSAGE };
-      }
+      throwIfAborted(signal);
 
       // Request screenshot from CtrlProxy iOS
-      const result = await client.requestScreenshot(10000); // 10 second timeout
+      const result = await awaitWhileRequestIsLive(client.requestScreenshot(10000), signal);
       return await this.writeiOSScreenshot(finalPath, result, startTime, signal);
     } catch (error) {
       const errorMsg = errorMessage(error);

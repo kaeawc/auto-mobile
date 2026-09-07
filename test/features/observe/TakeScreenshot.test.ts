@@ -186,6 +186,48 @@ describe("TakeScreenshot", function () {
   });
 
   describe("iOS cancellation", function () {
+    test("does not let a reconnect hold an expired screenshot request open", async function () {
+      const iosDevice: BootedDevice = {
+        name: "iPhone",
+        platform: "ios",
+        deviceId: "ios-device-id",
+        source: "local",
+      };
+      const controller = new AbortController();
+      const originalGetInstance = IOSCtrlProxyClient.getInstance;
+      let requestScreenshotCalls = 0;
+      let finishReconnect: (() => void) | undefined;
+      IOSCtrlProxyClient.getInstance = (() => ({
+        ensureConnected: () =>
+          new Promise<boolean>((resolve) => {
+            finishReconnect = () => resolve(true);
+          }),
+        requestScreenshot: async () => {
+          requestScreenshotCalls++;
+          return { success: false, error: "unexpected screenshot request" };
+        },
+      })) as typeof IOSCtrlProxyClient.getInstance;
+
+      try {
+        const screenshot = new TakeScreenshot(
+          iosDevice,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+        );
+        const resultPromise = screenshot.execute({ format: "png" }, controller.signal);
+
+        // The reconnect represents an iOS auto-setup path. Its completion is
+        // intentionally withheld past the caller's deadline.
+        controller.abort();
+        const result = await resultPromise;
+
+        expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        expect(requestScreenshotCalls).toBe(0);
+        finishReconnect?.();
+      } finally {
+        IOSCtrlProxyClient.getInstance = originalGetInstance;
+      }
+    });
+
     test("does not write or publish a screenshot after the request is cancelled", async function () {
       const iosDevice: BootedDevice = {
         name: "iPhone",

@@ -7,7 +7,7 @@
  * see `withSocketSessionAutolockKey` in `src/daemon/socketServer.ts`) may
  * have it honored and reattached onto the handler's arguments.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -58,14 +58,19 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
   });
 
   describe("daemonMode: false (direct, non-daemon server)", () => {
+    // One shared fixture per describe block (not beforeEach): matches the
+    // McpTestFixture convention used by ping.test.ts / index.progress.test.ts
+    // / planExecutionLock.test.ts, so the server-setup/warmup cost is paid
+    // once per block instead of being re-charged to every individual test's
+    // reported duration under the 100ms unit-test budget.
     let fixture: McpTestFixture;
 
-    beforeEach(async () => {
+    beforeAll(async () => {
       fixture = new McpTestFixture({ daemonMode: false });
       await fixture.setup();
     });
 
-    afterEach(async () => {
+    afterAll(async () => {
       await fixture.teardown();
     });
 
@@ -91,14 +96,16 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
   });
 
   describe("daemonMode: true (daemon-forwarded loopback server)", () => {
+    // See the daemonMode:false block above for why this is beforeAll/afterAll
+    // rather than per-test beforeEach/afterEach.
     let fixture: McpTestFixture;
 
-    beforeEach(async () => {
+    beforeAll(async () => {
       fixture = new McpTestFixture({ daemonMode: true });
       await fixture.setup();
     });
 
-    afterEach(async () => {
+    afterAll(async () => {
       await fixture.teardown();
     });
 

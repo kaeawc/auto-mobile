@@ -183,6 +183,30 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
+    test("does not include permission-denial controls in dry-run interactions", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = {
+        execute: async () =>
+          createMockObservation([
+            createMockViewHierarchyNode({
+              text: "Don't allow",
+              "resource-id": "com.android.permissioncontroller:id/permission_deny_button",
+            }),
+            createMockViewHierarchyNode({
+              text: "Allow",
+              "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+            }),
+          ]),
+      };
+
+      const result = await explore.execute({ dryRun: true, maxInteractions: 2 });
+
+      expect(result.dryRun).toBe(true);
+      expect(result.plannedInteractions.map((interaction) => interaction.target.value)).toEqual([
+        "Allow",
+      ]);
+    });
+
     for (const mode of ["hybrid", "discover"] as const) {
       test(`should use graph stats instead of exporting the full graph for ${mode} progress node counts`, async () => {
         fakeGraph.recordNavigationEvent({

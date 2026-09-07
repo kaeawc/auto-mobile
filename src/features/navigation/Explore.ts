@@ -425,12 +425,16 @@ export class Explore extends BaseVisualChange {
     const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
     const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
     const allCandidates = [...navigationElements, ...scrollableContainers];
+    const safeCandidates = filterPermissionNavigationCandidates(
+      allCandidates,
+      extractAllElements(viewHierarchy, this.elementParser),
+    );
 
-    if (allCandidates.length === 0) {
+    if (safeCandidates.length === 0) {
       warnings.push("No interactable elements were detected on the current screen.");
     }
 
-    const scored = rankElementsForDryRun(allCandidates, strategy, mode, this.exploredElements);
+    const scored = rankElementsForDryRun(safeCandidates, strategy, mode, this.exploredElements);
     const plannedInteractions = scored.slice(0, maxInteractions).map((entry, index) => {
       const target = getElementTarget(entry.element);
       const predictedOutcome = predictOutcomeForElement(entry.element, edges);
@@ -469,7 +473,7 @@ export class Explore extends BaseVisualChange {
       dryRun: true,
       currentScreen: {
         name: currentScreen,
-        interactableElements: allCandidates.length,
+        interactableElements: safeCandidates.length,
       },
       plannedInteractions,
       estimatedCoverage: {

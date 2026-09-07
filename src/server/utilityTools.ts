@@ -221,7 +221,9 @@ const networkConditionInputSchema = z
 // Display configuration (issue #6096): font scale, effective density, and
 // light/dark theme. A call with no set field is a getter; any set field (or
 // `reset`) makes it a setter that returns applied + previous values so the
-// client can restore. Android only — iOS has no automatable per-device control.
+// client can restore. Android supports all three fields; the iOS Simulator
+// supports theme only (via `simctl ui appearance`); physical iOS has no
+// automatable per-device control for any field.
 export const displayConfigSchema = addDeviceTargetingToSchema(
   z.object({
     fontScale: z
@@ -229,19 +231,23 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
       .min(0.1)
       .max(10)
       .optional()
-      .describe("System text scale, e.g. 1.0 (default), 1.3, 2.0. Omit to leave unchanged."),
+      .describe(
+        "System text scale, e.g. 1.0 (default), 1.3, 2.0. Android only. Omit to leave unchanged.",
+      ),
     density: z
       .union([z.number().min(1), z.enum(["smaller", "default", "larger"])])
       .optional()
       .describe(
         "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-          "(smaller/default/larger). Best-effort on physical devices. Omit to leave unchanged.",
+          "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
+          "leave unchanged.",
       ),
     theme: z
       .enum(["light", "dark", "system"])
       .optional()
       .describe(
-        "Light, dark, or system (follow-device) theme / night mode. Omit to leave unchanged.",
+        "Light, dark, or system (follow-device) theme / night mode. Supported on Android and " +
+          "the iOS Simulator; 'system' has no iOS Simulator equivalent. Omit to leave unchanged.",
       ),
     reset: z
       .boolean()
@@ -781,7 +787,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "displayConfig",
-    "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android only; density overrides are best-effort on physical devices.",
+    "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported.",
     displayConfigSchema,
     displayConfigHandler,
     { defaultEnabled: false },

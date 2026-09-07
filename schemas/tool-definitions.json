@@ -1080,19 +1080,19 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android only; density overrides are best-effort on physical devices.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "fontScale": {
-          "description": "System text scale, e.g. 1.0 (default), 1.3, 2.0. Omit to leave unchanged.",
+          "description": "System text scale, e.g. 1.0 (default), 1.3, 2.0. Android only. Omit to leave unchanged.",
           "type": "number",
           "minimum": 0.1,
           "maximum": 10
         },
         "density": {
-          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Best-effort on physical devices. Omit to leave unchanged.",
+          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Android only; best-effort on physical devices. Omit to leave unchanged.",
           "anyOf": [
             {
               "type": "number",
@@ -1105,7 +1105,7 @@
           ]
         },
         "theme": {
-          "description": "Light, dark, or system (follow-device) theme / night mode. Omit to leave unchanged.",
+          "description": "Light, dark, or system (follow-device) theme / night mode. Supported on Android and the iOS Simulator; 'system' has no iOS Simulator equivalent. Omit to leave unchanged.",
           "type": "string",
           "enum": ["light", "dark", "system"]
         },

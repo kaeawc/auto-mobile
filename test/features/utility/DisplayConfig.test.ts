@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BootedDevice } from "../../../src/models";
+import type { BootedDevice, ExecResult } from "../../../src/models";
 import {
   DisplayConfig,
   parseFontScale,
@@ -7,6 +7,7 @@ import {
   parseWmDensity,
 } from "../../../src/features/utility/DisplayConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 
 const androidEmulator: BootedDevice = {
   name: "Pixel",
@@ -26,6 +27,23 @@ const iosSimulator: BootedDevice = {
   deviceId: "12345678-1234-1234-1234-123456789ABC",
   iosVersion: "17.5",
 };
+
+const iosPhysical: BootedDevice = {
+  name: "Jason's iPhone",
+  platform: "ios",
+  deviceId: "00008130-001234567890ABCD",
+  iosVersion: "17.5",
+};
+
+function execResult(stdout: string, stderr = ""): ExecResult {
+  return {
+    stdout,
+    stderr,
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (s: string) => stdout.includes(s),
+  };
+}
 
 const FONT_GET = "shell settings get system font_scale";
 const DENSITY_GET = "shell wm density";
@@ -149,6 +167,23 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).toContain("shell wm density 506");
   });
 
+  test("resolves a relative density bucket against physical density, not a prior override", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    // The device already carries an override (506 = 440 * 1.15) from a previous
+    // `larger` request; a second `larger` request must still scale from the
+    // PHYSICAL density (440), not compound onto the effective override (#6096).
+    seedReads(adbFactory, { density: "Physical density: 440\nOverride density: 506\n" });
+
+    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: "larger" });
+
+    const commands = adbFactory
+      .getFakeClient()
+      .getCommandCalls()
+      .map((c) => c.command);
+    expect(commands).toContain("shell wm density 506");
+    expect(commands).not.toContain("shell wm density 582");
+  });
+
   test("sets dark theme via cmd uimode night", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
@@ -220,20 +255,128 @@ describe("DisplayConfig setConfig", () => {
 });
 
 describe("DisplayConfig platform gating", () => {
-  test("reports iOS as unsupported for reads without issuing commands", async () => {
-    const result = await new DisplayConfig(iosSimulator).getConfig();
+  test("reports physical iOS as fully unsupported for reads without issuing commands", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const result = await new DisplayConfig(iosPhysical, { processExecutor }).getConfig();
 
     expect(result.success).toBe(false);
     expect(result.platform).toBe("ios");
     expect(result.supported).toEqual({ fontScale: false, density: false, theme: false });
     expect(result.error).toContain("iOS");
+    expect(processExecutor.getExecutedCommands()).toEqual([]);
   });
 
-  test("reports iOS as unsupported for writes without issuing commands", async () => {
-    const result = await new DisplayConfig(iosSimulator).setConfig({ fontScale: 2.0 });
+  test("reports physical iOS as fully unsupported for writes without issuing commands", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const result = await new DisplayConfig(iosPhysical, { processExecutor }).setConfig({
+      fontScale: 2.0,
+    });
 
     expect(result.success).toBe(false);
     expect(result.platform).toBe("ios");
     expect(result.error).toContain("iOS");
+    expect(processExecutor.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("DisplayConfig iOS Simulator theme support", () => {
+  test("reports theme (only) as supported on an iOS Simulator", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).getConfig();
+
+    expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
+  });
+
+  test("reads the current appearance via simctl ui appearance", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    processExecutor.setCommandResponse(
+      `ui ${iosSimulator.deviceId} appearance`,
+      execResult("dark\n"),
+    );
+
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).getConfig();
+
+    expect(result.success).toBe(true);
+    expect(result.current).toEqual({ theme: "dark" });
+  });
+
+  test("sets the appearance via simctl ui appearance <value>", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    processExecutor.setCommandResponse(
+      `ui ${iosSimulator.deviceId} appearance`,
+      execResult("light\n"),
+    );
+
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+      theme: "dark",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.previous).toEqual({ theme: "light" });
+    expect(
+      processExecutor.wasCommandExecuted(
+        `xcrun simctl ui ${iosSimulator.deviceId} appearance dark`,
+      ),
+    ).toBe(true);
+  });
+
+  test("reset restores light appearance", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    processExecutor.setCommandResponse(
+      `ui ${iosSimulator.deviceId} appearance`,
+      execResult("dark\n"),
+    );
+
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+      reset: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      processExecutor.wasCommandExecuted(
+        `xcrun simctl ui ${iosSimulator.deviceId} appearance light`,
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects theme 'system' as an honest per-field refusal, issuing no command", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    processExecutor.setCommandResponse(
+      `ui ${iosSimulator.deviceId} appearance`,
+      execResult("light\n"),
+    );
+
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+      theme: "system",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("'system'");
+    expect(processExecutor.wasCommandExecuted("appearance system")).toBe(false);
+  });
+
+  test("rejects fontScale on the iOS Simulator without issuing a simctl appearance write", async () => {
+    const processExecutor = new FakeProcessExecutor();
+
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+      fontScale: 1.3,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("fontScale");
+    expect(processExecutor.getExecutedCommands().some((c) => c.includes("appearance "))).toBe(
+      false,
+    );
+  });
+
+  test("rejects density on the iOS Simulator", async () => {
+    const processExecutor = new FakeProcessExecutor();
+
+    const result = await new DisplayConfig(iosSimulator, { processExecutor }).setConfig({
+      density: 480,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("density");
   });
 });

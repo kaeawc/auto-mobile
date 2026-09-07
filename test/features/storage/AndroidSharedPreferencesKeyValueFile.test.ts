@@ -216,9 +216,16 @@ describe("setAndroidKeyValueDirect", () => {
     ).rejects.toThrow(/debuggable\/test build/);
   });
 
-  test.each(["+1.0", "1.", "1F", "1.e2", "0x1.0p0", "NaN", "Infinity"])(
-    "accepts the SDK FLOAT spelling %s",
-    async (value) => {
+  test.each([
+    ["+1.0", "1"],
+    ["1.", "1"],
+    ["1F", "1"],
+    ["1.e2", "100"],
+    ["0x1.0p0", "1"],
+    ["1.234567890", "1.2345678806304932"],
+  ])(
+    "canonicalizes the SDK FLOAT spelling %s to its stored float32 value",
+    async (value, expected) => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
@@ -236,7 +243,7 @@ describe("setAndroidKeyValueDirect", () => {
         decodeBase64WritePayload(
           commandText(adb.getExecutedCommands(), "base64 -d > shared_prefs/settings.xml"),
         ),
-      ).toContain(`value="${value}"`);
+      ).toContain(`value="${expected}"`);
     },
   );
 

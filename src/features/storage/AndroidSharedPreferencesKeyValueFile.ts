@@ -300,7 +300,27 @@ function parseAndroidFloat(value: string): string {
   if (!new RegExp(`^[+-]?(?:${decimal}|${hexadecimal}|${special})$`).test(trimmed)) {
     throw new ActionableError(`Expected FLOAT key-value, got '${value}'.`);
   }
-  return trimmed;
+  // SharedPreferences.putFloat stores an IEEE-754 single, not the caller's
+  // source spelling. Persist its decimal representation so the direct XML
+  // reader can consume hexadecimal, signed, and over-precise inputs exactly as
+  // the SDK route would after a read-back.
+  const parsed = parseAndroidFloatLiteral(trimmed);
+  return String(Math.fround(parsed));
+}
+
+function parseAndroidFloatLiteral(value: string): number {
+  const withoutSuffix = /[fFdD]$/.test(value) ? value.slice(0, -1) : value;
+  if (/^[+-]?0[xX]/.test(withoutSuffix)) {
+    const sign = withoutSuffix.startsWith("-") ? -1 : 1;
+    const unsigned = withoutSuffix.replace(/^[+-]?0[xX]/, "");
+    const [mantissa, exponentText] = unsigned.split(/[pP]/);
+    const [integer = "", fraction = ""] = mantissa!.split(".");
+    const significand =
+      Number.parseInt(integer || "0", 16) +
+      Number.parseInt(fraction || "0", 16) / 16 ** fraction.length;
+    return sign * significand * 2 ** Number.parseInt(exponentText!, 10);
+  }
+  return Number(withoutSuffix);
 }
 
 /** Shared actionable guidance for DataStore paths, which have no XML fallback. */

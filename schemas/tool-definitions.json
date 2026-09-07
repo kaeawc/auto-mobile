@@ -1079,6 +1079,91 @@
     }
   },
   {
+    "name": "displayConfig",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "fontScale": {
+          "description": "System text scale, or 'default' to remove Android's explicit override and restore its inherited default. Android only. Omit to leave unchanged.",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 10
+            },
+            {
+              "type": "string",
+              "const": "default"
+            }
+          ]
+        },
+        "density": {
+          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Android only; best-effort on physical devices. Omit to leave unchanged.",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 72
+            },
+            {
+              "type": "string",
+              "enum": ["smaller", "default", "larger"]
+            }
+          ]
+        },
+        "theme": {
+          "description": "Light, dark, system (follow-device), or custom (Android user-defined night-mode schedule) theme / night mode. Supported on Android; the iOS Simulator supports only 'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
+          "type": "string",
+          "enum": ["light", "dark", "system", "custom"]
+        },
+        "reset": {
+          "description": "Restore font scale, density, and theme to device defaults.",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "if": {
+        "required": ["reset"],
+        "properties": {
+          "reset": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": ["fontScale"]
+            },
+            {
+              "required": ["density"]
+            },
+            {
+              "required": ["theme"]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "dragAndDrop",
     "description": "Drag and drop element",
     "inputSchema": {

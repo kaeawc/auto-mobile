@@ -6,9 +6,9 @@ import type {
   SimCtl,
 } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 
-const buildExecResult = (stdout: string): ExecResult => ({
+const buildExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
-  stderr: "",
+  stderr,
   toString: () => stdout,
   trim: () => stdout.trim(),
   includes: (value: string) => stdout.includes(value),
@@ -41,6 +41,11 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
   private commandErrors = new Map<string, Error>();
   private argvResults = new Map<string, ExecResult>();
   private argvErrors = new Map<string, Error>();
+  private argvResultSequences = new Map<
+    string,
+    Array<{ stdout: string; stderr: string } | Error>
+  >();
+  private argvSequenceCursor = new Map<string, number>();
   private methodCalls = new Map<string, Array<Record<string, unknown>>>();
   private openSimulatorAppError: Error | null = null;
 
@@ -114,6 +119,28 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
     this.argvErrors.set(JSON.stringify(args), error);
   }
 
+  /**
+   * Stub a sequence of results/errors keyed by the exact argv array: each call
+   * consumes the next entry, and the final entry repeats once exhausted. Lets a
+   * pre-mutation read and a post-mutation read of the SAME argv (e.g. two
+   * `appearance` gets) diverge — the second failing while the first succeeds —
+   * without monkeypatching the fake (mirrors
+   * `FakeAdbClient.setCommandResultSequence`).
+   */
+  setCommandArgsResultSequence(
+    args: string[],
+    entries: Array<{ stdout: string; stderr?: string } | Error>,
+  ): void {
+    const key = JSON.stringify(args);
+    this.argvResultSequences.set(
+      key,
+      entries.map((entry) =>
+        entry instanceof Error ? entry : { stdout: entry.stdout, stderr: entry.stderr ?? "" },
+      ),
+    );
+    this.argvSequenceCursor.set(key, 0);
+  }
+
   getMethodCalls(methodName: string): Array<Record<string, unknown>> {
     return this.methodCalls.get(methodName) ?? [];
   }
@@ -155,6 +182,18 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
     this.recordCall("executeCommandArgs", { args, timeoutMs });
 
     const argvKey = JSON.stringify(args);
+
+    const sequence = this.argvResultSequences.get(argvKey);
+    if (sequence && sequence.length > 0) {
+      const cursor = this.argvSequenceCursor.get(argvKey) ?? 0;
+      const entry = sequence[Math.min(cursor, sequence.length - 1)];
+      this.argvSequenceCursor.set(argvKey, cursor + 1);
+      if (entry instanceof Error) {
+        throw entry;
+      }
+      return buildExecResult(entry.stdout, entry.stderr);
+    }
+
     const argvError = this.argvErrors.get(argvKey);
     if (argvError) {
       throw argvError;

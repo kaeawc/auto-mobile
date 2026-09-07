@@ -134,10 +134,15 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     fake.setObserveSequence([obs(10, "baseline"), obs(30, "B"), stale, obs(40, "A")]);
     const seen: string[] = [];
 
-    const outcome = await pollObserveUntil(fake, timer, { timeoutMs: 450, pollMs: 150 }, (value) => {
-      seen.push((value.viewHierarchy!.hierarchy.node as any).marker);
-      return false;
-    });
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 450, pollMs: 150 },
+      (value) => {
+        seen.push((value.viewHierarchy!.hierarchy.node as any).marker);
+        return false;
+      },
+    );
 
     expect(seen).toEqual(["baseline", "B", "A"]);
     expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("A");
@@ -215,5 +220,50 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
 
     expect(outcome.stopped).toBe(false);
     expect(outcome.polls).toBe(1);
+  });
+
+  test("does not accept an equal-timestamp delegate-unverified cache entry", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const unverifiedFallback = {
+      ...obs(20, "cached"),
+      freshness: { isFresh: true, verified: false },
+    } as ObserveResult;
+    fake.setObserveSequence([unverifiedFallback, obs(30, "verified")]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150, initialMinTimestampMs: 10 },
+      () => true,
+    );
+
+    expect(outcome.stopped).toBe(true);
+    expect(outcome.polls).toBe(2);
+    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("verified");
+  });
+
+  test("does not fast-fail on a stale Asleep cache entry", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const staleAsleep = {
+      ...obs(10, "cached-asleep"),
+      wakefulness: "Asleep",
+      freshness: { isFresh: true, verified: false },
+    } as ObserveResult;
+    fake.setObserveSequence([staleAsleep, obs(20, "awake")]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150, initialMinTimestampMs: 10 },
+      () => true,
+    );
+
+    expect(outcome.stopped).toBe(true);
+    expect(outcome.polls).toBe(2);
+    expect(outcome.observation.wakefulness).not.toBe("Asleep");
   });
 });

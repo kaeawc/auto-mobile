@@ -38,12 +38,21 @@ function makeHierarchy(marker: string): ViewHierarchyResult {
 }
 
 function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
+  const hierarchy = overrides.viewHierarchy;
+  const updatedAt = overrides.updatedAt ?? 1;
   return {
-    updatedAt: 1,
+    updatedAt,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     activeWindow,
     ...overrides,
+    // The polling contract accepts only device-authored hierarchy timestamps.
+    // Give each fixture its stated timestamp there too, rather than accidentally
+    // exercising timeout fallback with only the outer host-style metadata.
+    viewHierarchy:
+      hierarchy === undefined
+        ? undefined
+        : ({ ...hierarchy, updatedAt: hierarchy.updatedAt ?? updatedAt } as ViewHierarchyResult),
   } as ObserveResult;
 }
 

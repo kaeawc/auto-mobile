@@ -186,7 +186,13 @@ export async function pollObserveUntil(
     // wrong-window and incomplete hierarchies stale even when CtrlProxy was
     // able to stamp them; those trees must neither satisfy a predicate nor
     // advance stateful settle predicates.
-    const isExplicitlyStale = observation.freshness?.isFresh === false;
+    // `isFresh` can be normalized back to true when a cached hierarchy happens
+    // to meet a requested timestamp floor. The delegate's `verified: false`
+    // still says that no synchronous device read confirmed this sample, so it
+    // cannot become polling evidence merely because its cached timestamp is
+    // recent enough.
+    const isExplicitlyStale =
+      observation.freshness?.isFresh === false || observation.freshness?.verified === false;
     // Unseeded: the first observation is a throwaway baseline. It establishes
     // the entering reference (and the floor) but can never itself be terminal
     // evidence — it may be the pre-call cache the loop must read past.
@@ -215,7 +221,10 @@ export async function pollObserveUntil(
       newestTrustworthyObservation = observation;
     }
 
-    if (isScreenOff(observation)) {
+    // A screen-off terminal is only meaningful when the same observation passed
+    // the admission contract. A stale cached "Asleep" frame after the device
+    // wakes must not fast-fail a public wait or be promoted by tap settlement.
+    if (isScreenOff(observation) && isAdmissibleEvidence) {
       return { observation, polls, waitMs: timer.now() - start, stopped: false };
     }
 

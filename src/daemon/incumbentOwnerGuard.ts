@@ -46,9 +46,31 @@ export interface IncumbentOwnerGuardDeps {
  * It only ever preserves/consults a record that named a LIVE process OTHER than
  * this one at capture time, so a genuinely stale (post-crash) socket stays
  * reclaimable and this guard never fabricates a live owner.
+ *
+ * Overlapping hand-launched contenders (issue #6232, the overlapping
+ * interleaving): the on-disk record may itself be ANOTHER contender's early
+ * record (it clobbered the true incumbent before we read it). Such a record is
+ * not proof of who owns the socket, so this guard distinguishes it from a
+ * committed owner via {@link isCommittedOwnerRecord}: a committed owner is
+ * snapshotted and restorable; a live non-owner contender only latches a
+ * fail-closed flag so the lock-less bind refuses instead of restoring a
+ * non-owner's PID or unlinking the real winner after that contender exits.
  */
 export class IncumbentOwnerGuard {
   private incumbent: PidFileData | null = null;
+  /**
+   * Latched when the on-disk record at capture time named a LIVE foreign process
+   * that had NOT committed the socket bind — i.e. another hand-launched contender
+   * racing us, whose early-owner record (issue #2871) had already overwritten the
+   * true incumbent's. Such a record is NOT proof of who owns the socket, so we
+   * neither adopt it as the restorable incumbent nor let its later death read
+   * back as "socket is stale". Instead we fail CLOSED for the rest of this start
+   * so the lock-less bind refuses rather than unlinking a still-live winner
+   * (issue #6232, the overlapping-contender interleaving). The latch stays set
+   * even if that contender dies, because its death proves nothing about the true
+   * owner and a refused lock-less bind is always recoverable via `--daemon restart`.
+   */
+  private sawLiveContender = false;
   private readonly deps: IncumbentOwnerGuardDeps;
 
   constructor(deps?: Partial<IncumbentOwnerGuardDeps>) {
@@ -68,13 +90,36 @@ export class IncumbentOwnerGuard {
    * incumbent" so a stale socket stays reclaimable.
    */
   captureIncumbentBeforeOverwrite(): void {
+    this.incumbent = null;
+    this.sawLiveContender = false;
     const record = this.deps.readPidFile();
-    this.incumbent = this.isLiveForeign(record) ? record : null;
-    if (this.incumbent) {
-      logger.info(
-        `Captured live incumbent daemon owner record (pid ${this.incumbent.pid}) before overwriting it (issue #6232)`,
-      );
+    if (!this.isLiveForeign(record)) {
+      // Absent, ours, or dead: a genuinely stale (post-crash) socket stays
+      // reclaimable and there is no live sibling to preserve.
+      return;
     }
+    if (isCommittedOwnerRecord(record)) {
+      // Only a record written AFTER a committed socket bind carries build
+      // identity (issue #2871's pre-bind early record never does), so its
+      // presence proves the named process actually owned the socket. This is the
+      // one record we trust enough to snapshot for liveness AND to restore.
+      this.incumbent = record;
+      logger.info(
+        `Captured live incumbent daemon owner record (pid ${record.pid}) before overwriting it (issue #6232)`,
+      );
+      return;
+    }
+    // A LIVE foreign process left only an EARLY owner record: another
+    // hand-launched contender is racing us and has already clobbered the true
+    // incumbent's record with its own. Do NOT adopt its PID (restoring it would
+    // write a non-owner over the real record) and do NOT let its later death
+    // authorize unlinking the live winner — fail closed for this start instead
+    // (issue #6232, overlapping-contender interleaving).
+    this.sawLiveContender = true;
+    logger.info(
+      `Detected a live hand-launched contender (pid ${record.pid}) mid-startup; ` +
+        "failing the lock-less socket bind closed rather than treating its record as the socket owner (issue #6232)",
+    );
   }
 
   /**
@@ -93,7 +138,7 @@ export class IncumbentOwnerGuard {
    * is not reported as live.
    */
   hasLiveForeignOwner(): boolean {
-    return this.isLiveForeign(this.incumbent);
+    return this.sawLiveContender || this.isLiveForeign(this.incumbent);
   }
 
   /**
@@ -120,6 +165,21 @@ export class IncumbentOwnerGuard {
       record !== null && record.pid !== this.deps.selfPid && this.deps.isProcessRunning(record.pid)
     );
   }
+}
+
+/**
+ * Whether a PID record was written AFTER a committed socket bind. Only
+ * `Daemon.writePidFile()` (post-bind) stamps build identity onto the record; the
+ * pre-bind early-owner record (issue #2871) never carries `entryScript`/`buildId`.
+ * Presence of BOTH build-identity fields therefore proves the named process
+ * actually bound the socket, which is what separates the true incumbent from
+ * another hand-launched contender's early record. Requiring both (rather than
+ * either) fails safe: a real incumbent misread as a contender only makes a
+ * lock-less bind refuse (recoverable), whereas a contender misread as an owner
+ * would resurrect the #6232 brick.
+ */
+function isCommittedOwnerRecord(record: PidFileData): boolean {
+  return record.entryScript !== undefined && record.buildId !== undefined;
 }
 
 function defaultPersistPidFile(data: PidFileData): void {

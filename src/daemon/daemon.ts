@@ -514,86 +514,98 @@ export class Daemon {
     // isolated-path launch during our own multi-second startup window, instead
     // of failing closed on an unknown path. The ordering lives behind
     // runStartupPrologue() so it can be asserted with fakes (issue #2871).
-    await startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
-      runStartupPrologue({
-        writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
-        initializeDatabase: () => this.initializeDatabase(),
-      }),
-    );
-
-    // Find an available port. In strict-port mode (issue #6260, restart's
-    // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
-    // release preflight and its port+1..3 fallback: that preflight releases
-    // its probe socket before this process actually binds, leaving a window
-    // for a competitor to claim the canonical port and for the fallback to
-    // paper over it with a "successful" restart on the wrong port. Leaving
-    // `this.port` as the requested port makes the real `listen()` call below
-    // (in startHttpServer) the single atomic bind-or-fail attempt.
-    if (!this.strictPort) {
-      this.port = await this.findAvailablePort(this.port);
-    }
-
-    // Start HTTP MCP server
-    startupBenchmark.startPhase("httpServerStart");
-    await this.startHttpServer();
-    startupBenchmark.endPhase("httpServerStart");
-
-    // Initialize device pool BEFORE starting socket server
-    // This ensures clients connecting via socket will see initialized device pool
-    // Wait up to 5 seconds - emulators should already be running
-    logger.info("Initializing device pool...");
-    startupBenchmark.startPhase("deviceDiscovery");
-    await this.initializeDevicePoolWithTimeout(5000);
-    startupBenchmark.endPhase("deviceDiscovery");
-
-    // Initialize iOS CtrlProxy iOS connections for discovered iOS devices
-    // This establishes WebSocket connections early so observe calls are fast
-    await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
-
-    // Start Unix socket server AFTER device pool is ready
-    logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
-    logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
-    const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
-    logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
-    this.socketServer = new UnixSocketServer(
-      SOCKET_PATH,
-      mcpEndpoint,
-      undefined,
-      undefined,
-      FeatureFlagService.getInstance(),
-      undefined,
-      this.idGenerator,
-      // A hand-launched daemon (no startup lock) must refuse to unlink a live
-      // sibling's socket; only a manager-launched, lock-protected daemon may
-      // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
-      // incumbent snapshot, not the PID file we already overwrote above, so an
-      // inconclusive probe still sees the live sibling.
-      {
-        startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK,
-        ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
-      },
-    );
-    logger.info("Starting Unix socket server...");
-    startupBenchmark.startPhase("socketServerStart");
+    // The early-owner overwrite (issue #2871) inside runStartupPrologue() clobbers
+    // any live incumbent's PID record BEFORE we own anything, and cannot be
+    // deferred (the DB-ownership guard needs the owned path published first). So
+    // every step from that overwrite until a committed socket bind runs under a
+    // single restoration path: any failure in the interval — DB init, HTTP bind,
+    // device discovery, iOS services, OR the socket bind itself — leaves the
+    // shared PID file naming this about-to-exit contender, and because
+    // `socketBindCommitted` stays false exit cleanup is (correctly) suppressed and
+    // will not repair it. Restoring the captured live incumbent here keeps
+    // status()/`--daemon stop` pointed at the real winner (issue #6232; the
+    // socket-bind step was only one point in this interval).
     try {
+      await startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
+        runStartupPrologue({
+          writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+          initializeDatabase: () => this.initializeDatabase(),
+        }),
+      );
+
+      // Find an available port. In strict-port mode (issue #6260, restart's
+      // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
+      // release preflight and its port+1..3 fallback: that preflight releases
+      // its probe socket before this process actually binds, leaving a window
+      // for a competitor to claim the canonical port and for the fallback to
+      // paper over it with a "successful" restart on the wrong port. Leaving
+      // `this.port` as the requested port makes the real `listen()` call below
+      // (in startHttpServer) the single atomic bind-or-fail attempt.
+      if (!this.strictPort) {
+        this.port = await this.findAvailablePort(this.port);
+      }
+
+      // Start HTTP MCP server
+      startupBenchmark.startPhase("httpServerStart");
+      await this.startHttpServer();
+      startupBenchmark.endPhase("httpServerStart");
+
+      // Initialize device pool BEFORE starting socket server
+      // This ensures clients connecting via socket will see initialized device pool
+      // Wait up to 5 seconds - emulators should already be running
+      logger.info("Initializing device pool...");
+      startupBenchmark.startPhase("deviceDiscovery");
+      await this.initializeDevicePoolWithTimeout(5000);
+      startupBenchmark.endPhase("deviceDiscovery");
+
+      // Initialize iOS CtrlProxy iOS connections for discovered iOS devices
+      // This establishes WebSocket connections early so observe calls are fast
+      await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
+
+      // Start Unix socket server AFTER device pool is ready
+      logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
+      logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
+      const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
+      logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
+      this.socketServer = new UnixSocketServer(
+        SOCKET_PATH,
+        mcpEndpoint,
+        undefined,
+        undefined,
+        FeatureFlagService.getInstance(),
+        undefined,
+        this.idGenerator,
+        // A hand-launched daemon (no startup lock) must refuse to unlink a live
+        // sibling's socket; only a manager-launched, lock-protected daemon may
+        // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
+        // incumbent snapshot, not the PID file we already overwrote above, so an
+        // inconclusive probe still sees the live sibling.
+        {
+          startupLockHeld: DAEMON_LAUNCHED_UNDER_STARTUP_LOCK,
+          ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
+        },
+      );
+      logger.info("Starting Unix socket server...");
+      startupBenchmark.startPhase("socketServerStart");
       await this.socketServer.start();
+      // We now hold the socket bind. Only past this point may this process's exit /
+      // shutdown cleanup delete the shared socket/PID files: before it, the early
+      // owner record (issue #2871) makes the `expectedPid` self-check pass even
+      // though we do not own the socket, so a lock-less contender refused over a
+      // live sibling (issue #6232) must NOT clean up on exit and brick the winner
+      // (the #6140 failure mode via a bypassed launch). The socket bind is the
+      // single event that authorizes destructive cleanup.
+      this.socketBindCommitted = true;
+      startupBenchmark.endPhase("socketServerStart");
     } catch (error) {
-      // The bind guard refused a live sibling. Our early-owner overwrite left the
-      // shared PID file naming this (about-to-exit) contender; restore the live
-      // incumbent's record so status()/`--daemon stop` still find the winner
-      // (issue #6232).
-      this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+      // Restore the live incumbent's record on any pre-bind failure in the
+      // interval above (issue #6232). Guarded on the committed flag so a throw
+      // after the bind is committed never rewrites the file this process now owns.
+      if (!this.socketBindCommitted) {
+        this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+      }
       throw error;
     }
-    // We now hold the socket bind. Only past this point may this process's exit /
-    // shutdown cleanup delete the shared socket/PID files: before it, the early
-    // owner record (issue #2871) makes the `expectedPid` self-check pass even
-    // though we do not own the socket, so a lock-less contender refused over a
-    // live sibling (issue #6232) must NOT clean up on exit and brick the winner
-    // (the #6140 failure mode via a bypassed launch). The socket bind is the
-    // single event that authorizes destructive cleanup.
-    this.socketBindCommitted = true;
-    startupBenchmark.endPhase("socketServerStart");
     logger.info("Unix socket server started");
 
     startupBenchmark.startPhase("auxiliarySocketServerStart");

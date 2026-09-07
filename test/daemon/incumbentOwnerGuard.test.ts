@@ -11,7 +11,30 @@ import type { PidFileData } from "../../src/daemon/types";
  * #6140 socket-brick family). Every seam is injected so no test touches the real
  * `~/.auto-mobile` PID path.
  */
+/**
+ * A COMMITTED owner record: what a real incumbent daemon leaves after it has
+ * bound the socket. Only such a record carries build identity
+ * (`entryScript`/`buildId`), which is how the guard tells the true owner apart
+ * from another hand-launched contender's pre-bind early record (issue #6232).
+ */
 function record(pid: number): PidFileData {
+  return {
+    pid,
+    socketPath: "/tmp/daemon.sock",
+    port: 8080,
+    startedAt: 0,
+    version: "test",
+    entryScript: "/opt/auto-mobile/index.js",
+    buildId: "deadbeefcafef00d",
+  };
+}
+
+/**
+ * A pre-bind EARLY owner record (issue #2871): no build identity. Written by a
+ * contender still in startup that has NOT bound the socket — it is not proof of
+ * who owns the socket.
+ */
+function earlyRecord(pid: number): PidFileData {
   return { pid, socketPath: "/tmp/daemon.sock", port: 8080, startedAt: 0, version: "test" };
 }
 
@@ -124,5 +147,49 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
 
     expect(guard.restoreIncumbentAfterRefusal()).toBe(false);
     expect(writes).toHaveLength(0);
+  });
+
+  describe("overlapping hand-launched contenders (issue #6232)", () => {
+    const CONTENDER_PID = 5150;
+
+    test("P1: fails closed when the captured record is a live contender's EARLY record", () => {
+      // The true incumbent's record was already clobbered by another contender's
+      // early record before we read it, so the file names a live non-owner.
+      const { guard, file, running } = makeGuard();
+      running.add(CONTENDER_PID);
+      file.data = earlyRecord(CONTENDER_PID);
+
+      guard.captureIncumbentBeforeOverwrite();
+
+      // No committed owner was proven, so the lock-less bind must refuse rather
+      // than treat the contender's record as the socket owner.
+      expect(guard.hasLiveForeignOwner()).toBe(true);
+      expect(guard.asSocketOwnerLiveness().hasLiveForeignOwner()).toBe(true);
+    });
+
+    test("P1: stays closed even after the contender exits (its death proves nothing about the winner)", () => {
+      const { guard, file, running } = makeGuard();
+      running.add(CONTENDER_PID);
+      file.data = earlyRecord(CONTENDER_PID);
+
+      guard.captureIncumbentBeforeOverwrite();
+      // The contender refuses its own bind and exits; a naive re-check would now
+      // read "dead" and authorize unlinking the still-live winner's socket.
+      running.delete(CONTENDER_PID);
+
+      expect(guard.hasLiveForeignOwner()).toBe(true);
+    });
+
+    test("P2: never restores a contender's EARLY record over the real owner's", () => {
+      const { guard, file, running, writes } = makeGuard();
+      running.add(CONTENDER_PID);
+      file.data = earlyRecord(CONTENDER_PID);
+
+      guard.captureIncumbentBeforeOverwrite();
+
+      // Restoring the contender's PID would clobber the true incumbent's record.
+      expect(guard.restoreIncumbentAfterRefusal()).toBe(false);
+      expect(writes).toHaveLength(0);
+    });
   });
 });

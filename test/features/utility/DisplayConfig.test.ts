@@ -123,6 +123,16 @@ describe("DisplayConfig getConfig", () => {
     expect(result.supported.density).toBe("partial");
   });
 
+  test("reports the physical effective density when Android has no override", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { density: "Physical density: 440\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+    expect(result.success).toBe(true);
+    expect(result.current?.density).toBe(440);
+  });
+
   test("fails an iOS Simulator read when simctl does not report an appearance", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(["ui", iosSimulator.deviceId, "appearance"], { stdout: "\n" });
@@ -213,6 +223,22 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).toContain("shell wm density 560");
   });
 
+  test("fails closed when Android accepts a density command but retains the old value", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    // The OEM shell accepts the write but clamps or ignores it. Both snapshots
+    // still report the physical density, so success must not be inferred from
+    // command completion alone.
+    seedReads(adbFactory, { density: "Physical density: 440\n" });
+
+    const result = await new DisplayConfig(androidPhysical, { adbFactory }).setConfig({
+      density: 560,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.applied?.density).toBe(440);
+    expect(result.error).toContain("Display density remained 440");
+  });
+
   test("resolves a relative density bucket against physical density", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { density: "Physical density: 440\n" });
@@ -225,6 +251,23 @@ describe("DisplayConfig setConfig", () => {
       .map((c) => c.command);
     // 440 * 1.15 = 506
     expect(commands).toContain("shell wm density 506");
+  });
+
+  test("rejects a relative density bucket below Android's supported floor", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { density: "Physical density: 80\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      density: "smaller",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("68 dpi is below Android's 72 dpi minimum");
+    const commands = adbFactory
+      .getFakeClient()
+      .getCommandCalls()
+      .map((c) => c.command);
+    expect(commands).not.toContain("shell wm density 68");
   });
 
   test("resolves a relative density bucket against physical density, not a prior override", async () => {

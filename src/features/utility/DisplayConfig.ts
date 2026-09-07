@@ -53,6 +53,9 @@ const DENSITY_BUCKET_FACTORS: Record<Exclude<DensityBucket, "default">, number> 
   larger: 1.15,
 };
 
+/** `wm density` rejects values below this AOSP-supported floor. */
+const MIN_ANDROID_DENSITY_DPI = 72;
+
 /** The AOSP default text scale — restored on `reset`. */
 export const DEFAULT_FONT_SCALE = 1.0;
 
@@ -89,7 +92,7 @@ export interface DisplayConfigResult {
   supported: DisplayConfigSupport;
   /** Current values (getter form). */
   current?: DisplayConfigValues;
-  /** Values applied by a set/reset. */
+  /** Values observed immediately after a set/reset. */
   applied?: DisplayConfigValues;
   /** Values read immediately before a set/reset, so the client can restore. */
   previous?: DisplayConfigValues;
@@ -558,7 +561,7 @@ export class DisplayConfig {
     let physicalDensity: number | undefined;
     try {
       const raw = await this.readRawValues(adb);
-      previous = raw.values;
+      previous = raw.restorableValues;
       physicalDensity = raw.physicalDensity;
     } catch (error) {
       logger.warn(`[DisplayConfig] setConfig pre-read failed: ${errorMessage(error)}`, error);
@@ -584,7 +587,14 @@ export class DisplayConfig {
     let applied: DisplayConfigValues | undefined;
     let readError: string | undefined;
     try {
-      applied = await this.readValues(adb);
+      const postMutation = await this.readRawValues(adb);
+      applied = postMutation.values;
+      const verificationErrors = this.verifyAndroidAppliedConfig(
+        input,
+        postMutation,
+        physicalDensity,
+      );
+      errors.push(...verificationErrors);
     } catch (error) {
       logger.warn(`[DisplayConfig] setConfig post-read failed: ${errorMessage(error)}`, error);
       readError = `failed to read applied values: ${errorMessage(error)}`;
@@ -609,14 +619,15 @@ export class DisplayConfig {
 
   /**
    * Like {@link readValues}, but also surfaces the device's PHYSICAL density
-   * (discarded from the public `DisplayConfigValues.density`, which reports the
-   * EFFECTIVE — possibly already-overridden — density) so relative density
+   * so relative density
    * buckets can be resolved against the true hardware density rather than a
    * prior override, which would otherwise compound (issue #6096).
    */
-  private async readRawValues(
-    adb: AdbExecutor,
-  ): Promise<{ values: DisplayConfigValues; physicalDensity: number | undefined }> {
+  private async readRawValues(adb: AdbExecutor): Promise<{
+    values: DisplayConfigValues;
+    restorableValues: DisplayConfigValues;
+    physicalDensity: number | undefined;
+  }> {
     const [fontRaw, densityRaw, nightRaw] = await Promise.all([
       this.run(adb, "shell settings get system font_scale"),
       this.run(adb, "shell wm density"),
@@ -639,18 +650,20 @@ export class DisplayConfig {
       throw new Error(`Could not parse Android display baseline: ${unreadable.join(", ")}.`);
     }
 
-    // Every advertised Android field has a restorable baseline. Returning a
-    // partial success would permit a later mutation with no corresponding
-    // value for the caller to restore.
+    // `values` reports the actual effective density for observations and
+    // post-mutation confirmation. `restorableValues` retains the distinct
+    // no-override token for `previous`, because replaying the physical number
+    // would create an override instead of restoring the original state.
     const values: DisplayConfigValues = {
       fontScale,
-      // See DisplayConfigValues.density: only report a number when a `wm
-      // density` override is actually present, else the restorable `"default"`
-      // bucket (issue #6096 review).
-      density: parsedDensity.overridden ? parsedDensity.effective : "default",
+      density: parsedDensity.effective,
       theme,
     };
-    return { values, physicalDensity: parsedDensity.physical };
+    const restorableValues: DisplayConfigValues = {
+      ...values,
+      density: parsedDensity.overridden ? parsedDensity.effective : "default",
+    };
+    return { values, restorableValues, physicalDensity: parsedDensity.physical };
   }
 
   private async applyChanges(
@@ -667,14 +680,11 @@ export class DisplayConfig {
       errors.push(...(await this.runChecked(adb, command)));
     }
     if (input.density !== undefined) {
-      const command = this.resolveDensityCommand(input.density, physicalDensity);
-      if (command === null) {
-        errors.push(
-          `Cannot resolve relative density bucket '${String(input.density)}': the device's ` +
-            "physical density could not be read.",
-        );
+      const resolution = this.resolveDensityCommand(input.density, physicalDensity);
+      if ("error" in resolution) {
+        errors.push(resolution.error);
       } else {
-        errors.push(...(await this.runChecked(adb, command)));
+        errors.push(...(await this.runChecked(adb, resolution.command)));
       }
     }
     if (input.theme !== undefined) {
@@ -702,18 +712,81 @@ export class DisplayConfig {
   private resolveDensityCommand(
     density: DensityInput,
     physical: number | undefined,
-  ): string | null {
+  ): { command: string } | { error: string } {
     if (typeof density === "number") {
-      return `shell wm density ${Math.round(density)}`;
+      return { command: `shell wm density ${Math.round(density)}` };
     }
     if (density === "default") {
-      return "shell wm density reset";
+      return { command: "shell wm density reset" };
     }
     if (physical === undefined) {
-      return null;
+      return {
+        error:
+          `Cannot resolve relative density bucket '${density}': the device's physical density ` +
+          "could not be read.",
+      };
     }
     const scaled = Math.round(physical * DENSITY_BUCKET_FACTORS[density]);
-    return `shell wm density ${scaled}`;
+    if (scaled < MIN_ANDROID_DENSITY_DPI) {
+      return {
+        error:
+          `Cannot resolve relative density bucket '${density}': ${scaled} dpi is below Android's ` +
+          `${MIN_ANDROID_DENSITY_DPI} dpi minimum.`,
+      };
+    }
+    return { command: `shell wm density ${scaled}` };
+  }
+
+  private verifyAndroidAppliedConfig(
+    input: SetDisplayConfigInput,
+    postMutation: Awaited<ReturnType<DisplayConfig["readRawValues"]>>,
+    physicalDensity: number | undefined,
+  ): string[] {
+    const errors: string[] = [];
+    const expectedFontScale = input.reset ? "default" : input.fontScale;
+    const appliedFontScale = postMutation.restorableValues.fontScale;
+    if (
+      expectedFontScale !== undefined &&
+      appliedFontScale !== expectedFontScale &&
+      // Android builds may report the reset setting as either absent or the
+      // effective AOSP default. Both represent a successfully reset state.
+      !(expectedFontScale === "default" && appliedFontScale === DEFAULT_FONT_SCALE)
+    ) {
+      errors.push(
+        `Font scale remained ${String(appliedFontScale)} after requesting ${String(expectedFontScale)}.`,
+      );
+    }
+
+    const expectedDensity = input.reset
+      ? "default"
+      : input.density === undefined
+        ? undefined
+        : typeof input.density === "number"
+          ? Math.round(input.density)
+          : input.density === "default"
+            ? "default"
+            : physicalDensity === undefined
+              ? undefined
+              : Math.round(physicalDensity * DENSITY_BUCKET_FACTORS[input.density]);
+    if (expectedDensity !== undefined) {
+      const actualDensity =
+        expectedDensity === "default"
+          ? postMutation.restorableValues.density
+          : postMutation.values.density;
+      if (actualDensity !== expectedDensity) {
+        errors.push(
+          `Display density remained ${String(actualDensity)} after requesting ${String(expectedDensity)}.`,
+        );
+      }
+    }
+
+    const expectedTheme = input.reset ? "light" : input.theme;
+    if (expectedTheme !== undefined && postMutation.values.theme !== expectedTheme) {
+      errors.push(
+        `Night mode remained ${String(postMutation.values.theme)} after requesting ${expectedTheme}.`,
+      );
+    }
+    return errors;
   }
 
   /**

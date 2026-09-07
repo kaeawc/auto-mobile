@@ -880,7 +880,6 @@ export class TapOnElement extends BaseVisualChange {
       case "android": {
         const rawHierarchy = await refreshAndroidViewHierarchy(
           this.accessibilityService,
-          this.viewHierarchy,
           effectiveTimeoutMs,
           signal,
         );

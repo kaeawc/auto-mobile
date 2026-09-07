@@ -679,6 +679,61 @@ describe("WcagAudit", function () {
     });
   });
 
+  describe("Screen ID generation (#6252)", function () {
+    /**
+     * Records the `screenId` passed to `getBaseline` so tests can assert on it
+     * without reaching into the private `generateScreenId` method.
+     */
+    class RecordingBaselineManager implements WcagBaselineStore {
+      lastScreenId: string | undefined;
+
+      async getBaseline(
+        screenId: string,
+      ): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null> {
+        this.lastScreenId = screenId;
+        return null;
+      }
+
+      async saveBaseline(): Promise<void> {}
+      async clearBaseline(): Promise<void> {}
+    }
+
+    it("derives the screen id from the node's $ attributes, not top-level fields", async function () {
+      // Real hierarchies carry attributes under `$` (xml2js/CtrlProxy shape), not
+      // as top-level `class`/`resource-id` fields directly on the node. Before
+      // #6252, `generateScreenId` read `rootNode.class` / `rootNode["resource-id"]`
+      // directly, which are always undefined on this shape, so every screen
+      // collapsed to the same "unknown:" id.
+      const hierarchy: ViewHierarchyNode = {
+        $: { class: "com.example.MainActivity", "resource-id": "root-container" },
+      };
+      const recorder = new RecordingBaselineManager();
+      const withRecorder = new WcagAudit(new FakeTimer(), recorder);
+
+      await withRecorder.audit([], hierarchy, undefined, "com.test", {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: true,
+      });
+
+      expect(recorder.lastScreenId).toBe("com.test:com.example.MainActivity:root-container");
+    });
+
+    it("falls back to 'unknown' when $ attributes are absent", async function () {
+      const hierarchy: ViewHierarchyNode = { $: {} };
+      const recorder = new RecordingBaselineManager();
+      const withRecorder = new WcagAudit(new FakeTimer(), recorder);
+
+      await withRecorder.audit([], hierarchy, undefined, "com.test", {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: true,
+      });
+
+      expect(recorder.lastScreenId).toBe("com.test:unknown:");
+    });
+  });
+
   describe("Baseline Suppression", function () {
     const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
     // Two clickable, unlabelled, undersized elements → 4 violations.

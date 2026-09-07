@@ -115,6 +115,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private dragResult: A11yDragResult | null = null;
   private pinchResult: A11yPinchResult | null = null;
   private viewHierarchyResultOverride: ViewHierarchyResult | null = null;
+  private lastRequestHierarchySyncArgs: {
+    disableAllFiltering?: boolean;
+    timeoutMs?: number;
+  } | null = null;
 
   /**
    * Configure hierarchy data to be returned by getAccessibilityHierarchy
@@ -361,6 +365,19 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   /**
+   * Args the most recent `requestHierarchySync` call was invoked with — lets
+   * tests verify positional arguments (e.g. `timeoutMs`) were actually
+   * forwarded to the right parameter rather than only checking the return
+   * value, which callers can get "right" for the wrong reason (issue #6252).
+   */
+  getLastRequestHierarchySyncArgs(): {
+    disableAllFiltering?: boolean;
+    timeoutMs?: number;
+  } | null {
+    return this.lastRequestHierarchySyncArgs;
+  }
+
+  /**
    * Clear all call history
    */
   clearHistory(): void {
@@ -437,8 +454,12 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async requestHierarchySync(
     perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     this.hierarchyRequestCount++;
+    this.lastRequestHierarchySyncArgs = { disableAllFiltering, timeoutMs };
     await this.applyDelay("requestHierarchySync");
     this.checkFailure("requestHierarchySync");
 

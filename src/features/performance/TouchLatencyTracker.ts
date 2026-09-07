@@ -314,6 +314,14 @@ export class TouchLatencyTracker {
     // skew the latency being measured. When no inert point is currently
     // available, abort this sample rather than tapping a possibly-live control.
     let tapPoint = touchLocation;
+    // The frame-response baseline must reflect the counter state immediately
+    // before the timed tap. When the inert-point re-validation runs it awaits a
+    // device round-trip (re-capturing a hierarchy) during which the app may
+    // render frames of its own; those must be folded into the baseline below,
+    // not misattributed to the synthetic touch (issue #6228). Refreshed after
+    // the re-observation await; falls back to the quiescence snapshot when no
+    // resolver is wired (no intervening await, so it is already current).
+    let responseBaseline = baselineStats;
     if (this.inertTouchPointResolver) {
       const freshPoint = await perf.track("touchLatencyRevalidatePoint", () =>
         this.inertTouchPointResolver!.resolveInertTouchPoint(),
@@ -327,12 +335,25 @@ export class TouchLatencyTracker {
         return { latencyMs: null, animating: false, obstructed: true, tapPoint: touchLocation };
       }
       tapPoint = freshPoint;
+
+      // Re-read the gfxinfo counters AFTER the re-observation await, right before
+      // the tap, so any frame rendered during re-observe is part of the baseline
+      // and the first post-tap poll doesn't read it as the tap's response.
+      const { stdout: refreshedStdout } = await perf.track("adbGfxinfoBaselinePostRevalidate", () =>
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+      );
+      responseBaseline = this.idle.parseMetrics(refreshedStdout);
     }
 
     // Inject touch and immediately start measuring
     await this.injectTouch(tapPoint.x, tapPoint.y, perf);
 
-    const latencyMs = await this.measureFrameResponse(packageName, baselineStats, maxWaitMs, perf);
+    const latencyMs = await this.measureFrameResponse(
+      packageName,
+      responseBaseline,
+      maxWaitMs,
+      perf,
+    );
     return { latencyMs, animating: false, obstructed: false, tapPoint };
   }
 

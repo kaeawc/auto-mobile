@@ -1102,20 +1102,24 @@ describe("TouchLatencyTracker - Unit Tests", function () {
     // must use the CURRENT inert point, not the stale one from the first tap.
     test("re-derives the inert point before each tap so a moved control never reuses a stale point (#6228)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
-      let pollInSample = 0;
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      // Model frames as rendered only AFTER the tap, not by pure poll count: the
+      // quiescence snapshots AND the refreshed post-revalidation baseline (#6228)
+      // all read idle, then real frames land once the synthetic tap fires. Gate
+      // on the recorded tap count (per sample, relative to the last reset).
+      let tapsAtReset = 0;
+      let framesAfterTap = 0;
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        const taps = dynamicAdb.getExecutedCommands().filter((c) => c.includes("input tap")).length;
         if (command.includes("reset")) {
-          pollInSample = 0;
+          tapsAtReset = taps;
+          framesAfterTap = 0;
           return { stdout: "", stderr: "" };
         }
-        pollInSample++;
-        // Both pre-tap snapshots idle, then a real frame after the tap - every
-        // sample produces a clean measurement.
-        const totalFrames = pollInSample <= 2 ? 0 : 3;
+        const totalFrames = taps > tapsAtReset ? (framesAfterTap += 3) : 0;
         return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
       });
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       // A stale first point, then a DIFFERENT current point on the second tap -
@@ -1197,6 +1201,59 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.sampleCount).toBe(0);
       expect(result.animating).toBeFalsy();
       expect(result.error?.toLowerCase()).toContain("no longer inert");
+    });
+
+    // Regression (#6228, PRRT...Jdy): the frame-response baseline must be
+    // refreshed AFTER the re-observation await, immediately before the timed
+    // tap. A frame the app renders WHILE the hierarchy is being re-observed must
+    // be folded into the baseline, not misattributed as the tap's response.
+    test("does not attribute a frame rendered during re-observe to the tap (#6228)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      let frames = 0;
+
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
+        if (command.includes("reset")) {
+          frames = 0;
+          return { stdout: "", stderr: "" };
+        }
+        // Frames only ever come from the re-observe render below; the tap itself
+        // renders nothing. So if the baseline is refreshed after re-observe, the
+        // post-tap polls see no NEW frame and the sample correctly times out.
+        return { stdout: `Total frames rendered: ${frames}`, stderr: "" };
+      });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      // The resolver simulates the app rendering a frame *while* the hierarchy is
+      // being re-observed (before the tap). If this frame leaked into the tap's
+      // measurement window it would be a false, ~0ms latency reading.
+      const resolver = {
+        resolveInertTouchPoint: async () => {
+          frames += 5;
+          return { x: 500, y: 900 };
+        },
+      };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer, resolver);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 1, maxWaitMs: 50 },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      // A tap WAS injected (we got past re-validation with a fresh point)...
+      const tapCommands = dynamicAdb.getExecutedCommands().filter((c) => c.includes("input tap"));
+      expect(tapCommands).toHaveLength(1);
+      // ...but the frame rendered during re-observe was already in the refreshed
+      // baseline, so it was NOT counted as the tap's response - the sample reads
+      // as no-response rather than a spurious ~0ms latency.
+      expect(result.success).toBe(false);
+      expect(result.latencyMs).toBe(0);
     });
 
     test("should handle errors gracefully and return error result", async function () {

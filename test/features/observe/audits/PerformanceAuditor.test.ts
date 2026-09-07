@@ -900,9 +900,13 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
     });
   }
 
+  // Enclosing observation timestamp: fresh captures default to 2026-01-01, so
+  // this earlier value makes them strictly newer (passes the minTimestamp floor).
+  const enclosingUpdatedAt = Date.parse("2025-12-31T00:00:00.000Z");
+
   test("re-captures a fresh, device-verified hierarchy without recursing into the audit", async () => {
     const observeScreen = new FakeObserveScreen([resultWithControlAt()]);
-    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
 
     const point = await resolver.resolveInertTouchPoint();
 
@@ -918,6 +922,64 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
     expect(opts.skipAccessibilityAudit).toBe(true);
   });
 
+  // #6228 (PRRT...Jdu): skipWaitForFresh:false alone can reuse the SAME cached
+  // hierarchy the audit already saw, so the re-capture must pass a minTimestamp
+  // strictly newer than the enclosing observation to force a genuinely new tree.
+  test("forces a hierarchy newer than the enclosing observation via minTimestamp", async () => {
+    const observeScreen = new FakeObserveScreen([resultWithControlAt()]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
+
+    await resolver.resolveInertTouchPoint();
+
+    const opts = observeScreen.executeOptions[0];
+    expect(opts.minTimestamp).toBe(enclosingUpdatedAt + 1);
+    expect(opts.minTimestamp!).toBeGreaterThan(enclosingUpdatedAt);
+  });
+
+  // #6228 (PRRT...Jdu): if the capture layer surfaces a tree that is NOT newer
+  // than the enclosing observation (late push / sync fallback), the resolver
+  // must abort rather than reuse that stale capture.
+  test("aborts when the re-capture is not newer than the enclosing observation", async () => {
+    // Fresh result carries the SAME timestamp as the enclosing observation.
+    const staleReuse = makeResult({
+      updatedAt: enclosingUpdatedAt,
+      activeWindow: { appId, activityName: "Main" } as any,
+      viewHierarchy: { hierarchy: {} as any, windows: [fullWindow] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+    const observeScreen = new FakeObserveScreen([staleReuse]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
+
+    expect(await resolver.resolveInertTouchPoint()).toBeNull();
+  });
+
+  // #6228 (PRRT...Jdv): if the foreground moves from the audited app to another
+  // app mid-audit, deriving bounds for the audited app would target the wrong
+  // window - abort the sample instead.
+  test("aborts when the foreground app changed during the audit", async () => {
+    const otherApp = makeResult({
+      activeWindow: { appId: "com.other.app", activityName: "Main" } as any,
+      viewHierarchy: { hierarchy: {} as any, windows: [fullWindow] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+    const observeScreen = new FakeObserveScreen([otherApp]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
+
+    expect(await resolver.resolveInertTouchPoint()).toBeNull();
+  });
+
+  // #6228 (PRRT...Jd4): the nested observation must not share the enclosing
+  // PerformanceTracker, whose open blocks it would close via getTimings().
+  test("uses an isolated performance tracker for the nested observation", async () => {
+    const observeScreen = new FakeObserveScreen([resultWithControlAt()]);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
+
+    await resolver.resolveInertTouchPoint();
+
+    const opts = observeScreen.executeOptions[0];
+    expect(opts.perf).toBeInstanceOf(NoOpPerformanceTracker);
+  });
+
   // The core #6228 scenario: a control moved over the window center between
   // taps. The resolver re-derives from the fresh capture and returns an inert
   // point that is NOT under the now-covering control.
@@ -928,7 +990,7 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
       clickable: true,
     } as Element;
     const observeScreen = new FakeObserveScreen([resultWithControlAt(centerControl)]);
-    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
 
     const point = await resolver.resolveInertTouchPoint();
 
@@ -947,14 +1009,14 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
       viewHierarchy: { hierarchy: {} as any } as any,
     });
     const observeScreen = new FakeObserveScreen([noWindow]);
-    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
 
     expect(await resolver.resolveInertTouchPoint()).toBeNull();
   });
 
   test("returns null (aborts the tap) when the re-capture throws", async () => {
     const observeScreen = new FakeObserveScreen([new Error("ctrlproxy timeout")]);
-    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId);
+    const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);
 
     expect(await resolver.resolveInertTouchPoint()).toBeNull();
   });

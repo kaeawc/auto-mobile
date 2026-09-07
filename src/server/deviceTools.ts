@@ -4193,52 +4193,49 @@ export function registerDeviceTools() {
     if (!liveSession) {
       return false;
     }
-    if (args.readiness === "automation") {
-      const perf = createPerformanceTracker(true);
-      perf.serial("provisionDeviceReplay");
-      try {
-        const totalDeadlineMs =
-          deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
-        await ensureProvisionDeviceReadiness(
-          args,
-          deps,
-          liveSession.device,
-          `platform=${args.device.platform} name=${args.device.name}`,
-          totalDeadlineMs,
-          perf,
-          signal,
+    // A replay can re-establish readiness for a persisted session whose cache
+    // was lost during daemon recovery. Keep that setup, its live-session
+    // recheck, and the readiness record in one device transaction: a tool that
+    // resolves the session concurrently must join this marker rather than see
+    // an unrecorded level after CtrlProxy setup and start a second reset/setup.
+    return await trackDeviceAcquisitionReadiness(
+      deviceReadinessLockKey(liveSession.device.platform, liveSession.device.deviceId),
+      async () => {
+        if (args.readiness === "automation") {
+          const perf = createPerformanceTracker(true);
+          perf.serial("provisionDeviceReplay");
+          try {
+            const totalDeadlineMs =
+              deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+            await ensureProvisionDeviceReadiness(
+              args,
+              deps,
+              liveSession.device,
+              `platform=${args.device.platform} name=${args.device.name}`,
+              totalDeadlineMs,
+              perf,
+              signal,
+            );
+          } finally {
+            perf.end();
+          }
+        }
+        const revalidatedSession = getPersistedProvisionDeviceSession(result);
+        if (!revalidatedSession || !getLiveProvisionDeviceSession(result)) {
+          return false;
+        }
+        const daemonState = DaemonState.getInstance();
+        recordAcquiredSessionReadiness(
+          daemonState,
+          revalidatedSession.sessionId,
+          resolveProvisionDeviceAchievedReadiness(args.readiness),
         );
-      } finally {
-        perf.end();
-      }
-    }
-    const revalidatedSession = getPersistedProvisionDeviceSession(result);
-    if (!revalidatedSession || !getLiveProvisionDeviceSession(result)) {
-      return false;
-    }
-    const daemonState = DaemonState.getInstance();
-    // #6227 round 7: this point confirms the persisted session is live and
-    // bound to the requested device (`getLiveProvisionDeviceSession` re-check
-    // above), and — when `args.readiness === "automation"` — that
-    // `ensureProvisionDeviceReadiness` just re-verified (or re-established, if
-    // a prior CtrlProxy connection had dropped) automation readiness for it.
-    // Record the readiness level `args.readiness` implies the same way the
-    // initial `bootExactProvisionedDevice` acquisition does
-    // (`resolveProvisionDeviceAchievedReadiness`), so a session whose cache
-    // lost its recorded level (e.g. a fresh `Session` incarnation after daemon
-    // recovery) doesn't report unrecorded readiness to a later tool call and
-    // redundantly re-run setup. `setDeviceReadiness` is monotonic, so this is
-    // a no-op when the level is already recorded at or above what applies
-    // here.
-    recordAcquiredSessionReadiness(
-      daemonState,
-      revalidatedSession.sessionId,
-      resolveProvisionDeviceAchievedReadiness(args.readiness),
+        await daemonState
+          .getDevicePool()
+          .attachAutolockSessionToMcpSession(revalidatedSession.sessionId, args.__mcpSessionId);
+        return true;
+      },
     );
-    await daemonState
-      .getDevicePool()
-      .attachAutolockSessionToMcpSession(revalidatedSession.sessionId, args.__mcpSessionId);
-    return true;
   }
 
   async function revalidateProvisionDeviceReplay(
@@ -4654,30 +4651,35 @@ export function registerDeviceTools() {
       validatePooledDeviceMapping(boot.device, requestedIdentity);
       releaseReadinessReservation = await reserveProvisionDeviceReadiness(boot.device);
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
-      await ensureProvisionDeviceReadiness(
-        args,
-        deps,
-        boot.device,
-        requestedIdentity,
-        totalDeadlineMs,
-        perf,
-        signal,
-      );
-      validatePooledDeviceMapping(boot.device, requestedIdentity);
-      publishWarmDeviceReady(boot.source, boot.device.deviceId);
-      const sessionId = await bindBootedDeviceSession(
-        boot.device,
-        {
-          platform: args.device.platform,
-          name: args.device.name,
-          timeoutMs: args.timeoutMs,
-          __mcpSessionId: args.__mcpSessionId,
+      const sessionId = await trackDeviceAcquisitionReadiness(
+        deviceReadinessLockKey(boot.device.platform, boot.device.deviceId),
+        async () => {
+          await ensureProvisionDeviceReadiness(
+            args,
+            deps,
+            boot!.device,
+            requestedIdentity,
+            totalDeadlineMs,
+            perf,
+            signal,
+          );
+          validatePooledDeviceMapping(boot!.device, requestedIdentity);
+          publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
+          return await bindBootedDeviceSession(
+            boot!.device,
+            {
+              platform: args.device.platform,
+              name: args.device.name,
+              timeoutMs: args.timeoutMs,
+              __mcpSessionId: args.__mcpSessionId,
+            },
+            provisioned.device,
+            boot!.processHandle,
+            undefined,
+            undefined,
+            resolveProvisionDeviceAchievedReadiness(args.readiness),
+          );
         },
-        provisioned.device,
-        boot.processHandle,
-        undefined,
-        undefined,
-        resolveProvisionDeviceAchievedReadiness(args.readiness),
       );
       ownershipTransferred = true;
       return { device: boot.device, sessionId, source: boot.source };

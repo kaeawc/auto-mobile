@@ -19,6 +19,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceSession } from "../../src/db/types";
 
@@ -966,6 +967,70 @@ describe("ToolExecutionContext", () => {
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(0);
     expect(sessionManager.getDeviceReadiness("session-acquisition-race")).toBe("automationReady");
+  });
+
+  test("cancels while queued for a device readiness transaction without starting setup (#6280)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+    await sessionManager.createSession("session-cancelled-readiness", "device-1", "android");
+
+    const release = await acquireDeviceReadinessLock(deviceReadinessLockKey("android", "device-1"));
+    const controller = new AbortController();
+    const context = createToolExecutionContext(
+      "session-cancelled-readiness",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+      undefined,
+      undefined,
+      false,
+      controller.signal,
+    );
+
+    controller.abort(new Error("request cancelled"));
+    await expect(context).rejects.toThrow("request cancelled");
+    release();
+    expect(setupCalls).toBe(0);
+  });
+
+  test("runs session readiness setup with the request abort signal in its ambient context (#6280)", async () => {
+    let setupSignal: AbortSignal | undefined;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupSignal = getAbortSignal();
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-signal-readiness", "device-1", "android");
+    const controller = new AbortController();
+
+    await createToolExecutionContext(
+      "session-signal-readiness",
+      sessionManager,
+      devicePool,
+      { ...sessionOptions, deviceReadiness: "automationReady" },
+      undefined,
+      undefined,
+      false,
+      controller.signal,
+    );
+
+    expect(setupSignal).toBe(controller.signal);
   });
 
   test("should not run accessibility setup for existing sessions", async () => {

@@ -554,6 +554,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // discussion for why the reported #6069 bound-connection bypass could not
         // be reproduced through any current public route in-harness.
         true,
+        signal,
       );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;

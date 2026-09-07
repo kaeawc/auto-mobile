@@ -13,6 +13,7 @@ import {
   getDeviceAcquisitionReadiness,
   withDeviceReadinessLock,
 } from "../utils/deviceReadinessLock";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import { serverConfig } from "../utils/ServerConfig";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 
@@ -101,6 +102,7 @@ export async function createToolExecutionContext(
   // persisted, non-terminal row (restart recovery) is admissible. Internal callers
   // that intentionally mint fresh derived sessions (device labels) leave it false.
   requireIssuedSession = false,
+  signal?: AbortSignal,
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
@@ -128,8 +130,13 @@ export async function createToolExecutionContext(
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
 
-  await sessionManager.trackSessionSetup(session, () =>
-    setupSession(session, existingSession === session, sessionManager, sessionOptions),
+  await awaitReadinessWork(
+    sessionManager.trackSessionSetup(session, () =>
+      runWithAbortSignal(signal, () =>
+        setupSession(session, existingSession === session, sessionManager, sessionOptions, signal),
+      ),
+    ),
+    signal,
   );
   ensureSessionIsCurrent(session, sessionManager);
 
@@ -224,8 +231,10 @@ async function ensureReadinessUpgraded(
   session: Session,
   sessionManager: SessionManager,
   requiredReadiness: DeviceReadinessLevel,
+  signal?: AbortSignal,
 ): Promise<void> {
   for (;;) {
+    signal?.throwIfAborted();
     if (
       isReadinessSatisfied(sessionManager.getDeviceReadiness(session.sessionId), requiredReadiness)
     ) {
@@ -245,7 +254,7 @@ async function ensureReadinessUpgraded(
       // executes synchronously up to (and including) the
       // `setDeviceReadiness` write, so it can't race a concurrent
       // automationReady flight's own write.
-      await runDeviceReadinessSetup(session, sessionManager, "booted");
+      await runDeviceReadinessSetup(session, sessionManager, "booted", signal);
       return;
     }
 
@@ -254,7 +263,7 @@ async function ensureReadinessUpgraded(
       // Another caller is already upgrading this session's readiness — wait
       // for it rather than racing a second `runDeviceReadinessSetup` call,
       // then loop back to re-check whether it reached the level we need.
-      await inFlight;
+      await awaitReadinessWork(inFlight, signal);
       continue;
     }
 
@@ -270,7 +279,7 @@ async function ensureReadinessUpgraded(
       deviceReadinessLockKey(session.platform, session.assignedDevice),
     );
     if (acquisitionInFlight) {
-      await acquisitionInFlight;
+      await awaitReadinessWork(acquisitionInFlight, signal);
       continue;
     }
 
@@ -278,13 +287,14 @@ async function ensureReadinessUpgraded(
       session,
       sessionManager,
       requiredReadiness,
+      signal,
     ).finally(() => {
       if (readinessUpgradeInFlight.get(session) === setupPromise) {
         readinessUpgradeInFlight.delete(session);
       }
     });
     readinessUpgradeInFlight.set(session, setupPromise);
-    await setupPromise;
+    await awaitReadinessWork(setupPromise, signal);
     return;
   }
 }
@@ -294,6 +304,7 @@ async function setupSession(
   existingSession: boolean,
   sessionManager: SessionManager,
   sessionOptions: SessionOptions,
+  signal?: AbortSignal,
 ): Promise<void> {
   await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
   const requiredReadiness: DeviceReadinessLevel =
@@ -309,7 +320,7 @@ async function setupSession(
     // disconnected/unprepared device. `ensureReadinessUpgraded` serializes
     // concurrent upgrades for the same session (single-flight, #6227 P1
     // follow-up) so two racing callers can't both trigger setup.
-    await ensureReadinessUpgraded(session, sessionManager, requiredReadiness);
+    await ensureReadinessUpgraded(session, sessionManager, requiredReadiness, signal);
     return;
   }
 
@@ -320,7 +331,7 @@ async function setupSession(
   // caller racing for the same recovered session — whether it takes the
   // fresh or existing-session path — joins the one in-flight setup instead
   // of starting a second.
-  await ensureReadinessUpgraded(session, sessionManager, requiredReadiness);
+  await ensureReadinessUpgraded(session, sessionManager, requiredReadiness, signal);
   ensureSessionIsCurrent(session, sessionManager);
 
   // Start test coverage session for navigation graph tracking
@@ -347,7 +358,9 @@ async function runDeviceReadinessSetup(
   session: Session,
   sessionManager: SessionManager,
   requiredReadiness: DeviceReadinessLevel,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   if (session.platform === "android" && requiredReadiness !== "booted") {
     // #6227 P1 follow-up: serialize this session-scoped upgrade against the
     // SAME per-device readiness lock the acquisition paths
@@ -362,15 +375,42 @@ async function runDeviceReadinessSetup(
     await withDeviceReadinessLock(
       deviceReadinessLockKey(session.platform, session.assignedDevice),
       () =>
-        ensureAccessibilityServiceReady(
-          session.assignedDevice,
-          session.sessionId,
-          session.platform,
+        runWithAbortSignal(signal, () =>
+          ensureAccessibilityServiceReady(
+            session.assignedDevice,
+            session.sessionId,
+            session.platform,
+            defaultTimer,
+            signal,
+          ),
         ),
+      { signal },
     );
   }
   ensureSessionIsCurrent(session, sessionManager);
   sessionManager.setDeviceReadiness(session.sessionId, requiredReadiness);
+}
+
+/** Await shared readiness work without making a cancelled request wait for it. */
+function awaitReadinessWork<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return work;
+  }
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    void work.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager): void {
@@ -431,6 +471,7 @@ async function ensureAccessibilityServiceReady(
   sessionId: string,
   platform: Platform,
   timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<void> {
   const device: BootedDevice = {
     name: deviceId,
@@ -447,6 +488,7 @@ async function ensureAccessibilityServiceReady(
   const RETRY_DELAY_MS = 3000;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    signal?.throwIfAborted();
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityServiceReady");
 
@@ -468,7 +510,7 @@ async function ensureAccessibilityServiceReady(
         logger.warn(
           `[A11yRetry] Transient failure on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms: ${errorMsg}`,
         );
-        await timer.sleep(RETRY_DELAY_MS);
+        await awaitReadinessWork(timer.sleep(RETRY_DELAY_MS), signal);
         continue;
       }
 
@@ -482,7 +524,7 @@ async function ensureAccessibilityServiceReady(
     }
 
     const connected = await perf.track("waitForConnection", () =>
-      readinessDriver.waitForConnection(),
+      awaitReadinessWork(readinessDriver.waitForConnection(), signal),
     );
 
     perf.end();

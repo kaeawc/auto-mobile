@@ -68,6 +68,10 @@ export function acquireDeviceReadinessLock(
   key: string,
   options: AcquireDeviceReadinessLockOptions = {},
 ): Promise<DeviceReadinessLockRelease> {
+  // A caller that was cancelled before it reached the lock must never start
+  // setup merely because there happened to be no current holder. Queued
+  // callers already get this behavior through their abort listener below.
+  options.signal?.throwIfAborted();
   const timer = options.timer ?? defaultTimer;
   const lock = readinessLocksByDevice.get(key) ?? { locked: false, waiters: [] };
   readinessLocksByDevice.set(key, lock);

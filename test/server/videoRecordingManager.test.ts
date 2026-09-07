@@ -18,6 +18,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { VideoRecorderService } from "../../src/features/video";
 import { ActionableError, type BootedDevice } from "../../src/models";
+import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
   listVideoRecordings,
   interruptVideoRecording,
@@ -185,6 +186,43 @@ describe("videoRecordingManager", () => {
     await expect(startVideoRecording({ device: testDevice })).resolves.toMatchObject({
       recordingId: expect.any(String),
     });
+  });
+
+  // issue #6307 P2: distinct from the confirmed-teardown case above — when the
+  // backend cannot confirm the device-side process exited
+  // (ProcessTeardownUnconfirmedError), VideoRecorderService deliberately
+  // RETAINS the handle because the capture may still be alive. The manager
+  // must not still mark the durable row "interrupted" in that case: doing so
+  // would drop it from implicit stop discovery and make it archive-eligible
+  // while its in-memory owner keeps blocking a new recording on the device.
+  test("preserves active state when the backend cannot confirm teardown (issue #6307)", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+
+    fakeBackend.stop = async () => {
+      throw new ProcessTeardownUnconfirmedError(
+        "Process did not exit within 5000ms plus 5000ms after SIGKILL",
+      );
+    };
+
+    let caught: unknown;
+    try {
+      await stopVideoRecording(active.recordingId);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ActionableError);
+
+    // The row must stay "recording" (not "interrupted"): the service still
+    // owns the capture and a client listing/checking status must keep seeing
+    // it as active/being torn down, not silently dropped.
+    const record = await fakeRepository.getRecording(active.recordingId);
+    expect(record?.status).toBe("recording");
+
+    // The service retained ownership, so a second recording on the same
+    // device must still be blocked.
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow();
   });
 
   test("shares manager finalization when shutdown overlaps a user stop", async () => {

@@ -1035,20 +1035,44 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
   try {
     metadata = await videoRecorderService.stopRecording(resolvedId);
   } catch (error) {
-    // The capture backend already tore down its device-side process before
-    // this failure (e.g. a genuine `adb pull` failure after retries, issue
-    // #6291) — clean up the now-orphaned "recording" row via the same
-    // canonical interruption path used elsewhere, instead of leaving it
-    // stuck in "recording" forever, then surface a structured error rather
-    // than the backend's raw exec message.
-    try {
-      await interruptVideoRecording(resolvedId);
-    } catch (cleanupError) {
+    // A stop failure means one of two very different things at the service
+    // layer (see VideoRecorderService.handleStopFailure), and the durable row
+    // must track which one happened, not assume the worse case unconditionally
+    // (issue #6307 P2):
+    //   - Teardown unconfirmed (e.g. ProcessTeardownUnconfirmedError): the
+    //     service deliberately RETAINS the handle because the capture process
+    //     may still be alive, so a new recording on this device stays blocked.
+    //     Marking the row "interrupted" here would still drop it from implicit
+    //     stop discovery and make it eligible for archive access/deletion,
+    //     even though its in-memory owner is still live and blocking — a
+    //     contradiction between the durable row and the retained owner. Leave
+    //     the row's "recording" status (and its highlight session) intact so
+    //     status/listing keeps reflecting that it is still active/being torn
+    //     down; a later teardown/cleanup retry (shutdown, forceStop) can still
+    //     reach the retained handle.
+    //   - Confirmed teardown (e.g. a genuine `adb pull` failure after
+    //     retries, issue #6291): the backend already tore down the
+    //     device-side process, so ownership was released — clean up the now-
+    //     orphaned "recording" row via the same canonical interruption path
+    //     used elsewhere, instead of leaving it stuck in "recording" forever.
+    const stillOwnedByService = videoRecorderService.listActiveRecordingIds().includes(resolvedId);
+    if (stillOwnedByService) {
       logger.warn(
-        `[VideoRecording] Failed to clean up orphaned recording ${resolvedId} after a failed stop: ${cleanupError}`,
-        cleanupError,
+        `[VideoRecording] Stop of ${resolvedId} could not confirm teardown; the service ` +
+          `retained ownership, so its recording row stays active: ${error}`,
       );
+    } else {
+      try {
+        await interruptVideoRecording(resolvedId);
+      } catch (cleanupError) {
+        logger.warn(
+          `[VideoRecording] Failed to clean up orphaned recording ${resolvedId} after a failed stop: ${cleanupError}`,
+          cleanupError,
+        );
+      }
     }
+    // Surface a structured error rather than the backend's raw exec message
+    // either way.
     throw toActionableError(error, `Failed to stop video recording ${resolvedId}`);
   }
   const highlightSession = disposeHighlightSession(resolvedId);

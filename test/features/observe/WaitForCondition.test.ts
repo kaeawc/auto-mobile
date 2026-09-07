@@ -154,7 +154,9 @@ describe("RealWaitForCondition", () => {
     const waitFor = new RealWaitForCondition(fake, timer);
     await waitFor.execute(predicate, { timeoutMs: 2500, pollMs: 150 });
 
-    expect(fake.getExecuteMinTimestamps()).toEqual([0, 10, 20]);
+    // 0 (unseeded baseline) -> 11 (forced strictly past the baseline 10 for a
+    // genuine post-invocation capture) -> 20 (inclusive monotonic floor).
+    expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 20]);
   });
 
   test("built-in `appear` predicate reuses the finder and resolves when the element shows up", async () => {

@@ -407,6 +407,10 @@ export const freshnessSchema = z
     isFresh: z.boolean(),
     staleDurationMs: z.number().int().optional(),
     warning: z.string().optional(),
+    /** Stable discriminant for WHY freshness failed (only when `isFresh` is false). */
+    category: z
+      .enum(["cache_age", "window_identity", "requested_min", "no_timestamp", "unavailable"])
+      .optional(),
   })
   .passthrough();
 

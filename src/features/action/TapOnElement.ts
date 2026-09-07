@@ -114,6 +114,18 @@ const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
 const POST_TAP_EFFECT_TIMEOUT_MS = 2500;
 const POST_TAP_EFFECT_POLL_MS = 150;
 
+/**
+ * Minimum wall-clock time a hierarchy-only post-tap frame must hold UNCHANGED
+ * before it is accepted as the settled destination (issue #6284 P1). Set to two
+ * full poll intervals so a settle can never be declared on the first, zero-
+ * elapsed comparison, nor after a single interval — a real quiet period has to
+ * elapse. A delayed dialog/navigation frame `B` that arrives more than one poll
+ * interval after a transient `A` (the normal case for the delayed transitions
+ * this settle targets) therefore resets the quiet period and is reached, rather
+ * than being pre-empted by settling on `A`.
+ */
+const POST_TAP_SETTLE_QUIET_PERIOD_MS = 2 * POST_TAP_EFFECT_POLL_MS;
+
 /** Brief debounce between the original tap and the retry tap when a ghost tap
  *  was detected. Just enough to let any inflight gesture queue drain. */
 const PRE_RETRY_DELAY_MS = 100;
@@ -674,21 +686,25 @@ export class TapOnElement extends BaseVisualChange {
    * transient intermediate mutation before trusting it as terminal (issue
    * #6284). Polls (via the injected waiter/FakeTimer seam) until either:
    *  - `activeWindow` changes vs the baseline — authoritative, stop at once; or
-   *  - the hierarchy is unchanged across TWO consecutive poll comparisons — a
-   *    real `pollMs` interval genuinely elapsed with no further change, so the
-   *    transition has settled.
+   *  - the hierarchy hash holds UNCHANGED for a real quiet period of wall-clock
+   *    time (`POST_TAP_SETTLE_QUIET_PERIOD_MS`) — the transition has settled.
    *
-   * Requiring the hash to hold across two comparisons (not one against the
-   * pre-loop seed) is what makes `baseline → A → A → B` reach B: the very first
-   * poll is taken immediately with no `pollMs` sleep, so a single equal-hash
-   * comparison proves nothing about elapsed time, and a transient A that has not
-   * yet given way to B would otherwise be trusted after one frame.
+   * Settlement is a wall-clock quiet-period DEADLINE, not a count of equal
+   * comparisons, and that is what makes `baseline → A → A → B` reach B. A
+   * comparison count treats the very first poll — taken immediately, with no
+   * `pollMs` sleep yet elapsed — as if it proved stability, so a transient A
+   * that persists just one interval before a delayed B would settle on A. The
+   * deadline instead starts a clock when a hash first appears and accepts it
+   * only once it has genuinely held for the quiet period; a B that arrives after
+   * that interval resets the clock and is reached. A hierarchy-less (null-hash)
+   * poll cannot start or extend a quiet period — it resets the run — so a run of
+   * rootless captures never masquerades as a stable screen.
    *
    * Staleness robustness lives in the poll floor, NOT in this predicate and NOT
-   * in `compareViewHierarchy`: the monotonic device-clock floor (seeded here
-   * from the entering capture's `updatedAt`) means the device never re-serves a
-   * capture older than the floor, so two equal hashes can only be the same fresh
-   * static screen — never a stale snapshot returned twice masking a later fresh
+   * in `compareViewHierarchy`: the entering reference (seeded here from the
+   * entering capture's `updatedAt`) forces every poll strictly past that
+   * capture, so an unchanged hash across the quiet period is a genuinely-held
+   * fresh screen — never a stale snapshot re-served masking a later fresh
    * destination. That keeps `compareViewHierarchy` a pure hash diff, so a stale
    * baseline can never block a legitimate same-window dialog diff (the
    * entanglement root of the earlier incremental attempt).
@@ -698,24 +714,33 @@ export class TapOnElement extends BaseVisualChange {
     currentObservation: ObserveResult,
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
-    let lastObservation = currentObservation;
-    let consecutiveStablePolls = 0;
+    // Hash whose quiet period is currently being timed, and when that run began.
+    let quietHash: string | null = null;
+    let quietSinceMs = 0;
     const settled = await this.waitForCondition.execute(
       (observation) => {
         const activeWindowChanged =
           this.compareActiveWindow(previousObservation, observation)?.screenChanged === true;
+        if (activeWindowChanged) {
+          return { matched: true };
+        }
         const currentHash = this.hashViewHierarchy(observation.viewHierarchy ?? null);
-        const priorHash = this.hashViewHierarchy(lastObservation.viewHierarchy ?? null);
-        // Require two non-null hashes before trusting equality as "settled":
-        // two consecutive hierarchy-less polls both hash to null and would
-        // otherwise look identical, stopping the settle before a later real
-        // destination capture ever arrives.
-        const hierarchyEqualToPriorPoll =
-          currentHash !== null && priorHash !== null && currentHash === priorHash;
-        consecutiveStablePolls = hierarchyEqualToPriorPoll ? consecutiveStablePolls + 1 : 0;
-        const hierarchyStableSincePriorPoll = consecutiveStablePolls >= 2;
-        lastObservation = observation;
-        return { matched: activeWindowChanged || hierarchyStableSincePriorPoll };
+        const now = this.timer.now();
+        if (currentHash === null) {
+          // A hierarchy-less poll proves nothing about stability; reset the run.
+          quietHash = null;
+          return { matched: false };
+        }
+        if (currentHash !== quietHash) {
+          // A new (or first) hash: start its quiet-period clock now. Never
+          // settles on this frame — a real interval must elapse first.
+          quietHash = currentHash;
+          quietSinceMs = now;
+          return { matched: false };
+        }
+        // Same hash as the run's start: accept only once it has genuinely held
+        // for the full quiet period of wall-clock time.
+        return { matched: now - quietSinceMs >= POST_TAP_SETTLE_QUIET_PERIOD_MS };
       },
       {
         timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
@@ -889,20 +914,32 @@ export class TapOnElement extends BaseVisualChange {
    * Realign a cached observation's freshness verdict to the live re-capture that
    * just replaced its hierarchy (issue #6284). The refresh verified the tree
    * against the device on THIS call, so a lingering pre-refresh `isFresh: false`
-   * verdict no longer describes the attached data. Only ever promotes a stale
-   * verdict to fresh; never touches a verdict that was already fresh (or absent).
-   * Called exclusively from {@link replaceObservationHierarchy}.
+   * verdict no longer describes the attached data.
+   *
+   * Promote ONLY a `cache_age` failure — a stale/unverified/over-budget cache
+   * entry, which is exactly what swapping in a freshly-captured hierarchy
+   * resolves. A `window_identity` failure (wrong-window, status-bar-only,
+   * activity-attribution mismatch, incomplete capture, missing foreground
+   * window — issue #6284 P1) describes WHICH window/app the tree belongs to; the
+   * refresh replaced only `viewHierarchy` and did not recollect or reconcile
+   * `activeWindow`/attribution, and the re-capture may itself be from the wrong
+   * window, so clearing that warning would make an internally-inconsistent
+   * result look trustworthy. A verdict that was already fresh (or absent), or
+   * failed for any other reason, is left untouched. Called exclusively from
+   * {@link replaceObservationHierarchy}.
    */
   private markObservationFreshAfterSyncRefresh(observeResult: ObserveResult): void {
-    if (observeResult.freshness?.isFresh === false) {
+    const freshness = observeResult.freshness;
+    if (freshness?.isFresh === false && freshness.category === "cache_age") {
       observeResult.freshness = {
-        ...observeResult.freshness,
+        ...freshness,
         isFresh: true,
         verified: true,
         actualTimestamp: this.timer.now(),
         ageMs: 0,
         staleDurationMs: undefined,
         warning: undefined,
+        category: undefined,
       };
     }
   }

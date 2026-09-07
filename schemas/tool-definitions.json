@@ -6412,6 +6412,16 @@
             },
             "warning": {
               "type": "string"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "cache_age",
+                "window_identity",
+                "requested_min",
+                "no_timestamp",
+                "unavailable"
+              ]
             }
           },
           "required": ["isFresh"],
@@ -10048,6 +10058,16 @@
                     },
                     "warning": {
                       "type": "string"
+                    },
+                    "category": {
+                      "type": "string",
+                      "enum": [
+                        "cache_age",
+                        "window_identity",
+                        "requested_min",
+                        "no_timestamp",
+                        "unavailable"
+                      ]
                     }
                   },
                   "required": ["isFresh"],

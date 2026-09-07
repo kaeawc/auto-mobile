@@ -30,13 +30,13 @@ function obs(updatedAt: number, marker: string): ObserveResult {
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
-  test("seeds the first poll from the caller's DEVICE-domain floor, never the host clock", async () => {
+  test("forces the first poll STRICTLY past the caller's DEVICE-domain seed, never the host clock", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     // Host clock is far ahead of the device clock (device trails the daemon).
     timer.advanceTime(1_000_000);
     const fake = new FakeObserveScreen();
-    fake.setObserveSequence([obs(10, "a"), obs(20, "b")]);
+    fake.setObserveSequence([obs(20, "a"), obs(30, "b")]);
 
     let polls = 0;
     const outcome = await pollObserveUntil(
@@ -47,25 +47,37 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     );
 
     expect(outcome.stopped).toBe(true);
-    // First poll floors on the device-domain seed (10), NOT the host clock
-    // (1_000_000). A host-domain floor would reject every genuinely fresh
-    // device capture and burn the whole budget.
-    expect(fake.getExecuteMinTimestamps()).toEqual([10, 10]);
+    // First poll is forced strictly past the device-domain seed (10 -> 11), NOT
+    // the host clock (1_000_000): it can neither re-read nor accept the entering
+    // capture as terminal evidence (#6284 P1). Once a strictly-newer capture
+    // (20) arrives the floor relaxes to the inclusive monotonic device floor.
+    expect(fake.getExecuteMinTimestamps()).toEqual([11, 20]);
   });
 
-  test("with no seed, the first poll floors at 0 (no host clock) then seeds from the first observation's device timestamp", async () => {
+  test("an unseeded first poll is a non-terminal baseline; terminal evidence must be strictly newer", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     timer.advanceTime(1_000_000); // host clock far ahead
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([obs(100, "a"), obs(200, "b")]);
 
-    let polls = 0;
-    await pollObserveUntil(fake, timer, { timeoutMs: 5000, pollMs: 150 }, () => ++polls >= 2);
+    // A predicate that would match on EVERY observation (including the pre-call
+    // baseline). It must not terminate on the baseline — only on a genuine
+    // post-invocation capture.
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150 },
+      () => true,
+    );
 
-    // First poll: no floor (0), not the host clock. Second poll: floor seeded
-    // from the FIRST observation's own device timestamp (100).
-    expect(fake.getExecuteMinTimestamps()).toEqual([0, 100]);
+    expect(outcome.stopped).toBe(true);
+    // The baseline poll (100) is suppressed; the loop stops on poll 2 (200).
+    expect(outcome.polls).toBe(2);
+    expect(outcome.observation.updatedAt).toBe(200);
+    // First poll: no floor (0), not the host clock. Second poll: forced strictly
+    // past the baseline's own device timestamp (100 -> 101).
+    expect(fake.getExecuteMinTimestamps()).toEqual([0, 101]);
   });
 
   test("a stale/cached poll cannot LOWER the monotonic floor", async () => {
@@ -79,9 +91,40 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     let polls = 0;
     await pollObserveUntil(fake, timer, { timeoutMs: 5000, pollMs: 150 }, () => ++polls >= 4);
 
-    // floor: undefined -> 10 -> 30 -> max(30,20)=30 -> 40. The 4th poll's floor
-    // is 30, NOT the stale 20 — so the same stale hash cannot be re-served.
-    expect(fake.getExecuteMinTimestamps()).toEqual([0, 10, 30, 30]);
+    // minTimestamp: 0 (unseeded baseline) -> 11 (forced strictly past the
+    // baseline 10, still no post-invocation capture) -> 30 (inclusive floor,
+    // post-invocation reached) -> max(30,20)=30. The 4th poll's floor is 30, NOT
+    // the stale 20 — the same stale hash cannot be re-served.
+    expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 30, 30]);
+  });
+
+  test("a seeded poll that re-serves the entering capture is never accepted as terminal (#6284 P1)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // The delegate first re-serves the very entering capture (updatedAt 10 ===
+    // the seed) before a genuinely-newer destination (20) arrives. A match on
+    // the re-served entering capture would report a condition that may already
+    // be false; only the strictly-newer capture may terminate.
+    fake.setObserveSequence([obs(10, "entering"), obs(20, "destination")]);
+
+    const matchedMarkers: string[] = [];
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 5000, pollMs: 150, initialMinTimestampMs: 10 },
+      (observation) => {
+        matchedMarkers.push((observation.viewHierarchy!.hierarchy.node as any).marker as string);
+        return true; // would match on every poll, including the re-served entering one
+      },
+    );
+
+    expect(outcome.stopped).toBe(true);
+    // Both polls were evaluated, but only the strictly-newer "destination"
+    // terminated — the re-served "entering" capture was ignored as non-terminal.
+    expect(matchedMarkers).toEqual(["entering", "destination"]);
+    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("destination");
+    expect(outcome.observation.updatedAt).toBe(20);
   });
 
   test("a screen-off (Asleep) capture fast-fails the loop rather than burning the budget", async () => {

@@ -90,6 +90,28 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
     expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
   });
 
+  test("a transient A that persists BEYOND one poll interval before B still reaches B (#6284 P1)", async () => {
+    const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("baseline") });
+    const transientA = makeObservation({ updatedAt: 10, viewHierarchy: makeHierarchy("A") });
+    // A holds for two poll frames (a normal delay for the transitions this
+    // targets) before the real destination B arrives. A comparison-count settle
+    // would lock onto A after a single interval; the wall-clock quiet-period
+    // deadline requires A to hold for the FULL quiet period, which it never does
+    // — B arrives first and is reached.
+    const tap = createTapWithSettleSequence([
+      makeObservation({ updatedAt: 20, viewHierarchy: makeHierarchy("A") }),
+      makeObservation({ updatedAt: 30, viewHierarchy: makeHierarchy("A") }),
+      makeObservation({ updatedAt: 40, viewHierarchy: makeHierarchy("B") }),
+      makeObservation({ updatedAt: 50, viewHierarchy: makeHierarchy("B") }),
+      makeObservation({ updatedAt: 60, viewHierarchy: makeHierarchy("B") }),
+    ]);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+
+    expect(postTap.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
+    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
+  });
+
   test("a same-activity dialog (activeWindow unchanged) settles and is reported changed (#6151)", async () => {
     const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("alarm-list") });
     // Dialogs don't move activeWindow; only the hierarchy reflects them.
@@ -167,7 +189,7 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
 });
 
 describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
-  test("replaceObservationHierarchy promotes a stale verdict to fresh when refreshed from device", () => {
+  test("replaceObservationHierarchy promotes a cache_age stale verdict to fresh when refreshed from device", () => {
     const tap = createTapOnElement();
     const observation = makeObservation({
       viewHierarchy: makeHierarchy("stale"),
@@ -175,6 +197,7 @@ describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
       freshness: {
         isFresh: false,
         verified: false,
+        category: "cache_age",
         warning: "served from host-side cache without re-verification",
       },
     });
@@ -192,6 +215,38 @@ describe("freshness realignment at hierarchy-replace sites (#6284)", () => {
     expect(observation.freshness?.isFresh).toBe(true);
     expect(observation.freshness?.verified).toBe(true);
     expect(observation.freshness?.warning).toBeUndefined();
+    expect(observation.freshness?.category).toBeUndefined();
+  });
+
+  test("replaceObservationHierarchy does NOT promote a non-cache-age freshness failure (#6284 P1)", () => {
+    const tap = createTapOnElement();
+    // A wrong-window / attribution failure is NOT resolved by swapping in a
+    // freshly-captured hierarchy (which may itself be from the wrong window):
+    // the refresh recollected only viewHierarchy, not activeWindow/attribution.
+    const windowIdentityFailure = {
+      isFresh: false as const,
+      verified: false,
+      category: "window_identity" as const,
+      warning:
+        "Observed hierarchy is from com.other, but the device's current top resumed activity is com.example.app.",
+    };
+    const observation = makeObservation({
+      viewHierarchy: makeHierarchy("wrong-window"),
+      freshness: { ...windowIdentityFailure },
+    });
+    const fresh = {
+      packageName: "com.example.app",
+      hierarchy: { node: { marker: "fresh" } },
+      screenWidth: 1080,
+      screenHeight: 1920,
+    } as unknown as ViewHierarchyResult;
+
+    (tap as any).replaceObservationHierarchy(observation, fresh, true);
+
+    expect(observation.viewHierarchy).toBe(fresh);
+    // The hierarchy was swapped, but the wrong-window verdict must survive — the
+    // result must not be forged trustworthy.
+    expect(observation.freshness).toEqual(windowIdentityFailure);
   });
 
   test("replaceObservationHierarchy leaves freshness untouched when NOT refreshed from device", () => {

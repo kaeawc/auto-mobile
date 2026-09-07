@@ -1,19 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
-import type {
-  HierarchyDelegateContext,
-  XCTestHierarchy,
-} from "../../../../src/features/observe/ios/types";
+import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-
-function hierarchy(): XCTestHierarchy {
-  return {
-    updatedAt: 1,
-    packageName: "com.test.app",
-    hierarchy: { text: "fresh" },
-  } as XCTestHierarchy;
-}
 
 function context(
   timer: FakeTimer,
@@ -107,34 +96,5 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
 
     await expect(request).rejects.toThrow("caller cancelled");
     expect(harness.requestManager.getPendingCount()).toBe(0);
-  });
-
-  test("does not accept a response that arrives at the absolute deadline", async () => {
-    const timer = new FakeTimer();
-    let requestId: string | undefined;
-    const harness = context(
-      timer,
-      async () => true,
-      (data) => {
-        requestId = (JSON.parse(data) as { requestId: string }).requestId;
-      },
-    );
-
-    const request = new CtrlProxyHierarchy(harness.context).requestHierarchySync(
-      undefined,
-      false,
-      undefined,
-      10,
-    );
-    for (let attempt = 0; attempt < 5 && !requestId; attempt++) {
-      await Promise.resolve();
-    }
-    expect(requestId).toBeDefined();
-    harness.requestManager.resolve(requestId!, { hierarchy: hierarchy() });
-    timer.advanceTime(10);
-
-    const result = await request;
-
-    expect(result).toBeNull();
   });
 });

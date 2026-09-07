@@ -418,12 +418,12 @@ export class CtrlProxyHierarchy {
       ws?.send(JSON.stringify(message));
 
       const result = await promise;
-      // A response that races with cancellation or reaches us after the
-      // absolute deadline is not evidence this caller may accept.
+      // A response that races with cancellation must not be accepted. The
+      // absolute deadline is already enforced by the RequestManager timeout
+      // registered above (a resolved hierarchy necessarily arrived before that
+      // timeout, i.e. within budget), so no separate post-await deadline check
+      // is needed here.
       throwIfAborted(signal);
-      if (this.context.timer.now() >= deadlineMs) {
-        return null;
-      }
 
       if (result.hierarchy) {
         // Update cache

@@ -18,10 +18,12 @@ import { z } from "zod/v4";
 describe("PlanExecutor barrier-generation resume (#6234)", () => {
   let planExecutor: DefaultPlanExecutor;
   let barrierArrivals: string[];
+  let actionArrivals: string[];
 
   beforeEach(() => {
     planExecutor = new DefaultPlanExecutor();
     barrierArrivals = [];
+    actionArrivals = [];
 
     const daemonState = DaemonState.getInstance();
     if (daemonState.isInitialized()) {
@@ -55,7 +57,10 @@ describe("PlanExecutor barrier-generation resume (#6234)", () => {
       "fakeAction",
       "Fake action tool for #6234 resume test",
       actionSchema,
-      mock(async () => ({ success: true })),
+      mock(async (params: any) => {
+        actionArrivals.push(params.device);
+        return { success: true };
+      }),
     );
   });
 
@@ -103,5 +108,26 @@ describe("PlanExecutor barrier-generation resume (#6234)", () => {
 
     expect(result.success).toBe(true);
     expect(barrierArrivals.sort()).toEqual(["A", "B"]);
+  });
+
+  test("recovery replays only the changing-participant generation, not completed destructive work", async () => {
+    const plan: Plan = {
+      name: "changing-barrier-participants",
+      mcpVersion: "1.0",
+      devices: ["A", "B", "C"],
+      steps: [
+        { tool: "barrier", params: { device: "A", lock: "L", deviceCount: 2 } },
+        { tool: "barrier", params: { device: "B", lock: "L", deviceCount: 2 } },
+        { tool: "fakeAction", params: { device: "B", text: "destructive" } },
+        { tool: "barrier", params: { device: "A", lock: "L", deviceCount: 2 } },
+        { tool: "barrier", params: { device: "C", lock: "L", deviceCount: 2 } },
+      ],
+    };
+
+    const result = await planExecutor.executePlan(plan, 4, "android");
+
+    expect(result.success).toBe(true);
+    expect(barrierArrivals.sort()).toEqual(["A", "C"]);
+    expect(actionArrivals).toEqual([]);
   });
 });

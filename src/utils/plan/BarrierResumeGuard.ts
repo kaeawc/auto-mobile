@@ -1,3 +1,4 @@
+import { ActionableError } from "../../models";
 import { Plan, PlanStep } from "../../models/Plan";
 
 /**
@@ -54,26 +55,22 @@ interface Arrival {
  * `{0,1}`/`{2,3}` a global-order slice would produce.
  *
  * We therefore reconstruct each device's track (its arrivals in plan order) and
- * read them off column-by-column: column `g` across all tracks is generation
- * `g`, and its span is `[min planIndex, max planIndex]` of that column.
+ * repeatedly take the earliest *next* arrival from distinct tracks. This is the
+ * same constraint the executor imposes: a device cannot reach its second
+ * arrival until its first barrier release, while the next round may legitimately
+ * replace a participant. For `A@0,B@1,A@3,C@4` (count two), that yields
+ * `{A@0,B@1}` then `{A@3,C@4}`. A fixed all-track column would reject that
+ * validator-permitted changing participant set and replay round one.
  *
- * When the shape is irregular in a way plan validation would already reject —
- * an arrival missing its device label, ragged per-device arrival counts, or a
- * `deviceCount` that disagrees with the number of distinct devices — we fall
- * back to one conservative span covering every arrival of the lock, so a
- * mid-lock resume still rewinds to the lock's first arrival rather than
- * splitting a generation.
+ * If the guard is called on a shape that PlanValidator would reject — a missing
+ * device label, inconsistent count, incomplete generation, or too few candidate
+ * tracks — it fails closed. Rewinding the whole lock is unsafe because it
+ * replays completed destructive steps between otherwise independent generations.
  *
- * `deviceCount: 1` is a special case handled separately, BEFORE the
- * device-track/column analysis below: a count-one lock completes a
- * generation on every single arrival, regardless of which (or how many
- * distinct) devices share it. The column model assumes a generation is
- * filled by `deviceCount` DISTINCT devices arriving together — which never
- * matches when more than one device uses a count-one lock (`tracks.size`
- * exceeds the declared count of 1), so it fell through to the irregular,
- * whole-lock fallback and rewound a resume past already-completed count-one
- * arrivals for no reason (issue #6234 P2 follow-up review comment
- * PRRC_kwDOP-GF5M7rVEIB).
+ * `deviceCount: 1` is a special case: every arrival completes its own
+ * generation, regardless of which (or how many) devices share the lock. It
+ * must remain a singleton span so recovery never rewinds past a completed
+ * count-one arrival.
  */
 function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
   if (arrivals.length === 0) {
@@ -89,18 +86,42 @@ function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
   }
 
   const tracks = deviceTracks(arrivals);
-  const generationCount = regularGenerationCount(tracks, consistentCount);
-  if (generationCount === undefined) {
-    // Irregular shape (missing device, ragged tracks, or a deviceCount that
-    // disagrees with the device set) — plan validation would reject it, so span
-    // the whole lock and let a mid-lock resume rewind to its first arrival.
-    return [wholeLockSpan(lock, arrivals)];
+  if (tracks === undefined) {
+    throw invalidBarrierRecoveryShape(lock, "an arrival is missing its device label");
+  }
+  if (consistentCount === undefined || arrivals.length % consistentCount !== 0) {
+    throw invalidBarrierRecoveryShape(
+      lock,
+      `${arrivals.length} arrivals cannot form complete groups of ${String(consistentCount)}`,
+    );
   }
 
-  const trackLists = [...tracks.values()];
+  const consumed = new Map<string, number>();
   const spans: GenerationSpan[] = [];
-  for (let gen = 0; gen < generationCount; gen++) {
-    spans.push(columnSpan(lock, trackLists, gen));
+  for (let remaining = arrivals.length; remaining > 0; remaining -= consistentCount) {
+    const nextArrivals = [...tracks.entries()]
+      .map(([device, track]) => ({ device, arrival: track[consumed.get(device) ?? 0] }))
+      .filter(
+        (candidate): candidate is { device: string; arrival: Arrival } =>
+          candidate.arrival !== undefined,
+      )
+      .sort((a, b) => a.arrival.planIndex - b.arrival.planIndex);
+    if (nextArrivals.length < consistentCount) {
+      throw invalidBarrierRecoveryShape(
+        lock,
+        `only ${nextArrivals.length} device tracks remain for deviceCount=${consistentCount}`,
+      );
+    }
+    const generation = nextArrivals.slice(0, consistentCount);
+    spans.push(
+      spanForArrivals(
+        lock,
+        generation.map((candidate) => candidate.arrival),
+      ),
+    );
+    for (const { device } of generation) {
+      consumed.set(device, (consumed.get(device) ?? 0) + 1);
+    }
   }
   return spans;
 }
@@ -110,29 +131,27 @@ function singletonSpan(lock: string, arrival: Arrival): GenerationSpan {
   return { lock, firstIndex: arrival.planIndex, lastIndex: arrival.planIndex };
 }
 
-/** The conservative single span covering every arrival of a lock. */
-function wholeLockSpan(lock: string, arrivals: Arrival[]): GenerationSpan {
-  return {
-    lock,
-    firstIndex: arrivals[0].planIndex,
-    lastIndex: arrivals[arrivals.length - 1].planIndex,
-  };
+function invalidBarrierRecoveryShape(lock: string, reason: string): ActionableError {
+  return new ActionableError(
+    `Cannot safely recover barrier lock "${lock}": ${reason}. ` +
+      "The plan must pass barrier validation before it can be resumed.",
+  );
 }
 
 /**
  * Reconstruct each device's track (its arrivals' plan indices in plan order).
  * Iterating in plan order preserves per-device track order, so the k-th entry of
- * a device's list is that device's k-th arrival at the lock. Returns null when
+ * a device's list is that device's k-th arrival at the lock. Returns undefined when
  * any arrival is missing its device label.
  */
-function deviceTracks(arrivals: Arrival[]): Map<string, number[]> {
-  const perDevice = new Map<string, number[]>();
+function deviceTracks(arrivals: Arrival[]): Map<string, Arrival[]> | undefined {
+  const perDevice = new Map<string, Arrival[]>();
   for (const arrival of arrivals) {
     if (arrival.device === undefined) {
-      return new Map();
+      return undefined;
     }
     const list = perDevice.get(arrival.device) ?? [];
-    list.push(arrival.planIndex);
+    list.push(arrival);
     perDevice.set(arrival.device, list);
   }
   return perDevice;
@@ -150,35 +169,12 @@ function consistentDeviceCount(arrivals: Arrival[]): number | undefined {
   return counts.size === 1 ? (counts.values().next().value as number) : undefined;
 }
 
-/**
- * The number of generations when the lock has a regular shape: every device
- * track has the same arrival count (one arrival per generation) and a single
- * `deviceCount` that equals the number of distinct devices. Returns undefined
- * for an irregular shape (missing device, ragged tracks, count mismatch).
- */
-function regularGenerationCount(
-  tracks: Map<string, number[]>,
-  consistentCount: number | undefined,
-): number | undefined {
-  if (tracks.size === 0) {
-    return undefined;
-  }
-  if (consistentCount !== tracks.size) {
-    return undefined;
-  }
-  const arrivalCounts = new Set([...tracks.values()].map((list) => list.length));
-  if (arrivalCounts.size !== 1) {
-    return undefined;
-  }
-  return arrivalCounts.values().next().value as number;
-}
-
-/** Span of generation `gen` = [min, max] plan index of that column across tracks. */
-function columnSpan(lock: string, tracks: number[][], gen: number): GenerationSpan {
+/** Span of one coordinator generation's arrivals. */
+function spanForArrivals(lock: string, arrivals: Arrival[]): GenerationSpan {
   let firstIndex = Infinity;
   let lastIndex = -Infinity;
-  for (const track of tracks) {
-    const planIndex = track[gen];
+  for (const arrival of arrivals) {
+    const planIndex = arrival.planIndex;
     if (planIndex < firstIndex) {
       firstIndex = planIndex;
     }
@@ -198,12 +194,12 @@ function readDeviceCount(step: PlanStep): number | undefined {
 
 /**
  * Read the device label a step's track belongs to. Multi-device plans (the only
- * plans this guard sees, via executeParallel) tag every step with
- * `params.device`; anything else yields `undefined` and forces the conservative
- * single-span fallback for the lock.
+ * plans this guard sees, via executeParallel) tag every step with a device.
+ * Honor the validator's params-wins inline fallback so recovery sees the same
+ * normalized contract as execution.
  */
 function readDevice(step: PlanStep): string | undefined {
-  const device = step.params?.device;
+  const device = effectiveField(step, "device");
   return typeof device === "string" && device.length > 0 ? device : undefined;
 }
 

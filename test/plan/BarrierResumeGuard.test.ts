@@ -118,11 +118,10 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
     expect(computeSafeBarrierResumeStep(p, 4)).toBe(0);
   });
 
-  test("falls back to one conservative span when deviceCount disagrees with device set", () => {
+  test("rejects an invalid barrier shape instead of replaying the entire lock", () => {
     // deviceCount=2 but three distinct devices each arrive once: plan validation
-    // would reject this, and the coordinator cannot form a clean generation. The
-    // guard spans the whole lock so any mid-lock resume rewinds to the first
-    // arrival rather than splitting.
+    // would reject this, and the coordinator cannot form a clean generation.
+    // Recovery must reject the plan rather than guess and replay completed work.
     const p: Plan = {
       name: "barrier-plan",
       mcpVersion: "1.0",
@@ -133,8 +132,32 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
         barrierStep("C", "L", 2), // 2
       ],
     };
-    expect(computeSafeBarrierResumeStep(p, 1)).toBe(0);
-    expect(computeSafeBarrierResumeStep(p, 2)).toBe(0);
+    expect(() => computeSafeBarrierResumeStep(p, 1)).toThrow("Cannot safely recover barrier lock");
+    expect(() => computeSafeBarrierResumeStep(p, 2)).toThrow("Cannot safely recover barrier lock");
+  });
+
+  test("uses per-device frontiers for validator-permitted changing participant sets", () => {
+    // Generation 0 is A+B; after its release, A's next arrival pairs with C.
+    // The validator permits this (four arrivals, count two, no device appears
+    // more than twice). The old equal-column model classified it as ragged and
+    // rewound start=4 all the way to 0, replaying the completed A+B round and
+    // the destructive action at 2. Recovery must rewind only to A+C's start.
+    const p: Plan = {
+      name: "changing-participants",
+      mcpVersion: "1.0",
+      devices: ["A", "B", "C"],
+      steps: [
+        barrierStep("A", "L", 2), // 0 generation 0
+        barrierStep("B", "L", 2), // 1 generation 0
+        actionStep("B"), // 2 already-completed destructive work
+        barrierStep("A", "L", 2), // 3 generation 1
+        barrierStep("C", "L", 2), // 4 generation 1
+      ],
+    };
+
+    expect(computeSafeBarrierResumeStep(p, 4)).toBe(3);
+    expect(computeSafeBarrierResumeStep(p, 3)).toBe(3);
+    expect(computeSafeBarrierResumeStep(p, 2)).toBe(2);
   });
 
   test("iterates to a fixed point across interleaved barrier locks", () => {

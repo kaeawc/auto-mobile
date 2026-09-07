@@ -66,6 +66,13 @@ export interface LogPruneOptions {
    * without `launchLogPath` is legacy/ambiguous and retains launch logs.
    */
   readDaemonOwner?: (pidFilePath: string) => DaemonLaunchLogOwner | undefined;
+  /**
+   * Read the durable, exact owner declaration left alongside one launch log
+   * when its daemon removes the transient PID record during shutdown. Like a
+   * PID record reader, an unreadable or malformed tombstone must THROW so the
+   * sweep retains the log rather than guessing that its owner exited.
+   */
+  readDaemonLaunchLogOwnerTombstone?: (launchLogPath: string) => DaemonLaunchLogOwner | undefined;
   /** Optional diagnostic sink. Kept injectable so log pruning does not import the logger that calls it. */
   logger?: { debug(message: string, ...args: unknown[]): void };
 }
@@ -121,6 +128,34 @@ function ownerPid(file: string): number | undefined {
  */
 function isDaemonLaunchLog(file: string): boolean {
   return /^daemon-launch-\d+(?:-.*)?\.log$/.test(file);
+}
+
+async function removeLaunchLogTombstone(launchLogPath: string): Promise<void> {
+  await unlinkAsync(`${launchLogPath}.owner`).catch(() => {
+    /* the sidecar is owned by the launch log and may already be gone */
+  });
+}
+
+async function pruneStaleLog(
+  fullPath: string,
+  file: string,
+  now: number,
+  abandonedMaxAgeMs: number,
+): Promise<void> {
+  try {
+    const stats = await statAsync(fullPath);
+    if (now - stats.mtimeMs <= abandonedMaxAgeMs) {
+      return;
+    }
+    const removed = await unlinkAsync(fullPath)
+      .then(() => true)
+      .catch(() => false);
+    if (removed && isDaemonLaunchLog(file)) {
+      await removeLaunchLogTombstone(fullPath);
+    }
+  } catch {
+    // Another process may have removed it concurrently — ignore.
+  }
 }
 
 /**
@@ -184,16 +219,29 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   const daemonLaunchLogProtection = (file: string): LaunchLogProtection => {
     const { owners, uncertain } = discoverDaemonLaunchLogOwners();
     const filePath = path.resolve(opts.dir, file);
-    const owner = owners.find(
+    const exactOwners = owners.filter(
       (candidate) =>
         typeof candidate.launchLogPath === "string" &&
         path.resolve(candidate.launchLogPath) === filePath,
     );
-    if (owner) {
-      // An exact persisted association identifies this launch log's daemon even
-      // when sibling discovery is incomplete. Do not let unrelated namespace
-      // uncertainty turn a positively dead owner into permanent retention.
-      return Number.isInteger(owner.pid) && owner.pid > 0 && isAlive(owner.pid) ? "alive" : "dead";
+    try {
+      const tombstone = opts.readDaemonLaunchLogOwnerTombstone?.(filePath);
+      if (tombstone !== undefined) {
+        exactOwners.push(tombstone);
+      }
+    } catch (error) {
+      opts.logger?.debug(`launch-log ownership tombstone read failed: ${error}`, error);
+      return "unknown";
+    }
+    if (exactOwners.length > 0) {
+      // Several namespaces can retain declarations for the same manager PID
+      // after PID reuse. Every exact claim must be considered: one live daemon
+      // still holds the inherited fd, even if an earlier stale claim is dead.
+      return exactOwners.some(
+        (owner) => Number.isInteger(owner.pid) && owner.pid > 0 && isAlive(owner.pid),
+      )
+        ? "alive"
+        : "dead";
     }
     // Without an exact owner association, incomplete discovery means an
     // undiscovered daemon may still hold this inherited descriptor.
@@ -253,16 +301,6 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
         continue;
       }
     }
-    const full = path.join(opts.dir, file);
-    try {
-      const stats = await statAsync(full);
-      if (now - stats.mtimeMs > opts.abandonedMaxAgeMs) {
-        await unlinkAsync(full).catch(() => {
-          /* best effort */
-        });
-      }
-    } catch {
-      // Another process may have removed it concurrently — ignore.
-    }
+    await pruneStaleLog(path.join(opts.dir, file), file, now, opts.abandonedMaxAgeMs);
   }
 }

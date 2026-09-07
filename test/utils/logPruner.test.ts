@@ -225,6 +225,28 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
     });
   });
 
+  test("retains a shared launch log when any exact owner claim is alive", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "shared manager output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: (pid) => pid === 5001,
+        daemonPidFiles: () => ({ pidFiles: [pidFileA, pidFileB], uncertain: false }),
+        readDaemonOwner: (pidFile) => ({
+          pid: pidFile === pidFileA ? 5000 : 5001,
+          launchLogPath: path.join(dir, launchLog),
+        }),
+      });
+
+      expect(await readdir(dir)).toContain(launchLog);
+    });
+  });
+
   test("prunes the launch log once NO namespace has a live daemon", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
@@ -343,6 +365,28 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         // owner of THIS exact launch log is present and positively dead.
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
         readDaemonOwner: () => ({ pid: 5000, launchLogPath: path.join(dir, launchLog) }),
+      });
+
+      expect(await readdir(dir)).not.toContain(launchLog);
+    });
+  });
+
+  test("prunes a launch log from its durable dead-owner tombstone despite discovery uncertainty", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      const launchLogPath = path.join(dir, launchLog);
+      await writeFile(launchLogPath, "abandoned output");
+
+      await pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: -1,
+        isProcessAlive: () => false,
+        daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
+        readDaemonOwner: () => undefined,
+        readDaemonLaunchLogOwnerTombstone: (candidate) =>
+          candidate === launchLogPath ? { pid: 5000, launchLogPath } : undefined,
       });
 
       expect(await readdir(dir)).not.toContain(launchLog);

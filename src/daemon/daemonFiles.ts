@@ -1,6 +1,13 @@
 import os from "node:os";
 import path from "node:path";
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { unlink } from "node:fs/promises";
 import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
@@ -96,6 +103,65 @@ export interface DaemonFileCleanupOptions {
   expectedPid?: number;
 }
 
+/** Durable companion to a manager's launch-capture log. */
+export function daemonLaunchLogOwnerTombstonePath(launchLogPath: string): string {
+  return `${launchLogPath}.owner`;
+}
+
+/**
+ * Preserve the exact launch-log association before deleting the PID record.
+ * The PID record is deliberately transient liveness state, but its association
+ * is also the conclusive evidence a later prune needs once shutdown has
+ * completed. The write is replace-atomic so a concurrent sweep sees either the
+ * old complete tombstone or the new complete tombstone, never partial JSON.
+ */
+function persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath: string): void {
+  try {
+    const owner = readDaemonOwnerForRetentionSync(pidFilePath);
+    if (
+      !owner ||
+      typeof owner.launchLogPath !== "string" ||
+      !path.isAbsolute(owner.launchLogPath)
+    ) {
+      return;
+    }
+    const tombstonePath = daemonLaunchLogOwnerTombstonePath(owner.launchLogPath);
+    const temporaryPath = `${tombstonePath}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, JSON.stringify(owner), { encoding: "utf-8", mode: 0o600 });
+    renameSync(temporaryPath, tombstonePath);
+  } catch (error) {
+    // Cleanup still must remove a dead daemon's sockets/PID record. A failed
+    // tombstone write only makes the next pruning sweep retain the launch log.
+    logSafeDebug(`daemon launch-log owner tombstone write failed: ${error}`, error);
+  }
+}
+
+/**
+ * Read a durable exact owner declaration written at daemon shutdown. Absence
+ * is conclusive only for this sidecar; malformed data is ambiguity and throws
+ * so the log pruner fails closed.
+ */
+export function readDaemonLaunchLogOwnerTombstoneSync(
+  launchLogPath: string,
+): DaemonLaunchLogOwner | undefined {
+  const tombstonePath = daemonLaunchLogOwnerTombstonePath(launchLogPath);
+  if (!existsSync(tombstonePath)) {
+    return undefined;
+  }
+  const owner = JSON.parse(readFileSync(tombstonePath, "utf-8")) as DaemonLaunchLogOwner;
+  if (
+    typeof owner?.pid !== "number" ||
+    !Number.isInteger(owner.pid) ||
+    owner.pid <= 0 ||
+    typeof owner.launchLogPath !== "string" ||
+    !path.isAbsolute(owner.launchLogPath) ||
+    path.resolve(owner.launchLogPath) !== path.resolve(launchLogPath)
+  ) {
+    throw new Error(`Launch-log owner tombstone at ${tombstonePath} is invalid`);
+  }
+  return owner;
+}
+
 /**
  * Default on-disk paths of every daemon socket, for unlink-on-cleanup.
  *
@@ -132,6 +198,7 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
 
   if (existsSync(pidFilePath)) {
     try {
+      persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
       await unlink(pidFilePath);
     } catch {
       // Best-effort cleanup.
@@ -161,6 +228,7 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
 
   if (existsSync(pidFilePath)) {
     try {
+      persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
       unlinkSync(pidFilePath);
     } catch {
       // Best-effort cleanup.

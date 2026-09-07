@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   cleanupDaemonFiles,
   cleanupDaemonFilesSync,
+  daemonLaunchLogOwnerTombstonePath,
   isProcessRunning,
   listDaemonPidFilesSync,
   readDaemonOwnerForRetentionSync,
+  readDaemonLaunchLogOwnerTombstoneSync,
 } from "../../src/daemon/daemonFiles";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import type { PidFileData } from "../../src/daemon/types";
@@ -57,6 +59,28 @@ describe("daemon file cleanup", () => {
 
     expect(existsSync(socketPath)).toBe(false);
     expect(existsSync(pidFilePath)).toBe(false);
+  });
+
+  test("persists the launch-log owner before removing a PID record", () => {
+    const { dir, socketPath, pidFilePath } = createTempFiles();
+    const launchLogPath = join(dir, "daemon-launch-123.log");
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({ pid: 12345, socketPath, launchLogPath } satisfies Partial<PidFileData>),
+    );
+
+    cleanupDaemonFilesSync({ pidFilePath, socketPaths: [socketPath] });
+
+    expect(readDaemonLaunchLogOwnerTombstoneSync(launchLogPath)).toEqual({
+      pid: 12345,
+      launchLogPath,
+    });
+    expect(
+      JSON.parse(readFileSync(daemonLaunchLogOwnerTombstonePath(launchLogPath), "utf-8")),
+    ).toEqual({
+      pid: 12345,
+      launchLogPath,
+    });
   });
 
   test("cleanupDaemonFilesSync skips cleanup when PID file belongs to another process", () => {

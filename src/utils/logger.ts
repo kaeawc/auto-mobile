@@ -335,6 +335,12 @@ const readDaemonOwner = (pidFilePath: string) => {
   return readDaemonOwnerForRetentionSync(pidFilePath);
 };
 
+const readDaemonLaunchLogOwnerTombstone = (launchLogPath: string) => {
+  const { readDaemonLaunchLogOwnerTombstoneSync } =
+    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+  return readDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+};
+
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
 // beyond the cap, and (b) other processes' logs that are stale by mtime — never
 // another live process's current file, nor a daemon-launch log while a daemon is
@@ -355,6 +361,7 @@ const pruneOldLogFiles = (): Promise<void> => {
     // before `logger` was initialized (issue #6194).
     daemonPidFiles,
     readDaemonOwner,
+    readDaemonLaunchLogOwnerTombstone,
     isDaemonRunning,
   });
 };

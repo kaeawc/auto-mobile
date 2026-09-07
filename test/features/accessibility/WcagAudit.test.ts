@@ -273,7 +273,9 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      // mdpi (160 DPI) so the touch-target-size check (which now skips entirely
+      // when density is unknown, issue #6196) actually runs.
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
 
       // The fixture is two clickable, unlabelled elements both under 44x44dp, so
       // each yields a missing-content-description (error) AND a
@@ -581,19 +583,18 @@ describe("WcagAudit", function () {
       expect(sizeViolations[0].message).toContain("40x40dp");
     });
 
-    it("falls back to baseline density (160, no scaling) when none is reported — not FALLBACK_DENSITY_DPI (#6196)", async function () {
-      // No density passed at all. Unlike checkFormInputLabels' proximity gate
-      // (which safely widens under FALLBACK_DENSITY_DPI==320 when density is
-      // unreported), the minimum-size gate must NOT reuse that higher
-      // fallback: 320 would raise the 44dp gate to 88px and wrongly flag a
-      // 60x60px target that's fine on a real mdpi (160 DPI) device whose
-      // runner didn't report density. This exercises the exact false
-      // positive from issue #6196.
+    it("skips the check (no false too-small finding) when density is absent", async function () {
+      // No density passed at all. Assuming ANY density (160, 320, or
+      // otherwise) to convert px to dp misjudges targets on a device whose
+      // real density differs from the assumption — a 60x60px target reads as
+      // 60dp (fine) under a 160 DPI guess but is only ~20dp on a real xxhdpi
+      // device. With density genuinely unknown, the check must be skipped
+      // rather than evaluated against a guess (issue #6196).
       const elements: Element[] = [
         {
-          bounds: { left: 0, top: 0, right: 60, bottom: 60 }, // 60dp on a real mdpi device
+          bounds: { left: 0, top: 0, right: 60, bottom: 60 },
           clickable: true,
-          text: "Fine on real mdpi",
+          text: "Density unknown",
         },
       ];
 
@@ -603,10 +604,29 @@ describe("WcagAudit", function () {
       expect(sizeViolations).toHaveLength(0);
     });
 
-    it("still flags a genuinely too-small target when density is unreported", async function () {
-      // 30x30px with no density reported (falls back to 160 DPI, i.e. 1px ==
-      // 1dp) is a genuine 30dp target, under the 44dp minimum, and must still
-      // be flagged — the #6196 fix must not silence real violations.
+    it("skips the check (no false too-small finding) when density is 0", async function () {
+      // density=0 signals a failed on-device lookup (e.g. CtrlProxy.getDensity()
+      // returning 0), which is just as "unknown" as an absent density and must
+      // not be treated as a real density value.
+      const elements: Element[] = [
+        {
+          bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+          clickable: true,
+          text: "Density lookup failed",
+        },
+      ];
+
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 0);
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
+
+      expect(sizeViolations).toHaveLength(0);
+    });
+
+    it("still flags a genuinely too-small target when density IS known", async function () {
+      // Same 30x30px target as above, but this time density is reported
+      // (160 DPI, i.e. 1px == 1dp): a genuine 30dp target, under the 44dp
+      // minimum, must be flagged — the #6196 fix must not silence real
+      // violations once density is actually known.
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 30, bottom: 30 },
@@ -615,7 +635,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(1);

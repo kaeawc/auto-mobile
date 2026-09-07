@@ -213,24 +213,30 @@ export class WcagAudit {
   ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
+    // `bounds` are physical pixels (see Element.ts / ViewHierarchyNode), so
+    // converting them to dp requires a real density. Earlier revisions of this
+    // check assumed a density when none was reported — first FALLBACK_DENSITY_DPI
+    // (320), then BASELINE_DENSITY_DPI (160) — but *any* assumed density
+    // misjudges targets on a device whose real density differs from the
+    // assumption: BASELINE_DENSITY_DPI (160, i.e. no scaling) treats raw px as
+    // dp, so a 60x60px target on a real xhdpi/xxhdpi device (legitimately
+    // ~30dp or smaller) reads as 60dp and wrongly passes, while a genuinely
+    // small target on a higher-density device can just as easily read as
+    // passing or failing depending on the guess (issue #6196). There is no
+    // density assumption that is safe in both directions, so when density is
+    // genuinely unknown (undefined, or 0 from a failed on-device lookup) this
+    // check is skipped entirely rather than evaluated against a guess — no
+    // false too-small finding, but also no size evaluation. The check only
+    // runs when a real density is known.
+    if (!density || density <= 0) {
+      return violations;
+    }
+
     // WCAG 2.1 Level AA: minimum 44x44 dp on Android.
     // WCAG 2.1 Level AAA: no additional requirement beyond AA.
     const minSizeDp = 44;
 
-    // `bounds` are physical pixels (see Element.ts / ViewHierarchyNode), so the
-    // dp gate must be scaled by density the same way checkFormInputLabels
-    // scales its gap gate (labelGapThresholdPx) — otherwise a 33dp target on an
-    // xxhdpi device (~100px) is compared against a raw 44px and wrongly passes.
-    //
-    // Unlike checkFormInputLabels, this check must NOT reuse FALLBACK_DENSITY_DPI
-    // (320) when density is unreported: for a proximity *gap* gate a higher
-    // assumed density widens the gate (safer), but for this *minimum-size* gate
-    // a higher assumed density raises the pixel threshold (44dp * 320/160 =
-    // 88px), which flags legitimate targets on real mdpi (160 DPI) devices with
-    // unreported density as too-small (issue #6196). BASELINE_DENSITY_DPI (160,
-    // i.e. no scaling) preserves pre-#6192 density-unknown behavior and only
-    // changes when density IS reported.
-    const dpi = density && density > 0 ? density : WcagAudit.BASELINE_DENSITY_DPI;
+    const dpi = density;
     const minSizePx = minSizeDp * (dpi / WcagAudit.BASELINE_DENSITY_DPI);
 
     for (const element of elements) {

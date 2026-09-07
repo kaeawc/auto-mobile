@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
@@ -166,6 +166,49 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
     }
   }
   return true;
+}
+
+/**
+ * Basename prefix shared by every default/benchmark daemon pid file
+ * (`auto-mobile-daemon-<uid>.pid`, `auto-mobile-daemon-bench-<token>.pid`, ...).
+ * Isolated daemon namespaces (issue #6140) place their pid files alongside the
+ * default one under the same directory, so this prefix is what lets one process
+ * discover the OTHER namespaces that might share its log dir.
+ */
+const DAEMON_PID_FILE_BASENAME_PREFIX = "auto-mobile-daemon-";
+
+/**
+ * Every daemon pid file that could share a log directory with `pidFilePath`'s
+ * namespace: `pidFilePath` itself plus any sibling `auto-mobile-daemon-*.pid`
+ * in the same directory (other isolated namespaces, issue #6140).
+ *
+ * When isolated daemons SHARE an `AUTOMOBILE_LOG_DIR`, a `daemon-launch-*.log`
+ * in that dir may be held by a LIVE daemon from a namespace OTHER than the one
+ * doing the pruning. Checking only the pruning process's own pid file would
+ * miss that and unlink a live daemon's launch log (issue #6194). Enumerating
+ * all co-located pid files lets the pruner retain a launch log while ANY
+ * namespace's daemon is alive.
+ *
+ * Best-effort and deduplicated: an unreadable directory degrades to just
+ * `pidFilePath`, so the caller never loses its own-namespace check. Errs toward
+ * over-inclusion (an unrelated namespace's live daemon only causes a launch log
+ * to be retained a little longer — the safe direction here).
+ */
+export function listDaemonPidFilesSync(pidFilePath: string = PID_FILE_PATH): string[] {
+  const dir = path.dirname(pidFilePath);
+  const found = new Set<string>([pidFilePath]);
+  try {
+    for (const entry of readdirSync(dir)) {
+      if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
+        found.add(path.join(dir, entry));
+      }
+    }
+  } catch (error) {
+    // An unreadable pidfile directory only narrows the scan to our own
+    // namespace; retaining that single check is the safe degraded behavior.
+    logger.debug(`src/daemon/daemonFiles.ts pidfile dir scan failed: ${error}`, error);
+  }
+  return [...found];
 }
 
 export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFileData | null {

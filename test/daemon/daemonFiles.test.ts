@@ -6,6 +6,7 @@ import {
   cleanupDaemonFiles,
   cleanupDaemonFilesSync,
   isProcessRunning,
+  listDaemonPidFilesSync,
 } from "../../src/daemon/daemonFiles";
 import type { PidFileData } from "../../src/daemon/types";
 
@@ -81,6 +82,53 @@ describe("isProcessRunning", () => {
 
   test("reports the current process as running (sanity check for a real positive PID)", () => {
     expect(isProcessRunning(process.pid)).toBe(true);
+  });
+});
+
+describe("listDaemonPidFilesSync (cross-namespace enumeration, issue #6194)", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
+  function makeDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-pidfile-enum-test-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  test("returns the given pid file plus co-located sibling namespace pid files", () => {
+    const dir = makeDir();
+    const own = join(dir, "auto-mobile-daemon-1000.pid");
+    const bench = join(dir, "auto-mobile-daemon-bench-abc.pid");
+    writeFileSync(own, "{}");
+    writeFileSync(bench, "{}");
+    // Unrelated files in the same dir must be ignored.
+    writeFileSync(join(dir, "daemon.log"), "x");
+    writeFileSync(join(dir, "auto-mobile-daemon-1000.sock"), "x");
+
+    const found = listDaemonPidFilesSync(own);
+    expect(found).toContain(own);
+    expect(found).toContain(bench);
+    expect(found).not.toContain(join(dir, "daemon.log"));
+    expect(found).not.toContain(join(dir, "auto-mobile-daemon-1000.sock"));
+  });
+
+  test("always includes the given pid file even when it does not match the sibling pattern", () => {
+    const dir = makeDir();
+    const own = join(dir, "daemon.pid"); // arbitrary non-default name
+    // No file written on disk; enumeration must still include the requested path.
+    const found = listDaemonPidFilesSync(own);
+    expect(found).toContain(own);
+  });
+
+  test("degrades to just the given pid file when the directory is unreadable", () => {
+    const missing = join(tmpdir(), `no-such-dir-${Date.now()}-${Math.random()}`, "daemon.pid");
+    expect(listDaemonPidFilesSync(missing)).toEqual([missing]);
   });
 });
 

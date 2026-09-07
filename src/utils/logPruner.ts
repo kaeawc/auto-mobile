@@ -30,8 +30,29 @@ export interface LogPruneOptions {
    * + stale-mtime sweep (preserving issue #2724's leak cleanup). Injectable so
    * this module stays decoupled from the daemon pidfile module. Defaults to
    * treating no daemon as running when unset.
+   *
+   * Only checks the pruning process's OWN daemon namespace. When isolated
+   * daemons share a log dir, prefer {@link daemonPidFiles} + {@link readDaemonPid}
+   * so a live daemon in ANOTHER namespace also protects its launch log
+   * (issue #6194); this predicate is the single-namespace fallback and is
+   * OR-ed with the namespace-aware check when both are supplied.
    */
   isDaemonRunning?: () => boolean;
+  /**
+   * Daemon pid files of every namespace that could own a `daemon-launch-*.log`
+   * in `dir` — the pruning process's own plus any co-located sibling namespaces
+   * sharing this log dir (issue #6194). A launch log is retained if ANY of these
+   * namespaces' daemons is alive, not just the pruning process's own. Injectable
+   * (with {@link readDaemonPid}) so this module stays decoupled from the daemon
+   * pidfile module and tests stay deterministic.
+   */
+  daemonPidFiles?: readonly string[];
+  /**
+   * Read the owning daemon PID from a pid file listed in {@link daemonPidFiles};
+   * `undefined` when the file is missing/malformed. Liveness is then checked via
+   * the same {@link isProcessAlive} seam used for peer logs.
+   */
+  readDaemonPid?: (pidFilePath: string) => number | undefined;
   /** Optional diagnostic sink. Kept injectable so log pruning does not import the logger that calls it. */
   logger?: { debug(message: string, ...args: unknown[]): void };
 }
@@ -108,6 +129,35 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   const isAlive = opts.isProcessAlive ?? defaultIsProcessAlive;
   const isDaemonRunning = opts.isDaemonRunning ?? (() => false);
 
+  // A daemon-launch log's inherited fd may be held by a LIVE daemon in a namespace
+  // OTHER than the pruning process's own when isolated daemons share this log dir
+  // (issue #6194). Consider every co-located namespace's pid file, treating a
+  // launch log as protected if ANY of those daemons is alive; fall back to the
+  // single-namespace `isDaemonRunning` when no pid files were enumerated.
+  const anyDaemonHoldsLaunchLog = (): boolean => {
+    const pidFiles = opts.daemonPidFiles;
+    const readDaemonPid = opts.readDaemonPid;
+    if (pidFiles && pidFiles.length > 0 && readDaemonPid) {
+      try {
+        const anyAlive = pidFiles.some((pidFilePath) => {
+          const pid = readDaemonPid(pidFilePath);
+          // Reject non-positive/non-integer PIDs (corrupt lock) before probing —
+          // `process.kill(0|-1, 0)` targets a whole process group (issue #6260).
+          return pid !== undefined && Number.isInteger(pid) && pid > 0 && isAlive(pid);
+        });
+        if (anyAlive) {
+          return true;
+        }
+      } catch (error) {
+        // A pidfile read/probe failure must not green-light unlinking a launch
+        // log a live daemon may still hold — retain on ambiguity (issue #6194).
+        opts.logger?.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
+        return true;
+      }
+    }
+    return isDaemonRunning();
+  };
+
   let entries: string[];
   try {
     entries = await readdirAsync(opts.dir);
@@ -148,7 +198,7 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     // to that inherited fd, so unlinking on the manager's exit + stale mtime
     // would silently drop live daemon output (issue #6194). Retain all launch
     // logs until no daemon is running.
-    if (isDaemonLaunchLog(file) && isDaemonRunning()) {
+    if (isDaemonLaunchLog(file) && anyDaemonHoldsLaunchLog()) {
       continue;
     }
     const full = path.join(opts.dir, file);

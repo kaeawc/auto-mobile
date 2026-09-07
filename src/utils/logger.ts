@@ -275,17 +275,55 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // in the filename has exited (issue #6194). The daemon pidfile module is
 // required lazily so this foundational logger module keeps no static import of
 // it (daemonFiles.ts imports THIS module) and it is resolved only at sweep time.
+//
+// Crucially this considers EVERY daemon namespace that could own a launch log
+// in the shared log dir — the pruning process's own pid file plus co-located
+// isolated-namespace pid files (issue #6140) — not just this process's own.
+// When isolated daemons share an `AUTOMOBILE_LOG_DIR`, a launch log there can be
+// held by a LIVE daemon in a different namespace; checking only our own would
+// unlink it (the exact #6194 data-loss). The concrete pid enumeration is passed
+// to `pruneLogFiles` via `daemonPidFiles` + `readDaemonPid` below.
 const isDaemonRunning = (): boolean => {
   try {
-    const { readPidFileDataSync, isProcessRunning } =
+    const { readPidFileDataSync, isProcessRunning, listDaemonPidFilesSync } =
       require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    const data = readPidFileDataSync();
-    return data ? isProcessRunning(data.pid) : false;
+    return listDaemonPidFilesSync().some((pidFilePath) => {
+      const data = readPidFileDataSync(pidFilePath);
+      return data ? isProcessRunning(data.pid) : false;
+    });
   } catch (error) {
     // If the daemon pidfile can't be resolved, keep launch logs rather than
     // risk unlinking one a live daemon still holds — the safe direction here.
     logger.debug(`daemon liveness probe for log pruning failed: ${error}`, error);
     return true;
+  }
+};
+
+// Enumerate the daemon pid files of every namespace that could own a launch log
+// in this shared log dir, and read a pid from one. Passed to `pruneLogFiles` so
+// the namespace-aware retention decision (issue #6194) is made there against the
+// same injected liveness seam, keeping the sweep deterministic under test.
+const daemonPidFiles = (): string[] => {
+  try {
+    const { listDaemonPidFilesSync } =
+      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+    return listDaemonPidFilesSync();
+  } catch (error) {
+    // Fall back to the single-namespace `isDaemonRunning` gate (also passed) when
+    // the pidfile module can't be resolved.
+    logger.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
+    return [];
+  }
+};
+
+const readDaemonPid = (pidFilePath: string): number | undefined => {
+  try {
+    const { readPidFileDataSync } =
+      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+    return readPidFileDataSync(pidFilePath)?.pid;
+  } catch (error) {
+    logger.debug(`daemon pidfile read for log pruning failed: ${error}`, error);
+    return undefined;
   }
 };
 
@@ -302,6 +340,10 @@ const pruneOldLogFiles = (): Promise<void> => {
     ownPrefix: ownLogPrefix,
     maxOwnFiles: MAX_LOG_FILES,
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
+    // Namespace-aware retention: check every co-located namespace's daemon pid
+    // file, with `isDaemonRunning` as the single-namespace fallback (issue #6194).
+    daemonPidFiles: daemonPidFiles(),
+    readDaemonPid,
     isDaemonRunning,
   });
 };

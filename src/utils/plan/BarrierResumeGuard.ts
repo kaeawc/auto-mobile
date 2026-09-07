@@ -63,14 +63,33 @@ interface Arrival {
  * back to one conservative span covering every arrival of the lock, so a
  * mid-lock resume still rewinds to the lock's first arrival rather than
  * splitting a generation.
+ *
+ * `deviceCount: 1` is a special case handled separately, BEFORE the
+ * device-track/column analysis below: a count-one lock completes a
+ * generation on every single arrival, regardless of which (or how many
+ * distinct) devices share it. The column model assumes a generation is
+ * filled by `deviceCount` DISTINCT devices arriving together — which never
+ * matches when more than one device uses a count-one lock (`tracks.size`
+ * exceeds the declared count of 1), so it fell through to the irregular,
+ * whole-lock fallback and rewound a resume past already-completed count-one
+ * arrivals for no reason (issue #6234 P2 follow-up review comment
+ * PRRC_kwDOP-GF5M7rVEIB).
  */
 function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
   if (arrivals.length === 0) {
     return [];
   }
 
+  const consistentCount = consistentDeviceCount(arrivals);
+  if (consistentCount === 1) {
+    // Every arrival satisfies the barrier by itself — span it as a singleton
+    // generation of one, so a resume point between two count-one arrivals
+    // never rewinds past one that already completed.
+    return arrivals.map((arrival) => singletonSpan(lock, arrival));
+  }
+
   const tracks = deviceTracks(arrivals);
-  const generationCount = regularGenerationCount(arrivals, tracks);
+  const generationCount = regularGenerationCount(tracks, consistentCount);
   if (generationCount === undefined) {
     // Irregular shape (missing device, ragged tracks, or a deviceCount that
     // disagrees with the device set) — plan validation would reject it, so span
@@ -84,6 +103,11 @@ function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
     spans.push(columnSpan(lock, trackLists, gen));
   }
   return spans;
+}
+
+/** The span of a single arrival that completes its generation by itself. */
+function singletonSpan(lock: string, arrival: Arrival): GenerationSpan {
+  return { lock, firstIndex: arrival.planIndex, lastIndex: arrival.planIndex };
 }
 
 /** The conservative single span covering every arrival of a lock. */
@@ -115,22 +139,30 @@ function deviceTracks(arrivals: Arrival[]): Map<string, number[]> {
 }
 
 /**
+ * The single `deviceCount` value declared consistently across `arrivals`, or
+ * undefined when it is missing or disagrees between arrivals of the same
+ * lock.
+ */
+function consistentDeviceCount(arrivals: Arrival[]): number | undefined {
+  const counts = new Set(
+    arrivals.map((a) => a.deviceCount).filter((c): c is number => typeof c === "number" && c >= 1),
+  );
+  return counts.size === 1 ? (counts.values().next().value as number) : undefined;
+}
+
+/**
  * The number of generations when the lock has a regular shape: every device
  * track has the same arrival count (one arrival per generation) and a single
  * `deviceCount` that equals the number of distinct devices. Returns undefined
  * for an irregular shape (missing device, ragged tracks, count mismatch).
  */
 function regularGenerationCount(
-  arrivals: Arrival[],
   tracks: Map<string, number[]>,
+  consistentCount: number | undefined,
 ): number | undefined {
   if (tracks.size === 0) {
     return undefined;
   }
-  const counts = new Set(
-    arrivals.map((a) => a.deviceCount).filter((c): c is number => typeof c === "number" && c >= 1),
-  );
-  const consistentCount = counts.size === 1 ? (counts.values().next().value as number) : undefined;
   if (consistentCount !== tracks.size) {
     return undefined;
   }

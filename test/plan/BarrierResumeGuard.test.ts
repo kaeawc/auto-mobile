@@ -171,4 +171,30 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
     expect(computeSafeBarrierResumeStep(p, 0)).toBe(0);
     expect(computeSafeBarrierResumeStep(p, -3)).toBe(-3);
   });
+
+  test("treats deviceCount=1 arrivals as singleton generations, never grouping them by device track (#6234 P2 follow-up)", () => {
+    // deviceCount=1 means EVERY arrival completes its own generation
+    // immediately, regardless of which (or how many distinct) devices share
+    // the lock. The device-track/column model used for deviceCount>1 assumes
+    // a generation is filled by `deviceCount` distinct devices arriving
+    // together, which never holds here (two distinct devices, A and B, share
+    // a count-one lock) - it used to fall through to the irregular, whole-
+    // lock fallback and needlessly rewind past an already-completed arrival.
+    const p = plan([
+      barrierStep("A", "L", 1), // 0  A's own generation, already complete
+      actionStep("A"), // 1  destructive action, already run
+      actionStep("B"), // 2  the step that failed and triggered recovery
+      barrierStep("B", "L", 1), // 3  B's own generation, not yet reached
+    ]);
+    // Resuming at the failed step (2) does not split any generation: A's
+    // count-one arrival at 0 already completed on its own, and B's at 3
+    // has not happened yet. There is nothing to rewind for.
+    expect(computeSafeBarrierResumeStep(p, 2)).toBe(2);
+    // Resuming exactly at a count-one arrival is likewise a clean boundary.
+    expect(computeSafeBarrierResumeStep(p, 3)).toBe(3);
+    // Resuming strictly between the two singleton arrivals (e.g. at the
+    // destructive action) is also clean - it does not land inside either
+    // one-arrival generation.
+    expect(computeSafeBarrierResumeStep(p, 1)).toBe(1);
+  });
 });

@@ -790,6 +790,36 @@ describe("Explore", () => {
       expect((explore as any).stopReason).toBe("");
     });
 
+    test("forwards the exploration AbortSignal through PressButton into the ADB home dispatch (#6289)", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
+      } as never);
+      let dispatchSignal: AbortSignal | undefined;
+      const adb = {
+        execute: async (_args: string[], options: { signal?: AbortSignal } = {}) => {
+          dispatchSignal = options.signal;
+          return "";
+        },
+        // getActive + launcher resolution during home verification read through
+        // this; report the launcher so verification passes.
+        executeCommand: async () => launcherDumpsysResult(),
+      } as unknown as AdbClient;
+      const controller = new AbortController();
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+      // No targetPackageName -> no relaunch; keep the test on the press dispatch.
+
+      try {
+        await (explore as any).resetToHome(undefined, controller.signal);
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+
+      // Explore's signal (not merely a remaining timeout) reached the ADB
+      // keyevent dispatch, so a cancelled exploration aborts the home press.
+      expect(dispatchSignal).toBe(controller.signal);
+      expect((explore as any).stopReason).toBe("");
+    });
+
     test("records a failed relaunch as a terminal partial-report reason", async () => {
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: false, error: "unavailable" }),

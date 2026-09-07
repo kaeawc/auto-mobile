@@ -164,7 +164,7 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "volume_up",
     });
-    expect(press).toHaveBeenCalledWith("volume_up", expect.any(Number));
+    expect(press).toHaveBeenCalledWith("volume_up", expect.any(Number), undefined, undefined);
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -194,7 +194,7 @@ describe("UnixSocketServer input/pressButton", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("back", 30_000, "frame-1");
+    expect(press).toHaveBeenCalledWith("back", 30_000, "frame-1", undefined);
   });
 
   test("routes iOS button presses through the existing pressButton implementation", async () => {
@@ -227,7 +227,7 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "home",
     });
-    expect(press).toHaveBeenCalledWith("home", expect.any(Number));
+    expect(press).toHaveBeenCalledWith("home", expect.any(Number), undefined, undefined);
   });
 
   test("threads the client-supplied timeout budget into the button implementation", async () => {
@@ -260,7 +260,7 @@ describe("UnixSocketServer input/pressButton", () => {
     );
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("home", 500);
+    expect(press).toHaveBeenCalledWith("home", 500, undefined, undefined);
   });
 
   test("maps the socket app_switch contract name to the existing recent button implementation", async () => {
@@ -293,7 +293,7 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "app_switch",
     });
-    expect(press).toHaveBeenCalledWith("recent", expect.any(Number));
+    expect(press).toHaveBeenCalledWith("recent", expect.any(Number), undefined, undefined);
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
@@ -340,7 +340,7 @@ describe("UnixSocketServer input/pressButton", () => {
       deviceId: "emulator-5554",
       button: "back",
     });
-    expect(press).toHaveBeenCalledWith("back", expect.any(Number));
+    expect(press).toHaveBeenCalledWith("back", expect.any(Number), undefined, undefined);
   });
 
   test("propagates clear unsupported platform-gap errors from the button implementation", async () => {
@@ -368,7 +368,68 @@ describe("UnixSocketServer input/pressButton", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("iOS has no menu hardware button");
-    expect(press).toHaveBeenCalledWith("menu", expect.any(Number));
+    expect(press).toHaveBeenCalledWith("menu", expect.any(Number), undefined, undefined);
+  });
+
+  test("forwards the tracked session abort signal to press on the bound-session path (#6289)", async () => {
+    // A bound session makes runTrackedDeviceInput start an execution and hand its
+    // abort controller's signal to the operation. That tracked signal MUST reach
+    // press() as its fourth argument, otherwise session teardown mid-home-press
+    // leaves the ADB dispatch and foreground reads running.
+    let receivedSignal: AbortSignal | undefined;
+    const press = mock(
+      async (
+        button: string,
+        _timeoutMs?: number,
+        _frameContext?: string,
+        signal?: AbortSignal,
+      ): Promise<PressButtonResult> => {
+        receivedSignal = signal;
+        return { success: true, button, keyCode: 3 };
+      },
+    );
+    PressButton.prototype.press = press;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+
+    // Stable sessionManager/devicePool references (createFakeDaemonState builds
+    // fresh objects per getter call, so bound-session hooks would not survive).
+    const sessionManager = {
+      getSession: () => null,
+      getDeviceLabels: (): DeviceLabelMap | undefined => undefined,
+      releaseSession: async () => null,
+      getSessionForDevice: (deviceId: string) =>
+        deviceId === "emulator-5554" ? "session-uuid-1" : undefined,
+    };
+    const devicePool = {
+      refreshDevices: async () => 0,
+      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+      releaseDevice: async () => {},
+      resolveAutolockSessionForMcpSession: () => undefined,
+      assertSessionReadyForAutomation: () => {},
+    };
+    const daemonState = {
+      isInitialized: () => true,
+      getSessionManager: () => sessionManager,
+      getDevicePool: () => devicePool,
+    } as unknown as ReturnType<typeof createFakeDaemonState>;
+
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", daemonState, fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/pressButton", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      button: "home",
+    });
+
+    expect(response.success).toBe(true);
+    expect(press).toHaveBeenCalledWith(
+      "home",
+      expect.any(Number),
+      undefined,
+      expect.any(AbortSignal),
+    );
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
   });
 
   test("rejects enter before calling the platform button handler", async () => {

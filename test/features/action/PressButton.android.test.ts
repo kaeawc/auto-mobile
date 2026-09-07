@@ -4,6 +4,8 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import type { BootedDevice } from "../../../src/models";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
@@ -216,6 +218,207 @@ describe("PressButton Android keycode dispatch", () => {
       expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("keyevent"))).toEqual([
         "shell input keyevent 3",
       ]);
+    });
+  });
+
+  // Deadline/abort plumbing (issue #6289): press() accepts a signal, threaded
+  // into the ADB keyevent fallback and the home-foreground verification reads.
+  describe("AbortSignal propagation (issue #6289)", () => {
+    test("forwards the signal into the ADB keyevent fallback and home verification", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const window = launcherWindow();
+      const controller = new AbortController();
+
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = window;
+      const result = await (pressButton as any).executeAndroidButtonPress(
+        "home",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      expect(result.success).toBe(true);
+      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
+      expect(keyeventCall?.signal).toBeDefined();
+      // The verification read (getActive) also received the forwarded signal.
+      expect(window.getLastGetActiveSignal()).toBeDefined();
+    });
+
+    test("combined signal: an ambient request abort cancels the ADB keyevent fallback", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      fakeAdb.setThrowOnAbortedSignal();
+      const controller = new AbortController();
+      controller.abort();
+
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = launcherWindow();
+
+      // No explicit signal forwarded -- only the ambient request signal is
+      // aborted. Because the fallback COMBINES the (absent) forwarded signal
+      // with the ambient one, the ADB keyevent is still cancelled.
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          (pressButton as any).executeAndroidButtonPress("home"),
+        ),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
+      expect(keyeventCall?.signal?.aborted).toBe(true);
+    });
+
+    test("home verification spends the REMAINING deadline, not a fresh full getActive timeout", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const window = launcherWindow();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = window;
+
+      // Supply a 1234ms budget: the post-keyevent home verification must forward
+      // the leftover budget into getActive rather than letting it fall back to
+      // the 5s default (which would overrun a nearly-spent caller deadline).
+      await (pressButton as any).executeAndroidButtonPress("home", 1234);
+
+      const verifyOptions = window.getGetActiveOptions();
+      expect(verifyOptions.length).toBeGreaterThan(0);
+      const verifyTimeout = verifyOptions[verifyOptions.length - 1]?.timeoutMs;
+      expect(typeof verifyTimeout).toBe("number");
+      expect(verifyTimeout!).toBeGreaterThan(0);
+      expect(verifyTimeout!).toBeLessThanOrEqual(1234);
+    });
+
+    test("does not start a verification read after the shared deadline expires", async () => {
+      const window = launcherWindow();
+      // verifyAndroidHomeForeground only needs these collaborators. Avoid the
+      // production constructor here because it allocates a CtrlProxy port that
+      // is unrelated to this pre-read deadline gate.
+      const pressButton = Object.create(PressButton.prototype) as PressButton;
+      (pressButton as any).timer = fakeTimer;
+      (pressButton as any).adb = fakeAdb;
+      (pressButton as any).device = androidDevice;
+      (pressButton as any).window = window;
+
+      await expect(
+        (pressButton as any).verifyAndroidHomeForeground({ timeoutMs: 0 }),
+      ).resolves.toBe(false);
+
+      expect(window.getGetActiveCallCount()).toBe(0);
+    });
+
+    test("does not accept launcher evidence after the foreground read spends the budget", async () => {
+      const window = {
+        async getActive() {
+          fakeTimer.advanceTime(1);
+          return {
+            appId: "com.android.launcher3",
+            activityName: "Launcher",
+            layoutSeqSum: 0,
+          };
+        },
+      };
+      const pressButton = Object.create(PressButton.prototype) as PressButton;
+      (pressButton as any).timer = fakeTimer;
+      (pressButton as any).adb = fakeAdb;
+      (pressButton as any).device = androidDevice;
+      (pressButton as any).window = window;
+
+      await expect(
+        (pressButton as any).verifyAndroidHomeForeground({ timeoutMs: 1 }),
+      ).resolves.toBe(false);
+      expect(fakeAdb.getCommandCalls()).toEqual([]);
+    });
+
+    test("forwards the signal into the CtrlProxy global-action wait", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async (
+          _action: string,
+          _timeoutMs?: number,
+          _perf?: unknown,
+          _frameContext?: string,
+          signal?: AbortSignal,
+        ) => {
+          capturedSignal = signal;
+          // Report failure so the flow falls back to the ADB keyevent path.
+          return { success: false, action: "home", totalTimeMs: 0, error: "not now" };
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const controller = new AbortController();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = launcherWindow();
+
+      await (pressButton as any).executeAndroidButtonPress(
+        "home",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      expect(capturedSignal).toBe(controller.signal);
+    });
+
+    test("forwards the signal into the CtrlProxy frame-context validation wait", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, action: "back", totalTimeMs: 0 }),
+        validateFrameContext: async (
+          _frameContext: string,
+          _timeoutMs?: number,
+          signal?: AbortSignal,
+        ) => {
+          capturedSignal = signal;
+          return { success: true, totalTimeMs: 0 };
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const controller = new AbortController();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+
+      const result = await (pressButton as any).executeAndroidButtonPress(
+        "back",
+        500,
+        "frame-1",
+        controller.signal,
+      );
+
+      expect(result.success).toBe(true);
+      expect(capturedSignal).toBe(controller.signal);
+    });
+
+    test("classifies an ambient-only abort during verification as cancellation, not a read failure", async () => {
+      // The normal MCP route forwards no explicit signal; only the ambient
+      // request signal aborts. verifyAndroidHomeForeground must combine the two
+      // and rethrow the abort out of the retry loop instead of logging it as an
+      // ordinary read failure and sleeping/retrying to a false `false` verdict.
+      const window = new FakeWindow();
+      window.setThrowOnAbortedSignal();
+      window.configureActiveWindow({
+        appId: "com.android.settings",
+        activityName: "Settings",
+        layoutSeqSum: 0,
+      });
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      (pressButton as any).window = window;
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          (pressButton as any).verifyAndroidHomeForeground({}),
+        ),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      // Exactly one read attempt: the abort broke the loop, no retry backoffs ran.
+      expect(window.getGetActiveCallCount()).toBe(1);
     });
   });
 

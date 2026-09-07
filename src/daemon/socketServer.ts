@@ -3606,10 +3606,14 @@ export class UnixSocketServer {
           });
         }
 
+        // Forward the execution tracker's abort signal (this bound-session path
+        // is NOT wrapped in runWithAbortSignal, so there is no ambient signal for
+        // press to pick up): without it, session teardown mid-home-press leaves
+        // the ADB dispatch and foreground-verification reads running (issue #6289).
         const pressButton = new PressButton(targetDevice);
         return args.frameContext === undefined
-          ? await pressButton.press(args.button, remainingTimeoutMs)
-          : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
+          ? await pressButton.press(args.button, remainingTimeoutMs, undefined, signal)
+          : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext, signal);
       },
     );
 

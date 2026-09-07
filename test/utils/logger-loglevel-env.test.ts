@@ -22,8 +22,12 @@ class FakeLogStream extends EventEmitter {
     this.endCalls += 1;
     this.writableFinished = true;
     queueMicrotask(() => {
+      // Writable completion fires first (end callback + `finish`)...
       callback?.();
       this.emit("finish");
+      // ...then the fd is released via `close`, which closeLogStream awaits
+      // before its caller may reopen the same path (issue #6149).
+      this.emit("close");
     });
     return this;
   }

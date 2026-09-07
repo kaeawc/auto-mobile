@@ -132,6 +132,17 @@ describe("DisplayConfig getConfig", () => {
     expect(result.success).toBe(false);
     expect(result.current).toBeUndefined();
   });
+
+  test("rejects an unparseable Android baseline instead of reporting partial success", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { fontScale: "garbage\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+    expect(result.success).toBe(false);
+    expect(result.current).toBeUndefined();
+    expect(result.error).toContain("font scale");
+  });
 });
 
 describe("DisplayConfig setConfig", () => {
@@ -147,6 +158,22 @@ describe("DisplayConfig setConfig", () => {
     });
 
     expect(result.success).toBe(false);
+    expect(client.getCommandCalls().map((call) => call.command)).not.toContain(
+      "shell settings put system font_scale 2",
+    );
+  });
+
+  test("does not mutate after an unparseable baseline", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    seedReads(adbFactory, { fontScale: "garbage\n" });
+
+    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 2,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("font scale");
     expect(client.getCommandCalls().map((call) => call.command)).not.toContain(
       "shell settings put system font_scale 2",
     );

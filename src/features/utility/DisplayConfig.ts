@@ -608,21 +608,33 @@ export class DisplayConfig {
       this.run(adb, "shell cmd uimode night"),
     ]);
     const parsedDensity = parseWmDensity(densityRaw);
-    const values: DisplayConfigValues = {};
     const fontScale = parseFontScaleSnapshot(fontRaw);
-    if (fontScale !== undefined) {
-      values.fontScale = fontScale;
+    const theme = parseNightMode(nightRaw);
+    const unreadable: string[] = [];
+    if (fontScale === undefined) {
+      unreadable.push("font scale");
     }
-    if (parsedDensity.effective !== undefined) {
+    if (parsedDensity.effective === undefined) {
+      unreadable.push("display density");
+    }
+    if (theme === undefined) {
+      unreadable.push("night mode");
+    }
+    if (unreadable.length > 0) {
+      throw new Error(`Could not parse Android display baseline: ${unreadable.join(", ")}.`);
+    }
+
+    // Every advertised Android field has a restorable baseline. Returning a
+    // partial success would permit a later mutation with no corresponding
+    // value for the caller to restore.
+    const values: DisplayConfigValues = {
+      fontScale,
       // See DisplayConfigValues.density: only report a number when a `wm
       // density` override is actually present, else the restorable `"default"`
       // bucket (issue #6096 review).
-      values.density = parsedDensity.overridden ? parsedDensity.effective : "default";
-    }
-    const theme = parseNightMode(nightRaw);
-    if (theme !== undefined) {
-      values.theme = theme;
-    }
+      density: parsedDensity.overridden ? parsedDensity.effective : "default",
+      theme,
+    };
     return { values, physicalDensity: parsedDensity.physical };
   }
 

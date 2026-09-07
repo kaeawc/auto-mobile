@@ -8,6 +8,8 @@ import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
+import { serverConfig } from "../utils/ServerConfig";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 
 /**
@@ -327,10 +329,24 @@ async function runDeviceReadinessSetup(
   requiredReadiness: DeviceReadinessLevel,
 ): Promise<void> {
   if (session.platform === "android" && requiredReadiness !== "booted") {
-    await ensureAccessibilityServiceReady(
-      session.assignedDevice,
-      session.sessionId,
-      session.platform,
+    // #6227 P1 follow-up: serialize this session-scoped upgrade against the
+    // SAME per-device readiness lock the acquisition paths
+    // (startDevice/getAndroid/provision, via `RunnerReadinessService`) hold
+    // while preparing a device. The per-session single-flight above
+    // (`readinessUpgradeInFlight`) only stops two upgrades for the *same
+    // session* from colliding; without this per-DEVICE lock an upgrade and a
+    // concurrent device preparation could both run `resetSetupState()` +
+    // `setup()` on the shared per-device `AndroidCtrlProxyManager` singleton.
+    // Both paths derive the key via `deviceReadinessLockKey`, so they queue on
+    // one lock and setup on a device is never run concurrently.
+    await withDeviceReadinessLock(
+      deviceReadinessLockKey(session.platform, session.assignedDevice),
+      () =>
+        ensureAccessibilityServiceReady(
+          session.assignedDevice,
+          session.sessionId,
+          session.platform,
+        ),
     );
   }
   ensureSessionIsCurrent(session, sessionManager);
@@ -353,6 +369,31 @@ function isTransientA11yError(error: string): boolean {
   return A11Y_TRANSIENT_ERROR_PATTERNS.some((p) => error.includes(p));
 }
 
+/**
+ * #6227 P1 follow-up: honor `--skip-ctrl-proxy-download` on the session-scoped
+ * readiness upgrade exactly as the fresh acquisition path does
+ * (`RunnerReadinessService.ensureAndroidReadyWithoutDownloads`). When downloads
+ * are disabled and the CtrlProxy artifact is not already installed, the fresh
+ * path refuses with an actionable error rather than downloading — an upgrade of
+ * a booted-only session must degrade the same way instead of triggering
+ * `setup()`'s download/install of a missing artifact.
+ */
+async function assertCtrlProxyInstalledWhenDownloadsDisabled(
+  device: BootedDevice,
+  sessionId: string,
+): Promise<void> {
+  if (!serverConfig.isSkipCtrlProxyDownloadEnabled()) {
+    return;
+  }
+  const installed = await getDeviceReadinessProxyDriver(device).isInstalled();
+  if (!installed) {
+    throw new ActionableError(
+      `Failed to setup accessibility service for device ${device.deviceId} (session ${sessionId}): ` +
+        `CtrlProxy is not installed and runner downloads are disabled`,
+    );
+  }
+}
+
 async function ensureAccessibilityServiceReady(
   deviceId: string,
   sessionId: string,
@@ -367,6 +408,8 @@ async function ensureAccessibilityServiceReady(
   logger.info(
     `[ToolExecutionContext] Ensuring accessibility service is ready for session ${sessionId}`,
   );
+
+  await assertCtrlProxyInstalledWhenDownloadsDisabled(device, sessionId);
 
   const MAX_ATTEMPTS = 2;
   const RETRY_DELAY_MS = 3000;

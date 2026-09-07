@@ -33,6 +33,14 @@ export interface DeviceReadinessProxyDriver {
   resetSetupState(): void;
   setup(force: boolean, perf: PerformanceTracker): Promise<ProxySetupResult>;
   waitForConnection(): Promise<boolean>;
+  /**
+   * Whether the CtrlProxy artifact is already installed on the device (#6227).
+   * Consulted only when `--skip-ctrl-proxy-download` is enabled, so the
+   * session-scoped readiness upgrade can refuse to download a missing artifact
+   * exactly as the fresh acquisition path does — see
+   * `ToolExecutionContext.ensureAccessibilityServiceReady`.
+   */
+  isInstalled(): Promise<boolean>;
 }
 
 export type DeviceReadinessProxyDriverProvider = (
@@ -45,6 +53,7 @@ const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
     resetSetupState: () => manager.resetSetupState(),
     setup: (force, perf) => manager.setup(force, perf),
     waitForConnection: () => AndroidCtrlProxyClient.getInstance(device).waitForConnection(),
+    isInstalled: () => manager.isInstalled(),
   };
 };
 

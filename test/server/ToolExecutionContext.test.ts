@@ -9,6 +9,11 @@ import {
   setDeviceReadinessProxyDriverProviderForTesting,
 } from "../helpers/stubCtrlProxySetup";
 import { KeepScreenAwakeManager } from "../../src/utils/KeepScreenAwakeManager";
+import { serverConfig } from "../../src/utils/ServerConfig";
+import {
+  acquireDeviceReadinessLock,
+  deviceReadinessLockKey,
+} from "../../src/utils/deviceReadinessLock";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -742,8 +747,12 @@ describe("ToolExecutionContext", () => {
     mode = "new";
 
     // The replacement must start its OWN flight rather than joining (and
-    // hanging on) the predecessor's still-pending one.
-    const newContext = await createToolExecutionContext(
+    // resolving from) the predecessor's still-pending one. It queues behind the
+    // old incarnation on the shared per-device readiness lock (#6227 FIX 2), so
+    // release the old (now-released) incarnation's hung setup to free that lock;
+    // the replacement then runs its own setup (setupCalls -> 2) rather than the
+    // predecessor's.
+    const newContextPromise = createToolExecutionContext(
       "session-incarnation-scope",
       sessionManager,
       devicePool,
@@ -752,16 +761,130 @@ describe("ToolExecutionContext", () => {
       replacement,
     );
 
-    expect(newContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(2);
-    expect(sessionManager.getDeviceReadiness("session-incarnation-scope")).toBe("automationReady");
-
     releaseOldGate();
     await oldCall.catch(() => {
       // The old incarnation's own call is expected to fail once its setup
       // finally resolves against an already-released session; only the
       // replacement's outcome is under test here.
     });
+
+    const newContext = await newContextPromise;
+
+    expect(newContext.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(2);
+    expect(sessionManager.getDeviceReadiness("session-incarnation-scope")).toBe("automationReady");
+  });
+
+  // #6227 P1 review follow-up: the readiness UPGRADE path must honor
+  // `--skip-ctrl-proxy-download` exactly as the fresh acquisition path does.
+  // A booted-only session upgraded to automationReady while downloads are
+  // disabled and CtrlProxy is NOT installed must refuse (actionable error)
+  // rather than trigger `setup()`'s download/install of the missing artifact.
+  test("does not download CtrlProxy when upgrading a booted-only session while --skip-ctrl-proxy-download is set (#6227)", async () => {
+    let setupCalls = 0;
+    let installed = false;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        isInstalled: async () => installed,
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    serverConfig.setSkipCtrlProxyDownload(true);
+    try {
+      // A booted-only first touch skips accessibility setup entirely.
+      const bootedContext = await createToolExecutionContext(
+        "session-skip-dl",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "booted" },
+      );
+      expect(bootedContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(0);
+      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
+
+      // Upgrade to automationReady while CtrlProxy is NOT installed: the fresh
+      // path fails here rather than downloading, so the upgrade must too —
+      // `setup()` (the download/install path) must never run.
+      await expect(
+        createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        }),
+      ).rejects.toThrow(/not installed and runner downloads are disabled/);
+      expect(setupCalls).toBe(0);
+      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
+
+      // With the artifact already present, the upgrade proceeds without a
+      // download (setup runs against an installed package).
+      installed = true;
+      const upgraded = await createToolExecutionContext(
+        "session-skip-dl",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
+      expect(upgraded.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("automationReady");
+    } finally {
+      serverConfig.setSkipCtrlProxyDownload(false);
+    }
+  });
+
+  // #6227 P1 review follow-up: a session-scoped readiness upgrade must
+  // participate in the SAME per-device readiness lock the acquisition paths
+  // (startDevice/getAndroid/provision, via RunnerReadinessService) hold while
+  // preparing a device, so an upgrade and a concurrent device preparation
+  // never both reset+setup the shared per-device CtrlProxy manager. Here a
+  // concurrent device preparation holds that lock; the upgrade must not run
+  // accessibility setup until the preparation releases it.
+  test("serializes a session upgrade behind a concurrent device preparation holding the per-device readiness lock (#6227)", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    await sessionManager.createSession("session-device-lock", "device-1", "android");
+
+    // Stand in for a concurrent device preparation (startDevice/getAndroid/
+    // provision via RunnerReadinessService) holding the SAME per-device lock.
+    const release = await acquireDeviceReadinessLock(deviceReadinessLockKey("android", "device-1"));
+
+    const upgrade = createToolExecutionContext("session-device-lock", sessionManager, devicePool, {
+      ...sessionOptions,
+      deviceReadiness: "automationReady",
+    });
+
+    // While the device preparation holds the lock, the upgrade cannot run
+    // accessibility setup — no concurrent reset+setup on the shared manager.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(setupCalls).toBe(0);
+
+    // Once the device preparation releases, the queued upgrade proceeds and
+    // runs setup exactly once.
+    release();
+    const context = await upgrade;
+    expect(context.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-device-lock")).toBe("automationReady");
   });
 
   test("should not run accessibility setup for existing sessions", async () => {

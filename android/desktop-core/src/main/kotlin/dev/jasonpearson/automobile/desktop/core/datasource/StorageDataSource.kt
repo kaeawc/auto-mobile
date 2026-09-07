@@ -19,9 +19,9 @@ interface StorageDataSource {
     type: KeyValueType,
   ): Result<StorageMutationResult>
 
-  suspend fun removeKeyValue(fileName: String, key: String): Result<Unit>
+  suspend fun removeKeyValue(fileName: String, key: String): Result<StorageMutationResult>
 
-  suspend fun clearKeyValueFile(fileName: String): Result<Unit>
+  suspend fun clearKeyValueFile(fileName: String): Result<StorageMutationResult>
 
   suspend fun getTableData(
     databasePath: String,

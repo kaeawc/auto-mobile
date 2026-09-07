@@ -9,7 +9,7 @@ import { sendSocketRequest } from "./helpers/socketRequest";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -67,7 +67,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   let server: UnixSocketServer;
   let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
-  let originalAdbCreate: typeof defaultAdbClientFactory.create;
+  let adbClientFactory: AdbClientFactory;
   let androidSetPreference: ReturnType<typeof mock>;
   let androidRemovePreference: ReturnType<typeof mock>;
   let androidClearPreferenceStore: ReturnType<typeof mock>;
@@ -98,7 +98,11 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     originalAndroidGetInstance = AndroidCtrlProxyClient.getInstance;
     originalIosGetInstance = IOSCtrlProxyClient.getInstance;
-    originalAdbCreate = defaultAdbClientFactory.create;
+    adbClientFactory = {
+      create: () => {
+        throw new Error("Unexpected ADB access");
+      },
+    };
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       setPreference: androidSetPreference,
       removePreference: androidRemovePreference,
@@ -122,6 +126,8 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       new FakeTimer(),
       null,
       { sessionToolSelectionService: profileService },
+      undefined,
+      adbClientFactory,
     );
     await server.start();
   });
@@ -130,7 +136,6 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     await server.close();
     AndroidCtrlProxyClient.getInstance = originalAndroidGetInstance;
     IOSCtrlProxyClient.getInstance = originalIosGetInstance;
-    defaultAdbClientFactory.create = originalAdbCreate;
     PlatformDeviceManagerFactory.setInstance(null);
     if (existsSync(socketPath)) {
       await unlink(socketPath);
@@ -320,7 +325,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     }
 
     function injectFakeAdb(adb: FakeAdbExecutor): void {
-      defaultAdbClientFactory.create = () => adb;
+      adbClientFactory.create = () => adb;
     }
 
     test("ide/setKeyValue falls back to the direct-file XML edit and warns to relaunch", async () => {

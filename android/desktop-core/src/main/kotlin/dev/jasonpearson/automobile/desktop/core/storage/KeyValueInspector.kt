@@ -310,6 +310,7 @@ fun KeyValueInspector(
                   .clickable {
                     selectedEntry = entry
                     editingEntry = null
+                    saveWarning = null
                   }
                   .pointerHoverIcon(PointerIcon.Hand)
                   .background(backgroundColor)
@@ -400,6 +401,7 @@ fun KeyValueInspector(
                           Modifier.clickable {
                               editingEntry = null
                               saveError = null
+                              saveWarning = null
                             }
                             .pointerHoverIcon(PointerIcon.Hand),
                       )
@@ -442,6 +444,7 @@ fun KeyValueInspector(
                         modifier =
                           Modifier.clickable {
                               val filePath = selectedFile?.path ?: return@clickable
+                              saveWarning = null
                               editingEntry =
                                 EditingEntryIdentity(
                                   filePath = filePath,

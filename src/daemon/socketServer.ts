@@ -108,7 +108,10 @@ import {
   isInputKeyName,
   type InputKeyName,
 } from "../features/action/InputKey";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
@@ -458,6 +461,7 @@ export class UnixSocketServer {
   private closing = false;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
+  private readonly adbClientFactory: AdbClientFactory;
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
@@ -565,6 +569,7 @@ export class UnixSocketServer {
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
     bindGuard: SocketBindGuardOptions = {},
+    adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
@@ -583,6 +588,7 @@ export class UnixSocketServer {
     this.socketReachability = resolvedBindGuard.reachability;
     this.socketOwnerLiveness = resolvedBindGuard.ownerLiveness;
     this.socketReclaimLock = resolvedBindGuard.bindLock;
+    this.adbClientFactory = adbClientFactory;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -2877,7 +2883,7 @@ export class UnixSocketServer {
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
-        : AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        : AndroidCtrlProxyClient.getInstance(targetDevice, this.adbClientFactory);
     return { platform, client, device: targetDevice };
   }
 
@@ -2896,7 +2902,7 @@ export class UnixSocketServer {
     appId: string,
     fileName: string,
     viaSdk: () => Promise<void>,
-    viaDirectFile: (adb: ReturnType<typeof defaultAdbClientFactory.create>) => Promise<void>,
+    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
   ): Promise<{ usedDirectFileFallback: boolean }> {
     if (platform !== "android") {
       await viaSdk();
@@ -2905,7 +2911,7 @@ export class UnixSocketServer {
     return withAndroidSharedPreferencesInspectionFallback(
       appId,
       fileName,
-      () => defaultAdbClientFactory.create(device),
+      () => this.adbClientFactory.create(device),
       viaSdk,
       viaDirectFile,
     );

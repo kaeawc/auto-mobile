@@ -55,6 +55,32 @@ export async function readAndroidPreferencesXml(
 }
 
 /**
+ * Reads a SharedPreferences XML document and retains whether the backing file existed.
+ *
+ * Adding entries may create a preferences file, while removing an absent entry must remain a
+ * no-op. This keeps that policy decision at the mutation seam.
+ */
+export async function readAndroidPreferencesXmlIfExists(
+  adb: AdbExecutor,
+  appId: string,
+  fileName: string,
+): Promise<{ xml: string; exists: boolean }> {
+  try {
+    const result = await adb.executeCommand(
+      `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`,
+    );
+    return { xml: result.stdout, exists: true };
+  } catch (error) {
+    if (looksLikeMissingAndroidPrefsFile(error)) {
+      return { xml: "<map/>", exists: false };
+    }
+    throw new ActionableError(
+      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`,
+    );
+  }
+}
+
+/**
  * Writes raw SharedPreferences XML for `appId`/`fileName` via `adb shell run-as`.
  */
 export async function writeAndroidPreferencesXml(

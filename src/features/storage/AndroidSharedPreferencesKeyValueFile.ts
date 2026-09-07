@@ -6,6 +6,7 @@ import {
   arrayOfNodes,
   parseAndroidPreferencesXml,
   readAndroidPreferencesXml,
+  readAndroidPreferencesXmlIfExists,
   removeNamedNodes,
   sanitizeAndroidPreferencesFileName,
   serializeAndroidPreferencesXml,
@@ -109,7 +110,14 @@ export async function removeAndroidKeyValueDirect(
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, async () => {
-    const existingXml = await readAndroidPreferencesXml(adb, appId, safeFileName);
+    const { xml: existingXml, exists } = await readAndroidPreferencesXmlIfExists(
+      adb,
+      appId,
+      safeFileName,
+    );
+    if (!exists) {
+      return;
+    }
     const document = await parseAndroidPreferencesXml(existingXml);
     document.map ??= {};
     removeNamedNodes(document, key);
@@ -254,12 +262,8 @@ function androidKeyValueNode(
 }
 
 function parseAndroidBool(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes"].includes(normalized)) {
-    return "true";
-  }
-  if (["0", "false", "no"].includes(normalized)) {
-    return "false";
+  if (value === "true" || value === "false") {
+    return value;
   }
   throw new ActionableError(`Expected BOOLEAN key-value, got '${value}'.`);
 }
@@ -280,20 +284,17 @@ function parseAndroidInt(value: string): string {
 
 function parseAndroidFloat(value: string): string {
   const trimmed = value.trim();
-  // Kotlin's String.toFloatOrNull accepts these IEEE-754 spellings. The SDK
-  // path therefore accepts them too; the direct XML fallback must not change
-  // its input language merely because inspection is disabled.
-  if (["NaN", "Infinity", "+Infinity", "-Infinity"].includes(trimmed)) {
-    return trimmed;
-  }
-  if (!/^-?(?:\d+|\d*\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+  // Kotlin's String.toFloatOrNull delegates to JVM Float.parseFloat. Retain its
+  // decimal and hexadecimal grammar rather than narrowing fallback requests to
+  // JavaScript's Number grammar.
+  const decimal = "(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[fFdD]?";
+  const hexadecimal =
+    "0[xX](?:[0-9a-fA-F]+(?:\\.[0-9a-fA-F]*)?|\\.[0-9a-fA-F]+)[pP][+-]?\\d+[fFdD]?";
+  const special = "(?:NaN|Infinity)";
+  if (!new RegExp(`^[+-]?(?:${decimal}|${hexadecimal}|${special})$`).test(trimmed)) {
     throw new ActionableError(`Expected FLOAT key-value, got '${value}'.`);
   }
-  const parsed = Number.parseFloat(trimmed);
-  if (!Number.isFinite(parsed)) {
-    throw new ActionableError(`Expected FLOAT key-value, got '${value}'.`);
-  }
-  return String(parsed);
+  return trimmed;
 }
 
 /** Shared actionable guidance for DataStore paths, which have no XML fallback. */

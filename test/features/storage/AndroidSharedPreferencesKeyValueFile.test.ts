@@ -171,6 +171,50 @@ describe("setAndroidKeyValueDirect", () => {
       ),
     ).rejects.toThrow(/debuggable\/test build/);
   });
+
+  test.each(["+1.0", "1.", "1F", "1.e2", "0x1.0p0", "NaN", "Infinity"])(
+    "accepts the SDK FLOAT spelling %s",
+    async (value) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
+
+      await setAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        "com.example.app",
+        "settings",
+        "ratio",
+        value,
+        "FLOAT",
+      );
+
+      expect(
+        decodeBase64WritePayload(
+          commandText(adb.getExecutedCommands(), "base64 -d > shared_prefs/settings.xml"),
+        ),
+      ).toContain(`value="${value}"`);
+    },
+  );
+
+  test.each([" YES", "true ", "1", "no"])(
+    "rejects non-strict BOOLEAN spelling %s",
+    async (value) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
+
+      await expect(
+        setAndroidKeyValueDirect(
+          adb,
+          "device-1",
+          "com.example.app",
+          "settings",
+          "enabled",
+          value,
+          "BOOLEAN",
+        ),
+      ).rejects.toThrow(/Expected BOOLEAN/);
+    },
+  );
 });
 
 describe("removeAndroidKeyValueDirect", () => {
@@ -215,6 +259,9 @@ describe("removeAndroidKeyValueDirect", () => {
     await expect(
       removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA"),
     ).resolves.toBeUndefined();
+    expect(adb.getExecutedCommands()).not.toContainEqual(
+      expect.stringContaining("base64 -d > shared_prefs/settings.xml"),
+    );
   });
 });
 

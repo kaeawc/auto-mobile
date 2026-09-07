@@ -159,13 +159,23 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     );
 
     const adb = this.adbFactory.create(backendHandle.device);
+    let deviceFileFinalized = false;
     try {
       try {
         // Give screenrecord extra time to finalize the file on device. Even
         // though the process has exited, file writes may still be in progress.
         logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
         await this.timer.sleep(1000);
-        await this.waitForDeviceFileToFinalize(adb, backendHandle.deviceTempPath);
+        deviceFileFinalized = await this.waitForDeviceFileToFinalize(
+          adb,
+          backendHandle.deviceTempPath,
+        );
+        if (!deviceFileFinalized) {
+          throw new ActionableError(
+            `Device recording ${handle.recordingId} did not finish writing before the finalization deadline. ` +
+              "The device copy was retained; try stopping the recording again before retrying the pull.",
+          );
+        }
 
         logger.info(
           `[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`,
@@ -176,23 +186,32 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
           handle.recordingId,
         );
       } finally {
-        // Always clean up the /sdcard temp file, even when the pull failed.
-        logger.info(`[VideoCapture] Cleaning up temp file on device`);
-        const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
-        try {
-          const rmProcess = await adb.spawn(rmArgs);
-          await new Promise<void>((resolve) => {
-            rmProcess.once("exit", () => {
-              logger.info(`[VideoCapture] Temp file cleaned up`);
-              resolve();
+        // A recording that never stabilized might still be open on the device.
+        // Retain it instead of deleting the only potentially completeable copy.
+        // Once it did stabilize, retain the existing cleanup behavior for a
+        // subsequent pull failure.
+        if (!deviceFileFinalized) {
+          logger.warn(
+            `[VideoCapture] Retaining unstable device file ${backendHandle.deviceTempPath} for recovery`,
+          );
+        } else {
+          logger.info(`[VideoCapture] Cleaning up temp file on device`);
+          const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+          try {
+            const rmProcess = await adb.spawn(rmArgs);
+            await new Promise<void>((resolve) => {
+              rmProcess.once("exit", () => {
+                logger.info(`[VideoCapture] Temp file cleaned up`);
+                resolve();
+              });
+              rmProcess.once("error", (err) => {
+                logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+                resolve();
+              });
             });
-            rmProcess.once("error", (err) => {
-              logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-              resolve();
-            });
-          });
-        } catch (err) {
-          logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+          } catch (err) {
+            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+          }
         }
       }
 
@@ -258,27 +277,38 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * pulls it (issue #6291: a stop that lands right after start races
    * `screenrecord`'s own flush, so pulling too early sees a missing/empty
    * file and `adb pull` exits 1). Best-effort: if the size never visibly
-   * stabilizes within the attempt budget, falls through and lets the caller
-   * pull anyway — the pull retry loop covers a transient failure.
+   * stabilizes within the attempt budget. A file observed growing but never
+   * stable is retained on the device because a successful `adb pull` can still
+   * produce a truncated MP4. If the file cannot be observed at all, preserve
+   * the existing bounded pull retry as the only recovery path.
    */
   private async waitForDeviceFileToFinalize(
     adb: AdbExecutor,
     deviceTempPath: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     let lastSize = -1;
+    let observedNonEmptyFile = false;
     for (let attempt = 0; attempt < DEVICE_FILE_FINALIZE_POLL_ATTEMPTS; attempt++) {
       const size = await this.readDeviceFileSizeBytes(adb, deviceTempPath);
+      observedNonEmptyFile ||= size > 0;
       if (size > 0 && size === lastSize) {
         logger.info(`[VideoCapture] Device file finalized at ${size} bytes`);
-        return;
+        return true;
       }
       lastSize = size;
       await this.timer.sleep(DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS);
     }
+    if (observedNonEmptyFile) {
+      logger.warn(
+        `[VideoCapture] Device file ${deviceTempPath} did not visibly stabilize after ` +
+          `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks`,
+      );
+      return false;
+    }
     logger.warn(
-      `[VideoCapture] Device file ${deviceTempPath} did not visibly stabilize after ` +
-        `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks; pulling anyway`,
+      `[VideoCapture] Could not observe device file ${deviceTempPath}; attempting bounded pull recovery`,
     );
+    return true;
   }
 
   /** Spawns `adb pull` once and settles on the process's exit code. */

@@ -11,7 +11,7 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
-import { ActionableError, type BootedDevice } from "../../../src/models";
+import { type BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -488,6 +488,31 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(statIndices).toHaveLength(3);
       expect(pullIndex).toBeGreaterThan(-1);
       expect(Math.max(...statIndices)).toBeLessThan(pullIndex);
+    });
+
+    test("retains a recording that never stabilizes instead of pulling a truncated file", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      fakeClient.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
+        "128",
+        "256",
+        "384",
+        "512",
+        "640",
+      ]);
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "unstable.mp4"), fakeProcess);
+
+      await expect(backend.stop(handle)).rejects.toThrow(/did not finish writing/);
+
+      expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(5);
+      expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
     });
 
     // issue #6291: a stop-right-after-start pull failure must not leak the raw

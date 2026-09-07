@@ -69,6 +69,74 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
     expect(computeSafeBarrierResumeStep(p, 1)).toBe(0);
   });
 
+  test("groups generations by device-track order, not contiguous global index", () => {
+    // Device-grouped plan order: device A's two arrivals (0,1) precede device B's
+    // two arrivals (2,3). A global-order slice would wrongly pair {0,1} and {2,3},
+    // but the coordinator rendezvous is the g-th arrival of EACH device track:
+    //   gen0 = A@0 + B@2  (span [0,2])
+    //   gen1 = A@1 + B@3  (span [1,3])
+    const p = plan([
+      barrierStep("A", "L", 2), // 0  A arrival #0 -> gen0
+      barrierStep("A", "L", 2), // 1  A arrival #1 -> gen1
+      barrierStep("B", "L", 2), // 2  B arrival #0 -> gen0
+      barrierStep("B", "L", 2), // 3  B arrival #1 -> gen1
+    ]);
+    // Resume at 2 splits gen0 ([0,2]): A@0 would be skipped while B@2 re-arrives
+    // alone. The old global-slice guard saw span {2,3}, left 2 unchanged, and the
+    // survivor still deadlocked. Rewinding to gen0's first arrival (0) re-arrives
+    // A@0/B@2 together and then gen1.
+    expect(computeSafeBarrierResumeStep(p, 2)).toBe(0);
+    // Resume at 3 splits gen1 ([1,3]) -> rewind to 1, which then splits gen0
+    // ([0,2]) -> rewind to 0. (Old guard rewound only to 2 and still deadlocked.)
+    expect(computeSafeBarrierResumeStep(p, 3)).toBe(0);
+    // A clean boundary (gen0's first arrival) is untouched.
+    expect(computeSafeBarrierResumeStep(p, 0)).toBe(0);
+    // Resume at 1 splits gen0 ([0,2]) -> rewind to 0.
+    expect(computeSafeBarrierResumeStep(p, 1)).toBe(0);
+  });
+
+  test("handles a three-device lock grouped by track order", () => {
+    // A@0,A@1 | B@2,B@3 | C@4,C@5 with deviceCount=3.
+    //   gen0 = {0,2,4} span [0,4]
+    //   gen1 = {1,3,5} span [1,5]
+    const p: Plan = {
+      name: "barrier-plan",
+      mcpVersion: "1.0",
+      devices: ["A", "B", "C"],
+      steps: [
+        barrierStep("A", "L", 3), // 0 gen0
+        barrierStep("A", "L", 3), // 1 gen1
+        barrierStep("B", "L", 3), // 2 gen0
+        barrierStep("B", "L", 3), // 3 gen1
+        barrierStep("C", "L", 3), // 4 gen0
+        barrierStep("C", "L", 3), // 5 gen1
+      ],
+    };
+    // Resume at 5 splits gen1 ([1,5]) -> 1 -> gen0 ([0,4]) straddles 1 -> 0.
+    expect(computeSafeBarrierResumeStep(p, 5)).toBe(0);
+    // Resume at 4 splits gen0 ([0,4]) -> 0.
+    expect(computeSafeBarrierResumeStep(p, 4)).toBe(0);
+  });
+
+  test("falls back to one conservative span when deviceCount disagrees with device set", () => {
+    // deviceCount=2 but three distinct devices each arrive once: plan validation
+    // would reject this, and the coordinator cannot form a clean generation. The
+    // guard spans the whole lock so any mid-lock resume rewinds to the first
+    // arrival rather than splitting.
+    const p: Plan = {
+      name: "barrier-plan",
+      mcpVersion: "1.0",
+      devices: ["A", "B", "C"],
+      steps: [
+        barrierStep("A", "L", 2), // 0
+        barrierStep("B", "L", 2), // 1
+        barrierStep("C", "L", 2), // 2
+      ],
+    };
+    expect(computeSafeBarrierResumeStep(p, 1)).toBe(0);
+    expect(computeSafeBarrierResumeStep(p, 2)).toBe(0);
+  });
+
   test("iterates to a fixed point across interleaved barrier locks", () => {
     // Two locks whose generations interleave in plan order:
     //   X: [0,2]  (A@0, B@2)

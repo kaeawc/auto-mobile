@@ -36,53 +36,125 @@ function effectiveField(step: PlanStep, field: string): unknown {
 interface Arrival {
   planIndex: number;
   deviceCount: number | undefined;
+  /** The device label (`params.device`) whose track executes this arrival. */
+  device: string | undefined;
 }
 
 /**
  * Build the set of generation spans for one lock's ordered arrivals.
  *
- * When the lock has a single consistent, positive `deviceCount` N and its total
- * arrivals divide evenly into N, arrivals are grouped into exact N-sized
- * generations (the same generation model the barrier plan-validation checks
- * use). Otherwise — an inconsistent or indivisible count that plan validation
- * would already reject — we fall back to a single conservative span covering
- * every arrival of the lock, so a mid-lock resume still rewinds to the lock's
- * first arrival rather than splitting it.
+ * A barrier generation is NOT a contiguous slice of the global plan order — the
+ * device tracks run concurrently, each executing its own arrivals in track
+ * order. `CriticalSectionCoordinator` fills a generation with one arrival per
+ * distinct device and resets once `deviceCount` distinct devices have arrived,
+ * so generation `g` is the `g`-th arrival of *every* participating device's
+ * track, whichever global indices those land on. For a device-grouped plan
+ * order like `A@0, A@1, B@2, B@3` (deviceCount 2) the real generations are
+ * `{0,2}` and `{1,3}` — the "column" across tracks — not the contiguous
+ * `{0,1}`/`{2,3}` a global-order slice would produce.
+ *
+ * We therefore reconstruct each device's track (its arrivals in plan order) and
+ * read them off column-by-column: column `g` across all tracks is generation
+ * `g`, and its span is `[min planIndex, max planIndex]` of that column.
+ *
+ * When the shape is irregular in a way plan validation would already reject —
+ * an arrival missing its device label, ragged per-device arrival counts, or a
+ * `deviceCount` that disagrees with the number of distinct devices — we fall
+ * back to one conservative span covering every arrival of the lock, so a
+ * mid-lock resume still rewinds to the lock's first arrival rather than
+ * splitting a generation.
  */
 function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
   if (arrivals.length === 0) {
     return [];
   }
 
+  const tracks = deviceTracks(arrivals);
+  const generationCount = regularGenerationCount(arrivals, tracks);
+  if (generationCount === undefined) {
+    // Irregular shape (missing device, ragged tracks, or a deviceCount that
+    // disagrees with the device set) — plan validation would reject it, so span
+    // the whole lock and let a mid-lock resume rewind to its first arrival.
+    return [wholeLockSpan(lock, arrivals)];
+  }
+
+  const trackLists = [...tracks.values()];
+  const spans: GenerationSpan[] = [];
+  for (let gen = 0; gen < generationCount; gen++) {
+    spans.push(columnSpan(lock, trackLists, gen));
+  }
+  return spans;
+}
+
+/** The conservative single span covering every arrival of a lock. */
+function wholeLockSpan(lock: string, arrivals: Arrival[]): GenerationSpan {
+  return {
+    lock,
+    firstIndex: arrivals[0].planIndex,
+    lastIndex: arrivals[arrivals.length - 1].planIndex,
+  };
+}
+
+/**
+ * Reconstruct each device's track (its arrivals' plan indices in plan order).
+ * Iterating in plan order preserves per-device track order, so the k-th entry of
+ * a device's list is that device's k-th arrival at the lock. Returns null when
+ * any arrival is missing its device label.
+ */
+function deviceTracks(arrivals: Arrival[]): Map<string, number[]> {
+  const perDevice = new Map<string, number[]>();
+  for (const arrival of arrivals) {
+    if (arrival.device === undefined) {
+      return new Map();
+    }
+    const list = perDevice.get(arrival.device) ?? [];
+    list.push(arrival.planIndex);
+    perDevice.set(arrival.device, list);
+  }
+  return perDevice;
+}
+
+/**
+ * The number of generations when the lock has a regular shape: every device
+ * track has the same arrival count (one arrival per generation) and a single
+ * `deviceCount` that equals the number of distinct devices. Returns undefined
+ * for an irregular shape (missing device, ragged tracks, count mismatch).
+ */
+function regularGenerationCount(
+  arrivals: Arrival[],
+  tracks: Map<string, number[]>,
+): number | undefined {
+  if (tracks.size === 0) {
+    return undefined;
+  }
   const counts = new Set(
     arrivals.map((a) => a.deviceCount).filter((c): c is number => typeof c === "number" && c >= 1),
   );
   const consistentCount = counts.size === 1 ? (counts.values().next().value as number) : undefined;
-
-  if (
-    consistentCount === undefined ||
-    consistentCount < 1 ||
-    arrivals.length % consistentCount !== 0
-  ) {
-    return [
-      {
-        lock,
-        firstIndex: arrivals[0].planIndex,
-        lastIndex: arrivals[arrivals.length - 1].planIndex,
-      },
-    ];
+  if (consistentCount !== tracks.size) {
+    return undefined;
   }
-
-  const spans: GenerationSpan[] = [];
-  for (let start = 0; start < arrivals.length; start += consistentCount) {
-    const group = arrivals.slice(start, start + consistentCount);
-    spans.push({
-      lock,
-      firstIndex: group[0].planIndex,
-      lastIndex: group[group.length - 1].planIndex,
-    });
+  const arrivalCounts = new Set([...tracks.values()].map((list) => list.length));
+  if (arrivalCounts.size !== 1) {
+    return undefined;
   }
-  return spans;
+  return arrivalCounts.values().next().value as number;
+}
+
+/** Span of generation `gen` = [min, max] plan index of that column across tracks. */
+function columnSpan(lock: string, tracks: number[][], gen: number): GenerationSpan {
+  let firstIndex = Infinity;
+  let lastIndex = -Infinity;
+  for (const track of tracks) {
+    const planIndex = track[gen];
+    if (planIndex < firstIndex) {
+      firstIndex = planIndex;
+    }
+    if (planIndex > lastIndex) {
+      lastIndex = planIndex;
+    }
+  }
+  return { lock, firstIndex, lastIndex };
 }
 
 function readDeviceCount(step: PlanStep): number | undefined {
@@ -90,6 +162,17 @@ function readDeviceCount(step: PlanStep): number | undefined {
   return typeof rawCount === "number" && Number.isInteger(rawCount) && rawCount >= 1
     ? rawCount
     : undefined;
+}
+
+/**
+ * Read the device label a step's track belongs to. Multi-device plans (the only
+ * plans this guard sees, via executeParallel) tag every step with
+ * `params.device`; anything else yields `undefined` and forces the conservative
+ * single-span fallback for the lock.
+ */
+function readDevice(step: PlanStep): string | undefined {
+  const device = step.params?.device;
+  return typeof device === "string" && device.length > 0 ? device : undefined;
 }
 
 function pushArrival(bucket: Map<string, Arrival[]>, lock: string, arrival: Arrival): void {
@@ -119,7 +202,11 @@ function collectGenerationSpans(plan: Plan): GenerationSpan[] {
       continue;
     }
     const bucket = step.tool === "barrier" ? barrierArrivals : criticalSectionArrivals;
-    pushArrival(bucket, lock, { planIndex, deviceCount: readDeviceCount(step) });
+    pushArrival(bucket, lock, {
+      planIndex,
+      deviceCount: readDeviceCount(step),
+      device: readDevice(step),
+    });
   }
 
   const spans: GenerationSpan[] = [];

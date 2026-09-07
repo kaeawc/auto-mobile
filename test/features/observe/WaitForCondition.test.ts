@@ -27,6 +27,11 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     viewHierarchy: {
       packageName: "com.example",
       hierarchy: { node: node as any },
+      // The poll loop's device-clock freshness floor (#6284) reads the
+      // hierarchy-owned `updatedAt`, never the (possibly host-created) top-level
+      // one. Mirror the caller's device timestamp here so observations are
+      // admissible, matching the shared helper in SettleObserve.test.ts.
+      updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
     },
     ...extra,
   } as ObserveResult;

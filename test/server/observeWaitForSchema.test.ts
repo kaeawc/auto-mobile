@@ -1156,10 +1156,15 @@ describe("waitForObservation activeWindow", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveSequence([
-      makeObservation("com.example.app", "com.example.app.HomeActivity"),
-      makeObservation("com.example.app", "com.example.app.HomeActivity"),
-    ]);
+    // The settle loop's device-clock floor (#6284) admits a capture only via the
+    // hierarchy-owned `updatedAt`. A structurally-identical pair with strictly
+    // increasing device timestamps lets the second read clear the post-invocation
+    // floor and settle, exactly as the SettleObserve unit tests drive it.
+    const firstStable = makeObservation("com.example.app", "com.example.app.HomeActivity");
+    const secondStable = makeObservation("com.example.app", "com.example.app.HomeActivity");
+    firstStable.viewHierarchy!.updatedAt = 10;
+    secondStable.viewHierarchy!.updatedAt = 20;
+    observeScreen.setObserveSequence([firstStable, secondStable]);
 
     const outcome = await waitForObservation(
       observeScreen,

@@ -10,6 +10,7 @@ import {
   DeviceSessionRepository,
 } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import {
   KeepScreenAwakeManager,
   type KeepScreenAwakeState,
@@ -50,6 +51,14 @@ class FakeDeviceSessionRepository {
   }
 
   async markStaleActiveSessionsExpired(): Promise<void> {}
+}
+
+interface DaemonSocketServerInternals {
+  socketServer: {
+    quiesce(): Promise<void>;
+    drainSessionReleaseNotifications(): Promise<void>;
+    close(): Promise<void>;
+  } | null;
 }
 
 describe("Daemon shutdown session release (issue #5303)", () => {
@@ -274,6 +283,107 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     }
   });
 
+  test("publishes each concurrent bound-session shutdown before closing the control socket (#6336)", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const sessionManager = daemon.getSessionManager();
+    const events: string[] = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      events.push(`release:${sessionId}:${reason}`);
+    });
+    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      quiesce: async () => {
+        events.push("socket:quiesce");
+      },
+      drainSessionReleaseNotifications: async () => {
+        events.push("socket:drain-releases");
+      },
+      close: async () => {
+        events.push("socket:close");
+      },
+    };
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+
+    try {
+      await sessionManager.createSession("session-a", "emulator-5554", "android");
+      await sessionManager.createSession("session-b", "emulator-5556", "android");
+
+      await daemon.stop();
+
+      expect(events[0]).toBe("socket:quiesce");
+      expect(events.filter((event) => event === "release:session-a:daemon-shutdown")).toHaveLength(
+        1,
+      );
+      expect(events.filter((event) => event === "release:session-b:daemon-shutdown")).toHaveLength(
+        1,
+      );
+      const drainIndex = events.indexOf("socket:drain-releases");
+      expect(drainIndex).toBeGreaterThan(events.indexOf("release:session-a:daemon-shutdown"));
+      expect(drainIndex).toBeGreaterThan(events.indexOf("release:session-b:daemon-shutdown"));
+      expect(events.indexOf("socket:close")).toBeGreaterThan(drainIndex);
+      expect(sessionManager.getSession("session-a")).toBeNull();
+      expect(sessionManager.getSession("session-b")).toBeNull();
+    } finally {
+      unsubscribe();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
+  test("rejects a session creation that outlives control-socket quiescence (#6336)", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const sessionManager = daemon.getSessionManager();
+    const continueAcquisition = Promise.withResolvers<void>();
+    const lateCreation = (async () => {
+      await continueAcquisition.promise;
+      return await sessionManager.createSession(
+        "late-shutdown-session",
+        "emulator-5558",
+        "android",
+      );
+    })();
+    const lateCreationOutcome = lateCreation.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      quiesce: async () => {
+        continueAcquisition.resolve();
+        await Promise.resolve();
+      },
+      drainSessionReleaseNotifications: async () => {},
+      close: async () => {},
+    };
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+
+    try {
+      await daemon.stop();
+
+      expect(await lateCreationOutcome).toEqual(
+        expect.objectContaining({
+          message:
+            "Cannot create device session late-shutdown-session: the daemon is shutting down.",
+        }),
+      );
+      expect(sessionManager.getSession("late-shutdown-session")).toBeNull();
+      expect(repository.sessions.has("late-shutdown-session")).toBe(false);
+    } finally {
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
   test("drains a monitor release that removed its session before shutdown snapshots it", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
@@ -321,6 +431,77 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     } finally {
       markReleasedSpy.mockRestore();
       closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
+  test("publishes a shutdown fallback when terminal persistence outlives the drain (#6336)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const sessionManager = daemon.getSessionManager();
+    const events: string[] = [];
+    const persistence = Promise.withResolvers<void>();
+    const persistenceStarted = Promise.withResolvers<void>();
+    const originalMarkReleased = repository.markReleased.bind(repository);
+    const markReleasedSpy = spyOn(repository, "markReleased").mockImplementation(
+      async (...args) => {
+        persistenceStarted.resolve();
+        await persistence.promise;
+        await originalMarkReleased(...args);
+      },
+    );
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      events.push(`release:${sessionId}:${reason}`);
+    });
+    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      quiesce: async () => {},
+      drainSessionReleaseNotifications: async () => {
+        events.push("socket:drain-releases");
+      },
+      close: async () => {
+        events.push("socket:close");
+      },
+    };
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+
+    try {
+      await sessionManager.createSession(
+        "blocked-terminal-session",
+        "emulator-5560",
+        "android",
+      );
+      const terminalRelease = sessionManager.releaseSession(
+        "blocked-terminal-session",
+        "heartbeat-timeout",
+      );
+      await persistenceStarted.promise;
+
+      await daemon.stop();
+
+      const fallback = "release:blocked-terminal-session:daemon-shutdown";
+      expect(events.filter((event) => event === fallback)).toHaveLength(1);
+      expect(events.indexOf("socket:drain-releases")).toBeGreaterThan(events.indexOf(fallback));
+      expect(events.indexOf("socket:close")).toBeGreaterThan(
+        events.indexOf("socket:drain-releases"),
+      );
+
+      persistence.resolve();
+      await terminalRelease;
+      expect(events.filter((event) => event === fallback)).toHaveLength(1);
+      expect(events.filter((event) => event.startsWith("release:blocked-terminal-session:"))).toEqual(
+        [fallback],
+      );
+    } finally {
+      persistence.resolve();
+      markReleasedSpy.mockRestore();
+      unsubscribe();
       loggerCloseSpy.mockRestore();
     }
   });

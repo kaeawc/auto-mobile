@@ -649,6 +649,13 @@ export class DaemonMcpProxy {
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
   private connectionCloseReject: ((reason?: unknown) => void) | null = null;
+  /**
+   * A `daemon-shutdown` release arrives before the old daemon closes its socket.
+   * Calls admitted for replacement acquisition wait on this peer-close barrier
+   * instead of reconnecting to the still-reachable but quiesced incarnation.
+   */
+  private daemonShutdownDisconnect: Promise<void> | null = null;
+  private resolveDaemonShutdownDisconnect: (() => void) | null = null;
   private connected: boolean = false;
   private closing: boolean = false;
   // The daemon clears socket-local state when its RPC connection drops. Keep this
@@ -802,6 +809,13 @@ export class DaemonMcpProxy {
   async ensureConnected(): Promise<void> {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
+    }
+    const daemonShutdownDisconnect = this.daemonShutdownDisconnect;
+    if (daemonShutdownDisconnect) {
+      await daemonShutdownDisconnect;
+      if (this.closing) {
+        throw new DaemonUnavailableError("MCP proxy is closing");
+      }
     }
     if (this.connected && this.client) {
       return;
@@ -1068,7 +1082,29 @@ export class DaemonMcpProxy {
         notification.reason ?? "released",
         notification.release,
       );
+      if (notification.reason === "daemon-shutdown") {
+        this.waitForDaemonShutdownDisconnect();
+      }
     }
+  }
+
+  private waitForDaemonShutdownDisconnect(): void {
+    if (this.daemonShutdownDisconnect || !this.client) {
+      return;
+    }
+    const disconnect = Promise.withResolvers<void>();
+    this.daemonShutdownDisconnect = disconnect.promise;
+    this.resolveDaemonShutdownDisconnect = disconnect.resolve;
+    // Keep the old client attached long enough to observe peer EOF, but prevent
+    // ensureConnected() from treating this quiesced incarnation as reusable.
+    this.connected = false;
+  }
+
+  private completeDaemonShutdownDisconnect(): void {
+    const resolve = this.resolveDaemonShutdownDisconnect;
+    this.daemonShutdownDisconnect = null;
+    this.resolveDaemonShutdownDisconnect = null;
+    resolve?.();
   }
 
   /**
@@ -1524,6 +1560,7 @@ export class DaemonMcpProxy {
     this.connectionClosedUnsubscribe = client.onConnectionClosed(() => {
       if (this.client === client) {
         void this.resetConnection();
+        this.completeDaemonShutdownDisconnect();
       }
     });
   }
@@ -2496,6 +2533,7 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     await this.stopBoundSessionHeartbeat();

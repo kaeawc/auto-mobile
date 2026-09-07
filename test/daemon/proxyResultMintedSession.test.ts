@@ -207,6 +207,47 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     }
   });
 
+  test("waits for the shutting-down daemon to disconnect before reacquiring (#6336)", async () => {
+    const M1 = "shutdown-session";
+    const M2 = "replacement-session";
+    const oldDaemon = acquiringClient(sessionManager, [M1, "wrong-old-daemon-session"]);
+    const replacementDaemon = acquiringClient(sessionManager, [M2]);
+    let clientFactoryCalls = 0;
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => {
+        clientFactoryCalls += 1;
+        return clientFactoryCalls === 1 ? oldDaemon.client : replacementDaemon.client;
+      },
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.callTool("getAndroid", { avdName: "am-api34-ga-arm64" });
+      oldDaemon.client.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        M1,
+        "daemon-shutdown",
+      );
+
+      const reacquired = proxy.callTool("getAndroid", { avdName: "am-api34-ga-arm64" });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(oldDaemon.nextIndex()).toBe(1);
+      expect(replacementDaemon.nextIndex()).toBe(0);
+
+      oldDaemon.client.emitConnectionClosed();
+
+      await expect(reacquired).resolves.toEqual(deviceStartResult(M2));
+      expect(replacementDaemon.nextIndex()).toBe(1);
+      expect(sessionManager.getSession(M2)?.hasReceivedHeartbeat).toBe(true);
+    } finally {
+      await proxy.close();
+    }
+  });
+
   // AC3: a sessionless call on a fenced connection whose binding was result-minted
   // (never named by the client) fails naming the CURRENT state — directing to
   // re-acquire — rather than reporting the stale uuid the caller never referenced.

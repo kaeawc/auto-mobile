@@ -211,6 +211,37 @@ describe("UnixSocketServer notification broadcast", () => {
     });
   });
 
+  test("quiesce rejects new work while preserving concurrent shutdown releases (#6336)", async () => {
+    const subscriberA = await connectedClient();
+    const subscriberB = await connectedClient();
+    subscriberA.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+    subscriberB.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+    await Promise.all([subscriberA.waitForFrames(1), subscriberB.waitForFrames(1)]);
+
+    await server.quiesce();
+    subscriberA.send("daemon/refreshDevices");
+    await subscriberA.waitForFrames(2);
+    SessionReleaseBroadcaster.emit("session-a", "daemon-shutdown");
+    SessionReleaseBroadcaster.emit("session-b", "daemon-shutdown");
+    await server.drainSessionReleaseNotifications();
+    await server.close();
+    await Promise.all([subscriberA.waitForFrames(4), subscriberB.waitForFrames(3)]);
+
+    expect(subscriberA.frames[1]).toMatchObject({
+      type: "mcp_response",
+      success: false,
+      error: "Daemon is shutting down",
+    });
+    const expectedReleases = ["session-a", "session-b"].map((sessionId) => ({
+      type: "daemon_notification",
+      method: SESSION_RELEASED_NOTIFICATION_METHOD,
+      sessionId,
+      reason: "daemon-shutdown",
+    }));
+    expect(subscriberA.frames.slice(2)).toEqual(expectedReleases);
+    expect(subscriberB.frames.slice(1)).toEqual(expectedReleases);
+  });
+
   test("close() unsubscribes from the session-release broadcaster too (issue #4610)", async () => {
     const subscriber = await connectedClient();
     subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);

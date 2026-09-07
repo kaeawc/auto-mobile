@@ -379,6 +379,8 @@ export class SessionManager {
   private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
+  /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
+  private acceptingSessionCreations = true;
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
   /** Releases received before an assignment has published its session. */
@@ -515,6 +517,11 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
+    if (!this.acceptingSessionCreations) {
+      throw new ActionableError(
+        `Cannot create device session ${sessionId}: the daemon is shutting down.`,
+      );
+    }
     this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
     let terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
@@ -568,6 +575,18 @@ export class SessionManager {
         this.pendingSessionCreations.delete(sessionId);
       }
     }
+  }
+
+  /**
+   * Fence new session publication before daemon shutdown snapshots active work.
+   *
+   * A control-socket handler can outlive the bounded quiesce wait while preparing
+   * a device. Its eventual DevicePool binding still reaches createSession(), so
+   * this synchronous fence makes that assignment roll back instead of publishing
+   * a session after the shutdown release snapshot.
+   */
+  stopAcceptingSessionCreations(): void {
+    this.acceptingSessionCreations = false;
   }
 
   private async persistAndPublishSession(session: Session): Promise<Session> {

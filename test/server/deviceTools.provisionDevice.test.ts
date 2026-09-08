@@ -52,10 +52,19 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     string,
     { fingerprint: string; result?: Record<string, unknown>; creationStarted: boolean }
   >();
+  private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
   failCalls = 0;
 
+  /** Simulate a "running" row left behind by a crashed/earlier attempt. */
+  markInProgress(operationId: string): void {
+    this.forcedInProgress.add(operationId);
+  }
+
   async begin(operationId: string, requestFingerprint: string) {
+    if (this.forcedInProgress.has(operationId)) {
+      return { started: false as const, inProgress: true as const };
+    }
     const existing = this.results.get(operationId);
     if (!existing) {
       this.results.set(operationId, {
@@ -1917,6 +1926,44 @@ describe("provisionDevice handler", () => {
         code: "operation_conflict",
       },
     });
+  });
+
+  test("reports in-progress instead of re-running provisioning for an already-running operation", async () => {
+    operationStore.markInProgress("operation-already-running");
+
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-already-running",
+          device: {
+            platform: "android",
+            name: "phone-api-36-a",
+            spec: {
+              runtime: "system-images;android-36;google_apis;x86_64",
+              deviceType: "pixel_9",
+            },
+          },
+          boot: false,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "operation_in_progress",
+      },
+    });
+    // The lifecycle must never run for an in-progress row -- otherwise this is
+    // just the #6652 defect-1 restart bug wearing a different response shape.
+    expect(exactProvisioner.requests).toHaveLength(0);
+    expect(operationStore.failCalls).toBe(0);
   });
 
   test("enforces timeoutMs across exact provisioning before boot begins", async () => {

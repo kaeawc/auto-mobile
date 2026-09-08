@@ -3325,6 +3325,7 @@ async function rebootAndroidAfterSystemUiAnr(
         boot.device,
         sourceImage.name,
         sourceImage.name,
+        isDevicePoolAutolockEnabled() ? { mcpSessionId: args.__mcpSessionId } : undefined,
       )
     : undefined;
   let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
@@ -3336,6 +3337,7 @@ async function rebootAndroidAfterSystemUiAnr(
       devicePool,
       boot.device.deviceId,
       signal,
+      args.__mcpSessionId,
     );
     await shutdownAndroidForSystemUiAnr(boot.device, deviceManager, timer, totalDeadlineMs, signal);
     shutdownWasConfirmed = true;
@@ -3401,11 +3403,16 @@ async function reserveSystemUiAnrShutdown(
   devicePool: DevicePool | undefined,
   deviceId: string,
   signal: AbortSignal | undefined,
+  mcpSessionId: string | undefined,
 ): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal);
+  const reservation = await devicePool.reserveDeviceForShutdown(
+    deviceId,
+    signal,
+    isDevicePoolAutolockEnabled() ? { mcpSessionId } : undefined,
+  );
   if (reservation) {
     devicePool.markIntentionalShutdown(deviceId);
   }

@@ -5012,6 +5012,7 @@ export class DevicePool {
   async reserveDeviceForShutdown(
     deviceId: string,
     abortSignal?: AbortSignal,
+    autolockClient?: { mcpSessionId?: string },
   ): Promise<
     | {
         device: PooledDevice;
@@ -5028,6 +5029,7 @@ export class DevicePool {
       deviceId,
       identity,
       abortSignal,
+      autolockClient,
     );
     if (!expectedDevice) {
       identity.releaseSession?.();
@@ -5055,6 +5057,7 @@ export class DevicePool {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
+    autolockClient: { mcpSessionId?: string } | undefined,
   ): Promise<PooledDevice | undefined> {
     const releaseSessionOnAbort = () => identity.releaseSession?.();
     abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
@@ -5063,6 +5066,7 @@ export class DevicePool {
         deviceId,
         identity,
         abortSignal,
+        autolockClient,
       );
       if (abortSignal?.aborted) {
         if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
@@ -5106,6 +5110,7 @@ export class DevicePool {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
+    autolockClient: { mcpSessionId?: string } | undefined,
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(() => {
       if (abortSignal?.aborted) {
@@ -5124,6 +5129,9 @@ export class DevicePool {
       if (!currentDevice) {
         return undefined;
       }
+      // A readiness await can outlive this client's ownership. Check it while
+      // reserving shutdown so a stale request cannot reboot another session's device.
+      this.getOwnedAutolockSession(currentDevice, autolockClient);
       if (this.shutdownReservations.get(deviceId) === currentDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }

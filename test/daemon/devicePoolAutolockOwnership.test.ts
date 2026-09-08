@@ -278,17 +278,18 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
         timer: h.timer,
         notifyResourcesChanged: async () => {},
         ensureCtrlProxyReady: async (request) => {
-          if (++readinessAttempts === 1) {
-            throw new SystemUiAnrRecoveryRequiredError("System UI ANR");
-          }
-          recoveredExitListeners = recoveredProcess.listenerCount("exit");
-          recoveredOutputListeners = recoveredProcess.stdout.listenerCount("data");
-          if (client === "agent-A-reassigned") {
+          ++readinessAttempts;
+          if (client === "agent-A-reassigned" && readinessAttempts === 1) {
             const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
             deviceUtils.setBootedDevices("android", [request.device, otherDevice]);
             await h.pool.addDevice(otherDevice);
             secondOwner = await h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-A");
           }
+          if (readinessAttempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR");
+          }
+          recoveredExitListeners = recoveredProcess.listenerCount("exit");
+          recoveredOutputListeners = recoveredProcess.stdout.listenerCount("data");
         },
       });
       registerDeviceTools();
@@ -310,9 +311,10 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
           expect(h.manager.getDeviceReadiness(owner!)).toBe("automationReady");
         } else {
           await expect(acquiring).rejects.toThrow("another session");
-          expect(readinessAttempts).toBe(2);
+          expect(readinessAttempts).toBe(1);
           expect(secondOwner).toBeDefined();
-          expect(h.manager.getSession(owner!)?.assignedDevice).toBe(image.deviceId);
+          expect(deviceUtils.getExecutedOperations()).not.toContain(`killDevice:${device.name}`);
+          expect(h.manager.getSession(owner!)?.assignedDevice).toBe(device.deviceId);
         }
         expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(secondOwner ?? owner);
         expect(h.pool.resolveAutolockSessionForMcpSession("agent-B")).toBeUndefined();

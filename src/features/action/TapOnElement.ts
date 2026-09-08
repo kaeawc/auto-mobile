@@ -47,6 +47,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
+import { androidCoordinateTapRequiresAdbInput } from "./androidCoordinateTapPolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
 import {
@@ -2199,50 +2200,56 @@ export class TapOnElement extends BaseVisualChange {
     skipSemanticLongPress: boolean = false,
   ): Promise<void> {
     if (action === "tap") {
-      const result = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!result.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
     } else if (action === "longPress") {
       await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress);
     } else if (action === "doubleTap") {
-      const first = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!first.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture first tap failed (${first.error}), falling back to ADB`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
       await this.timer.sleep(200);
-      const second = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!second.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture second tap failed (${second.error}), falling back to ADB`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
     }
+  }
+
+  /**
+   * Issue a single coordinate tap. Uses the CtrlProxy `dispatchGesture` path by
+   * default and falls back to a real `adb shell input` tap when it fails.
+   *
+   * For DocumentsUI targets the dispatchGesture is skipped entirely: DocumentsUI
+   * *acknowledges* the synthetic gesture (the completion callback fires, so it
+   * reports success) without opening or selecting the row, so the tap must go
+   * straight through the ADB input pipeline that the RecyclerView touch handling
+   * honours (issue #6335, same acknowledged-but-ineffective dispatch as #5910).
+   */
+  private async dispatchCoordinateTapOrAdbFallback(
+    x: number,
+    y: number,
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const requiresAdbInput = androidCoordinateTapRequiresAdbInput(element);
+    const result = requiresAdbInput
+      ? { success: false, error: "documentsui-dispatchgesture-bypass" }
+      : await this.accessibilityService.requestTapCoordinates(x, y, 10);
+    if (result.success) {
+      return;
+    }
+    if (requiresAdbInput) {
+      logger.info(
+        `[TapOnElement] DocumentsUI target — using ADB input tap at (${x}, ${y}); ` +
+          `dispatchGesture is acknowledged but ineffective for DocumentsUI rows (#6335)`,
+      );
+    } else {
+      logger.warn(
+        `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
+      );
+    }
+    await this.adb.executeCommand(
+      `shell input touchscreen tap ${x} ${y}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   /**

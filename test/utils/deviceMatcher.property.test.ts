@@ -174,6 +174,91 @@ describe("compareVersions over lettered/QPR release qualifiers (property-based)"
   });
 });
 
+// Long numeric components (#6321). `parseDeviceVersion`'s `\d+` accepts a run
+// of any length, but coercing a run past ~308 digits through `Number()`
+// overflows to `Infinity`, which made the old subtraction comparison return
+// `NaN` -- not a total order. Generate components long enough to cross that
+// threshold and check against a BigInt oracle that never loses precision. Fewer
+// runs than RUN_OPTIONS: each case builds up to ~1.8KB of digits.
+const LONG_RUN_OPTIONS = { seed: 1_234_567, numRuns: 150 } as const;
+const bigComponent = fc
+  .array(fc.integer({ min: 0, max: 9 }), { minLength: 1, maxLength: 450 })
+  .map((digits) => digits.join(""));
+const bigVersionParts = fc.array(bigComponent, { minLength: 1, maxLength: 4 });
+const bigVersionOf = (parts: string[]): string => parts.join(".");
+
+// Independent oracle over arbitrary-length digit strings: exact integer
+// comparison via BigInt, missing trailing components treated as 0 (the same
+// contract compareVersions documents). BigInt ignores leading zeros, matching
+// the comparator.
+const refBigIntCompareSign = (a: string[], b: string[]): number => {
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i++) {
+    const av = BigInt(a[i] ?? "0");
+    const bv = BigInt(b[i] ?? "0");
+    if (av !== bv) {
+      return av < bv ? -1 : 1;
+    }
+  }
+  return 0;
+};
+
+describe("compareVersions over long numeric components (property-based, #6321)", () => {
+  test("is reflexive (never NaN) on a long component", () => {
+    fc.assert(
+      fc.property(
+        bigVersionParts,
+        (parts) => compareVersions(bigVersionOf(parts), bigVersionOf(parts)) === 0,
+      ),
+      LONG_RUN_OPTIONS,
+    );
+  });
+
+  test("returns a defined sign (never NaN) for any two accepted versions", () => {
+    fc.assert(
+      fc.property(bigVersionParts, bigVersionParts, (a, b) => {
+        return !Number.isNaN(compareVersions(bigVersionOf(a), bigVersionOf(b)));
+      }),
+      LONG_RUN_OPTIONS,
+    );
+  });
+
+  test("is sign-antisymmetric", () => {
+    fc.assert(
+      fc.property(bigVersionParts, bigVersionParts, (a, b) => {
+        const va = bigVersionOf(a);
+        const vb = bigVersionOf(b);
+        return Math.sign(compareVersions(va, vb)) === -Math.sign(compareVersions(vb, va));
+      }),
+      LONG_RUN_OPTIONS,
+    );
+  });
+
+  test("agrees in sign with a BigInt (precision-exact) oracle", () => {
+    fc.assert(
+      fc.property(bigVersionParts, bigVersionParts, (a, b) => {
+        return Math.sign(compareVersions(bigVersionOf(a), bigVersionOf(b))) === refBigIntCompareSign(a, b);
+      }),
+      LONG_RUN_OPTIONS,
+    );
+  });
+
+  test("ordering is transitive", () => {
+    fc.assert(
+      fc.property(bigVersionParts, bigVersionParts, bigVersionParts, (a, b, c) => {
+        const va = bigVersionOf(a);
+        const vb = bigVersionOf(b);
+        const vc = bigVersionOf(c);
+        return (
+          !(compareVersions(va, vb) <= 0 && compareVersions(vb, vc) <= 0) ||
+          compareVersions(va, vc) <= 0
+        );
+      }),
+      LONG_RUN_OPTIONS,
+    );
+  });
+});
+
 const platform = fc.constantFrom<Platform>("android", "ios");
 const device: fc.Arbitrary<BootedDevice> = fc.record({
   name: fc.string({ maxLength: 12 }),

@@ -601,6 +601,26 @@ describe("Rotate", () => {
       expect(fakeAwaitIdle.wasMethodCalled("waitForRotation(1")).toBe(true);
     });
 
+    test("reports a lock-only request without claiming a rotation (#6350)", async () => {
+      // The display is already landscape, but auto-rotate must still be
+      // disabled to make that orientation persistent.
+      fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
+        createExecResult("1"),
+        createExecResult("0"),
+      ]);
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=1"),
+      );
+
+      const result = await rotate.execute("landscape", undefined, true);
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.orientationLockState).toBe("locked");
+      expect(result.message).toBe("Locked device orientation to landscape.");
+    });
+
     test("reports a persistent rotation as unconfirmed when the lock cannot be verified (#6350)", async () => {
       // The rotation itself is confirmed by waitForRotation, but the
       // authoritative setting read still reports auto-rotate enabled.

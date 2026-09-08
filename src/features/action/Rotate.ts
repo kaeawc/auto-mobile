@@ -513,6 +513,7 @@ export class Rotate extends BaseVisualChange {
     wasAutoRotateEnabled: boolean,
   ): Promise<RotateResult> {
     const orientationLockState = await this.getOrientationLockState();
+    const rotationPerformed = currentOrientation !== orientation;
     if (preserveLock && orientationLockState !== "locked") {
       return {
         success: false,
@@ -520,10 +521,10 @@ export class Rotate extends BaseVisualChange {
         value,
         currentOrientation: orientation,
         previousOrientation: currentOrientation,
-        rotationPerformed: true,
+        rotationPerformed,
         orientationLockHandled: false,
         orientationLockState,
-        error: `Rotated to ${orientation}, but the persistent orientation lock could not be confirmed (auto-rotate is ${orientationLockState}).`,
+        error: `${rotationPerformed ? `Rotated to ${orientation}` : `Device is already in ${orientation} orientation`}, but the persistent orientation lock could not be confirmed (auto-rotate is ${orientationLockState}).`,
       };
     }
     if (restoreAutomaticRotation && orientationLockState !== "unlocked") {
@@ -533,7 +534,7 @@ export class Rotate extends BaseVisualChange {
         value,
         currentOrientation: achievedOrientation,
         previousOrientation: currentOrientation,
-        rotationPerformed: true,
+        rotationPerformed,
         orientationLockHandled: true,
         orientationLockState,
         error: `Rotated to ${orientation}, but automatic rotation could not be confirmed as restored (orientation lock is ${orientationLockState}).`,
@@ -545,17 +546,19 @@ export class Rotate extends BaseVisualChange {
       value,
       currentOrientation: achievedOrientation,
       previousOrientation: currentOrientation,
-      rotationPerformed: true,
+      rotationPerformed,
       orientationLockHandled: wasAutoRotateEnabled,
       orientationLockState,
       warning,
-      message: this.buildRotationMessage(
-        orientation,
-        currentOrientation,
-        achievedOrientation,
-        warning,
-        restoreConfirmed,
-      ),
+      message: rotationPerformed
+        ? this.buildRotationMessage(
+            orientation,
+            currentOrientation,
+            achievedOrientation,
+            warning,
+            restoreConfirmed,
+          )
+        : `Locked device orientation to ${orientation}.`,
     };
   }
 

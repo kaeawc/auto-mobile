@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { shellQuote } from "../utils/shellQuote";
 import {
   DaemonClient,
+  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
   type DaemonClientFactory,
@@ -18,6 +19,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
+  DAEMON_SHUTDOWN_TIMEOUT_MS,
 } from "./constants";
 import { PROGRESS_NOTIFICATION_METHOD, type DaemonNotification, type DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
@@ -1095,15 +1097,32 @@ export class DaemonMcpProxy {
       return;
     }
     const disconnect = Promise.withResolvers<void>();
+    let peerDisconnected = false;
+    const completeDisconnect = (): void => {
+      peerDisconnected = true;
+      disconnect.resolve();
+    };
+    const timeoutHandle = this.timer.setTimeout(disconnect.resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
     const barrier = disconnect.promise
-      .then(() => this.waitForDaemonShutdownRestartWindow())
+      .then(async () => {
+        this.timer.clearTimeout(timeoutHandle);
+        if (!peerDisconnected) {
+          if (this.resolveDaemonShutdownDisconnect === completeDisconnect) {
+            this.resolveDaemonShutdownDisconnect = null;
+          }
+          // A stalled transport must not remain attached after the bounded EOF
+          // wait. resetConnection detaches it synchronously before closing it.
+          void this.resetConnection();
+        }
+        await this.waitForDaemonShutdownRestartWindow();
+      })
       .catch((error) => {
         // Readiness is re-checked by doConnect; this barrier only prevents the
         // deterministic stale-PID/no-startup-lock gap from racing that path.
         logger.warn(`[DaemonMcpProxy] Failed while awaiting daemon restart transition: ${error}`);
       });
     this.daemonShutdownDisconnect = barrier;
-    this.resolveDaemonShutdownDisconnect = disconnect.resolve;
+    this.resolveDaemonShutdownDisconnect = completeDisconnect;
     void barrier.then(() => {
       if (this.daemonShutdownDisconnect === barrier) {
         this.daemonShutdownDisconnect = null;
@@ -1112,12 +1131,21 @@ export class DaemonMcpProxy {
     // Keep the old client attached long enough to observe peer EOF, but prevent
     // ensureConnected() from treating this quiesced incarnation as reusable.
     this.connected = false;
+    if (typeof this.client.onConnectionClosed !== "function") {
+      // This client cannot report peer EOF. Begin detaching now; the timeout
+      // still bounds a custom close() implementation that never settles.
+      void this.resetConnection();
+    }
   }
 
-  private completeDaemonShutdownDisconnect(): void {
-    const resolve = this.resolveDaemonShutdownDisconnect;
+  private completeDaemonShutdownDisconnect(
+    expectedResolve: (() => void) | null = this.resolveDaemonShutdownDisconnect,
+  ): void {
+    if (this.resolveDaemonShutdownDisconnect !== expectedResolve) {
+      return;
+    }
     this.resolveDaemonShutdownDisconnect = null;
-    resolve?.();
+    expectedResolve?.();
   }
 
   private async waitForDaemonShutdownRestartWindow(): Promise<void> {
@@ -1505,6 +1533,9 @@ export class DaemonMcpProxy {
       logger.warn(
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
+      if (error instanceof DaemonShuttingDownError) {
+        this.waitForDaemonShutdownDisconnect();
+      }
       await this.resetConnection();
       this.throwIfBoundSessionFenced(allowReleasedSession);
       await this.ensureConnected();
@@ -1560,6 +1591,7 @@ export class DaemonMcpProxy {
   }
 
   private async resetConnection(): Promise<void> {
+    const shutdownDisconnectResolve = this.resolveDaemonShutdownDisconnect;
     const staleClient = this.client;
     this.connected = false;
     this.client = null;
@@ -1570,7 +1602,7 @@ export class DaemonMcpProxy {
     this.invalidateCache();
 
     if (!staleClient) {
-      this.completeDaemonShutdownDisconnect();
+      this.completeDaemonShutdownDisconnect(shutdownDisconnectResolve);
       return;
     }
 
@@ -1582,7 +1614,7 @@ export class DaemonMcpProxy {
     // resetConnection deliberately unregisters the peer-close callback before
     // closing the stale client. Resolve an armed shutdown barrier explicitly so
     // the retry cannot wait forever for a callback that can no longer fire.
-    this.completeDaemonShutdownDisconnect();
+    this.completeDaemonShutdownDisconnect(shutdownDisconnectResolve);
   }
 
   private subscribeToClientConnectionClosed(client: DaemonClientLike): void {

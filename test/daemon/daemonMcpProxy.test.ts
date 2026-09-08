@@ -7,6 +7,7 @@ import {
 } from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonClient,
+  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";
@@ -1913,6 +1914,54 @@ describe("DaemonMcpProxy", () => {
         expect(freshClient.connectCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
           { toolName: "observe", params: { deviceId: "device-1" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("waits through quiescence before retrying a shutdown response (#6336)", async () => {
+      const recoveredResult = { content: [{ type: "text", text: "recovered after shutdown" }] };
+      const quiescedClient = new ScriptedDaemonClient({
+        toolError: new DaemonShuttingDownError(),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        toolResult: recoveredResult,
+      });
+      const clients = [quiescedClient, freshClient];
+      const manager = matchingDaemonManager();
+      const timer = new FakeTimer();
+      let availabilityChecks = 0;
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
+        availabilityChecks += 1;
+        return availabilityChecks === 1;
+      });
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: manager,
+        autoStartDaemon: true,
+        timer,
+      });
+
+      try {
+        const recovery = proxy.callTool("tapOn", { text: "Button" });
+        for (let i = 0; i < 20 && timer.getPendingSleepCount() === 0; i++) {
+          await Promise.resolve();
+        }
+
+        expect(timer.getPendingSleeps()).toEqual([100]);
+        expect(freshClient.connectCallCount).toBe(0);
+
+        manager.statusResult = { running: false };
+        await timer.advanceTimeAsync(100);
+
+        await expect(recovery).resolves.toEqual(recoveredResult);
+        expect(quiescedClient.closeCallCount).toBe(1);
+        expect(manager.startCalled).toBe(true);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { text: "Button" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

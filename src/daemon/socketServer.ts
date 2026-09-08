@@ -35,6 +35,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
@@ -960,7 +961,7 @@ export class UnixSocketServer {
         id: request.id,
         type: "mcp_response",
         success: false,
-        error: "Daemon is shutting down",
+        error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
       };
     }
 

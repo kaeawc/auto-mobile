@@ -4,7 +4,7 @@ import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -310,6 +310,51 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     }
   });
 
+  test("bounds a missing shutdown EOF before reacquiring (#6336)", async () => {
+    const M1 = "shutdown-without-eof";
+    const M2 = "replacement-after-timeout";
+    const oldDaemon = acquiringClient(sessionManager, [M1]);
+    const replacementDaemon = acquiringClient(sessionManager, [M2]);
+    const manager = matchingDaemonManager();
+    let availabilityChecks = 0;
+    isAvailableSpy!.mockImplementation(async () => {
+      availabilityChecks += 1;
+      return availabilityChecks === 1;
+    });
+    const clients = [oldDaemon.client, replacementDaemon.client];
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => clients.shift()!,
+      daemonManager: manager,
+      autoStartDaemon: true,
+      timer,
+    });
+
+    try {
+      await proxy.callTool("getAndroid", { avdName: "am-api34-ga-arm64" });
+      oldDaemon.client.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        M1,
+        "daemon-shutdown",
+      );
+
+      const reacquired = proxy.callTool("getAndroid", {
+        avdName: "am-api34-ga-arm64",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(replacementDaemon.nextIndex()).toBe(0);
+
+      manager.statusResult = { running: false };
+      await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS);
+
+      await expect(reacquired).resolves.toEqual(deviceStartResult(M2));
+      expect(manager.startCalled).toBe(true);
+      expect(replacementDaemon.nextIndex()).toBe(1);
+    } finally {
+      await proxy.close();
+    }
+  });
+
   test("rejects a result-minted session released before binding and waits for EOF (#6336)", async () => {
     const acquisitionStarted = Promise.withResolvers<void>();
     const finishAcquisition = Promise.withResolvers<void>();
@@ -402,12 +447,9 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         avdName: "am-api34-ga-arm64",
       });
       await oldClientClosed.promise;
-      for (let i = 0; i < 20 && replacementDaemon.nextIndex() === 0; i++) {
-        await Promise.resolve();
-      }
 
-      expect(replacementDaemon.nextIndex()).toBe(1);
       await expect(recovery).resolves.toEqual(deviceStartResult("replacement-after-reset"));
+      expect(replacementDaemon.nextIndex()).toBe(1);
     } finally {
       await proxy.close();
     }

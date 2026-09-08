@@ -55,6 +55,8 @@ import {
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
 
+type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
+
 function resolveLifecycleCoordinator(
   coordinator: VirtualDeviceLifecycleCoordinator | undefined,
 ): VirtualDeviceLifecycleCoordinator {
@@ -355,6 +357,7 @@ export class DevicePool {
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
+  private readonly mcpSessionRecoveryDevices: Map<string, PooledDevice> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
@@ -4891,7 +4894,7 @@ export class DevicePool {
     >,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
-    autolockClient?: { mcpSessionId?: string },
+    autolockClient?: AutolockClient,
   ): Promise<DeviceReadinessReservation> {
     // The stable-name reservation exists to bridge an Android emulator changing
     // serials across a reboot. iOS UDIDs are stable, so a name reservation there
@@ -5012,6 +5015,7 @@ export class DevicePool {
   async reserveDeviceForShutdown(
     deviceId: string,
     abortSignal?: AbortSignal,
+    autolockClient?: AutolockClient,
   ): Promise<
     | {
         device: PooledDevice;
@@ -5024,11 +5028,20 @@ export class DevicePool {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
     }
     const identity = this.reserveShutdownSessionIdentity(deviceId);
-    const expectedDevice = await this.reserveShutdownDeviceWithAbort(
-      deviceId,
-      identity,
-      abortSignal,
-    );
+    let expectedDevice: PooledDevice | undefined;
+    try {
+      expectedDevice = await this.reserveShutdownDeviceWithAbort(
+        deviceId,
+        identity,
+        abortSignal,
+        autolockClient,
+      );
+    } catch (error) {
+      if (autolockClient?.mcpSessionId) {
+        this.mcpSessionRecoveryDevices.delete(autolockClient.mcpSessionId);
+      }
+      throw error;
+    }
     if (!expectedDevice) {
       identity.releaseSession?.();
       return undefined;
@@ -5046,6 +5059,9 @@ export class DevicePool {
       if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
         this.shutdownReservations.delete(capturedDevice.id);
       }
+      if (autolockClient?.mcpSessionId) {
+        this.mcpSessionRecoveryDevices.delete(autolockClient.mcpSessionId);
+      }
       identity.releaseSession?.();
     };
     return { device: capturedDevice, session: identity.session, release };
@@ -5055,6 +5071,7 @@ export class DevicePool {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
+    autolockClient: AutolockClient | undefined,
   ): Promise<PooledDevice | undefined> {
     const releaseSessionOnAbort = () => identity.releaseSession?.();
     abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
@@ -5063,6 +5080,7 @@ export class DevicePool {
         deviceId,
         identity,
         abortSignal,
+        autolockClient,
       );
       if (abortSignal?.aborted) {
         if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
@@ -5106,6 +5124,7 @@ export class DevicePool {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
+    autolockClient: AutolockClient | undefined,
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(() => {
       if (abortSignal?.aborted) {
@@ -5123,6 +5142,12 @@ export class DevicePool {
       }
       if (!currentDevice) {
         return undefined;
+      }
+      // A readiness await can outlive this client's ownership. Check it while
+      // reserving shutdown so a stale request cannot reboot another session's device.
+      this.getOwnedAutolockSession(currentDevice, autolockClient);
+      if (autolockClient?.mcpSessionId && "expectedSessionId" in autolockClient) {
+        this.mcpSessionRecoveryDevices.set(autolockClient.mcpSessionId, currentDevice);
       }
       if (this.shutdownReservations.get(deviceId) === currentDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
@@ -5559,8 +5584,13 @@ export class DevicePool {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
-    return this.assignmentMutex.runExclusive(() =>
-      this.autolockDeviceExclusive(
+    return this.assignmentMutex.runExclusive(() => {
+      if (mcpSessionId && this.mcpSessionRecoveryDevices.has(mcpSessionId)) {
+        throw new ActionableError(
+          `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
+        );
+      }
+      return this.autolockDeviceExclusive(
         deviceId,
         platform,
         mcpSessionId,
@@ -5570,8 +5600,8 @@ export class DevicePool {
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
         achievedReadiness,
-      ),
-    );
+      );
+    });
   }
 
   private async autolockDeviceExclusive(
@@ -5725,12 +5755,22 @@ export class DevicePool {
 
   private getOwnedAutolockSession(
     device: PooledDevice,
-    client: { mcpSessionId?: string } | undefined,
+    client: AutolockClient | undefined,
   ): Session | undefined {
     if (!client) {
       return undefined;
     }
     const { mcpSessionId } = client;
+    if (
+      "expectedSessionId" in client &&
+      mcpSessionId &&
+      this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
+    ) {
+      throw new ActionableError(
+        `Device '${device.id}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+    }
     const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
     if (!session) {
       return undefined;
@@ -5748,6 +5788,10 @@ export class DevicePool {
       );
     }
     return session;
+  }
+
+  captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {
+    return mcpSessionId ? this.mcpSessionAutolockMap.get(mcpSessionId) : undefined;
   }
 
   private throwIfFreshStartAlreadyBound(

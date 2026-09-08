@@ -3303,6 +3303,7 @@ async function rebootAndroidAfterSystemUiAnr(
   timer: Timer,
   signal: AbortSignal | undefined,
   progress: { report: ProgressCallback } | undefined,
+  recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
   publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
 ): Promise<{
   boot: DeviceBootResult;
@@ -3325,6 +3326,7 @@ async function rebootAndroidAfterSystemUiAnr(
         boot.device,
         sourceImage.name,
         sourceImage.name,
+        recoveryAutolockClient,
       )
     : undefined;
   let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
@@ -3336,6 +3338,7 @@ async function rebootAndroidAfterSystemUiAnr(
       devicePool,
       boot.device.deviceId,
       signal,
+      recoveryAutolockClient,
     );
     await shutdownAndroidForSystemUiAnr(boot.device, deviceManager, timer, totalDeadlineMs, signal);
     shutdownWasConfirmed = true;
@@ -3401,11 +3404,12 @@ async function reserveSystemUiAnrShutdown(
   devicePool: DevicePool | undefined,
   deviceId: string,
   signal: AbortSignal | undefined,
+  autolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
 ): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal);
+  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal, autolockClient);
   if (reservation) {
     devicePool.markIntentionalShutdown(deviceId);
   }
@@ -3664,10 +3668,19 @@ async function prepareStartDeviceRunnerReadiness(
   input: StartDeviceRunnerReadinessInput,
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   const devicePool = getStartDevicePool(input.daemonState);
+  const recoveryAutolockClient =
+    isDevicePoolAutolockEnabled() && devicePool
+      ? {
+          mcpSessionId: input.args.__mcpSessionId,
+          expectedSessionId: devicePool.captureAutolockSessionForMcpSession(
+            input.args.__mcpSessionId,
+          ),
+        }
+      : undefined;
   const readinessResult = await ensureRunnerReadyWithSystemUiAnrRecovery(
     input.boot,
     createRunnerReadinessAttempt(input),
-    createSystemUiAnrRebooter(input, devicePool),
+    createSystemUiAnrRebooter(input, devicePool, recoveryAutolockClient),
   );
   if (readinessResult.recovered) {
     try {
@@ -3757,6 +3770,7 @@ function createRunnerReadinessAttempt(
 function createSystemUiAnrRebooter(
   input: StartDeviceRunnerReadinessInput,
   devicePool: DevicePool | undefined,
+  recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
 ): (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult> {
   return async (candidate) =>
     await rebootAndroidAfterSystemUiAnr(
@@ -3769,6 +3783,7 @@ function createSystemUiAnrRebooter(
       input.timer,
       input.signal,
       input.progress ? { report: input.progress } : undefined,
+      recoveryAutolockClient,
       (replacement) => input.publishRecoveredReadinessMarker?.(replacement),
     );
 }

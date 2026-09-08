@@ -498,6 +498,7 @@ export class TapAnyElement extends BaseVisualChange {
           this.accessibilityService,
           effectiveTimeoutMs,
           signal,
+          { adb: this.adb, timer: this.timer },
         );
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }

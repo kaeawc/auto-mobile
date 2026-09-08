@@ -346,6 +346,7 @@ export class DragAndDrop extends BaseVisualChange {
       this.accessibilityService,
       HIERARCHY_REFRESH_TIMEOUT_MS,
       signal,
+      { adb: this.adb, timer: this.timer },
     );
 
     if (!rawHierarchy) {

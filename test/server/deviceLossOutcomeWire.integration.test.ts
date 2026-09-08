@@ -350,6 +350,11 @@ describe("device loss MCP outcome", () => {
           "Call getAndroid, getApple, or startDevice to acquire a new device session.",
         sessionUuid: "device-session-a",
         reason: "heartbeat-timeout",
+        retryable: true,
+        recovery: {
+          action: "acquire_replacement_session",
+          tools: ["getAndroid", "getApple", "startDevice"],
+        },
         release,
       },
     });

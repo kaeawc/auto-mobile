@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
+import { DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "../../src/daemon/constants";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -73,5 +74,26 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
 
     await client.close();
     await pending;
+  });
+
+  test("classifies a quiescing daemon response as retryable", async () => {
+    const idGenerator = new CountingIdGenerator("req");
+    const writes: string[] = [];
+    const client = createConnectedClient(fakeTimer, idGenerator, writes);
+
+    const pending = client.callTool("tapOn", {});
+    (client as any).handleData(
+      Buffer.from(
+        JSON.stringify({
+          id: "req-1",
+          type: "mcp_response",
+          success: false,
+          error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+        }) + "\n",
+      ),
+    );
+
+    await expect(pending).rejects.toBeInstanceOf(DaemonShuttingDownError);
+    await client.close();
   });
 });

@@ -295,6 +295,12 @@ export class Daemon {
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
   private shutdownSessionReleasesDrained = true;
+  /** Session IDs whose normal callback emitted the daemon-shutdown reason. */
+  private shutdownReleaseNotifications: Set<string> | null = null;
+  /** Session IDs emitted by the shutdown fallback before their normal callback completed. */
+  private shutdownFallbackReleaseNotifications: Set<string> | null = null;
+  /** Identities captured before concurrent shutdown release begins. */
+  private shutdownSessionIds: string[] = [];
 
   constructor(
     options: DaemonOptions = {},
@@ -390,6 +396,12 @@ export class Daemon {
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
     this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
+      if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
+        return;
+      }
+      if (releaseReason === "daemon-shutdown") {
+        this.shutdownReleaseNotifications?.add(sessionId);
+      }
       SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
@@ -2435,6 +2447,9 @@ export class Daemon {
    */
   async stop(): Promise<void> {
     logger.info("Stopping daemon...");
+    this.shutdownReleaseNotifications = new Set();
+    this.shutdownFallbackReleaseNotifications = new Set();
+    this.shutdownSessionIds = [];
 
     const heartbeatMonitor = this.heartbeatMonitor;
     this.heartbeatMonitor = null;
@@ -2444,6 +2459,20 @@ export class Daemon {
     this.deviceDisconnectMonitor = null;
     await runShutdownCleanupStages(
       [
+        {
+          // Quiesce the control socket synchronously before fencing session
+          // publication. Established clients then receive the stable retryable
+          // shutdown response instead of entering SessionManager during the
+          // cleanup stages below. A request admitted before this barrier may
+          // still outlive the bounded handler drain, so fence its eventual pool
+          // assignment before awaiting that drain.
+          name: "Unix socket and device session admission",
+          run: async () => {
+            const quiescing = this.socketServer?.quiesce();
+            this.sessionManager.stopAcceptingSessionCreations();
+            await quiescing;
+          },
+        },
         {
           // Quiesce new recording work and stop owned children before any
           // potentially blocking socket teardown consumes the shutdown budget.
@@ -2504,14 +2533,6 @@ export class Daemon {
             void this.closeHttpListener().catch(() => {});
           },
         },
-        {
-          name: "Unix socket server",
-          run: async () => {
-            if (this.socketServer) {
-              await this.socketServer.close();
-            }
-          },
-        },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },
         { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
@@ -2547,6 +2568,19 @@ export class Daemon {
           run: () => this.closeHttpListener(),
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
+        {
+          // Session release broadcasts must be written while subscribed proxy
+          // sockets are still connected; closing first degrades the exact
+          // daemon-shutdown reason into session-not-found after reconnect.
+          name: "Unix socket server",
+          run: async () => {
+            if (this.socketServer) {
+              this.publishMissingShutdownReleaseNotifications();
+              await this.socketServer.drainSessionReleaseNotifications();
+              await this.socketServer.close();
+            }
+          },
+        },
         { name: "managed ADB server", run: this.stopManagedAdbServer },
         {
           name: "database write drain",
@@ -2615,6 +2649,7 @@ export class Daemon {
 
   private async releaseActiveSessionsForShutdown(): Promise<void> {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
+    this.shutdownSessionIds = sessionIds;
     const releases = sessionIds.map((sessionId) =>
       this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true),
     );
@@ -2631,6 +2666,7 @@ export class Daemon {
     await Promise.resolve();
     const drained = await this.sessionManager.drainReleasePromises(
       SESSION_RELEASE_DRAIN_TIMEOUT_MS,
+      releases,
     );
     if (!drained) {
       this.shutdownSessionReleasesDrained = false;
@@ -2641,6 +2677,27 @@ export class Daemon {
       return;
     }
     reportFailures(await settled);
+  }
+
+  /**
+   * Preserve a recovery signal when a pre-existing terminal release remains
+   * blocked past the bounded persistence drain. Normal release callbacks win;
+   * only snapshot identities that have not emitted anything receive this
+   * daemon-shutdown fallback before notification sockets close.
+   */
+  private publishMissingShutdownReleaseNotifications(): void {
+    const notified = this.shutdownReleaseNotifications;
+    const fallbacks = this.shutdownFallbackReleaseNotifications;
+    if (!(notified && fallbacks)) {
+      return;
+    }
+    for (const sessionId of this.shutdownSessionIds) {
+      if (notified.has(sessionId) || fallbacks.has(sessionId)) {
+        continue;
+      }
+      fallbacks.add(sessionId);
+      SessionReleaseBroadcaster.emit(sessionId, "daemon-shutdown");
+    }
   }
 
   private getDaemonFileCleanupOptions(): {

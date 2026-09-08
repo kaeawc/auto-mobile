@@ -233,6 +233,43 @@ describe("SessionManager", () => {
       }
     });
 
+    test("terminally rejects a creation whose persistence outlives the shutdown fence", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      const releaseReasons: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => {
+        releaseReasons.push(reason);
+      });
+
+      try {
+        repository.deferNextUpsert();
+        const creating = manager.createSession(
+          "persisting-during-shutdown",
+          "emulator-5554",
+          "android",
+        );
+        await repository.waitForUpsert();
+
+        manager.stopAcceptingSessionCreations();
+        repository.finishUpsert();
+
+        await expect(creating).rejects.toMatchObject({
+          sessionUuid: "persisting-during-shutdown",
+          release: expect.objectContaining({ releaseReason: "daemon-shutdown" }),
+        });
+        expect(manager.getSession("persisting-during-shutdown")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+        expect(manager.getTerminalReleaseSnapshot("persisting-during-shutdown")).toMatchObject({
+          releaseReason: "daemon-shutdown",
+          terminal: true,
+        });
+        expect(releaseReasons).toEqual(["daemon-shutdown"]);
+      } finally {
+        repository.finishUpsert();
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("keeps ownership unpublished while a creation write is pending", async () => {
       let rejectFirstWrite!: (error: Error) => void;
       const firstWrite = new Promise<void>((_resolve, reject) => {

@@ -42,6 +42,11 @@ function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
         "Call getAndroid, getApple, or startDevice to acquire a new device session.",
       sessionUuid: error.sessionUuid,
       reason: error.reason,
+      retryable: true,
+      recovery: {
+        action: "acquire_replacement_session",
+        tools: ["getAndroid", "getApple", "startDevice"],
+      },
       ...(error.release ? { release: error.release } : {}),
     },
   };
@@ -74,6 +79,11 @@ function noActiveDeviceSessionPayload(error: DaemonConnectionSessionReleasedErro
       code: "no_active_device_session",
       message: error.message,
       reason: error.reason,
+      retryable: true,
+      recovery: {
+        action: "acquire_replacement_session",
+        tools: ["getAndroid", "getApple", "startDevice"],
+      },
     },
   };
 }

@@ -41,6 +41,10 @@ describe("UnixSocketServer session id comes from the injected IdGenerator", () =
       idGenerator,
     );
 
+    // handleConnection is only entered after start() enables admission in
+    // production. This unit drives the private hook directly, so mirror that
+    // lifecycle state before asserting the injected ID sequence.
+    (server as any).acceptingRequests = true;
     (server as any).handleConnection(createFakeSocket());
     (server as any).handleConnection(createFakeSocket());
 

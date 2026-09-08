@@ -223,6 +223,9 @@ export const DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS = Math.min(
  */
 export const DAEMON_SHUTDOWN_TIMEOUT_MS = 10000;
 
+/** Stable control-socket error used to signal a retryable shutdown transition. */
+export const DAEMON_SHUTTING_DOWN_ERROR_MESSAGE = "Daemon is shutting down";
+
 /**
  * Minimum age (ms since startedAt) before the proxy will restart a daemon on
  * version mismatch. Prevents thrash when concurrent agents on different versions

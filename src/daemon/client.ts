@@ -18,6 +18,7 @@ import {
   DAEMON_VERSION,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_NON_FINITE_ENCODED_PARAM,
+  DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
@@ -37,6 +38,14 @@ export class DaemonUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "DaemonUnavailableError";
+  }
+}
+
+/** Retryable response from a live daemon that has stopped admitting work. */
+export class DaemonShuttingDownError extends DaemonUnavailableError {
+  constructor() {
+    super(DAEMON_SHUTTING_DOWN_ERROR_MESSAGE);
+    this.name = "DaemonShuttingDownError";
   }
 }
 
@@ -606,7 +615,9 @@ export class DaemonClient {
               response.error || "Device-control transport failure",
               transportFailure,
             )
-          : new ActionableError(response.error || "Unknown error from daemon"),
+          : response.error === DAEMON_SHUTTING_DOWN_ERROR_MESSAGE
+            ? new DaemonShuttingDownError()
+            : new ActionableError(response.error || "Unknown error from daemon"),
       );
     }
   }

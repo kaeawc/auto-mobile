@@ -928,6 +928,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               "Call getAndroid, getApple, or startDevice to acquire a new device session.",
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
+            retryable: true,
+            recovery: {
+              action: "acquire_replacement_session",
+              tools: ["getAndroid", "getApple", "startDevice"],
+            },
             release: error.release,
           },
         };

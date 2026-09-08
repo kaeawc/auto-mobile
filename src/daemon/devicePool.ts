@@ -357,6 +357,7 @@ export class DevicePool {
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
+  private readonly mcpSessionRecoveryDevices: Map<string, PooledDevice> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
@@ -5027,12 +5028,20 @@ export class DevicePool {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
     }
     const identity = this.reserveShutdownSessionIdentity(deviceId);
-    const expectedDevice = await this.reserveShutdownDeviceWithAbort(
-      deviceId,
-      identity,
-      abortSignal,
-      autolockClient,
-    );
+    let expectedDevice: PooledDevice | undefined;
+    try {
+      expectedDevice = await this.reserveShutdownDeviceWithAbort(
+        deviceId,
+        identity,
+        abortSignal,
+        autolockClient,
+      );
+    } catch (error) {
+      if (autolockClient?.mcpSessionId) {
+        this.mcpSessionRecoveryDevices.delete(autolockClient.mcpSessionId);
+      }
+      throw error;
+    }
     if (!expectedDevice) {
       identity.releaseSession?.();
       return undefined;
@@ -5049,6 +5058,9 @@ export class DevicePool {
       // the pool, so it must not queue behind a refresh holding assignmentMutex.
       if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
         this.shutdownReservations.delete(capturedDevice.id);
+      }
+      if (autolockClient?.mcpSessionId) {
+        this.mcpSessionRecoveryDevices.delete(autolockClient.mcpSessionId);
       }
       identity.releaseSession?.();
     };
@@ -5134,6 +5146,9 @@ export class DevicePool {
       // A readiness await can outlive this client's ownership. Check it while
       // reserving shutdown so a stale request cannot reboot another session's device.
       this.getOwnedAutolockSession(currentDevice, autolockClient);
+      if (autolockClient?.mcpSessionId && "expectedSessionId" in autolockClient) {
+        this.mcpSessionRecoveryDevices.set(autolockClient.mcpSessionId, currentDevice);
+      }
       if (this.shutdownReservations.get(deviceId) === currentDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }
@@ -5595,6 +5610,11 @@ export class DevicePool {
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string> {
+    if (mcpSessionId && this.mcpSessionRecoveryDevices.has(mcpSessionId)) {
+      throw new ActionableError(
+        `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
+      );
+    }
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // Ensure device is in the pool (it may have been freshly booted)

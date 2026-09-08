@@ -811,4 +811,198 @@ describe("deviceSnapshotManager", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  describe("scoped on-disk settings/metadata read-back (#6492)", () => {
+    test("listDeviceSnapshots discovers an AVD-scoped Android metadata.json with no DB row", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-meta-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "baseline";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+
+        const timestamp = new Date(fakeTimer.now()).toISOString();
+        const manifest: DeviceSnapshotManifest = {
+          snapshotName,
+          timestamp,
+          deviceId: "emulator-5554",
+          deviceName: "Pixel_7",
+          platform: "android",
+          snapshotType: "adb",
+          includeAppData: false,
+          includeSettings: true,
+          settings: { global: { foo: "bar" } },
+        };
+        await fs.writeFile(
+          realStore.getMetadataPath(snapshotName, androidOptions),
+          JSON.stringify(manifest, null, 2),
+        );
+
+        // No DB row exists for this snapshot yet — it lives only on disk.
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+
+        const { snapshots, count, totalSizeBytes } = await listDeviceSnapshots();
+
+        expect(count).toBe(1);
+        expect(snapshots[0]?.snapshotName).toBe(snapshotName);
+        expect(totalSizeBytes).toBeGreaterThan(0);
+
+        const record = await repository.getSnapshot(snapshotName);
+        expect(record).not.toBeNull();
+        expect(record?.manifest.settings).toEqual(manifest.settings);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("restoreDeviceSnapshot hydrates an AVD-scoped metadata.json snapshot directly, with no prior listDeviceSnapshots call", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-restore-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "baseline";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+
+        const timestamp = new Date(fakeTimer.now()).toISOString();
+        const manifest: DeviceSnapshotManifest = {
+          snapshotName,
+          timestamp,
+          deviceId: "emulator-5554",
+          deviceName: "Pixel_7",
+          platform: "android",
+          snapshotType: "adb",
+          includeAppData: false,
+          includeSettings: true,
+          settings: { global: { foo: "bar" } },
+        };
+        await fs.writeFile(
+          realStore.getMetadataPath(snapshotName, androidOptions),
+          JSON.stringify(manifest, null, 2),
+        );
+
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+
+        // No listDeviceSnapshots() call first — restore must find it on its own.
+        const { result, manifest: returnedManifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+          snapshotName,
+        });
+
+        expect(result.snapshotType).toBe("adb");
+        expect(returnedManifest.settings).toEqual(manifest.settings);
+        expect(restoreCalls[0]?.manifest.settings).toEqual(manifest.settings);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("restoreDeviceSnapshot round-trips a settings-only Android capture's settings.json when the DB row is absent", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-settings-only-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "settings-baseline";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+
+        // This is exactly what CaptureSnapshot.saveSettings writes: the raw
+        // settings triplet, NOT a full manifest — no metadata.json/manifest.json
+        // exists anywhere for this snapshot (mirrors the real non-VM Android
+        // settings-only capture path).
+        const settings = {
+          global: { some_global_setting: "1" },
+          secure: { some_secure_setting: "on" },
+          system: { some_system_setting: "off" },
+        };
+        await fs.writeFile(
+          realStore.getSettingsPath(snapshotName, androidOptions),
+          JSON.stringify(settings, null, 2),
+        );
+
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+
+        const { result, manifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+          snapshotName,
+        });
+
+        expect(result.snapshotType).toBe("adb");
+        expect(manifest.platform).toBe("android");
+        expect(manifest.includeSettings).toBe(true);
+        expect(manifest.settings).toEqual(settings);
+        expect(restoreCalls[0]?.manifest.settings).toEqual(settings);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("listDeviceSnapshots skips a '.replacing' set-aside directory nested under android/<avd>/", async () => {
+      const tempRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "snapshot-manager-scoped-replacing-"),
+      );
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };
+        const asideDir = realStore.getSnapshotPathWithOptions("ghost.replacing", androidOptions);
+        await fs.mkdir(asideDir, { recursive: true });
+
+        const manifest: DeviceSnapshotManifest = {
+          snapshotName: "ghost",
+          timestamp: new Date(0).toISOString(),
+          deviceId: "emulator-5554",
+          deviceName: "Pixel_5",
+          platform: "android",
+          snapshotType: "adb",
+          includeAppData: false,
+          includeSettings: true,
+        };
+        await fs.writeFile(path.join(asideDir, "metadata.json"), JSON.stringify(manifest));
+
+        const { snapshots } = await listDeviceSnapshots();
+
+        expect(snapshots.some((entry) => entry.snapshotName === "ghost.replacing")).toBe(false);
+        expect(await repository.getSnapshot("ghost.replacing")).toBeNull();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("listDeviceSnapshots degrades a malformed scoped metadata.json to a skip, without throwing", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-bad-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "corrupt";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+        await fs.writeFile(
+          realStore.getMetadataPath(snapshotName, androidOptions),
+          "{ not valid json",
+        );
+
+        const { snapshots, count } = await listDeviceSnapshots();
+
+        expect(count).toBe(0);
+        expect(snapshots).toEqual([]);
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+  });
 });

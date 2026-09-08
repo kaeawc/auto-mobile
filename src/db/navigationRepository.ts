@@ -527,6 +527,14 @@ export class NavigationRepository {
 
   /**
    * Link UI elements to an edge.
+   *
+   * Idempotent under UNIQUE(edge_id, ui_element_id) (idx_edge_ui_elements_pk, #6463):
+   * two `SelectedElement`s in the same interaction can resolve to the same
+   * `ui_elements` row (matched on text/resourceId/contentDescription with no bounds),
+   * and re-observing the same edge later re-links element ids already linked from a
+   * prior call. Neither case may throw `SQLITE_CONSTRAINT_UNIQUE` — that would abort
+   * the enclosing `recordNavigationEvent` transaction and silently drop the whole
+   * navigation-graph write, not just the offending link.
    */
   async linkUIElementsToEdge(edgeId: number, uiElementIds: number[]): Promise<void> {
     if (uiElementIds.length === 0) {
@@ -534,13 +542,66 @@ export class NavigationRepository {
     }
 
     const db = this.getDb();
-    const values: NewEdgeUIElement[] = uiElementIds.map((uiElementId, index) => ({
-      edge_id: edgeId,
-      ui_element_id: uiElementId,
-      selection_order: index,
-    }));
+    // storeUIElements calls this on a repository already bound to the enclosing
+    // recordNavigationEvent transaction (via withExecutor), so opening a nested
+    // `db.transaction()` would throw "Nested transactions are not supported" —
+    // mirrors the db.isTransaction guard in getOrCreateUIElement/promoteSuggestion.
+    if (db.isTransaction) {
+      return this.linkUIElementsToEdgeWithin(db, edgeId, uiElementIds);
+    }
+    return db
+      .transaction()
+      .execute((trx) => this.linkUIElementsToEdgeWithin(trx, edgeId, uiElementIds));
+  }
 
-    await db.insertInto("edge_ui_elements").values(values).execute();
+  private async linkUIElementsToEdgeWithin(
+    trx: Kysely<Database>,
+    edgeId: number,
+    uiElementIds: number[],
+  ): Promise<void> {
+    // Read what this edge already links, inside the transaction, so new elements
+    // are appended AFTER the current maximum selection_order rather than restarting
+    // at zero. Restarting collided on order across calls: linking [A,B] then [B,C]
+    // gave both B and C order 1, so getUIElementsForEdge()'s `ORDER BY
+    // selection_order` could not preserve a stable observation order.
+    const existing = await trx
+      .selectFrom("edge_ui_elements")
+      .select(["ui_element_id", "selection_order"])
+      .where("edge_id", "=", edgeId)
+      .execute();
+    const existingIds = new Set<number>(existing.map((row) => row.ui_element_id));
+    let nextOrder = existing.reduce((max, row) => Math.max(max, row.selection_order), -1) + 1;
+
+    // De-dupe within this call, and skip pairs already linked (they keep their
+    // recorded order). Two ids resolving to the same ui_elements row must not
+    // produce two rows for one (edge_id, ui_element_id) pair.
+    const seen = new Set<number>();
+    const values: NewEdgeUIElement[] = [];
+    for (const uiElementId of uiElementIds) {
+      if (seen.has(uiElementId) || existingIds.has(uiElementId)) {
+        continue;
+      }
+      seen.add(uiElementId);
+      values.push({
+        edge_id: edgeId,
+        ui_element_id: uiElementId,
+        selection_order: nextOrder++,
+      });
+    }
+
+    if (values.length === 0) {
+      return;
+    }
+
+    // onConflict is retained as a safety net against a concurrent inserter racing
+    // the same pair between the read above and this insert; it keeps the
+    // first-recorded row, matching the "leave existing identity alone on conflict"
+    // convention used elsewhere in this file's onConflict upserts (e.g. getOrCreateApp).
+    await trx
+      .insertInto("edge_ui_elements")
+      .values(values)
+      .onConflict((oc) => oc.columns(["edge_id", "ui_element_id"]).doNothing())
+      .execute();
   }
 
   /**

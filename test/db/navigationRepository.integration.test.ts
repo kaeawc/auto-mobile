@@ -257,6 +257,92 @@ describe("NavigationRepository", () => {
     });
   });
 
+  describe("linkUIElementsToEdge / getUIElementsForEdge", () => {
+    test("links UI elements to an edge in selection order", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+      const first = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "First", resourceId: "btn_first" },
+        1000,
+      );
+      const second = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Second", resourceId: "btn_second" },
+        1000,
+      );
+
+      await repo.linkUIElementsToEdge(edge.id, [first.id, second.id]);
+
+      const linked = await repo.getUIElementsForEdge(edge.id);
+      expect(linked.map((e) => e.id)).toEqual([first.id, second.id]);
+    });
+
+    test("a duplicate ui_element_id within a single call does not throw and links once (issue #6463)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+      // Two SelectedElements that resolve to the same ui_elements row (matched on
+      // text/resourceId/contentDescription with no bounds — #6463's root cause).
+      const element = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Row", resourceId: "list_row" },
+        1000,
+      );
+
+      await repo.linkUIElementsToEdge(edge.id, [element.id, element.id]);
+
+      const linked = await repo.getUIElementsForEdge(edge.id);
+      expect(linked.map((e) => e.id)).toEqual([element.id]);
+    });
+
+    test("re-linking overlapping/identical UI elements to the same edge is idempotent (issue #6463)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+      const first = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "First", resourceId: "btn_first" },
+        1000,
+      );
+      const second = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Second", resourceId: "btn_second" },
+        1000,
+      );
+      const third = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Third", resourceId: "btn_third" },
+        1000,
+      );
+
+      await repo.linkUIElementsToEdge(edge.id, [first.id, second.id]);
+
+      // Re-observing the same edge: second.id repeats, third.id is newly selected.
+      // Must not throw SQLITE_CONSTRAINT_UNIQUE on (edge_id, ui_element_id).
+      await repo.linkUIElementsToEdge(edge.id, [second.id, third.id]);
+
+      const linked = await repo.getUIElementsForEdge(edge.id);
+      const ids = linked.map((e) => e.id);
+      // At most one row per (edge_id, ui_element_id) pair — the acceptance criterion
+      // from #6463 — and every element ever linked to this edge remains discoverable.
+      expect(new Set(ids).size).toBe(ids.length);
+      // Selection order must be STABLE across calls: new elements append after the
+      // existing maximum selection_order rather than restarting at zero. Restarting
+      // gave both `second` and `third` order 1, so this ordered assertion pins that
+      // getUIElementsForEdge() returns first-observed, then newly-observed (#6463).
+      expect(ids).toEqual([first.id, second.id, third.id]);
+    });
+
+    test("linking zero elements is a no-op", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+
+      await repo.linkUIElementsToEdge(edge.id, []);
+
+      const linked = await repo.getUIElementsForEdge(edge.id);
+      expect(linked).toHaveLength(0);
+    });
+  });
+
   describe("setNodeModals / getNodeModals", () => {
     test("sets and retrieves modal stack for a node", async () => {
       await repo.getOrCreateApp("com.example.app");

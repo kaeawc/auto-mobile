@@ -206,6 +206,18 @@ function abiRank(abi: string, preferences: string[]): number {
 const LOWEST_KNOWN_API_LEVEL = 21;
 
 /**
+ * Minimum API level the AutoMobile CtrlProxy runner APK can install on. This
+ * mirrors `build-android-minSdk` in `android/gradle/libs.versions.toml` (the
+ * value `android/control-proxy/build.gradle.kts` compiles the APK with). The
+ * `startDevice` flow installs the runner APK during readiness prep, so an AVD
+ * provisioned below this level boots but can never install the runner and
+ * become automation-ready — provisioning must never select a sub-24 image
+ * (#6187). Keep this in sync with the gradle version catalog if the APK's
+ * `minSdk` ever changes.
+ */
+export const CTRL_PROXY_APK_MIN_SDK = 24;
+
+/**
  * A bound shaped exactly like a release version `versionToApiLevelRange`
  * knows how to parse: an integer major, optional dotted point-release
  * components, and an optional single trailing release letter (`"17"`,
@@ -286,11 +298,28 @@ export function pickAndroidSystemImage(
   criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion">,
   architecture: string,
 ): SystemImage {
-  const min = resolveApiLevelBound(criteria.minOsVersion, "min");
+  const requestedMin = resolveApiLevelBound(criteria.minOsVersion, "min");
   const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
+  // Fail fast when the requested upper bound cannot host the runner APK
+  // (minSdk 24): an older AVD would boot but never install the runner during
+  // startDevice readiness prep, so it could never become automation-ready.
+  // Rejecting here beats creating an unusable AVD that only fails later (#6187).
+  if (max !== undefined && max < CTRL_PROXY_APK_MIN_SDK) {
+    throw new ActionableError(
+      `Requested Android maxOsVersion ${describeBound(criteria.maxOsVersion, max)} is below API ` +
+        `${CTRL_PROXY_APK_MIN_SDK}, the minimum SDK the AutoMobile CtrlProxy runner APK supports. ` +
+        "A lower AVD would boot but never install the runner and become automation-ready. " +
+        "Request Android 7.0 (API 24) or newer.",
+    );
+  }
+
+  // The runner-APK floor also raises the effective minimum, so a sub-24 image is
+  // never selected even when no (or a lower) minOsVersion was requested (#6187).
+  const min = Math.max(requestedMin ?? CTRL_PROXY_APK_MIN_SDK, CTRL_PROXY_APK_MIN_SDK);
+
   const inRange = images.filter((image) => {
-    if (min !== undefined && image.apiLevel < min) {
+    if (image.apiLevel < min) {
       return false;
     }
     if (max !== undefined && image.apiLevel > max) {
@@ -300,9 +329,16 @@ export function pickAndroidSystemImage(
   });
 
   if (inRange.length === 0) {
+    // When the runner-APK floor (not an explicit minOsVersion) is what excluded
+    // every image, describe the floor honestly rather than echoing a lower or
+    // absent requested bound.
+    const minDescription =
+      requestedMin !== undefined && requestedMin >= CTRL_PROXY_APK_MIN_SDK
+        ? describeBound(criteria.minOsVersion, min)
+        : `API ${CTRL_PROXY_APK_MIN_SDK} (CtrlProxy runner minSdk)`;
     throw new ActionableError(
       "No installed Android system image matches the requested API range " +
-        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
+        `(min=${minDescription}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
         `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
         "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
     );

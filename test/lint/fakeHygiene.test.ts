@@ -25,7 +25,8 @@ const FAKES_DIR = path.join(import.meta.dir, "..", "fakes");
 const ALLOWLIST: Record<string, string[]> = {
   "FakeIOSCtrlProxy.ts": [
     'import { defaultTimer } from "../../src/utils/SystemTimer";',
-    "await defaultTimer.sleep(delay);",
+    // Preserve the existing default only at construction; delayed calls use the injected timer.
+    "constructor(private readonly timer: Timer = defaultTimer) {}",
     "timestamp: Date.now(),",
   ],
   "FakeWebSocket.ts": [

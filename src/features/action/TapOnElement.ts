@@ -1147,6 +1147,7 @@ export class TapOnElement extends BaseVisualChange {
           this.accessibilityService,
           effectiveTimeoutMs,
           signal,
+          { adb: this.adb, timer: this.timer },
         );
 
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
@@ -2161,6 +2162,13 @@ export class TapOnElement extends BaseVisualChange {
     options?: TapOnElementOptions,
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    // XML-only candidates have no CtrlProxy node identity, even if their resource
+    // ID also exists in the incomplete native tree. Never retarget semantic actions.
+    if (element["hierarchy-source"] === "uiautomator") {
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
+      return undefined;
+    }
+
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
       typeof isTalkBackEnabled === "boolean"

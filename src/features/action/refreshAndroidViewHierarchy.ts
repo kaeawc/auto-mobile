@@ -2,29 +2,21 @@ import type { ViewHierarchyResult } from "../../models";
 import type { AndroidCtrlProxyClient } from "../observe/android";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
-import { logger } from "../../utils/logger";
+import { defaultTimer } from "../../utils/SystemTimer";
+import {
+  supplementAndroidHierarchy,
+  type AndroidHierarchyFallbackDeps,
+} from "./AndroidHierarchyFallback";
 
-/**
- * Shared Android view hierarchy refresh: sync from the accessibility service
- * and surface whether CtrlProxy reported the capture as incomplete.
- *
- * A uiautomator-dump fallback for the incomplete case was attempted here via
- * `ViewHierarchy.getUiAutomatorHierarchy`/`mergeHierarchies`, but neither method
- * was ever implemented (issue #6252) — the call always threw and was silently
- * swallowed, so the "fallback" was dead code that never ran. Removed rather
- * than reimplemented: building a real uiautomator-dump-and-merge pipeline is a
- * separate feature, not a typecheck-baseline sweep fix. Callers already treat
- * `ctrlProxyIncomplete` as a signal (see `ObserveScreen.ts`), so the incomplete
- * hierarchy is still returned as-is for them to act on.
- *
- * Returns the raw (unfiltered) hierarchy — callers are responsible for
- * any post-processing (filtering, attachRawViewHierarchy, etc.).
- */
+/** Refresh CtrlProxy, supplement incomplete captures within the same caller budget. */
 export async function refreshAndroidViewHierarchy(
   accessibilityService: AndroidCtrlProxyClient,
   timeoutMs: number,
   signal?: AbortSignal,
+  fallback?: AndroidHierarchyFallbackDeps,
 ): Promise<ViewHierarchyResult | null> {
+  const timer = fallback?.timer ?? defaultTimer;
+  const deadline = timer.now() + timeoutMs;
   const syncResult = await accessibilityService.requestHierarchySync(
     new NoOpPerformanceTracker(),
     serverConfig.isRawElementSearchEnabled(),
@@ -40,10 +32,8 @@ export async function refreshAndroidViewHierarchy(
     return null;
   }
 
-  if (rawHierarchy.ctrlProxyIncomplete) {
-    logger.debug(
-      "[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy; no uiautomator fallback is implemented, returning as-is",
-    );
+  if (rawHierarchy.ctrlProxyIncomplete && fallback) {
+    return supplementAndroidHierarchy(rawHierarchy, fallback, deadline, signal);
   }
 
   return rawHierarchy;

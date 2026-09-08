@@ -357,6 +357,15 @@ describe("logger degrades the record itself under a persistent write failure (Co
     // ENOSPC failures rather than a synchronous constructor throw.
     const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
     mkdirSync(targetLogFile);
+    // flush() waits for write callbacks, but Windows may deliver the stream's
+    // error/close afterward. Keep teardown outside that failure window.
+    const streamClosures: Promise<void>[] = [];
+    const realCreateWriteStream = fs.createWriteStream;
+    const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+      const stream = realCreateWriteStream(...args);
+      streamClosures.push(new Promise<void>((resolve) => stream.once("close", resolve)));
+      return stream;
+    });
     const stderr = spyStderr();
 
     let mod: typeof import("../../src/utils/logger") | undefined;
@@ -373,8 +382,10 @@ describe("logger degrades the record itself under a persistent write failure (Co
       mod.logger.info("third record");
       await mod.logger.flush();
     } finally {
-      stderr.restore();
+      await Promise.all(streamClosures);
       await mod?.logger.closeAfterFlush();
+      stderr.restore();
+      createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });
     }
 

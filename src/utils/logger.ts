@@ -526,8 +526,42 @@ const recoverFromFailedRotation = async (
   await reportLogFailure("Log rotation failed", error);
 };
 
-// Function to check log file size and rotate if necessary
-const checkAndRotateLog = async (): Promise<void> => {
+// Bytes accumulated since the last time checkAndRotateLog actually stat'd the
+// file. Seeded at Infinity so the very first write after the stream opens
+// forces an immediate check regardless of what THIS process has written so
+// far -- the file may already be oversized left over from a previous run
+// (e.g. the daemon's single, stably-named log surviving across restarts,
+// see the `ownLogPrefix` comment above), and this process has no prior
+// writes of its own yet to compare against.
+let bytesSinceLastRotationCheck = Number.POSITIVE_INFINITY;
+
+// Only re-stat once writes could plausibly have pushed the file within
+// striking distance of MAX_LOG_SIZE, instead of on every single write
+// (issue #6651). A steady stream of small, serialized writes previously paid
+// for an `fs.existsSync` + `await statAsync` pair ahead of every line even
+// though rotation only needs to happen once every MAX_LOG_SIZE bytes of
+// output. Fixed (not a fraction of MAX_LOG_SIZE) and deliberately small so
+// overshoot past MAX_LOG_SIZE stays a small multiple of this interval (a few
+// tens of KiB): buffered writes flushed between checks can defer a stat by
+// more than one interval's worth of bytes, so the bound is roughly this
+// interval plus one flush of pending output, not exactly this value.
+const ROTATION_CHECK_INTERVAL_BYTES = 32 * 1024;
+
+// Function to check log file size and rotate if necessary. Only actually
+// stats the file once `lineByteLength` (this write's contribution) has
+// pushed the accumulated total since the last check past
+// ROTATION_CHECK_INTERVAL_BYTES -- see `bytesSinceLastRotationCheck` above.
+// `rotationInFlight`'s concurrent-caller coalescing (beginOrJoinRotationCheck)
+// is untouched: it still covers every writer that arrives while an actual
+// check/rotation cycle is running; only this too-eager triggering condition
+// changed.
+const checkAndRotateLog = async (lineByteLength: number): Promise<void> => {
+  bytesSinceLastRotationCheck += lineByteLength;
+  if (bytesSinceLastRotationCheck < ROTATION_CHECK_INTERVAL_BYTES) {
+    return;
+  }
+  bytesSinceLastRotationCheck = 0;
+
   const paths = fileLogPaths();
   if (!paths || !logStream) {
     return;
@@ -710,7 +744,7 @@ const writeToFile = async (line: string): Promise<void> => {
     logStream = openLogStream(logFilePath);
   }
   if (logStream) {
-    await checkAndRotateLog();
+    await checkAndRotateLog(Buffer.byteLength(line) + 1);
   }
   const stream = logStream;
   if (!stream) {

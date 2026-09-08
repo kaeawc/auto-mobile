@@ -309,6 +309,35 @@ describe("GestureClassifier (property-based)", () => {
     );
   });
 
+  test("pinch emission is pinned just across the PINCH_MIN_SCALE_DELTA boundary", () => {
+    // The property above uses fc.pre to sample only the emit region, so it
+    // never deliberately straddles the |scale - 1| >= PINCH_MIN_SCALE_DELTA
+    // (0.1) boundary; a `<`-vs-`<=` regression there could stay green. Axis-
+    // aligned fingers make each distance an exact integer, so scale is a clean
+    // finalDist/initialDist ratio (initialDist fixed at 100). We straddle the
+    // 0.1 delta at +/-0.11 (emit) and +/-0.09 (suppress) — comfortably clear of
+    // float-equality fragility while still bracketing the boundary tightly.
+    fc.assert(
+      fc.property(density, coord, coord, (d, x, y) => {
+        const pinchWithFinalDist = (finalDist: number) =>
+          twoFinger(d, { x, y }, { x: x + 100, y }, { x, y }, { x: x + finalDist, y });
+
+        // |scale - 1| = 0.11 >= 0.10 ⇒ emitted, direction agreeing with scale.
+        const out = pinchWithFinalDist(111); // scale 1.11
+        expect(out?.type).toBe("pinch");
+        expect(out?.pinchDirection).toBe("out");
+        const inward = pinchWithFinalDist(89); // scale 0.89
+        expect(inward?.type).toBe("pinch");
+        expect(inward?.pinchDirection).toBe("in");
+
+        // |scale - 1| = 0.09 < 0.10 ⇒ suppressed (null), on both sides.
+        expect(pinchWithFinalDist(109)).toBeNull(); // scale 1.09
+        expect(pinchWithFinalDist(91)).toBeNull(); // scale 0.91
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
   test("two fingers starting coincident never emit a non-finite scale (divide-by-zero guard)", () => {
     fc.assert(
       fc.property(

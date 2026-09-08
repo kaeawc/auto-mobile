@@ -139,6 +139,50 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     }
   });
 
+  test("rejects a result-minted session released during its first heartbeat (#6336)", async () => {
+    const MINTED = "released-during-first-heartbeat";
+    const heartbeatStarted = Promise.withResolvers<void>();
+    const finishHeartbeat = Promise.withResolvers<void>();
+    const client = new FakeDaemonClient({
+      onCallTool: async (toolName) => {
+        if (toolName === "getAndroid") {
+          await sessionManager.createSession(MINTED, "emulator-5554", "android", 60_000);
+        }
+      },
+      toolResultFor: (toolName) =>
+        toolName === "getAndroid" ? deviceStartResult(MINTED) : undefined,
+      onCallDaemonMethod: async (method, params) => {
+        if (method === "daemon/heartbeat" && params.sessionId === MINTED) {
+          heartbeatStarted.resolve();
+          await finishHeartbeat.promise;
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      const acquisition = proxy.callTool("getAndroid", {
+        avdName: "am-api34-ga-arm64",
+      });
+      await heartbeatStarted.promise;
+      client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, MINTED, "daemon-shutdown");
+      finishHeartbeat.resolve();
+
+      await expect(acquisition).rejects.toMatchObject({
+        sessionUuid: MINTED,
+        reason: "daemon-shutdown",
+      });
+    } finally {
+      finishHeartbeat.resolve();
+      await proxy.close();
+    }
+  });
+
   // AC1 (regression of the exact repro): without binding, the minted session is
   // reaped after ~5s idle. With the fix it survives a 20s idle window and a later
   // sessionless call still routes to it.

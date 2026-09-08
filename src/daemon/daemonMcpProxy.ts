@@ -2362,6 +2362,10 @@ export class DaemonMcpProxy {
     // daemon records ownership before the pre-first-heartbeat grace fires
     // (mirrors the establishment guarantee in issue #5637).
     await this.establishBoundSessionHeartbeat();
+    // The first heartbeat is an awaited daemon round-trip. A shutdown release
+    // can arrive while it is in flight, fence and clear the binding, and make
+    // this acquisition result stale before it reaches the caller.
+    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
   }
 
   // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit

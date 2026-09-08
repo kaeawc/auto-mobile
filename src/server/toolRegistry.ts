@@ -61,6 +61,12 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { executionTracker } from "./executionTracker";
+import {
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+} from "../daemon/constants";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -1400,7 +1406,13 @@ export class ToolRegistryClass {
     const invocation = this.createInternalToolInvocationContext(args, options);
 
     return runWithToolSelectionContext(invocation, () =>
-      this.invokeInternalTool(resolved, invocation.args, progress, signal, options.targetDevice),
+      this.invokeInternalTool(
+        resolved,
+        invocation.args,
+        progress ?? getToolSelectionContext()?.planRequest?.progress,
+        signal,
+        options.targetDevice,
+      ),
     );
   }
 
@@ -1409,6 +1421,18 @@ export class ToolRegistryClass {
     options: InternalToolCallOptions,
   ): InternalToolInvocationContext {
     const context = getToolSelectionContext();
+    const request = context?.planRequest;
+    if (request) {
+      // Parent metadata wins even when absent: a passthrough step schema must
+      // not let plan content choose another request's live deadline.
+      args = {
+        ...args,
+        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: request.deadlineMs,
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: request.timeoutMs,
+        [INTERNAL_EXECUTION_START_TIME_PARAM]: request.startTime,
+        [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: request.liveDeadlineKey,
+      };
+    }
     // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
     // so a plan step or navigation replay routes to the same derived/label
     // session the outer call resolved to, not the base session.

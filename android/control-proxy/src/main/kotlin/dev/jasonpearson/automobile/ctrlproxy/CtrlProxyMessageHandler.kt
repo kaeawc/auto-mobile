@@ -32,6 +32,7 @@ import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.RequestHitTest
 import dev.jasonpearson.automobile.protocol.RequestImeAction
+import dev.jasonpearson.automobile.protocol.RequestInsertText
 import dev.jasonpearson.automobile.protocol.RequestInstalledPackages
 import dev.jasonpearson.automobile.protocol.RequestLaunchIntent
 import dev.jasonpearson.automobile.protocol.RequestPackageInfo
@@ -262,6 +263,7 @@ class CtrlProxyMessageHandler(
             request.frameContext,
           )
         }
+      is RequestInsertText -> actions.requestInsertText(request.requestId, request.text)
       is RequestImeAction ->
         if (request.frameContext == null) {
           actions.requestImeAction(request.requestId, request.action)

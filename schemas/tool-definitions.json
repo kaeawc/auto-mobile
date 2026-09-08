@@ -1995,7 +1995,7 @@
         },
         "shape": {
           "description": "Optional highlight shape definition",
-          "anyOf": [
+          "oneOf": [
             {
               "type": "object",
               "properties": {
@@ -8079,6 +8079,189 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "sendKeys",
+    "description": "Execute an ordered sequence of text insertion/replacement, clear, raw keys, and semantic IME keys.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "selector": {
+          "description": "Field to focus once before executing the ordered command sequence",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Resource ID, e.g. com.app:id/field",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Text, content-desc, or placeholder of the field",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "textAny": {
+                  "description": "Ordered text variants; first visible match wins",
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": ["textAny"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "commands": {
+          "description": "One to 100 commands executed serially; execution stops on the first failure",
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "type"
+                  },
+                  "text": {
+                    "description": "Text to insert or replace; never echoed in the result",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "operation": {
+                    "description": "Insert at the current selection (default) or replace the focused field",
+                    "default": "insert",
+                    "type": "string",
+                    "enum": ["insert", "replace"]
+                  },
+                  "mode": {
+                    "description": "Android delivery mode. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
+                    "default": "auto",
+                    "type": "string",
+                    "enum": ["auto", "a11y", "eventLast", "eventAll", "eventOnly"]
+                  }
+                },
+                "required": ["action", "text"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "key"
+                  },
+                  "key": {
+                    "description": "Raw key or semantic IME key. Semantic next/previous/done/search/send/go ignore modifiers",
+                    "type": "string",
+                    "enum": [
+                      "enter",
+                      "tab",
+                      "escape",
+                      "backspace",
+                      "delete",
+                      "arrow_up",
+                      "arrow_down",
+                      "arrow_left",
+                      "arrow_right",
+                      "next",
+                      "previous",
+                      "done",
+                      "search",
+                      "send",
+                      "go"
+                    ]
+                  },
+                  "modifiers": {
+                    "description": "Raw-key modifier chord: shift, ctrl, alt, or meta",
+                    "maxItems": 4,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["shift", "ctrl", "alt", "meta"]
+                    }
+                  }
+                },
+                "required": ["action", "key"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "clear"
+                  }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["commands", "platform"],
       "additionalProperties": false
     }
   },

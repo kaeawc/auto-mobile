@@ -218,7 +218,7 @@ describe("GestureClassifier (property-based)", () => {
           );
           expect(g?.type).toBe("pinch");
           expect(Number.isFinite(g?.scale)).toBe(true);
-          expect(g!.scale!).toBeGreaterThan(0);
+          expect(g!.scale!).toBeGreaterThanOrEqual(0);
           expect(g!.scale!).toBeCloseTo(scale, 6);
           expect(g?.pinchDirection).toBe(scale < 1 ? "in" : "out");
         },
@@ -318,4 +318,9 @@ describe("GestureClassifier (property-based)", () => {
       RUN_OPTIONS,
     );
   });
+});
+
+test("a pinch converging to coincident endpoints has finite zero scale", () => {
+  const gesture = twoFinger(1, { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 0 });
+  expect(gesture).toMatchObject({ type: "pinch", scale: 0, pinchDirection: "in" });
 });

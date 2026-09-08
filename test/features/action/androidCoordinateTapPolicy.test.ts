@@ -1,19 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
-import {
-  androidCoordinateTapRequiresAdbInput,
-  androidPackageOfElement,
-} from "../../../src/features/action/androidCoordinateTapPolicy";
+import { isAndroidDocumentsUiRow } from "../../../src/features/action/androidCoordinateTapPolicy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 function createTapOnElement(): TapOnElement {
-  return new TapOnElement(
-    { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
-    { timer: new FakeTimer() },
+  const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+    {} as AndroidCtrlProxyClient,
   );
+  try {
+    return new TapOnElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
+      new FakeAdbClient() as any,
+      { timer: new FakeTimer() },
+    );
+  } finally {
+    clientSpy.mockRestore();
+  }
 }
 
 /**
@@ -60,28 +65,10 @@ function documentsUiRowHierarchy(): ViewHierarchyResult {
   } as unknown as ViewHierarchyResult;
 }
 
-describe("androidPackageOfElement", () => {
-  test("prefers the explicit package attribute", () => {
-    expect(androidPackageOfElement({ package: "com.android.documentsui" } as Element)).toBe(
-      "com.android.documentsui",
-    );
-  });
-
-  test("falls back to the resource-id package prefix", () => {
-    expect(
-      androidPackageOfElement({ "resource-id": "com.android.documentsui:id/item_root" } as Element),
-    ).toBe("com.android.documentsui");
-  });
-
-  test("returns undefined when neither package nor resource-id is present", () => {
-    expect(androidPackageOfElement({ text: "Download" } as Element)).toBeUndefined();
-  });
-});
-
-describe("androidCoordinateTapRequiresAdbInput", () => {
+describe("isAndroidDocumentsUiRow", () => {
   test("flags AOSP DocumentsUI rows", () => {
     expect(
-      androidCoordinateTapRequiresAdbInput({
+      isAndroidDocumentsUiRow({
         "resource-id": "com.android.documentsui:id/item_root",
       } as Element),
     ).toBe(true);
@@ -89,13 +76,15 @@ describe("androidCoordinateTapRequiresAdbInput", () => {
 
   test("flags Google DocumentsUI rows", () => {
     expect(
-      androidCoordinateTapRequiresAdbInput({ package: "com.google.android.documentsui" } as Element),
+      isAndroidDocumentsUiRow({
+        "resource-id": "com.google.android.documentsui:id/item_root",
+      } as Element),
     ).toBe(true);
   });
 
   test("does not flag ordinary in-app rows", () => {
     expect(
-      androidCoordinateTapRequiresAdbInput({
+      isAndroidDocumentsUiRow({
         "resource-id": "com.example.app:id/row",
         clickable: true,
       } as Element),
@@ -104,7 +93,7 @@ describe("androidCoordinateTapRequiresAdbInput", () => {
 });
 
 describe("DocumentsUI row tap-target resolution (#6335)", () => {
-  test("resolves the non-clickable title to the actioning item_root row, which requires ADB input", () => {
+  test("resolves the non-clickable title to the actioning item_root row, which exposes semantic activation", () => {
     const tap = createTapOnElement();
     const title: Element = {
       "resource-id": "android:id/title",
@@ -129,7 +118,45 @@ describe("DocumentsUI row tap-target resolution (#6335)", () => {
     const center = (tap as any).resolveTapPoint(resolved.element) as { x: number; y: number };
     expect(center).toEqual({ x: 540, y: 380 });
 
-    // And that resolved row must be routed through the real ADB input pipeline.
-    expect(androidCoordinateTapRequiresAdbInput(resolved.element)).toBe(true);
+    // And that resolved row must use DocumentsUI row activation/recovery.
+    expect(isAndroidDocumentsUiRow(resolved.element)).toBe(true);
   });
+});
+
+test("resolves the second repeated row and preserves its preview control", () => {
+  const tap = createTapOnElement();
+  const first = {
+    "resource-id": "com.google.android.documentsui:id/item_root",
+    clickable: "true",
+    actions: ["click"],
+    "collection-row-index": 0,
+    "collection-column-index": 0,
+    bounds: { left: 0, top: 300, right: 500, bottom: 450 },
+    node: { text: "Folder", bounds: { left: 100, top: 320, right: 400, bottom: 420 } },
+  };
+  const title = {
+    "resource-id": "android:id/title",
+    text: "example.txt",
+    bounds: { left: 100, top: 720, right: 400, bottom: 770 },
+  };
+  const preview = {
+    "resource-id": "com.google.android.documentsui:id/preview_icon",
+    clickable: "true",
+    actions: ["click"],
+    bounds: { left: 400, top: 500, right: 500, bottom: 600 },
+  };
+  const second = {
+    ...first,
+    "collection-row-index": 2,
+    bounds: { left: 0, top: 500, right: 500, bottom: 800 },
+    node: [title, preview],
+  };
+  const hierarchy = { hierarchy: { node: [first, second] } };
+  const resolved = (tap as any).resolveTapTargetElement(title, hierarchy, "tap", false);
+  expect(resolved.element["collection-row-index"]).toBe(2);
+  expect(resolved.element["collection-column-index"]).toBe(0);
+  expect(isAndroidDocumentsUiRow(resolved.element)).toBe(true);
+  const resolvedPreview = (tap as any).resolveTapTargetElement(preview, hierarchy, "tap", false);
+  expect(resolvedPreview.usedParent).toBe(false);
+  expect(isAndroidDocumentsUiRow(resolvedPreview.element)).toBe(false);
 });

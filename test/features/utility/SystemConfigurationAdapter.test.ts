@@ -5,6 +5,7 @@ import { IosSystemConfigurationAdapter } from "../../../src/features/utility/sys
 import { createSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/createSystemConfigurationAdapter";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { SystemConfigurationAdapter } from "../../../src/utils/interfaces/SystemConfigurationAdapter";
 
@@ -210,14 +211,19 @@ describe("SystemConfigurationAdapter", () => {
       ).toBe(true);
     });
 
-    it("uses root-backed system locale after adb root below Android 13", async () => {
+    it("uses root-backed system locale after adb root below Android 13 and reports system scope", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "32");
       adb.setCommandResult("root", "restarting adbd as root\n");
       adb.setCommandResult("wait-for-device", "");
       adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
-      adb.setCommandResult("shell settings get system system_locales", "en-US");
-      adb.setCommandResult("shell am get-config", "config: mcc310-mnc260-ja-rJP-sw411dp\n");
+      // persist.sys.locale is read once for the previous value, then again for the
+      // race-free read-back after the framework restart.
+      adb.setCommandResultSequence("shell getprop persist.sys.locale", [
+        { stdout: "en-US", stderr: "" },
+        { stdout: "ja-JP", stderr: "" },
+      ]);
+      adb.setCommandResult("shell getprop sys.boot_completed", "1");
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
       const result = await adapter.setLocale("ja-JP", {
         broadcast: false,
@@ -226,10 +232,15 @@ describe("SystemConfigurationAdapter", () => {
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("setprop persist.sys.locale + stop/start after adb root");
+      expect(result.localeScope).toBe("system");
+      expect(result.previousLanguageTag).toBe("en-US");
       expect(adb.wasCommandExecuted("root")).toBe(true);
       expect(adb.wasCommandExecuted("shell id")).toBe(true);
       expect(adb.wasCommandExecuted("cmd locale set-app-locales")).toBe(false);
       expect(adb.wasCommandExecuted("setprop persist.sys.locale 'ja-JP'")).toBe(true);
+      // Read-back verifies the prop we actually wrote, never `am get-config`,
+      // which would race the in-progress framework restart (issue #6346).
+      expect(adb.wasCommandExecuted("shell am get-config")).toBe(false);
     });
 
     it("returns a root-capability error below Android 13 when adb root fails", async () => {
@@ -323,20 +334,111 @@ describe("SystemConfigurationAdapter", () => {
       expect(adb.wasCommandExecuted("cmd locale set-app-locales")).toBe(false);
     });
 
-    it("returns false when legacy root-backed verification reads the old effective locale", async () => {
+    it("returns false with system scope when the legacy setprop read-back does not take", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "32");
       adb.setCommandResult("root", "restarting adbd as root\n");
       adb.setCommandResult("wait-for-device", "");
       adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
-      adb.setCommandResult("shell settings get system system_locales", "en-US");
-      adb.setCommandResult("shell am get-config", "config: mcc310-mnc260-en-rUS-sw411dp\n");
+      // setprop silently no-ops (e.g. read-only prop): persist.sys.locale keeps
+      // its old value on read-back, so we honestly report failure.
+      adb.setCommandResult("shell getprop persist.sys.locale", "en-US");
+      adb.setCommandResult("shell getprop sys.boot_completed", "1");
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Read-back verification failed: expected "ja-JP" but got "en-US"');
+      expect(result.localeScope).toBe("system");
+      expect(result.previousLanguageTag).toBe("en-US");
+      expect(result.error).toBe(
+        'Read-back verification failed: expected persist.sys.locale "ja-JP" but got "en-US"',
+      );
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    it("reports app scope on the Android 13+ app-scoped path (issue #6346)", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
+      adb.setCommandResultSequence("shell cmd locale get-app-locales 'com.example.app' --user 0", [
+        { stdout: "Locales for com.example.app for user 0 are []\n", stderr: "" },
+        { stdout: "Locales for com.example.app for user 0 are [ja-JP]\n", stderr: "" },
+      ]);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("ja-JP", {
+        broadcast: false,
+        appId: "com.example.app",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.localeScope).toBe("app");
+      expect(adb.wasCommandExecuted("setprop persist.sys.locale")).toBe(false);
+    });
+
+    it("waits for the framework restart before the legacy read-back instead of racing it (issue #6346)", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "31");
+      adb.setCommandResult("root", "restarting adbd as root\n");
+      adb.setCommandResult("wait-for-device", "");
+      adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
+      // Previous value, then the value after the restart settles.
+      adb.setCommandResultSequence("shell getprop persist.sys.locale", [
+        { stdout: "en-US", stderr: "" },
+        { stdout: "es-ES", stderr: "" },
+      ]);
+      // The framework is still restarting for the first two polls (empty
+      // boot_completed) before it comes back up — mirroring the wedge in #6346.
+      adb.setCommandResultSequence("shell getprop sys.boot_completed", [
+        { stdout: "", stderr: "" },
+        { stdout: "", stderr: "" },
+        { stdout: "1", stderr: "" },
+      ]);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any, timer);
+
+      const result = await adapter.setLocale("es-ES", {
+        broadcast: false,
+        appId: "com.android.settings",
+      });
+
+      // Result and reality agree: the change applied device-wide and we say so.
+      expect(result.success).toBe(true);
+      expect(result.localeScope).toBe("system");
+      expect(result.languageTag).toBe("es-ES");
+      expect(result.previousLanguageTag).toBe("en-US");
+      // We polled boot_completed until it returned "1" (did not read back on the
+      // first, racing, poll) and slept between polls via the injected timer.
+      expect(adb.getCommandCount("shell getprop sys.boot_completed")).toBe(3);
+      expect(timer.getSleepCallCount()).toBeGreaterThanOrEqual(2);
+      expect(adb.wasCommandExecuted("shell am get-config")).toBe(false);
+    });
+
+    it("returns success once the legacy prop is applied even if the framework never reports ready (issue #6346)", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "28");
+      adb.setCommandResult("root", "restarting adbd as root\n");
+      adb.setCommandResult("wait-for-device", "");
+      adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
+      adb.setCommandResultSequence("shell getprop persist.sys.locale", [
+        { stdout: "en-US", stderr: "" },
+        { stdout: "es-ES", stderr: "" },
+      ]);
+      // boot_completed never flips to "1"; the readiness wait times out but the
+      // prop-based read-back still confirms the change was applied.
+      adb.setCommandResult("shell getprop sys.boot_completed", "");
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any, timer);
+
+      const result = await adapter.setLocale("es-ES", {
+        broadcast: false,
+        appId: "com.android.settings",
+      });
+
+      // The change applied and persisted, so we must not report success:false.
+      expect(result.success).toBe(true);
+      expect(result.localeScope).toBe("system");
+      expect(result.previousLanguageTag).toBe("en-US");
     });
 
     it("ignores no-op user_locale when reading Android localization settings", async () => {

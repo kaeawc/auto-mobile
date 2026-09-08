@@ -602,8 +602,15 @@ export function registerUtilityTools() {
       const result = await manager.setLocale(args.locale, localeOptions);
       if (result.success) {
         changes.locale = result.languageTag;
+        // Prefer the scope the adapter reports directly (issue #6346): on
+        // Android < 13 a per-app request is forced device-wide, and the adapter
+        // says so via localeScope: "system" rather than us inferring it from the
+        // method string.
+        const localeScope =
+          result.localeScope ??
+          (result.method?.startsWith("cmd locale set-app-locales") ? "app" : "system");
         localeMetadata = {
-          localeScope: result.method?.startsWith("cmd locale set-app-locales") ? "app" : "system",
+          localeScope,
           ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
           ...(result.method ? { localeMethod: result.method } : {}),
         };

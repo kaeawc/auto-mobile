@@ -386,6 +386,70 @@ export class Rotate extends BaseVisualChange {
     return autoRotateState === "locked" ? "locked" : "unlocked";
   }
 
+  private async lockAlreadyAppliedOrientation(
+    orientation: "portrait" | "landscape",
+    value: number,
+    currentOrientation: string,
+  ): Promise<RotateResult> {
+    try {
+      // Do not write user_rotation here: an already-applied reverse
+      // orientation (mRotation 2 or 3) must remain reverse when locked.
+      await this.writeSystemSetting("accelerometer_rotation", "0");
+    } catch (error) {
+      logger.warn(`Failed to lock the current ${orientation} orientation: ${error}`, error);
+      return {
+        success: false,
+        orientation,
+        value,
+        currentOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: false,
+        orientationLockHandled: false,
+        orientationLockState: await this.getOrientationLockState(),
+        error: `Failed to lock the device in its current ${orientation} orientation: ${error}`,
+      };
+    }
+
+    const orientationLockState = await this.getOrientationLockState();
+    if (orientationLockState !== "locked") {
+      return {
+        success: false,
+        orientation,
+        value,
+        currentOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: false,
+        orientationLockHandled: false,
+        orientationLockState,
+        error: `Device is already in ${orientation} orientation, but the persistent orientation lock could not be confirmed (auto-rotate is ${orientationLockState}).`,
+      };
+    }
+
+    return {
+      success: true,
+      orientation,
+      value,
+      currentOrientation,
+      previousOrientation: currentOrientation,
+      rotationPerformed: false,
+      orientationLockHandled: true,
+      orientationLockState,
+      message: `Locked device orientation to ${orientation}.`,
+    };
+  }
+
+  private shouldReturnAlreadyAppliedOrientation(
+    preserveLock: boolean,
+    restoreAutomaticRotation: boolean,
+    initialOrientationLockState: OrientationLockState,
+  ): boolean {
+    return (
+      (preserveLock && initialOrientationLockState === "locked") ||
+      (restoreAutomaticRotation && initialOrientationLockState === "unlocked") ||
+      (!preserveLock && !restoreAutomaticRotation)
+    );
+  }
+
   private async handleAlreadyAppliedOrientation(
     orientation: "portrait" | "landscape",
     value: number,
@@ -405,9 +469,11 @@ export class Rotate extends BaseVisualChange {
           ? "unlocked"
           : "unknown";
     if (
-      (preserveLock && initialOrientationLockState === "locked") ||
-      (restoreAutomaticRotation && initialOrientationLockState === "unlocked") ||
-      (!preserveLock && !restoreAutomaticRotation)
+      this.shouldReturnAlreadyAppliedOrientation(
+        preserveLock,
+        restoreAutomaticRotation,
+        initialOrientationLockState,
+      )
     ) {
       return {
         success: true,
@@ -420,6 +486,10 @@ export class Rotate extends BaseVisualChange {
         orientationLockState: initialOrientationLockState,
         message: `Device is already in ${orientation} orientation`,
       };
+    }
+
+    if (preserveLock) {
+      return this.lockAlreadyAppliedOrientation(orientation, value, currentOrientation);
     }
 
     if (!restoreAutomaticRotation) {

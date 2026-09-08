@@ -55,6 +55,8 @@ import {
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
 
+type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
+
 function resolveLifecycleCoordinator(
   coordinator: VirtualDeviceLifecycleCoordinator | undefined,
 ): VirtualDeviceLifecycleCoordinator {
@@ -4891,7 +4893,7 @@ export class DevicePool {
     >,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
-    autolockClient?: { mcpSessionId?: string },
+    autolockClient?: AutolockClient,
   ): Promise<DeviceReadinessReservation> {
     // The stable-name reservation exists to bridge an Android emulator changing
     // serials across a reboot. iOS UDIDs are stable, so a name reservation there
@@ -5012,7 +5014,7 @@ export class DevicePool {
   async reserveDeviceForShutdown(
     deviceId: string,
     abortSignal?: AbortSignal,
-    autolockClient?: { mcpSessionId?: string },
+    autolockClient?: AutolockClient,
   ): Promise<
     | {
         device: PooledDevice;
@@ -5057,7 +5059,7 @@ export class DevicePool {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
-    autolockClient: { mcpSessionId?: string } | undefined,
+    autolockClient: AutolockClient | undefined,
   ): Promise<PooledDevice | undefined> {
     const releaseSessionOnAbort = () => identity.releaseSession?.();
     abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
@@ -5110,7 +5112,7 @@ export class DevicePool {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
-    autolockClient: { mcpSessionId?: string } | undefined,
+    autolockClient: AutolockClient | undefined,
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(() => {
       if (abortSignal?.aborted) {
@@ -5733,20 +5735,24 @@ export class DevicePool {
 
   private getOwnedAutolockSession(
     device: PooledDevice,
-    client: { mcpSessionId?: string } | undefined,
+    client: AutolockClient | undefined,
   ): Session | undefined {
     if (!client) {
       return undefined;
     }
     const { mcpSessionId } = client;
+    if (
+      "expectedSessionId" in client &&
+      mcpSessionId &&
+      this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
+    ) {
+      throw new ActionableError(
+        `Device '${device.id}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+    }
     const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
     if (!session) {
-      if (mcpSessionId && this.mcpSessionAutolockMap.has(mcpSessionId)) {
-        throw new ActionableError(
-          `Device '${device.id}' is already assigned to another session. ` +
-            "Acquire a different device or wait for its owner to release it.",
-        );
-      }
       return undefined;
     }
     if (
@@ -5762,6 +5768,10 @@ export class DevicePool {
       );
     }
     return session;
+  }
+
+  captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {
+    return mcpSessionId ? this.mcpSessionAutolockMap.get(mcpSessionId) : undefined;
   }
 
   private throwIfFreshStartAlreadyBound(

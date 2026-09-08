@@ -166,6 +166,37 @@ describe("GestureClassifier (property-based)", () => {
     );
   });
 
+  test("classification pivots exactly at the density-scaled touch-slop threshold", () => {
+    // The zero-displacement and >=40px properties above leave the real slop
+    // band untested: TOUCH_SLOP_DP * d is 8..32px across the density range, so
+    // neither straddles it. A regression that dropped density scaling or
+    // loosened the classifier's `displacement < slopPx` to `<=` would satisfy
+    // both and go uncaught. A single-axis move makes the Euclidean displacement
+    // equal the integer offset exactly (identity scaler), so we can pin the
+    // pivot: strictly below slop is a tap, at-or-above slop is a swipe. The
+    // exact-boundary case (displacement === slopPx) is hit whenever 8*d is
+    // integral (d = 1.0, 1.5, 2.0, ...), which is what rules out the `<=` bug.
+    fc.assert(
+      fc.property(density, coord, coord, fc.boolean(), (d, x, y, horizontal) => {
+        const slopPx = GESTURE_THRESHOLDS.TOUCH_SLOP_DP * d;
+        const belowOffset = Math.ceil(slopPx) - 1; // always in [7,31] and strictly < slopPx
+        const atOffset = Math.ceil(slopPx); // always >= slopPx (equal when slopPx is integral)
+        const aboveOffset = atOffset + 8;
+
+        // Single-axis move ⇒ displacement == offset. Short duration keeps a
+        // below-slop contact a tap (not longPress); a fresh classifier per call
+        // rules out doubleTap.
+        const endpoint = (offset: number): { x: number; y: number } =>
+          horizontal ? { x: x + offset, y } : { x, y: y + offset };
+
+        expect(singleFinger(d, { x, y }, endpoint(belowOffset), 50)?.type).toBe("tap");
+        expect(singleFinger(d, { x, y }, endpoint(atOffset), 50)?.type).toBe("swipe");
+        expect(singleFinger(d, { x, y }, endpoint(aboveOffset), 50)?.type).toBe("swipe");
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
   test("a completed single-finger contact is never null and never a two-finger type", () => {
     fc.assert(
       fc.property(

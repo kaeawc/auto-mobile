@@ -247,7 +247,7 @@ test("registered getAndroid preserves its caller's UUID and rejects a different 
   });
 });
 
-test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
+test.each(["agent-B", "agent-A"])(
   "System UI recovery respects the requesting autolock owner: %s",
   async (client) => {
     await withAutolock(async () => {
@@ -270,7 +270,6 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
       let readinessAttempts = 0;
       let recoveredExitListeners = 0;
       let recoveredOutputListeners = 0;
-      let secondOwner: string | undefined;
       DaemonState.getInstance().initialize(h.manager, h.pool);
       setDeviceToolsDependencies({
         deviceManagerFactory: () => deviceUtils,
@@ -279,12 +278,6 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
         notifyResourcesChanged: async () => {},
         ensureCtrlProxyReady: async (request) => {
           ++readinessAttempts;
-          if (client === "agent-A-reassigned" && readinessAttempts === 1) {
-            const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
-            deviceUtils.setBootedDevices("android", [request.device, otherDevice]);
-            await h.pool.addDevice(otherDevice);
-            secondOwner = await h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-A");
-          }
           if (readinessAttempts === 1) {
             throw new SystemUiAnrRecoveryRequiredError("System UI ANR");
           }
@@ -297,7 +290,7 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
         const owner = await h.pool.autolockDevice(device.deviceId, "android", "agent-A", image);
         const acquiring = ToolRegistry.getTool("getAndroid")!.handler({
           deviceId: device.deviceId,
-          __mcpSessionId: client === "agent-A-reassigned" ? "agent-A" : client,
+          __mcpSessionId: client,
         });
         if (client === "agent-B") {
           await expect(acquiring).rejects.toThrow("another session");
@@ -309,14 +302,8 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
           expect(readinessAttempts).toBe(2);
           expect(h.manager.getSession(owner!)?.assignedDevice).toBe(image.deviceId);
           expect(h.manager.getDeviceReadiness(owner!)).toBe("automationReady");
-        } else {
-          await expect(acquiring).rejects.toThrow("another session");
-          expect(readinessAttempts).toBe(1);
-          expect(secondOwner).toBeDefined();
-          expect(deviceUtils.getExecutedOperations()).not.toContain(`killDevice:${device.name}`);
-          expect(h.manager.getSession(owner!)?.assignedDevice).toBe(device.deviceId);
         }
-        expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(secondOwner ?? owner);
+        expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(owner);
         expect(h.pool.resolveAutolockSessionForMcpSession("agent-B")).toBeUndefined();
         if (readinessAttempts > 1) {
           expect(recoveredExitListeners).toBeGreaterThan(0);
@@ -324,7 +311,7 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
           expect(recoveredProcess.stdout.listenerCount("data")).toBe(recoveredOutputListeners);
         }
         expect(await h.db.selectFrom("device_sessions").selectAll().execute()).toHaveLength(
-          secondOwner ? 2 : 1,
+          1,
         );
       } finally {
         resetDeviceToolsDependencies();
@@ -335,3 +322,55 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
     });
   },
 );
+
+test("System UI recovery rejects a remapped client while its first target is idle", async () => {
+  await withAutolock(async () => {
+    const deviceUtils = new FakeDeviceUtils();
+    const h = await harness(deviceUtils);
+    const matcher = new FakeDeviceMatcher();
+    const device = h.devices.bootedDevices[0];
+    const image = { ...device, deviceId: "emulator-5556", isRunning: false };
+    const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
+    deviceUtils.setBootedDevices("android", [device]);
+    deviceUtils.setDeviceImages("android", [image]);
+    matcher.setBootedResult(device);
+    matcher.setImageResult(image);
+    let readinessAttempts = 0;
+    let secondOwner: string | undefined;
+    DaemonState.getInstance().initialize(h.manager, h.pool);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deviceUtils,
+      deviceMatcherFactory: () => matcher,
+      timer: h.timer,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async (request) => {
+        ++readinessAttempts;
+        if (readinessAttempts === 1) {
+          deviceUtils.setBootedDevices("android", [request.device, otherDevice]);
+          await h.pool.addDevice(otherDevice);
+          secondOwner = await h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-A");
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR");
+        }
+      },
+    });
+    registerDeviceTools();
+    try {
+      await expect(
+        ToolRegistry.getTool("getAndroid")!.handler({
+          deviceId: device.deviceId,
+          __mcpSessionId: "agent-A",
+        }),
+      ).rejects.toThrow("another session");
+      expect(readinessAttempts).toBe(1);
+      expect(secondOwner).toBeDefined();
+      expect(deviceUtils.getExecutedOperations()).not.toContain(`killDevice:${device.name}`);
+      expect(h.pool.getDevice(device.deviceId)?.sessionId).toBeNull();
+      expect(h.manager.getSession(secondOwner!)?.assignedDevice).toBe(otherDevice.deviceId);
+    } finally {
+      resetDeviceToolsDependencies();
+      DaemonState.getInstance().reset();
+      ToolRegistry.clearTools();
+      await h.close();
+    }
+  });
+});

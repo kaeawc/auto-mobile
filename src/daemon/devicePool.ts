@@ -5741,6 +5741,12 @@ export class DevicePool {
     const { mcpSessionId } = client;
     const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
     if (!session) {
+      if (mcpSessionId && this.mcpSessionAutolockMap.has(mcpSessionId)) {
+        throw new ActionableError(
+          `Device '${device.id}' is already assigned to another session. ` +
+            "Acquire a different device or wait for its owner to release it.",
+        );
+      }
       return undefined;
     }
     if (

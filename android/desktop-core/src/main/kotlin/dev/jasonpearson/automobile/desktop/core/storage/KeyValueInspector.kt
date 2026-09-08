@@ -413,17 +413,17 @@ fun KeyValueInspector(
                             .pointerHoverIcon(PointerIcon.Hand),
                       )
                     }
-                    if (saveError != null) {
+                    saveError?.let { error ->
                       Text(
-                        saveError!!,
+                        error,
                         fontSize = 9.sp,
                         color = Color(0xFFE57373),
                         modifier = Modifier.padding(top = 2.dp),
                       )
                     }
-                    if (saveWarning != null) {
+                    saveWarning?.let { warning ->
                       Text(
-                        saveWarning!!,
+                        warning,
                         fontSize = 9.sp,
                         color = Color(0xFFFFB74D),
                         modifier = Modifier.padding(top = 2.dp),

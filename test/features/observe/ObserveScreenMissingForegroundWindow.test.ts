@@ -369,6 +369,137 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     expect(result.freshness?.warning).toContain("status-bar content");
   });
 
+  // Regression (#6320, adversary finding against merged #6239): the
+  // packageName-attribution backfill must fill ONLY the missing `appId`, never
+  // replace the whole `activeWindow`. `Window.getActive` computes `layoutSeqSum`
+  // (and often `activityName`/`type`) INDEPENDENTLY of package/activity parse
+  // success, so its bootstrap/partial-parse sentinel is `{ appId: "",
+  // activityName: <real>, layoutSeqSum: <real>, type: <real> }`. #6239's new
+  // `!activeWindow?.appId` guard fires on that shape; the pre-fix body replaced
+  // the object, zeroing `layoutSeqSum` and blanking `activityName` — which
+  // masks `compareActiveWindow`'s screen-change signal (two bootstrap
+  // observations both reporting `layoutSeqSum: 0`).
+  test("backfilling appId preserves layoutSeqSum/activityName/type from the legacy sentinel (#6320)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    // Real package attribution, no usable foregroundActivity: the accessibility
+    // path leaves `activeWindow` unset, so the legacy Window query runs.
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "com.foo.app",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Hello", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+
+    // The legacy query's bootstrap/partial-parse sentinel: empty appId but a
+    // REAL layoutSeqSum, activityName, and type computed independently.
+    const sentinelWindow = {
+      getActive: async () => ({
+        appId: "",
+        activityName: "com.foo.app.MainActivity",
+        layoutSeqSum: 999,
+        type: "app",
+      }),
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    };
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: sentinelWindow,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    // appId backfilled from the hierarchy package...
+    expect(result.activeWindow?.appId).toBe("com.foo.app");
+    // ...but the independently-computed fields are PRESERVED, not zeroed/blanked.
+    expect(result.activeWindow?.layoutSeqSum).toBe(999);
+    expect(result.activeWindow?.activityName).toBe("com.foo.app.MainActivity");
+    expect(result.activeWindow?.type).toBe("app");
+  });
+
+  // The genuinely-absent case must still construct a fresh object with empty
+  // defaults: when the legacy query returns null (no sentinel to preserve), the
+  // package-name backfill supplies the appId and the empty-string/zero defaults.
+  test("backfill constructs a fresh object when activeWindow is truly undefined (#6320)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "com.foo.app",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Hello", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+
+    // Legacy query returns null: `collectActiveWindow` leaves `activeWindow`
+    // undefined, so the backfill takes the object-construction path.
+    const nullWindow = {
+      getActive: async () => null,
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    };
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: nullWindow as any,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.foo.app");
+    expect(result.activeWindow?.activityName).toBe("");
+    expect(result.activeWindow?.layoutSeqSum).toBe(0);
+  });
+
   // The counterpart: a legitimate FULL-height SystemUI shade capture (the
   // notification shade IS a valid full SystemUI window) must stay verified —
   // `isStatusBarOnlyHierarchy` only fires when EVERY node is confined to the

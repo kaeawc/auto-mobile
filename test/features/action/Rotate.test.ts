@@ -650,26 +650,34 @@ describe("Rotate", () => {
       expect(fakeAwaitIdle.wasMethodCalled("waitForRotation(2")).toBe(true);
     });
 
-    test("reports a persistent rotation as unconfirmed when the lock cannot be verified (#6350)", async () => {
-      // The rotation itself is confirmed by waitForRotation, but the
-      // authoritative setting read still reports auto-rotate enabled.
-      fakeAdb.setCommandResponse(
-        "shell settings get system accelerometer_rotation",
-        createExecResult("1"),
-      );
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
+    test.each([
+      { liveRotation: "mRotation=3", expectedOrientation: "landscape" },
+      { liveRotation: "unavailable", expectedOrientation: "unknown" },
+    ])(
+      "reports $expectedOrientation after persistent lock verification fails (#6350)",
+      async ({ liveRotation, expectedOrientation }) => {
+        // waitForRotation confirmed the requested portrait, but auto-rotate is
+        // still enabled: the sensor may already have restored landscape.
+        fakeAdb.setCommandResponse(
+          "shell settings get system accelerometer_rotation",
+          createExecResult("1"),
+        );
+        fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+          createExecResult("mRotation=1"),
+          createExecResult(liveRotation),
+          createExecResult(liveRotation),
+          createExecResult(liveRotation),
+        ]);
 
-      const result = await rotate.execute("portrait", undefined, true);
+        const result = await rotate.execute("portrait", undefined, true);
 
-      expect(result.success).toBe(false);
-      expect(result.rotationPerformed).toBe(true);
-      expect(result.currentOrientation).toBe("portrait");
-      expect(result.orientationLockState).toBe("unlocked");
-      expect(result.error ?? "").toMatch(/persistent.*could not be confirmed/i);
-    });
+        expect(result.success).toBe(false);
+        expect(result.rotationPerformed).toBe(true);
+        expect(result.currentOrientation).toBe(expectedOrientation);
+        expect(result.orientationLockState).toBe("unlocked");
+        expect(result.error ?? "").toMatch(/persistent.*could not be confirmed/i);
+      },
+    );
 
     test("reports the remaining lock state after a persistent target write fails (#6350)", async () => {
       // Disabling auto-rotate can succeed before the target write fails. The

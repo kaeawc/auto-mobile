@@ -633,11 +633,14 @@ export class Rotate extends BaseVisualChange {
     const orientationLockState = await this.getOrientationLockState();
     const rotationPerformed = currentOrientation !== orientation;
     if (preserveLock && orientationLockState !== "locked") {
+      // Auto-rotate may already have restored the sensor-held orientation.
+      // Reuse the bounded live read; stale user_rotation cannot confirm it.
+      const confirmation = await this.confirmOrientationAfterAutoRotateRestore(orientation, false);
       return {
         success: false,
         orientation,
         value,
-        currentOrientation: orientation,
+        currentOrientation: confirmation.achievedOrientation,
         previousOrientation: currentOrientation,
         rotationPerformed,
         orientationLockHandled: false,

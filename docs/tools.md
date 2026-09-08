@@ -168,6 +168,26 @@ fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
+### Keeping an Android orientation locked
+
+`rotate` preserves its existing behavior when `lockOrientation` is omitted: it
+temporarily disables auto-rotate when necessary, then restores the prior
+setting. To keep portrait or landscape orientation in effect for subsequent
+actions, pass `lockOrientation: true`:
+
+```json
+{ "orientation": "landscape", "lockOrientation": true }
+```
+
+The result reports `orientationLockState` as `locked`, `unlocked`, or `unknown`.
+A persistent request succeeds only after live rotation and the lock are
+confirmed. If lock verification fails, `currentOrientation` reports the latest
+confirmed live orientation, or `unknown` when it cannot be read.
+
+To restore automatic rotation, pass `lockOrientation: false`, for example
+`{ "orientation": "landscape", "lockOrientation": false }`. These lock options
+are supported only on Android.
+
 ### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
 
 `getAndroid` and `getApple` each accept two ways to name a target; pass one.

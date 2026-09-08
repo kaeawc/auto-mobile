@@ -3409,11 +3409,7 @@ async function reserveSystemUiAnrShutdown(
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(
-    deviceId,
-    signal,
-    autolockClient,
-  );
+  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal, autolockClient);
   if (reservation) {
     devicePool.markIntentionalShutdown(deviceId);
   }
@@ -3676,7 +3672,9 @@ async function prepareStartDeviceRunnerReadiness(
     isDevicePoolAutolockEnabled() && devicePool
       ? {
           mcpSessionId: input.args.__mcpSessionId,
-          expectedSessionId: devicePool.captureAutolockSessionForMcpSession(input.args.__mcpSessionId),
+          expectedSessionId: devicePool.captureAutolockSessionForMcpSession(
+            input.args.__mcpSessionId,
+          ),
         }
       : undefined;
   const readinessResult = await ensureRunnerReadyWithSystemUiAnrRecovery(

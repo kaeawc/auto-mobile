@@ -5584,8 +5584,13 @@ export class DevicePool {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
-    return this.assignmentMutex.runExclusive(() =>
-      this.autolockDeviceExclusive(
+    return this.assignmentMutex.runExclusive(() => {
+      if (mcpSessionId && this.mcpSessionRecoveryDevices.has(mcpSessionId)) {
+        throw new ActionableError(
+          `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
+        );
+      }
+      return this.autolockDeviceExclusive(
         deviceId,
         platform,
         mcpSessionId,
@@ -5595,8 +5600,8 @@ export class DevicePool {
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
         achievedReadiness,
-      ),
-    );
+      );
+    });
   }
 
   private async autolockDeviceExclusive(
@@ -5610,11 +5615,6 @@ export class DevicePool {
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string> {
-    if (mcpSessionId && this.mcpSessionRecoveryDevices.has(mcpSessionId)) {
-      throw new ActionableError(
-        `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
-      );
-    }
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // Ensure device is in the pool (it may have been freshly booted)

@@ -310,9 +310,7 @@ test.each(["agent-B", "agent-A"])(
           expect(recoveredProcess.listenerCount("exit")).toBe(recoveredExitListeners);
           expect(recoveredProcess.stdout.listenerCount("data")).toBe(recoveredOutputListeners);
         }
-        expect(await h.db.selectFrom("device_sessions").selectAll().execute()).toHaveLength(
-          1,
-        );
+        expect(await h.db.selectFrom("device_sessions").selectAll().execute()).toHaveLength(1);
       } finally {
         resetDeviceToolsDependencies();
         DaemonState.getInstance().reset();

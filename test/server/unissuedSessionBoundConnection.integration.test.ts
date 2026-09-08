@@ -141,6 +141,49 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     expect(sessionManager.getSession("S1")?.assignedDevice).toBe("emulator-5554");
   });
 
+  test("rejects routing to a FOREIGN live session once the connection is bound (#6069 red→green)", async () => {
+    const { client } = fixture!.getContext();
+
+    // The connection acquires and binds its own session S1 on emulator-5554.
+    await sessionManager.createSession("S1", "emulator-5554", "android");
+    const first = (await client.request(
+      { method: "tools/call", params: { name: "observeProbe", arguments: { sessionUuid: "S1" } } },
+      z.any(),
+    )) as { isError?: boolean };
+    expect(first.isError ?? false).toBe(false);
+    expect(handlerDevices).toEqual(["emulator-5554"]);
+
+    // A DIFFERENT, genuinely-issued session F1 exists on the OTHER pooled device
+    // (e.g. left by earlier fleet activity / another connection). Because it is a
+    // real live session, admitIssuedSessionForAutomation would happily admit it —
+    // so the #6045/#6079 admission guard does NOT reject this id. Before the fix,
+    // the connection bound to S1 could still route this call to F1 and run against
+    // emulator-5556, a device this connection never acquired.
+    await sessionManager.createSession("F1", "emulator-5556", "android");
+
+    let rejected = false;
+    let result: { isError?: boolean } | undefined;
+    try {
+      result = (await client.request(
+        {
+          method: "tools/call",
+          params: { name: "observeProbe", arguments: { sessionUuid: "F1" } },
+        },
+        z.any(),
+      )) as { isError?: boolean };
+    } catch {
+      rejected = true;
+    }
+
+    // The call must be rejected by the connection-binding guard...
+    expect(rejected || result?.isError === true).toBe(true);
+    // ...and must NOT have run on the foreign device the connection never bound.
+    expect(handlerDevices).toEqual(["emulator-5554"]);
+    // Both sessions keep their own devices; nothing was re-routed or re-assigned.
+    expect(sessionManager.getSession("S1")?.assignedDevice).toBe("emulator-5554");
+    expect(sessionManager.getSession("F1")?.assignedDevice).toBe("emulator-5556");
+  });
+
   test("rejects a fabricated sessionUuid while an autolock session is active on the connection", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     try {

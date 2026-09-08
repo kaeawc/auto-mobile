@@ -54,6 +54,43 @@ describe("session-scoped tool discovery", () => {
     expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
   });
 
+  test("exposes a session acquired mid-connection as the bound device session (#6069)", () => {
+    // The connection is NOT seeded with an initial session; it acquires one
+    // mid-flight (getAndroid, or a device tool with a valid sessionUuid) which
+    // records the binding via bind(). `boundDeviceSessionUuid` must surface that
+    // id so the device-routing guard can reject a later call that names a
+    // DIFFERENT (fabricated/typo'd/stale) session — the residual #6019/#6045
+    // ownership bypass behind an active-session precondition. This is distinct
+    // from `effectiveSessionUuid`, whose cross-routing throw is deliberately kept
+    // to construction-seeded bindings so plain tools stay free to carry any id.
+    const binding = new SessionToolBinding();
+    expect(binding.boundDeviceSessionUuid("conn-1")).toBeUndefined();
+
+    expect(binding.bind("conn-1", "device-session-a")).toBe(true);
+    expect(binding.boundDeviceSessionUuid("conn-1")).toBe("device-session-a");
+    // A fabricated id on the SAME connection does NOT throw here (that guard now
+    // lives on the device path), but the connection's real binding is unchanged.
+    expect(binding.effectiveSessionUuid("conn-1", { sessionUuid: "kumquat-D" })).toBe("kumquat-D");
+    expect(binding.boundDeviceSessionUuid("conn-1")).toBe("device-session-a");
+
+    // Releasing the session clears the bound id.
+    expect(binding.unbindSession("device-session-a")).toBe(true);
+    expect(binding.boundDeviceSessionUuid("conn-1")).toBeUndefined();
+  });
+
+  test("exposes a mid-connection stdio (direct) binding as the bound device session (#6069)", () => {
+    const binding = new SessionToolBinding();
+    expect(binding.boundDeviceSessionUuid(undefined)).toBeUndefined();
+
+    expect(binding.bind(undefined, "device-session-a")).toBe(true);
+    expect(binding.boundDeviceSessionUuid(undefined)).toBe("device-session-a");
+  });
+
+  test("exposes a construction-seeded initial session as the bound device session (#6069)", () => {
+    const binding = new SessionToolBinding("device-session-a");
+    expect(binding.boundDeviceSessionUuid("recreated-transport")).toBe("device-session-a");
+  });
+
   test("seeds only a recreated transport's initial session binding", () => {
     const binding = new SessionToolBinding("device-session-a");
 

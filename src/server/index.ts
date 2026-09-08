@@ -552,6 +552,38 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
     }
+
+    // #6069: enforce connection ownership on the DEVICE-routing path. If this
+    // connection already holds an active device session — whether seeded at
+    // construction or acquired mid-connection via getAndroid/getApple (recorded
+    // by `bind()`) — a device tool that names a DIFFERENT `sessionUuid` must be
+    // rejected, not routed. Without this, a later call carrying a fabricated,
+    // typo'd, or stale id on a connection that already owns a device was handed
+    // off to session admission/creation and auto-assigned a SECOND, foreign
+    // device (the residual #6019/#6045 bypass behind an active-session
+    // precondition). This is scoped to `requiresDevice` tools on purpose:
+    // `effectiveSessionUuid`'s own cross-routing throw fires for every tool and
+    // so is deliberately limited to construction-seeded bindings, leaving plain
+    // tools free to carry any sessionUuid (e.g. a tool-selection profile).
+    // Acquisition tools are excluded — they legitimately mint/rebind a session.
+    if (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) {
+      const rawExplicitSessionUuid = (toolParams as Record<string, unknown>).sessionUuid;
+      const explicitSessionUuid =
+        typeof rawExplicitSessionUuid === "string" && rawExplicitSessionUuid.trim().length > 0
+          ? rawExplicitSessionUuid
+          : undefined;
+      const boundDeviceSessionUuid = sessionToolBinding.boundDeviceSessionUuid(sessionId);
+      if (
+        boundDeviceSessionUuid &&
+        explicitSessionUuid &&
+        explicitSessionUuid !== boundDeviceSessionUuid
+      ) {
+        throw new ActionableError(
+          `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
+            `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
+        );
+      }
+    }
     // An omitted selection target always belongs to an independent
     // transport-local profile, even after device routing binds. Device-session
     // release must not erase choices for a still-open MCP connection.

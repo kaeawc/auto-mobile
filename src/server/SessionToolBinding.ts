@@ -52,6 +52,24 @@ export class SessionToolBinding {
     return explicitSessionUuid ?? boundSessionUuid;
   }
 
+  /**
+   * #6069: The connection's live device-session binding, whether seeded at
+   * construction (`initialSessionUuid`) OR acquired mid-connection via `bind()`
+   * (getAndroid/getApple, or a device tool with a valid sessionUuid). Unlike
+   * {@link effectiveSessionUuid}'s cross-routing throw — which fires for every
+   * tool and so is deliberately kept to construction-seeded bindings to leave
+   * plain (non-device) tools free to carry any sessionUuid (e.g. a tool-selection
+   * profile) — this exposes the bound id so the caller can enforce ownership on
+   * the DEVICE-routing path only. Keying that throw on this instead of
+   * `initialSessionUuid` closes the residual bypass where a later device-tool
+   * call on a connection that already holds an active session passed a DIFFERENT
+   * (fabricated/typo'd/stale) `sessionUuid` and was auto-assigned a SECOND,
+   * foreign device (`#6019`/`#6045` behind an active-session precondition).
+   */
+  boundDeviceSessionUuid(mcpSessionId: string | undefined): string | undefined {
+    return this.boundSessionUuid(mcpSessionId);
+  }
+
   /** A released identity is not an authorization grant for a replacement session. */
   releasedResourceSessionUuid(mcpSessionId: string | undefined): string | undefined {
     if (this.boundSessionUuid(mcpSessionId)) {

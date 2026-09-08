@@ -99,6 +99,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   private screenshotRequestCount: number = 0;
   private hierarchyRequestCount: number = 0;
+  private hierarchyRequestTimeouts: Array<number | undefined> = [];
   private keyboardOpen: boolean = false;
   private keyboardHistory: Array<{ action: "open" | "close" | "detect" }> = [];
   private pressHomeRequestCount: number = 0;
@@ -462,6 +463,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.imeActionHistory = [];
     this.screenshotRequestCount = 0;
     this.hierarchyRequestCount = 0;
+    this.hierarchyRequestTimeouts = [];
     this.keyboardOpen = false;
     this.keyboardHistory = [];
     this.pressHomeRequestCount = 0;
@@ -501,8 +503,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
+    void signal;
     this.hierarchyRequestCount++;
+    this.hierarchyRequestTimeouts.push(timeoutMs);
     await this.applyDelay("getHierarchy");
     this.checkFailure("getHierarchy");
 
@@ -511,6 +517,16 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     }
 
     return this.convertToViewHierarchyResult(this.hierarchyData);
+  }
+
+  /**
+   * `timeoutMs` argument passed to each `getAccessibilityHierarchy` call, in
+   * order -- lets tests assert a caller (e.g. `TapAnyElement`'s pre-tap search
+   * loop) actually constrains this request to its own remaining budget instead
+   * of relying on the client's generic default (issue #6306 review, P2).
+   */
+  getHierarchyRequestTimeouts(): Array<number | undefined> {
+    return [...this.hierarchyRequestTimeouts];
   }
 
   async getLatestHierarchy(
@@ -579,7 +595,20 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     duration: number = 0,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyTapResult> {
+    // Mirrors the real `sendCommand`'s pre-dispatch abort check (#6306
+    // review): an already-expired caller deadline must never reach the
+    // device.
+    if (signal?.aborted) {
+      return {
+        success: false,
+        totalTimeMs: 0,
+        error: "Request aborted before dispatch",
+      };
+    }
+
     await this.applyDelay("tap");
     this.checkFailure("tap");
 
@@ -953,7 +982,19 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   async requestVoiceOverState(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult> {
+    // Mirrors the real `sendCommand`'s pre-dispatch abort check (#6306
+    // review): an already-expired caller deadline must never reach the
+    // device.
+    if (signal?.aborted) {
+      return {
+        success: false,
+        enabled: false,
+        error: "Request aborted before dispatch",
+      };
+    }
+
     await this.applyDelay("voiceOverState");
     this.checkFailure("voiceOverState");
 

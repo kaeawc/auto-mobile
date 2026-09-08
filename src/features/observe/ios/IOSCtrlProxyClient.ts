@@ -249,6 +249,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyTapResult>;
 
   requestDrag(
@@ -375,6 +376,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestVoiceOverState(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult>;
 
   requestVoiceOverActivate(
@@ -2044,6 +2046,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
     return this.hierarchy.getAccessibilityHierarchy(
       queryOptions,
@@ -2051,6 +2055,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       skipWaitForFresh,
       minTimestamp,
       disableAllFiltering,
+      signal,
+      timeoutMs,
     );
   }
 
@@ -2162,8 +2168,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyTapResult> {
-    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
+    return this.gestures.requestTapCoordinates(
+      x,
+      y,
+      duration,
+      timeoutMs,
+      perf,
+      frameContext,
+      signal,
+    );
   }
 
   async requestSwipe(
@@ -2384,8 +2399,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestVoiceOverState(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult> {
-    return this.voiceOver.requestVoiceOverState(timeoutMs, perf);
+    return this.voiceOver.requestVoiceOverState(timeoutMs, perf, signal);
   }
 
   async requestVoiceOverActivate(

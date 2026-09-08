@@ -26,6 +26,7 @@ export interface IosVoiceOverDetector {
     client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<boolean>;
 
   /**
@@ -54,6 +55,7 @@ export interface IosVoiceOverDetector {
     client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<boolean>;
 
   /**

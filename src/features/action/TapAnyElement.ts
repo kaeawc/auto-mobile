@@ -58,19 +58,60 @@ interface TapAnyElementDependencies {
 export const LONG_PRESS_TIMEOUT_HEADROOM_MS = 2000;
 
 /**
- * Build the INNER CtrlProxy request timeout for a long-press gesture,
- * clamped to `MAX_SETTIMEOUT_DELAY_MS`. `setTimeout` (Node/Bun) silently
- * normalizes any delay >= 2^31 to 1ms rather than honoring it, so an
- * unclamped `pressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS` computed from a
- * caller-supplied `duration` near/over that ceiling (e.g.
+ * Build the INNER CtrlProxy request timeout for an iOS tap gesture from its
+ * on-device press duration, clamped to `MAX_SETTIMEOUT_DELAY_MS`. `setTimeout`
+ * (Node/Bun) silently normalizes any delay >= 2^31 to 1ms rather than
+ * honoring it, so an unclamped `pressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS`
+ * computed from a caller-supplied `duration` near/over that ceiling (e.g.
  * `tapAny({action:"longPress", duration:2147481648})`) would time the
  * CtrlProxy request out almost immediately instead of covering the intended
  * press (issue #6248 review, P2). The daemon's OUTER MCP deadline
  * (`resolveTapAnyLongPressBudgetMs` in `src/daemon/mcpRequestTimeout.ts`)
  * applies the same ceiling to the outer request -- both must be clamped.
+ *
+ * Originally sized only for `longPress` (hence the historical name in
+ * callers' comments); now also sizes an explicit timeout for ordinary
+ * `tap`/`doubleTap` gestures instead of leaving `timeoutMs: undefined` and
+ * relying on `requestTapCoordinates`'s own generic default -- a
+ * pathologically slow/uncached CtrlProxy could otherwise tie up a quick tap
+ * for the full default budget before failing (issue #6276).
  */
-function resolveLongPressCtrlProxyTimeoutMs(pressDurationMs: number): number {
+function resolveTapAnyCtrlProxyTimeoutMs(pressDurationMs: number): number {
   return Math.min(pressDurationMs + LONG_PRESS_TIMEOUT_HEADROOM_MS, MAX_SETTIMEOUT_DELAY_MS);
+}
+
+/**
+ * Established per-request default timeout that `SharedGestureDelegate.requestTapCoordinates`,
+ * `CtrlProxyVoiceOver.requestAction`, and `CtrlProxyVoiceOver.requestVoiceOverActivate` each
+ * apply when no `timeoutMs` is passed. An ordinary tap/doubleTap relied on this default before
+ * `resolveTapAnyCtrlProxyTimeoutMs` started sizing an explicit timeout from the (short, 50ms)
+ * fixed press duration -- which computes to ~2050ms, well BELOW this floor. Applying that
+ * shorter value unguarded shrinks, rather than merely budgets, the window an ordinary tap
+ * already had for a slow-but-otherwise-healthy CtrlProxy round trip: XCTest performs element
+ * lookup and `tap()`/activation before replying, so a device that legitimately takes 2.05-5s
+ * could now report failure -- and potentially still execute the tap after that reported failure
+ * -- where the same request previously succeeded (issue #6306 review, P1).
+ * `resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs` below floors at this value so the tapAny-specific
+ * budgeting stays additive/bounding on top of the established default, never below it.
+ */
+export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS = 5000;
+
+/**
+ * Build the INNER CtrlProxy request timeout for an ORDINARY (non-longPress) iOS tap/doubleTap
+ * gesture. Same derivation as `resolveTapAnyCtrlProxyTimeoutMs` (press duration + headroom,
+ * clamped to `MAX_SETTIMEOUT_DELAY_MS`), floored at
+ * `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS` so sizing an explicit timeout from the tap's
+ * short fixed press duration never reduces the established default the underlying CtrlProxy
+ * request methods already applied (issue #6306 review, P1). Deliberately NOT applied to
+ * `longPress`, whose caller-supplied duration can legitimately exceed this floor already and
+ * whose timeout must track that duration exactly (a floor there would just waste time on a
+ * quick, deliberately short longPress).
+ */
+function resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(pressDurationMs: number): number {
+  return Math.max(
+    resolveTapAnyCtrlProxyTimeoutMs(pressDurationMs),
+    TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+  );
 }
 
 /**
@@ -110,6 +151,49 @@ export const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID = 1000;
  * without duplicating the literal (issue #6248 review P2, fuZRt).
  */
 export const TAP_ANY_SEARCH_UNTIL_MAX_MS = 12000;
+
+/**
+ * Fixed on-device press duration `executeIosTapWithCoordinates` sends for an
+ * ordinary `tap`/`doubleTap` (as opposed to `longPress`, whose duration is
+ * caller-supplied). Exported so the daemon's outer MCP timeout budgeting
+ * (`resolveTapAnyOrdinaryTapBudgetMs` in `src/daemon/mcpRequestTimeout.ts`)
+ * shares this single value instead of duplicating the literal (issue #6276).
+ */
+export const TAP_ANY_ORDINARY_TAP_DURATION_MS = 50;
+
+/**
+ * Fixed delay `executeIosTapWithCoordinates` sleeps between the two presses
+ * of a `doubleTap`. Exported for the same reason as
+ * `TAP_ANY_ORDINARY_TAP_DURATION_MS` above (issue #6276).
+ */
+export const TAP_ANY_DOUBLE_TAP_GAP_MS = 200;
+
+/**
+ * The actual per-request CtrlProxy timeout `executeIosTapWithCoordinates`/
+ * `executeIosTapWithVoiceOver` apply to an ordinary tap/doubleTap gesture.
+ * `TAP_ANY_ORDINARY_TAP_DURATION_MS` is fixed, so
+ * `resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs` always resolves to this same value. Exported so
+ * the daemon's outer MCP timeout budgeting derives the ordinary-tap gesture term from the REAL
+ * per-request deadline instead of only the on-device press time (issue #6306 review, P2).
+ */
+export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS =
+  resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(TAP_ANY_ORDINARY_TAP_DURATION_MS);
+
+/**
+ * Worst-case WALL-CLOCK time for an ordinary `tap`/`doubleTap` gesture: `doubleTap` issues two
+ * sequential CtrlProxy requests separated by `TAP_ANY_DOUBLE_TAP_GAP_MS`, and EACH request can
+ * independently consume the full `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS` before CtrlProxy
+ * replies (or the request times out) -- not just the on-device press duration
+ * (`TAP_ANY_ORDINARY_TAP_DURATION_MS`), which is what an earlier round of this arithmetic
+ * charged (issue #6306 review, P2): with near-deadline observations that undersizing let the
+ * outer floor expire mid-gesture even though the CtrlProxy requests themselves were still
+ * within their own established timeout. Exported so the daemon's outer MCP timeout budgeting
+ * (`resolveTapAnyOrdinaryTapBudgetMs` in `src/daemon/mcpRequestTimeout.ts`) shares this single
+ * derived value instead of duplicating the arithmetic -- using the doubleTap worst case for
+ * both `tap` and `doubleTap` only ever over-budgets a plain `tap`, never under-budgets it.
+ */
+export const TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS =
+  2 * TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS + TAP_ANY_DOUBLE_TAP_GAP_MS;
 
 /**
  * Timeout `CtrlProxyVoiceOver.requestVoiceOverState`'s own default applies to
@@ -156,23 +240,51 @@ const TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS =
   TAP_ANY_LONG_PRESS_FINAL_OBSERVE_TOTAL_BACKOFF_MS;
 
 /**
+ * Worst-case cost of the SEPARATE pre-action `ObserveScreen.execute` call
+ * `BaseVisualChange.observedInteraction` performs BEFORE running the tapAny
+ * gesture itself (`getPreviousObserve` / its `getPreviousObserveFallback`
+ * catch path), when no usable cached observation exists. An earlier round of
+ * this budget accounted only for the POST-gesture final-observation retry
+ * loop (`TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS` above); it was blind
+ * to this separate pre-gesture call, which runs the identical
+ * `ObserveScreen.execute` pipeline (hierarchy request AND the unconditional
+ * accessibility-state-detection step) and so can cost the same per-attempt
+ * amount (issue #6276, follow-up to #6248 review thread funav). Reuses the
+ * per-attempt worst case computed above since it is the SAME underlying call.
+ */
+export const TAP_ANY_LONG_PRESS_PRE_ACTION_OBSERVE_MS =
+  TAP_ANY_LONG_PRESS_FINAL_OBSERVE_PER_ATTEMPT_MS;
+
+/**
  * Extra headroom on top of the derived worst-case arithmetic above, so a
  * further phase added later (or a small amount of scheduling jitter) can't
  * blow the budget and force yet another review round (issue #6248 review,
  * P2).
  */
-const TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS = 10_000;
+// The terminal screenshot is queued behind an observation's fire-and-forget
+// capture. Each CtrlProxy screenshot has a ten-second request budget, so the
+// terminal evidence can spend two full requests (the already pending one plus
+// its own fresh capture). Budget both instead of treating the first as free.
+export const TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS = 20_000;
+const TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS = TAP_ANY_TERMINAL_SCREENSHOT_WORST_CASE_MS;
 
 /**
- * Consolidated overhead for every non-press phase of a tapAny longPress: the
- * pre-gesture VoiceOver-detection probe, the post-gesture final observation's
- * realistic worst case (initial + retries + backoff, including the
- * accessibility-state-detection step each attempt also runs), plus a fixed
- * CtrlProxy request headroom and extra generosity headroom. Exported so the
- * daemon's outer MCP timeout budgeting (`resolveTapAnyLongPressBudgetMs` in
+ * Consolidated overhead for every non-press phase of a tapAny action (both
+ * `longPress` and, since issue #6276, ordinary `tap`/`doubleTap` -- every
+ * tapAny action runs the same `BaseVisualChange.observedInteraction`
+ * pipeline, so this overhead is action-agnostic): the pre-GESTURE
+ * VoiceOver-detection probe, the pre-ACTION `ObserveScreen.execute` call
+ * `observedInteraction` performs before running the gesture at all, the
+ * post-gesture final observation's realistic worst case (initial + retries +
+ * backoff, including the accessibility-state-detection step each attempt
+ * also runs), plus a fixed CtrlProxy request headroom and extra generosity
+ * headroom. Exported so the daemon's outer MCP timeout budgeting
+ * (`resolveTapAnyLongPressBudgetMs`/`resolveTapAnyOrdinaryTapBudgetMs` in
  * `src/daemon/mcpRequestTimeout.ts`) shares this single value instead of
- * duplicating the arithmetic (issue #6248 review, P2). Covers:
+ * duplicating the arithmetic (issue #6248 review, P2; issue #6276). Covers:
  *   - VoiceOver-detection probe (`TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS`)
+ *   - Pre-action `ObserveScreen.execute` call, run once before the gesture
+ *     (`TAP_ANY_LONG_PRESS_PRE_ACTION_OBSERVE_MS`)
  *   - Final post-gesture observation retry loop's worst case, hierarchy +
  *     a11y-detection per attempt (`TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS`)
  *   - Existing fixed CtrlProxy request headroom (`LONG_PRESS_TIMEOUT_HEADROOM_MS`)
@@ -181,10 +293,12 @@ const TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS = 10_000;
  *
  * Deliberately does NOT fold in the pre-gesture search window -- that varies
  * per-call (`searchUntil.duration` or its default) and stays budgeted
- * explicitly in `resolveTapAnyLongPressBudgetMs` alongside this constant.
+ * explicitly in `resolveTapAnyLongPressBudgetMs`/`resolveTapAnyOrdinaryTapBudgetMs`
+ * alongside this constant.
  */
 export const TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS =
   TAP_ANY_LONG_PRESS_VOICEOVER_PROBE_TIMEOUT_MS +
+  TAP_ANY_LONG_PRESS_PRE_ACTION_OBSERVE_MS +
   TAP_ANY_LONG_PRESS_FINAL_OBSERVE_WORST_CASE_MS +
   LONG_PRESS_TIMEOUT_HEADROOM_MS +
   TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS;
@@ -389,7 +503,23 @@ export class TapAnyElement extends BaseVisualChange {
       }
       case "ios": {
         const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
+        // Constrain the request to the CALLER's remaining budget, not
+        // `getAccessibilityHierarchy`'s own generic default -- the pre-tap search
+        // loop below bounds its own deadline by `searchUntil.duration`, but an
+        // unconstrained hierarchy fetch could independently run for the full
+        // default `IOS_HIERARCHY_REQUEST_TIMEOUT_MS` (~15s) regardless of how much
+        // of that budget is actually left, letting the outer MCP floor expire
+        // mid-search even though this call would eventually have returned (issue
+        // #6306 review, P2).
+        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+          effectiveTimeoutMs,
+        );
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       default:
@@ -450,15 +580,22 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     longPressDuration: number,
     element?: Element,
+    signal?: AbortSignal,
   ): Promise<void> {
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     // Fail-safe tap-bias variant (#6267): an indeterminate probe must route
     // through the VoiceOver activation gesture rather than a plain
     // coordinate touch that would get reported as a successful activation.
+    // `signal` is threaded through so a caller deadline that already expired
+    // while `ensureConnected()`/auto-setup was resolving aborts this probe
+    // before dispatch, rather than after the caller has given up (issue
+    // #6306 review).
     const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
       this.device.deviceId,
       xcTestClient,
       this.featureFlags,
+      undefined,
+      signal,
     );
 
     if (isVoiceOverEnabled && element) {
@@ -466,16 +603,21 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
 
-    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration);
+    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, signal);
   }
 
   /**
    * Execute iOS tap using coordinate-based input (standard mode).
    *
-   * CtrlProxy blocks its reply until the on-device press actually completes, so a
-   * long press must size the request timeout from the press duration —
-   * `requestTapCoordinates`'s default 5s timeout would otherwise fire (and report
-   * failure) before a longer on-device press finishes.
+   * CtrlProxy blocks its reply until the on-device press actually completes, so
+   * every action sizes the request timeout from its press duration —
+   * `requestTapCoordinates`'s own generic default timeout would otherwise apply
+   * to an ordinary tap/doubleTap, leaving it with no tapAny-specific floor/ceiling
+   * tailored to a quick gesture (issue #6276). An ordinary tap/doubleTap floors
+   * that explicit timeout at `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS` --
+   * the established default `requestTapCoordinates` already applied -- so sizing
+   * it from the short fixed press duration never SHRINKS the window a slow-but-
+   * healthy CtrlProxy round trip already had (issue #6306 review, P1).
    */
   private async executeIosTapWithCoordinates(
     xcTestClient: IOSCtrlProxyClient,
@@ -483,26 +625,60 @@ export class TapAnyElement extends BaseVisualChange {
     x: number,
     y: number,
     longPressDuration: number,
+    signal?: AbortSignal,
   ): Promise<void> {
-    // Short duration (50ms) for tap/doubleTap, full duration for longPress.
-    const tapDuration = action === "longPress" ? longPressDuration : 50;
+    // Short fixed duration for tap/doubleTap, caller-supplied duration for longPress.
+    const tapDuration =
+      action === "longPress" ? longPressDuration : TAP_ANY_ORDINARY_TAP_DURATION_MS;
     const timeoutMs =
-      action === "longPress" ? resolveLongPressCtrlProxyTimeoutMs(tapDuration) : undefined;
+      action === "longPress"
+        ? resolveTapAnyCtrlProxyTimeoutMs(tapDuration)
+        : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(tapDuration);
 
+    // `signal` reaches `sendCommand` as `abortSignal`: a caller deadline that
+    // already fired while `ensureConnected()` was resolving a reconnect/
+    // auto-setup (not itself cancellable) is checked right after that await
+    // and before dispatch, so the gesture is never sent to the device after
+    // the caller has already given up and returned a timeout (issue #6306
+    // review, P1/P2).
     if (action === "doubleTap") {
-      const firstResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
+      const firstResult = await xcTestClient.requestTapCoordinates(
+        x,
+        y,
+        tapDuration,
+        timeoutMs,
+        undefined,
+        undefined,
+        signal,
+      );
       if (!firstResult.success) {
         throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
       }
-      await this.timer.sleep(200);
-      const secondResult = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
+      await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
+      const secondResult = await xcTestClient.requestTapCoordinates(
+        x,
+        y,
+        tapDuration,
+        timeoutMs,
+        undefined,
+        undefined,
+        signal,
+      );
       if (!secondResult.success) {
         throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
       }
       return;
     }
 
-    const result = await xcTestClient.requestTapCoordinates(x, y, tapDuration, timeoutMs);
+    const result = await xcTestClient.requestTapCoordinates(
+      x,
+      y,
+      tapDuration,
+      timeoutMs,
+      undefined,
+      undefined,
+      signal,
+    );
     if (!result.success) {
       throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
     }
@@ -589,8 +765,13 @@ export class TapAnyElement extends BaseVisualChange {
 
     const voiceOverAction: "activate" | "long_press" =
       action === "longPress" ? "long_press" : "activate";
+    // Ordinary tap/doubleTap floors at the established default (P1 fix, issue #6306
+    // review) the same way `executeIosTapWithCoordinates` does -- longPress keeps
+    // tracking its caller-supplied duration exactly, with no floor.
     const timeoutMs =
-      action === "longPress" ? resolveLongPressCtrlProxyTimeoutMs(longPressDuration) : undefined;
+      action === "longPress"
+        ? resolveTapAnyCtrlProxyTimeoutMs(longPressDuration)
+        : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(TAP_ANY_ORDINARY_TAP_DURATION_MS);
 
     if (resourceId) {
       await this.activateIosByResourceId(xcTestClient, resourceId, voiceOverAction, timeoutMs);
@@ -669,6 +850,15 @@ export class TapAnyElement extends BaseVisualChange {
                 continue;
               }
 
+              // A hierarchy request can consume the last millisecond of the
+              // search window. Do not select from its result after the
+              // deadline: CtrlProxy may have served a stale fallback when its
+              // synchronous refresh timed out, and a late candidate must not
+              // turn a bounded search into an unbounded tap.
+              if (this.timer.now() >= deadline) {
+                break;
+              }
+
               const hash = this.hashViewHierarchy(refreshed);
               if (hash && hash !== lastHash) {
                 changeCount += 1;
@@ -724,7 +914,14 @@ export class TapAnyElement extends BaseVisualChange {
               }
               break;
             case "ios":
-              await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration, element);
+              await this.executeIosTap(
+                action,
+                tapPoint.x,
+                tapPoint.y,
+                longPressDuration,
+                element,
+                signal,
+              );
               break;
             default:
               throw new ActionableError(`Unsupported platform: ${this.device.platform}`);

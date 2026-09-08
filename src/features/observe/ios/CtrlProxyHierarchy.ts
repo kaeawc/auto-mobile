@@ -11,6 +11,7 @@ import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
+import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
 import { maxObservationAgeMs } from "../observationFreshness";
 import type {
@@ -79,6 +80,20 @@ export class CtrlProxyHierarchy {
 
   /**
    * Get the accessibility hierarchy converted to ViewHierarchyResult format.
+   *
+   * @param signal - Optional abort signal, checked before the synchronous fetch starts.
+   *   Parameter POSITION (6th, before `timeoutMs`) mirrors Android's `getAccessibilityHierarchy`
+   *   exactly (`CtrlProxyHierarchy`/`AndroidCtrlProxyClient` in `../android/`) and the shared
+   *   `ReadinessClient.getAccessibilityHierarchy` interface (`RunnerReadinessService.ts`) both
+   *   platform clients must satisfy -- swapping the two would compile (both optional) but break
+   *   any caller passing both positionally.
+   * @param timeoutMs - Per-request timeout forwarded to `getLatestHierarchy`'s synchronous
+   *   fetch, defaulting to `IOS_HIERARCHY_REQUEST_TIMEOUT_MS` when omitted. A caller polling
+   *   against its OWN outer deadline (e.g. `TapAnyElement`'s pre-tap search loop) must pass its
+   *   remaining budget here -- otherwise this call ignores that budget entirely and can block
+   *   for the full default even after the caller's own deadline has passed (issue #6306 review,
+   *   P2). Mirrors the `timeoutMs` parameter Android's `getAccessibilityHierarchy` already
+   *   honours.
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
@@ -86,13 +101,16 @@ export class CtrlProxyHierarchy {
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
     const response = await this.getLatestHierarchy(
       !skipWaitForFresh,
-      IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
+      timeoutMs ?? IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
       perf,
       skipWaitForFresh,
       minTimestamp,
+      signal,
     );
 
     if (!response.hierarchy) {
@@ -114,6 +132,11 @@ export class CtrlProxyHierarchy {
 
   /**
    * Get the latest hierarchy, optionally waiting for fresh data.
+   *
+   * @param signal - Optional abort signal. Checked once up front, then forwarded to the
+   *   synchronous sync fetch below (`requestHierarchySync`, which already honours it) so a
+   *   caller's cancellation is not silently dropped on the one path this delegate can actually
+   *   interrupt.
    */
   async getLatestHierarchy(
     waitForFresh: boolean = false,
@@ -121,7 +144,11 @@ export class CtrlProxyHierarchy {
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchyResponse> {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+    }
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
     let cachedCaptureAgeMs: number | undefined;
@@ -190,7 +217,7 @@ export class CtrlProxyHierarchy {
           `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
         );
       }
-      const result = await this.requestHierarchySync(perf, false, undefined, timeout);
+      const result = await this.requestHierarchySync(perf, false, signal, timeout);
       if (result) {
         if (result.hierarchy.packageName) {
           this.lastKnownPackageName = result.hierarchy.packageName;
@@ -282,6 +309,50 @@ export class CtrlProxyHierarchy {
   }
 
   /**
+   * Connection setup can include runner provisioning and is not itself
+   * cancellable. Race its result with this request's absolute deadline so a
+   * short hierarchy search returns on time and cannot later dispatch a tap
+   * candidate after its search window closed.
+   */
+  private async ensureConnectedBeforeDeadline(
+    deadlineMs: number,
+    perf: PerformanceTracker | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    const remainingMs = deadlineMs - this.context.timer.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const settle = (result: boolean | Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.context.timer.clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        if (result instanceof Error) {
+          reject(result);
+        } else {
+          resolve(result);
+        }
+      };
+      const onAbort = () =>
+        settle(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
+      const timeout = this.context.timer.setTimeout(() => settle(false), remainingMs);
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void this.context.ensureConnected(perf).then(
+        (connected) => settle(connected),
+        (error: unknown) => settle(error instanceof Error ? error : new Error(String(error))),
+      );
+    });
+  }
+
+  /**
    * Request a synchronous hierarchy fetch from the device.
    */
   async requestHierarchySync(
@@ -295,19 +366,42 @@ export class CtrlProxyHierarchy {
     perfTiming?: CtrlProxyPerfTiming;
     frameContext?: string;
   } | null> {
-    if (!(await this.context.ensureConnected(perf))) {
+    const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
+    throwIfAborted(signal);
+    if (!(await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal))) {
+      return null;
+    }
+    // Connection establishment can include iOS runner setup. It is not
+    // interruptible through this delegate, but it still spends this request's
+    // budget: never dispatch a hierarchy extraction after that budget expired.
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+    }
+    const remainingTimeoutMs = deadlineMs - this.context.timer.now();
+    if (remainingTimeoutMs <= 0) {
       return null;
     }
 
     const requestId = this.context.requestManager.generateId("hierarchy");
     if (suppressObservationStreamPush) {
-      this.context.suppressHierarchyObservationStreamPush?.(requestId, timeoutMs);
+      this.context.suppressHierarchyObservationStreamPush?.(requestId, remainingTimeoutMs);
     }
     const promise = this.context.requestManager.register<{
       hierarchy?: XCTestHierarchy;
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
-    }>(requestId, "hierarchy", timeoutMs, () => ({ hierarchy: undefined, perfTiming: undefined }));
+    }>(requestId, "hierarchy", remainingTimeoutMs, () => ({
+      hierarchy: undefined,
+      perfTiming: undefined,
+    }));
+
+    const rejectOnAbort = () => {
+      this.context.requestManager.reject(
+        requestId,
+        signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"),
+      );
+    };
+    signal?.addEventListener("abort", rejectOnAbort, { once: true });
 
     const message = {
       type: disableAllFiltering ? "request_hierarchy" : "request_hierarchy_if_stale",
@@ -316,32 +410,46 @@ export class CtrlProxyHierarchy {
     };
 
     const ws = this.context.getWebSocket();
-    ws?.send(JSON.stringify(message));
+    try {
+      // The request can be cancelled between connection setup and dispatch.
+      // Rejecting the registered request first keeps that cancellation from
+      // leaking a pending RequestManager entry.
+      throwIfAborted(signal);
+      ws?.send(JSON.stringify(message));
 
-    const result = await promise;
+      const result = await promise;
+      // A response that races with cancellation must not be accepted. The
+      // absolute deadline is already enforced by the RequestManager timeout
+      // registered above (a resolved hierarchy necessarily arrived before that
+      // timeout, i.e. within budget), so no separate post-await deadline check
+      // is needed here.
+      throwIfAborted(signal);
 
-    if (result.hierarchy) {
-      // Update cache
-      const now = this.context.timer.now();
-      const previous = this.context.getCachedHierarchy();
-      const newCache: CachedHierarchy = {
-        hierarchy: result.hierarchy,
-        receivedAt: now,
-        captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
-        fresh: true,
-        perfTiming: result.perfTiming,
-        frameContext: result.frameContext,
-      };
-      this.context.setCachedHierarchy(newCache);
+      if (result.hierarchy) {
+        // Update cache
+        const now = this.context.timer.now();
+        const previous = this.context.getCachedHierarchy();
+        const newCache: CachedHierarchy = {
+          hierarchy: result.hierarchy,
+          receivedAt: now,
+          captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
+          fresh: true,
+          perfTiming: result.perfTiming,
+          frameContext: result.frameContext,
+        };
+        this.context.setCachedHierarchy(newCache);
 
-      return {
-        hierarchy: result.hierarchy,
-        perfTiming: result.perfTiming,
-        frameContext: result.frameContext,
-      };
+        return {
+          hierarchy: result.hierarchy,
+          perfTiming: result.perfTiming,
+          frameContext: result.frameContext,
+        };
+      }
+
+      return null;
+    } finally {
+      signal?.removeEventListener("abort", rejectOnAbort);
     }
-
-    return null;
   }
 
   private captureReceivedAt(

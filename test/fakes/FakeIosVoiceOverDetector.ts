@@ -60,6 +60,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     _client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    _signal?: AbortSignal,
   ): Promise<boolean> {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
@@ -80,6 +81,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     _client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
+    _signal?: AbortSignal,
   ): Promise<boolean> {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);

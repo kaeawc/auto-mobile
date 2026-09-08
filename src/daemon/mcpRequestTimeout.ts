@@ -12,6 +12,7 @@ import {
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS,
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
   TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+  TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS,
   LONG_PRESS_TIMEOUT_HEADROOM_MS,
 } from "../features/action/TapAnyElement";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
@@ -351,6 +352,44 @@ function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefi
   return Math.min(budget, MAX_SETTIMEOUT_DELAY_MS);
 }
 
+/**
+ * Floor for a `tapAny` ordinary `tap`/`doubleTap` (i.e. any call that is NOT
+ * `action: "longPress"`, including an omitted `action`, which the schema
+ * defaults to `"tap"`). Mirrors `resolveTapAnyLongPressBudgetMs` above: the
+ * outer MCP deadline must cover every phase of the call, not just the
+ * gesture itself (issue #6276, follow-up to #6248 review thread funaf) --
+ * `TapAnyElement.executeIosTapWithCoordinates` previously passed
+ * `timeoutMs: undefined` for ordinary tap/doubleTap, leaving the daemon's
+ * outer deadline to fall through to the generic `DEFAULT_MCP_REQUEST_TIMEOUT_MS`
+ * (30s) with no tapAny-specific floor tailored to the call's real worst case.
+ *
+ * So the floor is `gestureWorstCase + effectiveSearchWindow +
+ * nonPressOverhead`, the same shape `resolveTapAnyLongPressBudgetMs` uses --
+ * `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` is action-agnostic (every tapAny
+ * action runs the same pre/post-action observation pipeline), so it applies
+ * here unchanged. Clamped to `MAX_SETTIMEOUT_DELAY_MS` for the same reason as
+ * the longPress floor, even though the fixed inputs here can never actually
+ * reach that ceiling -- kept for structural symmetry with the longPress
+ * resolver and to stay correct if a future change makes any term variable.
+ */
+function resolveTapAnyOrdinaryTapBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
+    return undefined;
+  }
+  const argumentsRecord = asRecord(request.params?.arguments);
+  if (argumentsRecord?.action === "longPress") {
+    return undefined;
+  }
+  const searchUntilDuration =
+    positiveFiniteNumber(asRecord(argumentsRecord?.searchUntil)?.duration) ??
+    TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
+  const budget =
+    TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+    Math.round(searchUntilDuration) +
+    TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS;
+  return Math.min(budget, MAX_SETTIMEOUT_DELAY_MS);
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
   const base =
@@ -361,7 +400,14 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
     request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
   const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
-  return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0, tapAnyLongPressBudget ?? 0);
+  const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
+  return Math.max(
+    base,
+    floor ?? 0,
+    devicePreparationBudget ?? 0,
+    tapAnyLongPressBudget ?? 0,
+    tapAnyOrdinaryTapBudget ?? 0,
+  );
 }
 
 /**

@@ -10,6 +10,11 @@ the common keys. Producers of complete platform reports use `AndroidDeviceResour
 or `AppleDeviceResource`. Consumers needing platform narrowing accept their union,
 `AndroidDeviceResource | AppleDeviceResource`, rather than widening to the base.
 
+Known map fields are declared explicitly so an unchecked `Record<string, ...>`
+cannot stand in for a complete platform snapshot. Compile-only contract fixtures
+run through the normal TypeScript gate. These types do not validate external JSON;
+a future I/O boundary must validate incoming data before constructing a report.
+
 This contract defines reporting semantics. It does not inspect devices, change
 provisioning settings, suspend services, or expose a new tool. Future producers
 must obtain evidence before reporting an observed state.

@@ -13,6 +13,6 @@
     "noEmit": false,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src"],
+  "include": ["src", "test/**/*.typecheck.ts"],
   "exclude": ["node_modules", "dist"]
 }

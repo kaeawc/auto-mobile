@@ -1,4 +1,9 @@
-import type { CommonDeviceResource, DeviceResource } from "./DeviceResource";
+import type {
+  CommonDeviceResource,
+  DeviceResource,
+  DeviceResourceMap,
+  DeviceResourceStatus,
+} from "./DeviceResource";
 
 /**
  * iOS resource snapshot.
@@ -10,4 +15,8 @@ export interface AppleDeviceResource extends DeviceResource<
   CommonDeviceResource | "icloudSync" | "photoAnalysis"
 > {
   platform: "ios";
+  resources: DeviceResourceMap & {
+    icloudSync: DeviceResourceStatus;
+    photoAnalysis: DeviceResourceStatus;
+  };
 }

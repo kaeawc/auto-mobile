@@ -1,4 +1,9 @@
-import type { CommonDeviceResource, DeviceResource } from "./DeviceResource";
+import type {
+  CommonDeviceResource,
+  DeviceResource,
+  DeviceResourceMap,
+  DeviceResourceStatus,
+} from "./DeviceResource";
 
 /**
  * Android resource snapshot. googlePlayServices covers the Google Play services
@@ -9,4 +14,7 @@ export interface AndroidDeviceResource extends DeviceResource<
   CommonDeviceResource | "googlePlayServices"
 > {
   platform: "android";
+  resources: DeviceResourceMap & {
+    googlePlayServices: DeviceResourceStatus;
+  };
 }

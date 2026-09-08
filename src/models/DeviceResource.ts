@@ -22,7 +22,13 @@ export interface DeviceResourceStatus {
  * - searchIndexing: OS-maintained search indexes, excluding app-owned indexes.
  * - animations: system UI transition animations, excluding app-rendered animation.
  */
-export type CommonDeviceResource = "backgroundSync" | "searchIndexing" | "animations";
+export interface DeviceResourceMap {
+  backgroundSync: DeviceResourceStatus;
+  searchIndexing: DeviceResourceStatus;
+  animations: DeviceResourceStatus;
+}
+
+export type CommonDeviceResource = keyof DeviceResourceMap;
 
 /**
  * Shared, extensible view of a device's logical resources, serialized as JSON.
@@ -35,5 +41,5 @@ export type CommonDeviceResource = "backgroundSync" | "searchIndexing" | "animat
 export interface DeviceResource<Resource extends string = CommonDeviceResource> {
   deviceId: string;
   platform: Platform;
-  resources: Record<Resource, DeviceResourceStatus>;
+  resources: DeviceResourceMap & Record<Resource, DeviceResourceStatus>;
 }

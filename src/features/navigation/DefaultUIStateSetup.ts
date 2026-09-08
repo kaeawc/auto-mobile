@@ -512,6 +512,28 @@ export class DefaultUIStateSetup implements UIStateSetup {
   }
 
   /**
+   * Strict variant of {@link isModalDismissed} for the close-button success
+   * path. Unlike `isModalDismissed`, an unavailable observation (the
+   * re-observation returned no view hierarchy, or `observeScreen.execute`
+   * threw, so `getCurrentUIState` resolves to `undefined`) does NOT count as a
+   * confirmed dismissal (#6319): the modal's presence is genuinely
+   * unobservable, so there is zero positive evidence it closed. `tapCloseButton`
+   * promises a candidate succeeds only when it "genuinely dismissed the modal
+   * (verified by re-observing and checking the modal is no longer present)", so
+   * it must require an actual observation — the plain `!undefined?.…` negation
+   * would otherwise collapse to a false-positive `true`. An unverifiable outcome
+   * falls through to the next candidate (and, ultimately, the remaining
+   * dismissal strategies) instead of claiming success.
+   */
+  private async isModalConfirmedDismissed(modal: ModalState, platform: string): Promise<boolean> {
+    const currentState = await this.getCurrentUIState(platform);
+    if (!currentState) {
+      return false;
+    }
+    return !currentState.modalStack?.some((m) => m.windowId === modal.windowId);
+  }
+
+  /**
    * Try to tap a close/cancel button in the current view.
    *
    * Each candidate text is tried in turn, and a candidate only counts as
@@ -548,7 +570,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         throwIfInternalToolFailed(response, "tapOn", platform);
 
         await this.sleep(200);
-        if (await this.isModalDismissed(modal, platform)) {
+        if (await this.isModalConfirmedDismissed(modal, platform)) {
           logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
           return true;
         }

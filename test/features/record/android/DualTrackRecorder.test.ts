@@ -49,12 +49,16 @@ class FakeA11ySource implements A11ySource {
   constructor(private readonly supportedCommands: string[] | null = ["request_insert_text"]) {}
 
   async ensureConnected(): Promise<boolean> {
-    if (this.connectionError) {throw this.connectionError;}
+    if (this.connectionError) {
+      throw this.connectionError;
+    }
     return this.connected;
   }
 
   async getSupportedCommands(): Promise<string[] | null> {
-    if (this.capabilityError) {throw this.capabilityError;}
+    if (this.capabilityError) {
+      throw this.capabilityError;
+    }
     return this.supportedCommands;
   }
 
@@ -295,7 +299,9 @@ describe("DualTrackRecorder", () => {
     "required connection %s still fails startup",
     async (mode) => {
       fakeA11y.connected = false;
-      if (mode === "rejected") {fakeA11y.connectionError = new Error("connection failed");}
+      if (mode === "rejected") {
+        fakeA11y.connectionError = new Error("connection failed");
+      }
       await expect(recorder.start()).rejects.toThrow(
         mode === "rejected" ? "connection failed" : "Unable to connect",
       );

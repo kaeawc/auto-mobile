@@ -213,6 +213,53 @@ describe("pickAndroidSystemImage", () => {
     expect(preferredAbis("arm64")[0]).toBe("arm64-v8a");
     expect(preferredAbis("x64")[0]).toBe("x86_64");
   });
+
+  describe("CtrlProxy runner-APK minSdk floor (#6187)", () => {
+    // The runner APK targets minSdk 24; provisioning must never hand back a
+    // sub-24 image that would boot an AVD the runner can never install onto.
+    const withLegacy = [
+      systemImage(21, "google_apis", "x86_64"),
+      systemImage(23, "google_apis", "x86_64"),
+      systemImage(24, "google_apis", "x86_64"),
+      systemImage(34, "google_apis", "x86_64"),
+    ];
+
+    it("never selects an image below API 24 even without an explicit min bound", () => {
+      // API 21 is newest-by-nothing here only because 24/34 also exist; ensure a
+      // catalog whose only options are sub-24 is rejected rather than selected.
+      const onlyLegacy = [
+        systemImage(21, "google_apis", "x86_64"),
+        systemImage(23, "google_apis", "x86_64"),
+      ];
+      expect(() => pickAndroidSystemImage(onlyLegacy, {}, "x64")).toThrow(
+        /No installed Android system image.*CtrlProxy runner minSdk/,
+      );
+    });
+
+    it("clamps a below-floor min bound up to API 24 without touching valid picks", () => {
+      // minOsVersion "5.0" is Android 5.0 (API 21) — below the runner floor. The
+      // API 21/23 images stay excluded; the newest at-or-above 24 is chosen.
+      expect(pickAndroidSystemImage(withLegacy, { minOsVersion: "5.0" }, "x64").apiLevel).toBe(34);
+    });
+
+    it("fails fast when the requested max cannot host the runner APK", () => {
+      // maxOsVersion "6" is Android 6.0 (API 23): creating that AVD would fail
+      // APK install later, so provisioning rejects it up front.
+      expect(() => pickAndroidSystemImage(withLegacy, { maxOsVersion: "6" }, "x64")).toThrow(
+        ActionableError,
+      );
+      expect(() => pickAndroidSystemImage(withLegacy, { maxOsVersion: "6" }, "x64")).toThrow(
+        /below API 24.*CtrlProxy runner APK/,
+      );
+    });
+
+    it("leaves a valid at-or-above-floor bound unaffected", () => {
+      // A normal request that already sits at/above the floor selects exactly as
+      // before — the guard adds no behavior for in-support bounds.
+      expect(pickAndroidSystemImage(withLegacy, { minOsVersion: "7.0" }, "x64").apiLevel).toBe(34);
+      expect(pickAndroidSystemImage(withLegacy, { maxOsVersion: "7.0" }, "x64").apiLevel).toBe(24);
+    });
+  });
 });
 
 describe("DefaultDeviceProvisioner", () => {

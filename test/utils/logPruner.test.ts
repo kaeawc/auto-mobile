@@ -484,6 +484,8 @@ describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        // Windows file mtimes can be ahead of Date.now(); age is not under test.
+        now: Date.now() + 60_000,
         isProcessAlive: () => false, // every spawning manager AND discovered pid is dead
         daemonPidFiles: () => {
           enumerateCalls += 1;

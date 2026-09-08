@@ -1162,6 +1162,58 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       expect(result.touchCoordinates).toEqual({ x: 333, y: 444 });
     });
 
+    // Regression (#6318): a #6296 adversary finding. When the LAST sample is
+    // obstructed (resolver returns null → no tap issued, tapPoint falls back to
+    // the untouched initial location) but an EARLIER sample tapped and produced
+    // a real measurement, touchCoordinates must report the genuinely-tapped
+    // point, not the never-tapped initial selection.
+    test("touchCoordinates must not report the never-tapped initial point when the last sample is obstructed (#6318)", async function () {
+      const dynamicAdb = new DynamicFakeAdbExecutor();
+      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      let tapsAtReset = 0;
+      let framesAfterTap = 0;
+      dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command) => {
+        const taps = dynamicAdb.getExecutedCommands().filter((c) => c.includes("input tap")).length;
+        if (command.includes("reset")) {
+          tapsAtReset = taps;
+          framesAfterTap = 0;
+          return { stdout: "", stderr: "" };
+        }
+        const totalFrames = taps > tapsAtReset ? (framesAfterTap += 3) : 0;
+        return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
+      });
+      const factory: AdbClientFactory = { create: () => dynamicAdb };
+
+      // Sample 1 resolves a real inert point; sample 2 is obstructed (null).
+      const points: Array<{ x: number; y: number } | null> = [{ x: 333, y: 444 }, null];
+      let resolveCallCount = 0;
+      const resolver = {
+        resolveInertTouchPoint: async () => points[resolveCallCount++] ?? null,
+      };
+
+      tracker = new TouchLatencyTracker(device, factory, fakeTimer, resolver);
+
+      const result = await runWithFakeTimer(
+        tracker.measureLatency(
+          "com.example.app",
+          screenSize,
+          { sampleCount: 2, maxWaitMs: 200, touchPoint: { x: 999, y: 888 } },
+          perf,
+        ),
+        fakeTimer,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.sampleCount).toBe(1);
+      const tapCommands = dynamicAdb.getExecutedCommands().filter((c) => c.includes("input tap"));
+      expect(tapCommands).toHaveLength(1);
+      expect(tapCommands[0]).toContain("input tap 333 444");
+      // The obstructed final sample must NOT overwrite the reported coordinate
+      // with the untouched initial point.
+      expect(result.touchCoordinates).not.toEqual({ x: 999, y: 888 });
+      expect(result.touchCoordinates).toEqual({ x: 333, y: 444 });
+    });
+
     // Regression (#6228): when the freshly captured hierarchy has no
     // verified-inert point (a control now covers every candidate), the sample
     // must abort WITHOUT tapping rather than reuse a stale point.

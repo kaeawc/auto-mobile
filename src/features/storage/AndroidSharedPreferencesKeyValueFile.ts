@@ -162,6 +162,35 @@ export function isSharedPreferencesInspectionDisabledError(error: unknown): bool
   return /SharedPreferences inspection is disabled/i.test(errorMessage(error));
 }
 
+/**
+ * True when `error` is the SDK's *mutation* policy gate
+ * (`SharedPreferencesError.MutationNotAllowed` →
+ * `"SharedPreferences mutations are disabled by SDK policy"`), a distinct refusal from the
+ * inspection gate above. Like inspection, this policy only constrains the SDK
+ * ContentProvider route — it never touches the on-device `shared_prefs/<file>.xml`, which
+ * `setPreference` edits directly — so a mutation refused here is still reachable through the
+ * direct-file fallback (issue #6347).
+ */
+export function isSharedPreferencesMutationDisabledError(error: unknown): boolean {
+  return /SharedPreferences mutations are disabled by SDK policy/i.test(errorMessage(error));
+}
+
+/**
+ * True when a key-value mutation failed for a reason the direct-file fallback resolves:
+ * either the SDK's inspection capability is disabled (issue #6292) or its mutation policy
+ * disables writes (issue #6347). Both gates constrain only the SDK ContentProvider route,
+ * not the `adb shell run-as` XML edit that `setPreference`/`getPreference` always use, so the
+ * fallback restores write/delete/clear symmetry with `setPreference` in either case. A
+ * failure that is neither (a genuine transport/argument error, or the direct-file fallback
+ * itself failing on a non-debuggable app) is NOT matched, so its real cause still surfaces.
+ */
+export function isSharedPreferencesDirectFileFallbackError(error: unknown): boolean {
+  return (
+    isSharedPreferencesInspectionDisabledError(error) ||
+    isSharedPreferencesMutationDisabledError(error)
+  );
+}
+
 /** Outcome of {@link withAndroidSharedPreferencesInspectionFallback}. */
 export interface SharedPreferencesInspectionFallbackResult {
   /**
@@ -174,20 +203,22 @@ export interface SharedPreferencesInspectionFallbackResult {
 
 /**
  * Runs an Android SharedPreferences key-value mutation through the SDK ContentProvider
- * (`viaSdk`) and, if that fails specifically because SharedPreferences inspection is
- * disabled on the app, falls back to the same direct-file `adb shell run-as` XML edit
- * that `setPreference`/`getPreference` always use (`viaDirectFile`).
+ * (`viaSdk`) and, if that fails specifically because the SDK route is gated — SharedPreferences
+ * inspection is disabled (issue #6292) OR the SDK's mutation policy disables writes (issue
+ * #6347) — falls back to the same direct-file `adb shell run-as` XML edit that
+ * `setPreference`/`getPreference` always use (`viaDirectFile`).
  *
  * This keeps write/delete/clear reachability consistent for the same app + SharedPreferences
- * file (issue #6292) across BOTH mutation entry points — the MCP `setKeyValue`/`removeKeyValue`/
+ * file across BOTH mutation entry points — the MCP `setKeyValue`/`removeKeyValue`/
  * `clearKeyValueFile` tools and the desktop Storage pane's `ide/*` daemon-socket routes — so a
  * caller who can write a preference through `setPreference` can also delete or clear it, instead
- * of the delete/clear paths being wrongly gated behind a capability the write path never needed.
+ * of the delete/clear paths being wrongly gated behind a capability (or a policy) the write path
+ * never needed.
  *
- * A failure that is NOT the "inspection disabled" gate (e.g. a genuine transport error, or the
- * direct-file fallback itself failing because the app is not debuggable) is surfaced as-is so the
- * caller sees the real, actionable cause rather than a misleading fallback error. `createAdb` is
- * only invoked when the fallback actually runs, so no adb client is created on the happy path.
+ * A failure that is neither gate (e.g. a genuine transport error, or the direct-file fallback
+ * itself failing because the app is not debuggable) is surfaced as-is so the caller sees the real,
+ * actionable cause rather than a misleading fallback error. `createAdb` is only invoked when the
+ * fallback actually runs, so no adb client is created on the happy path.
  */
 export async function withAndroidSharedPreferencesInspectionFallback(
   appId: string,
@@ -200,11 +231,11 @@ export async function withAndroidSharedPreferencesInspectionFallback(
     await viaSdk();
     return { usedDirectFileFallback: false };
   } catch (error) {
-    if (!isSharedPreferencesInspectionDisabledError(error)) {
+    if (!isSharedPreferencesDirectFileFallbackError(error)) {
       throw error;
     }
     logger.info(
-      `[storage] SharedPreferences inspection is disabled for ${appId}; falling back to direct-file access for ${fileName} (issue #6292)`,
+      `[storage] SharedPreferences SDK route is disabled for ${appId} (inspection or mutation policy); falling back to direct-file access for ${fileName} (issues #6292, #6347)`,
     );
     const adb = createAdb();
     await viaDirectFile(adb);
@@ -223,8 +254,8 @@ export async function withAndroidSharedPreferencesInspectionFallback(
  */
 export function directFileFallbackRelaunchWarning(appId: string, fileName: string): string {
   return (
-    `Edited ${appId}'s "${fileName}" SharedPreferences file on disk directly because ` +
-    "inspection is disabled. If the app is running it may keep the old value in memory and " +
+    `Edited ${appId}'s "${fileName}" SharedPreferences file on disk directly because the ` +
+    "SDK route is disabled. If the app is running it may keep the old value in memory and " +
     "overwrite this change on its next commit — relaunch the app (or let it clear its " +
     "in-memory cache) for the change to take effect reliably."
   );

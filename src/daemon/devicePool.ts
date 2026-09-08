@@ -5581,7 +5581,6 @@ export class DevicePool {
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string> {
-    const sessionId = this.idGenerator.next();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // Ensure device is in the pool (it may have been freshly booted)
@@ -5646,6 +5645,16 @@ export class DevicePool {
       readinessReservationOwners,
     );
 
+    const reusedSessionId = await this.reuseOwnedAutolockSession(
+      device,
+      mcpSessionId,
+      achievedReadiness,
+    );
+    if (reusedSessionId) {
+      return reusedSessionId;
+    }
+
+    const sessionId = this.idGenerator.next();
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
@@ -5684,6 +5693,42 @@ export class DevicePool {
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  /** Warm acquisition must prove ownership before reusing a live autolock. */
+  private async reuseOwnedAutolockSession(
+    device: PooledDevice,
+    mcpSessionId: string | undefined,
+    achievedReadiness: DeviceReadinessLevel,
+  ): Promise<string | undefined> {
+    const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
+    if (!session) {
+      return undefined;
+    }
+    if (
+      !mcpSessionId ||
+      this.mcpSessionAutolockMap.get(mcpSessionId) !== session.sessionId ||
+      device.autolockSessionId !== session.sessionId ||
+      !this.isSessionAssignmentCurrent(device, session) ||
+      !this.sessionManager.isAdmittedForAutomation(session)
+    ) {
+      throw new ActionableError(
+        `Device '${device.id}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+    }
+    const refreshed = await this.sessionManager.getOrCreateSession(session.sessionId);
+    // Release can finish while activity persistence yields, even under the
+    // assignment mutex. Do not report success for a retired ownership identity.
+    if (
+      refreshed !== session ||
+      !this.isSessionAssignmentCurrent(device, session) ||
+      !this.sessionManager.isAdmittedForAutomation(session)
+    ) {
+      throw new ActionableError(`Device '${device.id}' was released during autolock acquisition.`);
+    }
+    this.sessionManager.setDeviceReadiness(session.sessionId, achievedReadiness);
+    return session.sessionId;
   }
 
   private throwIfFreshStartAlreadyBound(

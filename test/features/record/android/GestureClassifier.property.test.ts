@@ -83,6 +83,25 @@ function twoFinger(
   return c.feedFrame(makeFrame(200, [], [0, 1]));
 }
 
+/**
+ * Drive one finger DOWN → MOVE → UP with explicit (monotonic non-decreasing)
+ * frame timestamps, so a test can control durationMs precisely — including
+ * durationMs === 0 when downT === upT. The MOVE frame shares downT, so only
+ * downT and upT determine the reported duration.
+ */
+function swipeTimed(
+  d: number,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  downT: number,
+  upT: number,
+) {
+  const c = new GestureClassifier(identityScaler, d);
+  c.feedFrame(makeFrame(downT, [{ slotId: 0, trackingId: 1, x: from.x, y: from.y }]));
+  c.feedFrame(makeFrame(downT, [{ slotId: 0, trackingId: 1, x: to.x, y: to.y }]));
+  return c.feedFrame(makeFrame(upT, [], [0]));
+}
+
 describe("GestureClassifier (property-based)", () => {
   // -------------------------------------------------------------------------
   // Single-finger classification partition
@@ -193,6 +212,38 @@ describe("GestureClassifier (property-based)", () => {
         expect(singleFinger(d, { x, y }, endpoint(atOffset), 50)?.type).toBe("swipe");
         expect(singleFinger(d, { x, y }, endpoint(aboveOffset), 50)?.type).toBe("swipe");
       }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("a zero-duration swipe is guarded to 'normal', not a divide-by-zero 'fast'", () => {
+    // The swipe property above draws durationMs from [1, 5000], so it never
+    // exercises the classifier's `durationMs > 0 ? ... : 0` guard. Same-
+    // millisecond DOWN/UP frames are real (arrivedAt is Date.now()), yielding
+    // durationMs === 0; without the guard displacement/0 = Infinity would
+    // report "fast". (The fling-threshold comparison itself is already pinned
+    // by the swipe property, which mirrors the density-scaled velocity formula.)
+    fc.assert(
+      fc.property(
+        density,
+        coord,
+        coord,
+        fc.integer({ min: 40, max: 1500 }), // >= 40 > max slop, so always a swipe
+        fc.integer({ min: 0, max: 5_000_000 }),
+        (d, x, y, disp, t) => {
+          // Zero duration (DOWN and UP share timestamp t) ⇒ velocity guarded to
+          // 0 ⇒ "normal".
+          const zero = swipeTimed(d, { x, y }, { x: x + disp, y }, t, t);
+          expect(zero?.type).toBe("swipe");
+          expect(zero?.speed).toBe("normal");
+
+          // The same displacement over 1ms is a genuinely high velocity ⇒
+          // "fast", proving the guard (not a blanket "normal") is what makes the
+          // zero-duration case normal.
+          const fast = swipeTimed(d, { x, y }, { x: x + disp, y }, t, t + 1);
+          expect(fast?.speed).toBe("fast");
+        },
+      ),
       RUN_OPTIONS,
     );
   });

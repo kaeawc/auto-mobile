@@ -14,6 +14,13 @@ import {
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
+import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+} from "../daemon/constants";
 
 const testMetadataSchema = z.object({
   testClass: z.string(),
@@ -115,7 +122,21 @@ const executePlanTool = async (
     progress,
     signal,
   });
-  const result = await orchestrator.execute();
+  // These fields come from the enclosing MCP call, never from step params.
+  // Preserve the live registry key rather than freezing its current deadline.
+  const internalParams = params as Record<string, unknown>;
+  const result = await runWithToolSelectionContext(
+    {
+      planRequest: {
+        deadlineMs: internalParams[INTERNAL_MCP_REQUEST_DEADLINE_PARAM],
+        timeoutMs: internalParams[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM],
+        startTime: internalParams[INTERNAL_EXECUTION_START_TIME_PARAM],
+        liveDeadlineKey: internalParams[INTERNAL_LIVE_DEADLINE_KEY_PARAM],
+        progress,
+      },
+    },
+    () => orchestrator.execute(),
+  );
   return createStructuredToolResponse(result);
 };
 

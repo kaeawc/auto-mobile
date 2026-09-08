@@ -45,10 +45,9 @@
 # introduce it. Resolve by rebasing onto `main` or re-running `--update`. (CI
 # already gates this step on `ts_changed`, so native-only PRs skip it entirely.)
 #
-# Scope: `tsconfig.json` has `include: ["src"]`, so type errors under `test/**`
-# are OUTSIDE this gate by design -- the class of bug it guards (a masked prod
-# error) lives in `src/`. Extending coverage to tests would need a separate
-# test-scoped tsconfig and its own baseline.
+# Scope: `tsconfig.json` includes `src` and compile-only `test/**/*.typecheck.ts`
+# contract fixtures. Runtime test files remain outside this gate; extending
+# coverage to them would need a separate test-scoped tsconfig and its own baseline.
 #
 # Usage:
 #   scripts/typecheck-baseline.sh                     # check mode (CI gate)

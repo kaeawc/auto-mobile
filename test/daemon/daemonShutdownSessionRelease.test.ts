@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import * as daemonFilesModule from "../../src/daemon/daemonFiles";
 import * as databaseModule from "../../src/db";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
@@ -376,6 +377,47 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     } finally {
       restoreSpy.mockRestore();
       loggerCloseSpy.mockRestore();
+    }
+  });
+
+  test("cleans up daemon pid/socket files only after the logger has flushed and closed (issue #6194)", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const events: string[] = [];
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+      events.push("closeDatabase");
+    });
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockImplementation(async () => {
+      events.push("logger");
+    });
+    const cleanupDaemonFilesSpy = spyOn(daemonFilesModule, "cleanupDaemonFiles").mockImplementation(
+      async () => {
+        events.push("daemon files");
+        return true;
+      },
+    );
+
+    try {
+      await daemon.stop();
+
+      // The pid record is this daemon's ONLY externally-observable liveness
+      // signal, and the process keeps holding its inherited launch-log fd
+      // through every earlier shutdown stage. Removing the pid record before the
+      // logger has fully flushed and closed opens a window where a concurrent
+      // pruning sweep in another process reads "no daemon" while this one is
+      // still alive and still writing, and unlinks a launch log out from under
+      // it (issue #6194) — so "daemon files" cleanup must run LAST.
+      expect(events).toEqual(["closeDatabase", "logger", "daemon files"]);
+    } finally {
+      closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+      cleanupDaemonFilesSpy.mockRestore();
     }
   });
 });

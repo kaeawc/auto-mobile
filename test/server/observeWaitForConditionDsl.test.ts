@@ -42,14 +42,17 @@ const makeHierarchy = (children: Record<string, unknown>[]): ViewHierarchyResult
     screenHeight: 200,
   }) as unknown as ViewHierarchyResult;
 
-const makeObservation = (children: Record<string, unknown>[], updatedAt = 0): ObserveResult =>
-  ({
+const makeObservation = (children: Record<string, unknown>[], updatedAt = 0): ObserveResult => {
+  const viewHierarchy = makeHierarchy(children);
+  viewHierarchy.updatedAt = updatedAt;
+  return {
     updatedAt,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 0 },
-    viewHierarchy: makeHierarchy(children),
-  }) as ObserveResult;
+    viewHierarchy,
+  } as ObserveResult;
+};
 
 const node = (props: Record<string, unknown>): Record<string, unknown> => ({
   bounds: flatBounds(0, 0, 10, 10),
@@ -267,6 +270,28 @@ describe("waitForObservation DSL branch", () => {
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.timedOut).toBe(false);
     expect(outcome.polls).toBe(1);
+  });
+
+  test("for:'stable' reports timeout when stale Asleep frames exhaust the budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      ...makeObservation([node({ "resource-id": "content" })], 10),
+      wakefulness: "Asleep",
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    });
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "stable", timeout: 300 } as any,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(outcome.timedOut).toBe(true);
   });
 });
 

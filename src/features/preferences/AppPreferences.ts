@@ -1,5 +1,4 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { Builder, parseStringPromise } from "xml2js";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -12,6 +11,18 @@ import { ActionableError } from "../../models";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import {
+  arrayOfNodes,
+  findNamedNode,
+  parseAndroidPreferencesXml,
+  readAndroidPreferencesXml,
+  removeNamedNodes,
+  sanitizeAndroidPreferencesFileName,
+  serializeAndroidPreferencesXml,
+  writeAndroidPreferencesXml,
+  type AndroidPreferencesXmlDocument,
+} from "./AndroidPreferencesXmlFile";
+import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
@@ -191,34 +202,25 @@ export class AppPreferences {
 
   private async setAndroidSharedPreference(input: SetPreferenceInput): Promise<void> {
     const fileName = androidSharedPreferencesFileName(input);
-    const existingXml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
-    const updatedXml = await writeAndroidPreferenceEntry(
-      existingXml,
-      input.key,
-      input.value,
-      input.type,
-    );
-    const encodedXml = Buffer.from(updatedXml, "utf8").toString("base64");
-    const innerCommand = `mkdir -p shared_prefs && printf '%s' '${encodedXml}' | base64 -d > shared_prefs/${fileName}.xml`;
-    await this.adb().executeCommand(
-      `shell run-as ${shellQuoteUnlessSafe(input.appId!)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`,
+    await getAndroidSharedPreferencesMutationCoordinator().run(
+      this.device.deviceId,
+      input.appId!,
+      fileName,
+      async () => {
+        const existingXml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
+        const updatedXml = await writeAndroidPreferenceEntry(
+          existingXml,
+          input.key,
+          input.value,
+          input.type,
+        );
+        await writeAndroidPreferencesXml(this.adb(), input.appId!, fileName, updatedXml);
+      },
     );
   }
 
   private async readAndroidSharedPreferencesXml(appId: string, fileName: string): Promise<string> {
-    try {
-      const result = await this.adb().executeCommand(
-        `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`,
-      );
-      return result.stdout;
-    } catch (error) {
-      if (looksLikeMissingAndroidPrefsFile(error)) {
-        return "<map/>";
-      }
-      throw new ActionableError(
-        `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`,
-      );
-    }
+    return readAndroidPreferencesXml(this.adb(), appId, fileName);
   }
 
   private async getIosUserDefault(
@@ -370,13 +372,15 @@ export class AppPreferences {
 
 function androidSharedPreferencesFileName(input: GetPreferenceInput): string {
   const name = input.suite ?? `${input.appId}_preferences`;
-  const fileName = name.endsWith(".xml") ? name.slice(0, -4) : name;
-  if (!/^[A-Za-z0-9_.-]+$/.test(fileName) || fileName === "." || fileName === "..") {
+  try {
+    return sanitizeAndroidPreferencesFileName(name);
+  } catch {
+    // Re-thrown with "suite" terminology since this is reached from the setPreference/
+    // getPreference tools, where the caller-facing argument is named `suite`.
     throw new ActionableError(
       "Android SharedPreferences suite must be a safe file name using letters, numbers, underscore, dash, or dot.",
     );
   }
-  return fileName;
 }
 
 async function readAndroidPreferenceEntry(
@@ -425,72 +429,16 @@ async function writeAndroidPreferenceEntry(
   value: PreferenceValue,
   type: PreferenceValueType,
 ): Promise<string> {
-  const document = await parseAndroidPreferencesXml(xml);
+  const document: AndroidPreferencesXmlDocument = await parseAndroidPreferencesXml(xml);
   document.map ??= {};
-  removeNamedNodes(document.map, key);
+  removeNamedNodes(document, key);
 
   const tag = ANDROID_TYPE_TO_TAG[type];
   const nodes = arrayOfNodes(document.map[tag]);
   nodes.push(androidNodeFor(key, value, type));
   document.map[tag] = nodes;
 
-  return new Builder({
-    xmldec: { version: "1.0", encoding: "utf-8", standalone: true },
-    renderOpts: { pretty: false },
-  }).buildObject(document);
-}
-
-async function parseAndroidPreferencesXml(xml: string): Promise<any> {
-  const trimmed = xml.trim();
-  if (!trimmed) {
-    return { map: {} };
-  }
-  try {
-    const parsed = await parseStringPromise(trimmed, {
-      explicitArray: true,
-      explicitRoot: true,
-      trim: false,
-    });
-    return normalizeAndroidPreferencesDocument(parsed);
-  } catch (error) {
-    throw new ActionableError(`Failed to parse Android SharedPreferences XML: ${error}`);
-  }
-}
-
-function normalizeAndroidPreferencesDocument(parsed: unknown): { map: Record<string, unknown> } {
-  if (!isRecord(parsed)) {
-    return { map: {} };
-  }
-  if (!isRecord(parsed.map)) {
-    return { ...parsed, map: {} };
-  }
-  return parsed as { map: Record<string, unknown> };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function findNamedNode(nodes: unknown, key: string): any | null {
-  return arrayOfNodes(nodes).find((node) => node?.$?.name === key) ?? null;
-}
-
-function removeNamedNodes(map: Record<string, unknown>, key: string): void {
-  for (const [tag, nodes] of Object.entries(map)) {
-    if (Array.isArray(nodes)) {
-      map[tag] = nodes.filter((node) => node?.$?.name !== key);
-    }
-  }
-}
-
-function arrayOfNodes(nodes: unknown): any[] {
-  if (Array.isArray(nodes)) {
-    return nodes;
-  }
-  if (nodes === undefined || nodes === null) {
-    return [];
-  }
-  return [nodes];
+  return serializeAndroidPreferencesXml(document);
 }
 
 function readAndroidStringSetValues(node: any): string[] {
@@ -701,14 +649,6 @@ function shellQuoteUnlessSafe(value: string): string {
     return value;
   }
   return shellQuote(value);
-}
-
-function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
-  const message = errorMessage(error);
-  if (!/No such file|not found|does not exist/i.test(message)) {
-    return false;
-  }
-  return /shared_prefs\/[^/\s]+\.xml/i.test(message);
 }
 
 function looksLikeMissingIosDefault(error: unknown): boolean {

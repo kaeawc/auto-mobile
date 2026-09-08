@@ -168,6 +168,25 @@ describe("platform device preparation tools", () => {
     expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
   });
 
+  test("getApple ignores daemon deadline provenance before strict schema validation", async () => {
+    const simulator: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 17",
+      deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+      isRunning: false,
+    };
+    deviceUtils.setDeviceImages("ios", [simulator]);
+
+    const result = await callTool("getApple", {
+      deviceId: simulator.deviceId,
+      __mcpRequestTimeoutMs: 120_000,
+      __mcpRequestDeadlineMs: Date.now() + 120_000,
+      __mcpLiveDeadlineKey: "daemon-deadline-key",
+    });
+
+    expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
+  });
+
   test("getAndroid rejects a call with neither avdName nor deviceId, naming the source (#5870)", () => {
     expect(() => getAndroidSchema.parse({})).toThrow(/avdName.*deviceId|deviceId.*avdName/i);
   });

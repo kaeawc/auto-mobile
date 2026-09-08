@@ -43,6 +43,7 @@ export class SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<BaseResult> {
     return sendCommand<BaseResult>(this.context, {
       idPrefix: "tap",
@@ -52,6 +53,12 @@ export class SharedGestureDelegate {
       timeoutMs,
       perf,
       errorLabel: "Tap",
+      // The caller's own outer deadline may already have fired while
+      // `ensureConnected()` was resolving a reconnect/auto-setup (which is
+      // not itself cancellable) -- `sendCommand` checks this right after that
+      // await and before dispatch, so an already-abandoned tap is never sent
+      // to the device after the caller has given up (issue #6306 review).
+      abortSignal: signal,
     });
   }
 

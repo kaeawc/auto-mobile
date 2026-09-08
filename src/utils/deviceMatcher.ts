@@ -22,13 +22,19 @@ export interface DeviceMatcher {
 
 export interface ParsedDeviceVersion {
   components: number[];
-  /** A trailing single-letter release qualifier, e.g. Android 12L's "L" (#6132 follow-up). */
+  /**
+   * A trailing alphabetic release qualifier, uppercased. A single letter
+   * covers the shipped cases (Android 12L's "L", #6132 follow-up); the parser
+   * also accepts a multi-letter qualifier (e.g. a hypothetical "12Lv2"-style
+   * codename) so those order deterministically instead of failing to parse and
+   * degrading to a NaN comparison (#6326).
+   */
   letter?: string;
   qpr?: number;
 }
 
 function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
-  const match = /^(\d+(?:\.\d+)*)([A-Za-z])?(?:-QPR(\d+))?$/i.exec(version.trim());
+  const match = /^(\d+(?:\.\d+)*)([A-Za-z]+)?(?:-QPR(\d+))?$/i.exec(version.trim());
   if (!match) {
     return null;
   }
@@ -51,12 +57,15 @@ function compareParsedVersions(partsA: number[], partsB: number[]): number {
 }
 
 /**
- * Orders a trailing release-qualifier letter such as Android 12L's "L": a
- * release with no letter sorts before one with a letter at the same numeric
- * components (Android 12 < 12L), and letters otherwise sort alphabetically.
- * This is a generic string-ordering rule, not an Android-specific codename
- * table -- it works for any single trailing letter without knowing what it
- * means.
+ * Orders a trailing release-qualifier such as Android 12L's "L": a release
+ * with no letter sorts before one with a letter at the same numeric components
+ * (Android 12 < 12L), and letters otherwise sort lexicographically. This is a
+ * generic string-ordering rule, not an Android-specific codename table -- it
+ * works for any trailing qualifier, single- or multi-letter (#6326), without
+ * knowing what it means. Lexicographic comparison stays a correct total order
+ * over multi-letter qualifiers too (e.g. "L" < "LA" < "LB"), so no separate
+ * length rule is needed to keep the relation reflexive, antisymmetric and
+ * transitive.
  */
 function compareLetterQualifier(letterA: string | undefined, letterB: string | undefined): number {
   if (letterA === letterB) {

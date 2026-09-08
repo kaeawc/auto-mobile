@@ -1,5 +1,8 @@
 import { ActiveWindow } from "../../src/models";
 import type { Window } from "../../src/features/observe/interfaces/Window";
+import type { GetActiveOptions } from "../../src/features/observe/Window";
+import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
+import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 
 /**
  * Fake implementation of Window for testing
@@ -12,7 +15,18 @@ export class FakeWindow implements Window {
   private cachedActiveWindowCallCount: number = 0;
   private getActiveCallCount: number = 0;
   private getActiveForceRefreshes: boolean[] = [];
+  private getActiveOptions: GetActiveOptions[] = [];
   private configuredActiveHash: string = "fake-active-hash";
+  private throwOnAbortedSignal: boolean = false;
+
+  /**
+   * When enabled, getActive rejects with a cancellation error if handed an
+   * already-aborted signal (mirrors the real Window.getActive). Off by default
+   * so existing suites are unaffected.
+   */
+  setThrowOnAbortedSignal(value: boolean = true): void {
+    this.throwOnAbortedSignal = value;
+  }
 
   /**
    * Configure the cached active window to be returned by getCachedActiveWindow
@@ -64,6 +78,7 @@ export class FakeWindow implements Window {
     this.cachedActiveWindowCallCount = 0;
     this.getActiveCallCount = 0;
     this.getActiveForceRefreshes = [];
+    this.getActiveOptions = [];
   }
 
   /**
@@ -84,6 +99,16 @@ export class FakeWindow implements Window {
     return [...this.getActiveForceRefreshes];
   }
 
+  /** The `options` argument recorded for each getActive call, in call order. */
+  getGetActiveOptions(): GetActiveOptions[] {
+    return [...this.getActiveOptions];
+  }
+
+  /** The `signal` forwarded into the most recent getActive call, if any. */
+  getLastGetActiveSignal(): AbortSignal | undefined {
+    return this.getActiveOptions[this.getActiveOptions.length - 1]?.signal;
+  }
+
   // Implementation of Window interface
 
   async getCachedActiveWindow(): Promise<ActiveWindow | null> {
@@ -92,10 +117,20 @@ export class FakeWindow implements Window {
     return this.configuredCachedActiveWindow;
   }
 
-  async getActive(forceRefresh: boolean = false): Promise<ActiveWindow> {
+  async getActive(
+    forceRefresh: boolean = false,
+    _perf?: PerformanceTracker,
+    options: GetActiveOptions = {},
+  ): Promise<ActiveWindow> {
     this.executedOperations.push("getActive");
     this.getActiveCallCount++;
     this.getActiveForceRefreshes.push(forceRefresh);
+    this.getActiveOptions.push(options);
+    // Mimic the real Window.getActive (opt-in): an already-cancelled read rejects
+    // so a verification caller propagates the abort instead of masking it.
+    if (this.throwOnAbortedSignal && options.signal?.aborted) {
+      throw new Error(OPERATION_CANCELLED_MESSAGE);
+    }
     if (!forceRefresh && this.configuredCachedActiveWindow) {
       return this.configuredCachedActiveWindow;
     }

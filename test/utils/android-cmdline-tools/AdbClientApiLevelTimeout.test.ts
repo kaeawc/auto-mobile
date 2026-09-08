@@ -42,6 +42,27 @@ function ok(stdout: string): ExecResult {
 }
 
 describe("AdbClient.getAndroidApiLevel timeout caching", () => {
+  test("does not return a cached API level after the caller aborts", async () => {
+    let calls = 0;
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes(GETPROP)) {
+        calls += 1;
+        return Promise.resolve(ok("31"));
+      }
+      return Promise.resolve(ok(""));
+    };
+    const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
+
+    expect(await client.getAndroidApiLevel()).toBe(31);
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(client.getAndroidApiLevel(undefined, controller.signal)).rejects.toThrow(
+      /aborted/i,
+    );
+    expect(calls).toBe(1);
+  });
+
   test("does not cache an AdbCommandTimeoutError, so a later call re-probes", async () => {
     let calls = 0;
     let timeOut = true;

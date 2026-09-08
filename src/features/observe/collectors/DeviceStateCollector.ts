@@ -31,6 +31,7 @@ export class DeviceStateCollector {
       const wakefulness = await adb.getWakefulness(signal);
       if (wakefulness) {
         result.wakefulness = wakefulness;
+        result.wakefulnessSource = "adb";
       }
     } catch (error) {
       logger.warn("Failed to get wakefulness state:", error);

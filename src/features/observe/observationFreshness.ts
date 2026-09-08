@@ -128,6 +128,34 @@ export interface FreshnessInputs {
   maxAgeMs?: number;
 }
 
+/**
+ * WHY a freshness verdict failed, as a stable discriminant a consumer can branch
+ * on instead of pattern-matching the human-readable `warning` (issue #6284 P1).
+ * The distinction that matters at the tap layer is whether a fresh view-hierarchy
+ * re-capture RESOLVES the failure:
+ *
+ *  - `cache_age` — the tree was stale/unverified from the host-side cache, or
+ *    past the age budget. A live hierarchy re-capture resolves exactly this.
+ *  - `window_identity` — wrong-window, status-bar-only, activity-attribution
+ *    mismatch, incomplete capture, or a missing foreground window. These describe
+ *    WHICH window/app the tree belongs to; swapping in a freshly-captured
+ *    hierarchy (which may still be from the wrong window) does NOT resolve them.
+ *  - `requested_min` — an explicit `minTimestamp` was not satisfied.
+ *  - `no_timestamp` — the capture carried no timestamp to judge.
+ *  - `unavailable` — no hierarchy could be retrieved at all.
+ *  - `effect_inconsistent` — the returned capture still describes the
+ *    pre-action screen even though the action reported a screen change.
+ *
+ * Only ever set when `isFresh` is false.
+ */
+export type FreshnessFailureCategory =
+  | "cache_age"
+  | "window_identity"
+  | "requested_min"
+  | "no_timestamp"
+  | "unavailable"
+  | "effect_inconsistent";
+
 export interface FreshnessVerdict {
   requestedAfter?: number;
   actualTimestamp?: number;
@@ -149,6 +177,11 @@ export interface FreshnessVerdict {
   staleDurationMs?: number;
   /** Names the CAUSE whenever `isFresh` is false. */
   warning?: string;
+  /**
+   * Stable discriminant for WHY freshness failed, for consumers that must decide
+   * whether a re-capture resolves it. Present only when `isFresh` is false.
+   */
+  category?: FreshnessFailureCategory;
 }
 
 /**
@@ -178,6 +211,7 @@ function computeRequestedFreshness(
       : actualTimestamp === undefined
         ? "Observation carries no capture timestamp, so the requested minimum could not be checked."
         : `Observation was captured ${staleDurationMs}ms before the requested minimum timestamp.`,
+    category: isFresh ? undefined : "requested_min",
   };
 }
 
@@ -274,6 +308,7 @@ function resolveIdentityMismatch(
       verified: false,
       isFresh: false,
       warning: `Observed hierarchy is from ${observed}, but the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
+      category: "window_identity",
     };
   }
   if (inputs.statusBarOnlyHierarchy) {
@@ -287,6 +322,7 @@ function resolveIdentityMismatch(
       warning: ctrlProxyIncomplete
         ? unreadableFocusedWindowWarning(foreground, sdkInt)
         : `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
+      category: "window_identity",
     };
   }
   if (inputs.activityAttributionMismatch) {
@@ -298,6 +334,7 @@ function resolveIdentityMismatch(
       isFresh: false,
       warning:
         "CtrlProxy and adb disagree about the current activity, and a fresh hierarchy could not reconcile them. The observation was not verified against the current activity; call observe again.",
+      category: "window_identity",
     };
   }
   // The service reported the focused application's root as unreadable even
@@ -322,6 +359,7 @@ function resolveIdentityMismatch(
       verified: false,
       isFresh: false,
       warning: `The accessibility service reported the capture as incomplete: ${lead}. ${incompleteCaptureGuidance(sdkInt, reason)}`,
+      category: "window_identity",
     };
   }
   // Lowest-priority fallback (issue #6220): none of the device-confirmed gates
@@ -342,6 +380,7 @@ function resolveIdentityMismatch(
         reason === "status_bar_only"
           ? "Observed hierarchy contains only Android status-bar content — every extracted node lies within the status-bar strip, not a full foreground application window. Any package/activity attribution on this capture may be stale from a previous app; this capture cannot be trusted to reflect any app's screen. Call observe again."
           : "Observed hierarchy reports no foreground application window (activeWindow.appId is empty), so this capture cannot be trusted to reflect the current screen; call observe again.",
+      category: "window_identity",
     };
   }
   return undefined;
@@ -381,6 +420,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       verified,
       isFresh: false,
       warning: unavailableWarning(inputs.incompleteCapture),
+      category: "unavailable",
     };
   }
 
@@ -405,6 +445,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       verified,
       isFresh: false,
       warning: "Observation carries no capture timestamp, so its freshness cannot be established.",
+      category: "no_timestamp",
     };
   }
 
@@ -422,6 +463,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       isFresh: false,
       staleDurationMs: overBudget ? ageMs : undefined,
       warning: `Hierarchy was served from the host-side cache without being re-verified against the device (captured ${ageMs}ms ago). The runner did not answer a synchronous hierarchy request.`,
+      category: "cache_age",
     };
   }
 
@@ -456,6 +498,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       isFresh: false,
       staleDurationMs: ageMs,
       warning: `Hierarchy was captured ${ageMs}ms ago, past the ${maxAgeMs}ms freshness budget (AUTOMOBILE_MAX_OBSERVATION_AGE_MS), and the source did not report whether it was verified against the device.`,
+      category: "cache_age",
     };
   }
 

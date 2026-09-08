@@ -11,6 +11,8 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -281,6 +283,50 @@ describe("HomeScreen", () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
+    });
+  });
+
+  // Deadline-bounding + AbortSignal propagation for the ADB KEYCODE_HOME
+  // fallback (issue #6289).
+  describe("ADB KEYCODE_HOME fallback deadline + abort (issue #6289)", () => {
+    test("bounds the KEYCODE_HOME keyevent with a deadline and threads a signal", async () => {
+      // Global action unavailable, so the ADB keyevent fallback runs; the
+      // default fakeWindow reports the launcher, so verification passes.
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+
+      await (homeScreen as any).executeAndroidHome();
+
+      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
+      expect(keyeventCall).toBeDefined();
+      // Deadline-bounded and single-shot. With no ambient/forwarded signal in
+      // scope the combined signal is undefined (nothing to cancel on); the
+      // combined-signal test below covers the cancellation wiring.
+      expect(keyeventCall?.timeoutMs).toBe(3000);
+      expect(keyeventCall?.noRetry).toBe(true);
+    });
+
+    test("an ambient request abort cancels the KEYCODE_HOME fallback (combined signal)", async () => {
+      // The forwarded private signal is combined with the ambient request
+      // signal, so a cancelled MCP request still aborts the fallback read.
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => {
+          throw new Error("global action unavailable");
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      fakeAdb.setThrowOnAbortedSignal();
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        runWithAbortSignal(controller.signal, () => (homeScreen as any).executeAndroidHome()),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
+      expect(keyeventCall?.signal?.aborted).toBe(true);
     });
   });
 });

@@ -26,6 +26,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
+  DAEMON_LAUNCH_LOG_PATH_ENV,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
@@ -54,7 +55,11 @@ import {
 } from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { cleanupDaemonFiles, isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
+import {
+  cleanupDaemonFiles,
+  clearDaemonLaunchLogOwnerTombstoneSync,
+  isProcessRunning as isDaemonProcessRunning,
+} from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
@@ -535,8 +540,8 @@ const LOCK_HOLDER_PROBE_TIMEOUT_MS = 1000;
  * binding and publishing its own record — closing the window where a
  * concurrent start rewrites the PID file between `stop()`'s liveness check and
  * its unlink. Bounded so `stop()` can never hang if a start holds the lock
- * unusually long; on timeout the stale file is left for the next locked bind
- * to reclaim instead (safe — see {@link DaemonManager.removeConfirmedDeadPidFile}).
+ * unusually long; on timeout the stale PID record is left for a later explicit
+ * cleanup or startup to supersede safely (see {@link DaemonManager.removeConfirmedDeadPidFile}).
  */
 const PID_FILE_DELETE_LOCK_ACQUIRE_TIMEOUT_MS = 2000;
 
@@ -966,8 +971,11 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    // Clean up stale socket and PID files from previous sessions
-    await cleanupDaemonFiles({ pidFilePath: this.pidFilePath });
+    // Do not pre-emptively remove namespace files here. The lock serializes
+    // cooperative managers, but a direct daemon may still own a socket which
+    // this manager cannot prove stale. The child uses the shared bind guard to
+    // reclaim only a socket with an unreachable listener and a positively-dead
+    // recorded owner; it publishes its own early PID record before that bind.
 
     stderrLog("Starting AutoMobile daemon...");
 
@@ -1007,8 +1015,17 @@ export class DaemonManager implements DaemonManagerLike {
     const logPath = capturesLaunchOutput
       ? (this.heldLockLogPath ?? this.daemonLaunchLogPath())
       : devNull;
+    // Preserve the exact capture path for the child PID record. Retention uses
+    // this association instead of letting an unrelated live daemon protect all
+    // launch logs in a shared directory.
+    childEnv[DAEMON_LAUNCH_LOG_PATH_ENV] = capturesLaunchOutput ? logPath : "";
     if (capturesLaunchOutput) {
       ensureSecureLogsDirSync();
+      // `openSync(..., "w")` below starts a new launch-log generation. A
+      // same-PID manager reuse can otherwise leave a dead prior generation's
+      // exact-owner sidecar behind and let pruning delete this fresh file while
+      // its child still holds the descriptor.
+      clearDaemonLaunchLogOwnerTombstoneSync(logPath);
     }
     // Open with restricted permissions (0o600 = owner read/write only).
     // Stderr-only containers deliberately skip the file capture and do not need
@@ -1613,9 +1630,9 @@ export class DaemonManager implements DaemonManagerLike {
    * cheap way to establish current ownership — the lsof/inode ownership-proof
    * machinery was deliberately removed earlier in #6140 for exactly this
    * reason) would delete that winner's live socket: the exact brick #6140 is
-   * about. A leftover socket file is harmless; it is unconditionally reclaimed
-   * by the next daemon start's unlink-before-`listen()`, under the O_EXCL
-   * startup lock (`UnixSocketServer.start()`).
+   * about. A leftover socket file is harmless. A later daemon start may reclaim
+   * it only after its bind guard proves the listener unreachable and its recorded
+   * owner dead; the startup lock itself is not that proof.
    *
    * Even the PID file alone is NOT unconditionally safe to delete on a single
    * read, though: a concurrent daemon start can rewrite it — with its own LIVE
@@ -1652,7 +1669,7 @@ export class DaemonManager implements DaemonManagerLike {
     if (!acquired) {
       logger.warn(
         "Could not acquire the startup lock to remove a stale PID file during stop(); " +
-          "leaving it for the next daemon start to reclaim.",
+          "leaving it for a later safe startup or explicit cleanup to supersede.",
       );
       return;
     }

@@ -306,6 +306,17 @@ steps:
       }
     };
 
+    // #6227: `registerDeviceLabelMap` now runs real per-session readiness
+    // setup (`createToolExecutionContext` -> `ensureAccessibilityServiceReady`)
+    // for every labeled session, including "base" and the freshly-allocated
+    // "base:B" — both are `existingSession` by the time it runs (created
+    // directly above / by the `assignMultipleDevices` override), and an
+    // `existingSession` with no recorded readiness no longer short-circuits
+    // setup. This test exercises session-assignment survival through expiry
+    // cleanup, not the accessibility-setup mechanism itself. The shared test
+    // preload (test/setup/testPreload.ts) installs a no-op readiness driver so
+    // that setup succeeds immediately instead of hitting the real device (which
+    // has no real `adb`/network backing it and can block past the test timeout).
     const multiDevicePlan = `
 name: multi-device-test
 devices:

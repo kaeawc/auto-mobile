@@ -10,16 +10,13 @@ const isWindows = platform() === "win32";
 /**
  * Issue #6140 design change: `DaemonClient` no longer performs ANY client-side
  * destructive stale-socket recovery. `UnixSocketServer.start()`
- * (`src/daemon/socketServer.ts`) already unconditionally unlinks the socket path
- * before `listen()`, and that runs under `DaemonManager`'s `O_EXCL` startup lock
- * (`src/daemon/manager.ts`) — so stale-socket recovery already happens,
- * correctly, at daemon bind time under a lock. The client-side unlink this suite
- * used to cover had no lock to coordinate against: a concurrent startup winner
- * could bind a NEW socket at the same path between the client's "is this dead?"
- * check and its unlink, and the client would delete the winner's live socket —
- * the exact brick #6140 is about. Removing the client-side unlink makes that
- * brick impossible by construction and loses no auto-recovery: the next daemon
- * start reclaims a stale socket under its lock regardless.
+ * (`src/daemon/socketServer.ts`) is the sole recovery point: it requires an
+ * unreachable listener and a positively-dead recorded owner before unlinking.
+ * A startup lock alone is not permission to reclaim. The client-side unlink this
+ * suite used to cover had no ownership proof: a concurrent startup winner could
+ * bind a new socket between the client's check and its unlink, and the client
+ * would delete that winner's live socket — the exact brick #6140 is about.
+ * Removing the client-side unlink makes that brick impossible by construction.
  *
  * This suite asserts the invariant that replaces the old multi-layered
  * probe/holder/inode recovery machinery: `connect()` and `isAvailable()` NEVER

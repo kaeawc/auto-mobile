@@ -17,6 +17,7 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   "tapOn",
   "swipeOn",
   "inputText",
+  "sendKeys",
   "clearText",
   "pressButton",
   "dragAndDrop",

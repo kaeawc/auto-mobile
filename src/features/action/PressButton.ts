@@ -9,6 +9,7 @@ import { logger } from "../../utils/logger";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 
 export class PressButton extends BaseVisualChange {
   constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
@@ -48,16 +49,24 @@ export class PressButton extends BaseVisualChange {
    *   runner/ADB call so the caller's timeout is honored instead of the
    *   per-transport hard-coded defaults. When omitted, the existing defaults
    *   apply.
+   * @param frameContext - Optional frame-context token to validate before the
+   *   ADB fallback dispatch.
+   * @param signal - Optional cancellation signal. Threaded into the Android ADB
+   *   keyevent dispatch and the home-foreground verification reads (a `home`
+   *   press verifies end-to-end) so a cancelled caller — e.g. Explore's
+   *   AbortSignal forwarded through `resetToHome` — actually aborts the device
+   *   work rather than only shrinking a timeout budget.
    */
   async press(
     button: string,
     timeoutMs?: number,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<PressButtonResult> {
     try {
       switch (this.device.platform) {
         case "android":
-          return await this.executeAndroidButtonPress(button, timeoutMs, frameContext);
+          return await this.executeAndroidButtonPress(button, timeoutMs, frameContext, signal);
         case "ios":
           return await this.executeiOSButtonPress(button, timeoutMs, frameContext);
         default:
@@ -91,6 +100,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     timeoutMs?: number,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<PressButtonResult> {
     const normalized = button.toLowerCase();
     const keyCode = resolveAndroidKeyCode(normalized);
@@ -113,6 +123,7 @@ export class PressButton extends BaseVisualChange {
       keyCode,
       deadlineMs,
       frameContext,
+      signal,
     );
     if (globalActionResult) {
       return globalActionResult;
@@ -132,11 +143,17 @@ export class PressButton extends BaseVisualChange {
       };
     }
 
+    // Combine the forwarded signal with the ambient request signal so BOTH can
+    // cancel the ADB keyevent fallback: passing `signal` alone would replace the
+    // ambient signal AdbClient.executeArgsImpl would otherwise pick up, dropping
+    // MCP request cancellation on this fallback dispatch (issue #6289).
+    const dispatchSignal = combineWithAmbientAbort(signal);
     let validationFailure: PressButtonResult | undefined;
     try {
       await this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
         timeoutMs: adbBudget,
         noRetry: true,
+        signal: dispatchSignal,
         beforeDispatch:
           frameContext === undefined
             ? undefined
@@ -146,6 +163,7 @@ export class PressButton extends BaseVisualChange {
                   keyCode,
                   deadlineMs,
                   frameContext,
+                  signal,
                 );
                 if (validationFailure) {
                   throw new Error(validationFailure.error);
@@ -174,7 +192,18 @@ export class PressButton extends BaseVisualChange {
     // self-reported success, on API 28 specifically. Other buttons (back,
     // recent, hardware) have no equivalently cheap ground truth to check
     // against and keep their existing dispatch-is-success behavior.
-    if (normalized === "home" && !(await this.verifyAndroidHomeForeground())) {
+    // Verify within the REMAINING budget, not a fresh full timeout: the ADB
+    // keyevent above already spent part of the caller's deadline, so re-derive
+    // the leftover and hand it to verification (which shares it across getActive,
+    // launcher lookup, and retries) rather than letting getActive fall back to
+    // its 5s default and overrun the keyed device-input op (issue #6289).
+    if (
+      normalized === "home" &&
+      !(await this.verifyAndroidHomeForeground({
+        signal,
+        timeoutMs: this.remainingMs(deadlineMs),
+      }))
+    ) {
       return {
         success: false,
         button,
@@ -192,6 +221,7 @@ export class PressButton extends BaseVisualChange {
     keyCode: number,
     deadlineMs: number | undefined,
     frameContext: string | undefined,
+    signal?: AbortSignal,
   ): Promise<PressButtonResult | undefined> {
     if (!PressButton.GLOBAL_ACTION_BUTTONS.has(normalized)) {
       return undefined;
@@ -211,13 +241,20 @@ export class PressButton extends BaseVisualChange {
         globalActionTimeout,
         undefined,
         frameContext,
+        signal,
       );
       if (result.success) {
         // "home" specifically can self-report success while leaving the
         // foreground app unchanged on API 28 (issue #6147). Confirm the
         // foreground actually became the launcher before trusting it; other
         // global-action buttons (back, recent) keep the prior behavior.
-        if (normalized !== "home" || (await this.verifyAndroidHomeForeground())) {
+        if (
+          normalized !== "home" ||
+          (await this.verifyAndroidHomeForeground({
+            signal,
+            timeoutMs: this.remainingMs(deadlineMs),
+          }))
+        ) {
           logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
           return { success: true, button, keyCode };
         }
@@ -241,6 +278,7 @@ export class PressButton extends BaseVisualChange {
     keyCode: number,
     deadlineMs: number | undefined,
     frameContext: string | undefined,
+    signal?: AbortSignal,
   ): Promise<PressButtonResult | undefined> {
     if (frameContext === undefined) {
       return undefined;
@@ -256,7 +294,7 @@ export class PressButton extends BaseVisualChange {
     }
 
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const validation = await client.validateFrameContext(frameContext, validationBudget);
+    const validation = await client.validateFrameContext(frameContext, validationBudget, signal);
     if (validation.success) {
       return undefined;
     }

@@ -690,9 +690,10 @@ const runWaitForConditionDsl = async (
       awaitDuration: settle.waitMs,
       awaitTimeout: !settle.settled,
       settled: settle.settled,
-      // A screen-off capture fast-fails the settle primitive; it did not use
-      // the timeout budget, so distinguish it from a genuine timeout.
-      timedOut: !settle.settled && settle.observation.wakefulness !== "Asleep",
+      // The terminal reason preserves whether an Asleep observation was an
+      // admissible screen-off fast-fail or merely the last stale frame at the
+      // end of an exhausted timeout budget.
+      timedOut: settle.terminalReason === "timeout",
       polls: settle.polls,
       waitMs: settle.waitMs,
     };

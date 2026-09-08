@@ -62,6 +62,7 @@ export const registerDeviceLabelMap = async (
   primaryLabel?: string,
   sessionOptions: SessionOptions = {},
   execution?: SessionExecutionMetadata,
+  signal?: AbortSignal,
 ): Promise<DeviceLabelMap> => {
   if (!DaemonState.getInstance().isInitialized()) {
     throw new ActionableError("Device labels require an active daemon session.");
@@ -85,6 +86,9 @@ export const registerDeviceLabelMap = async (
     devicePool,
     sessionOptions,
     execution,
+    undefined,
+    false,
+    signal,
   );
 
   const assignedSessions = new Set(Object.values(deviceLabelMap));
@@ -97,6 +101,9 @@ export const registerDeviceLabelMap = async (
       devicePool,
       sessionOptions,
       execution,
+      undefined,
+      false,
+      signal,
     );
   }
 

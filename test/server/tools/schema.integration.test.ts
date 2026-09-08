@@ -227,6 +227,7 @@ describe("MCP Tools Schema", () => {
   test.each([
     "tapOn",
     "inputText",
+    "sendKeys",
     "launchApp",
     "tapAny",
     "dragAndDrop",

@@ -28,6 +28,7 @@ final class ErrorResponseTypeTests: XCTestCase {
             .requestImeAction: .imeActionResult,
             .requestSelectAll: .selectAllResult,
             .requestKeyboard: .keyboardResult,
+            .requestPressKey: .pressKeyResult,
             .requestPressButton: .pressButtonResult,
             .requestPressHome: .pressHomeResult,
             .requestPressBack: .pressBackResult,

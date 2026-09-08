@@ -1,5 +1,6 @@
 import type { ActiveWindowInfo } from "../../../models/ActiveWindowInfo";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { GetActiveOptions } from "../Window";
 
 /**
  * Interface for retrieving active window information.
@@ -10,9 +11,15 @@ export interface Window {
    * Uses cache unless forceRefresh is true.
    * @param forceRefresh - Force refresh the cache (default: false)
    * @param perf - Optional performance tracker
+   * @param options - Optional per-read deadline + cancellation signal threaded
+   *   into every underlying device command.
    * @returns Promise with active window information (appId, activityName, layoutSeqSum)
    */
-  getActive(forceRefresh?: boolean, perf?: PerformanceTracker): Promise<ActiveWindowInfo>;
+  getActive(
+    forceRefresh?: boolean,
+    perf?: PerformanceTracker,
+    options?: GetActiveOptions,
+  ): Promise<ActiveWindowInfo>;
 
   /**
    * Get a hash of the current activity name.

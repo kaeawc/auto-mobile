@@ -17,6 +17,7 @@ import {
   type BiometricEnrollment,
   type NetworkConditionProfile,
 } from "../features/utility/DeviceState";
+import { deviceReadinessRank, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -98,6 +99,16 @@ export interface SessionCacheData {
   biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
   networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
+  /**
+   * Highest {@link DeviceReadinessLevel} actually achieved by
+   * `ToolExecutionContext`'s setup for this session (#6227). Lets a later call
+   * on the same (possibly persisted/recovered) session detect that it needs a
+   * higher readiness than a prior call achieved — e.g. a `booted`-only tool
+   * ran first and left CtrlProxy/accessibility-service setup unprepared, then
+   * an `automationReady` tool reuses the session — and upgrade in place
+   * instead of silently skipping setup on the `existingSession` fast path.
+   */
+  deviceReadiness?: DeviceReadinessLevel;
 }
 
 /**
@@ -2467,6 +2478,46 @@ export class SessionManager {
    */
   getKeepScreenAwake(sessionId: string): KeepScreenAwakeState | undefined {
     return this.getSession(sessionId)?.cacheData.keepScreenAwake;
+  }
+
+  /**
+   * Record the highest {@link DeviceReadinessLevel} actually achieved for a
+   * session (#6227). Mirrors `setKeepScreenAwake`'s typed-slot pattern so a
+   * later call reusing the same session UUID can detect an upgrade is needed
+   * (e.g. a prior `booted`-only call left CtrlProxy setup unprepared) rather
+   * than trusting `existingSession` alone.
+   *
+   * MONOTONIC by achieved level (#6227 round 7): only ever RAISES the
+   * recorded level, never lowers it. `bindOrReuseDeviceSession` can hand back
+   * a live session already bound to the exact requested device — a session
+   * that previously reached `automationReady` through one acquisition path.
+   * A later, less-demanding acquisition on that same session (e.g.
+   * `provisionDevice({ readiness: "none" })`, or the `booted`-only branch of
+   * `ensureReadinessUpgraded`) would otherwise overwrite that recorded level
+   * with `"booted"`, silently downgrading it — a later `automationReady` tool
+   * would then trust the stale `booted` record and skip CtrlProxy/
+   * accessibility-service setup the device still needs, or an unnecessary
+   * redundant setup would run. Comparing against the currently recorded level
+   * and only writing when the new one is higher (or none has been recorded
+   * yet) closes that hole. There is currently no caller that needs to lower
+   * or clear a recorded level — a genuine reset/teardown should add a
+   * distinct, explicitly-named method rather than repurposing this recorder.
+   */
+  setDeviceReadiness(sessionId: string, level: DeviceReadinessLevel): void {
+    const current = this.getDeviceReadiness(sessionId);
+    if (current !== undefined && deviceReadinessRank(current) >= deviceReadinessRank(level)) {
+      return;
+    }
+    this.updateSessionCache(sessionId, { deviceReadiness: level });
+  }
+
+  /**
+   * Read the achieved readiness level without recording session activity
+   * (mirrors `getKeepScreenAwake`). Returns `undefined` for an unknown/expired
+   * session or before any setup has recorded a level.
+   */
+  getDeviceReadiness(sessionId: string): DeviceReadinessLevel | undefined {
+    return this.getSession(sessionId)?.cacheData.deviceReadiness;
   }
 
   /**

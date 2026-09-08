@@ -59,6 +59,31 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     resetObserveCacheStore();
   });
 
+  test("does not reuse cache for an overlay recapture without a device timestamp", async () => {
+    const viewHierarchy = new FakeViewHierarchy();
+    const screen = makeScreen(viewHierarchy, new FakeAdbExecutor());
+    const result = { viewHierarchy: { hierarchy: { node: {} } } } as any;
+
+    const recaptured = await (screen as any).recaptureHierarchyForSystemUiOverlay(result);
+
+    expect(recaptured).toBe(false);
+    expect(viewHierarchy.getCallCount()).toBe(0);
+  });
+
+  test("does not reuse cache for a back-stack recapture without a device timestamp", async () => {
+    const viewHierarchy = new FakeViewHierarchy();
+    const screen = makeScreen(viewHierarchy, new FakeAdbExecutor());
+    const result = { viewHierarchy: { hierarchy: { node: {} } } } as any;
+
+    const recaptured = await (screen as any).recaptureHierarchyForBackStackAttribution(result, {
+      packageName: "com.example.app",
+      activityName: "com.example.app.MainActivity",
+    });
+
+    expect(recaptured).toBe(false);
+    expect(viewHierarchy.getCallCount()).toBe(0);
+  });
+
   test("falls back when accessibility foreground metadata is a View class", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

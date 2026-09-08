@@ -7,6 +7,8 @@ import {
 } from "../../../src/features/observe/androidLauncherPackages";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 const RESOLVE_HOME_PATTERN = "resolve-activity";
 
@@ -29,6 +31,70 @@ describe("androidLauncherPackages", () => {
       const result = await resolveConfiguredHomePackage(fakeAdb, "device-1");
 
       expect(result).toBe("com.example.launcher");
+    });
+
+    test("bounds the resolve command to the caller's remaining budget when smaller (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+
+      // A shrinking home-verification deadline (e.g. 250ms left) must cap the
+      // launcher resolve so it cannot spend the full RESOLVE_HOME_TIMEOUT_MS.
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, 250);
+
+      const resolveCall = fakeAdb
+        .getCommandCalls()
+        .find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      expect(resolveCall?.timeoutMs).toBe(250);
+    });
+
+    test("clamps an exhausted remaining budget to a positive resolve timeout (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, -5);
+
+      const resolveCall = fakeAdb
+        .getCommandCalls()
+        .find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      expect(resolveCall?.timeoutMs).toBe(1);
+    });
+
+    test("rejects a cancelled resolve even when the HOME cache is warm (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      // Warm the cache with a successful resolution.
+      expect(await resolveConfiguredHomePackage(fakeAdb, "device-1")).toBe("com.example.launcher");
+
+      // A cancellation landing before the (warm) cache lookup must reject, not
+      // return the cached launcher -- otherwise a cancelled home press verifies
+      // as success off the hot cache.
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, controller.signal),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    });
+
+    test("rejects a cancelled resolve off the AMBIENT signal with a warm cache (#6289)", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      expect(await resolveConfiguredHomePackage(fakeAdb, "device-1")).toBe("com.example.launcher");
+
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          resolveConfiguredHomePackage(fakeAdb, "device-1"),
+        ),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     });
 
     test("returns null when the device cannot resolve a HOME launcher", async () => {
@@ -338,6 +404,71 @@ describe("androidLauncherPackages", () => {
     test("returns false for a falsy appId without resolving", async () => {
       expect(await isForegroundLauncher(null, fakeAdb, "device-1")).toBe(false);
       expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    });
+  });
+
+  describe("deadline-bounding + cancellation (#6289)", () => {
+    test("resolve-activity is deadline-bounded and receives the signal", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      const controller = new AbortController();
+
+      await resolveConfiguredHomePackage(
+        fakeAdb,
+        "device-1",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      const call = fakeAdb.getCommandCalls().find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      // Bounded (RESOLVE_HOME_TIMEOUT_MS) and cancellable.
+      expect(call?.timeoutMs).toBe(5000);
+      expect(call?.noRetry).toBe(true);
+      expect(call?.signal).toBeDefined();
+    });
+
+    test("propagates an abort instead of swallowing it into a null downgrade", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      fakeAdb.setThrowOnAbortedSignal();
+      const controller = new AbortController();
+      controller.abort();
+
+      // A cancelled resolve must REJECT (propagate) rather than return null and
+      // downgrade the caller to the fallback launcher list.
+      await expect(
+        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, controller.signal),
+      ).rejects.toThrow();
+
+      // The abort must not have poisoned the cache: a later resolve with a live
+      // signal still returns the real configured launcher.
+      const later = await resolveConfiguredHomePackage(fakeAdb, "device-1");
+      expect(later).toBe("com.example.launcher");
+    });
+
+    test("isForegroundLauncher forwards the signal into the resolve read", async () => {
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.example.launcher/.LauncherActivity",
+        stderr: "",
+      });
+      const controller = new AbortController();
+
+      await isForegroundLauncher(
+        "com.example.launcher",
+        fakeAdb,
+        "device-1",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      const call = fakeAdb.getCommandCalls().find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
+      expect(call?.signal).toBeDefined();
     });
   });
 });

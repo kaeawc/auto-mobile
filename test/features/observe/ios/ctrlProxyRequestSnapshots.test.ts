@@ -216,6 +216,11 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     invoke: (h) => new CtrlProxyKeyboard(h.context).requestKeyboard("open"),
   },
   {
+    name: "request_press_key",
+    builder: "CtrlProxyKeyboard.requestPressKey",
+    invoke: (h) => new CtrlProxyKeyboard(h.context).requestPressKey("tab", ["shift"]),
+  },
+  {
     name: "request_press_button",
     builder: "CtrlProxyNavigation.requestPressButton",
     invoke: (h) =>

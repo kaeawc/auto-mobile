@@ -63,6 +63,19 @@ export function apiLevelToVersion(apiLevel: number): string | undefined {
   return API_LEVEL_TO_VERSION[apiLevel];
 }
 
+/**
+ * The canonical Android release table ({@link API_LEVEL_TO_VERSION}) as a list
+ * ordered ascending by API level. This is the single source of truth for the
+ * relative ordering of shipped release versions; the device matcher's
+ * `compareVersions` is cross-checked against it so the two modules can never
+ * disagree on, say, whether "12L" sorts above "12" and below "13" (#6326).
+ */
+export function canonicalReleaseVersionsByApiLevel(): { apiLevel: number; version: string }[] {
+  return Object.entries(API_LEVEL_TO_VERSION)
+    .map(([apiLevel, version]) => ({ apiLevel: Number(apiLevel), version }))
+    .sort((a, b) => a.apiLevel - b.apiLevel);
+}
+
 interface ParsedReleaseVersion {
   major: number;
   minor?: number;

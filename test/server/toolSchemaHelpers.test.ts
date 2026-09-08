@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import {
   addDeviceTargetingToSchema,
   appIdFieldAliases,
+  canonicalizeDiscriminatedUnionJsonSchema,
   platformSchema,
   withFieldAliases,
 } from "../../src/server/toolSchemaHelpers";
@@ -126,6 +127,58 @@ describe("addDeviceTargetingToSchema", () => {
     if (withExplicit.success) {
       expect(withExplicit.data.platform).toBe("ios");
     }
+  });
+});
+
+describe("canonicalizeDiscriminatedUnionJsonSchema", () => {
+  test("recursively converts object unions with unique literal discriminators", () => {
+    const schema = {
+      properties: {
+        commands: {
+          items: {
+            anyOf: [
+              { properties: { action: { const: "type" } }, required: ["action"] },
+              { properties: { action: { const: "key" } }, required: ["action"] },
+            ],
+          },
+        },
+      },
+    };
+
+    canonicalizeDiscriminatedUnionJsonSchema(schema);
+
+    expect(schema.properties.commands.items).toEqual({
+      oneOf: [
+        { properties: { action: { const: "type" } }, required: ["action"] },
+        { properties: { action: { const: "key" } }, required: ["action"] },
+      ],
+    });
+  });
+
+  test("preserves unions with optional literal properties", () => {
+    const schema = {
+      anyOf: [
+        { properties: { action: { const: "type" } } },
+        { properties: { action: { const: "key" } } },
+      ],
+    };
+
+    canonicalizeDiscriminatedUnionJsonSchema(schema);
+
+    expect(schema).toEqual({
+      anyOf: [
+        { properties: { action: { const: "type" } } },
+        { properties: { action: { const: "key" } } },
+      ],
+    });
+  });
+
+  test("preserves non-discriminated anyOf unions", () => {
+    const schema = { anyOf: [{ type: "string" }, { type: "null" }] };
+
+    canonicalizeDiscriminatedUnionJsonSchema(schema);
+
+    expect(schema).toEqual({ anyOf: [{ type: "string" }, { type: "null" }] });
   });
 });
 

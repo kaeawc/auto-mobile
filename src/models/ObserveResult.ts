@@ -245,6 +245,8 @@ export interface ObserveResult {
    * - "Dozing": Device is in ambient display / always-on mode
    */
   wakefulness?: "Awake" | "Asleep" | "Dozing";
+  /** Provenance used internally to distinguish a live device-state read from cached hierarchy metadata. */
+  wakefulnessSource?: "hierarchy" | "adb";
 
   /**
    * Structured device-lock signal (Android only). Present when the lock state
@@ -375,6 +377,20 @@ export interface ObserveResult {
     staleDurationMs?: number;
     /** Optional warning when freshness could not be guaranteed */
     warning?: string;
+    /**
+     * Stable discriminant for WHY freshness failed (present only when `isFresh`
+     * is false): "cache_age" (stale/unverified/over-budget — a re-capture
+     * resolves it), "window_identity" (wrong-window / status-bar-only /
+     * activity-attribution / incomplete-capture / missing foreground window),
+     * "requested_min", "no_timestamp", or "unavailable".
+     */
+    category?:
+      | "cache_age"
+      | "window_identity"
+      | "requested_min"
+      | "no_timestamp"
+      | "unavailable"
+      | "effect_inconsistent";
   };
 
   /**

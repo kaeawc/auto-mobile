@@ -50,6 +50,65 @@ async function callAndResolve<T>(
 }
 
 describe("SharedGestureDelegate", () => {
+  describe("requestTapCoordinates abort signal (issue #6306 review)", () => {
+    // A caller's outer deadline can expire WHILE `ensureConnected()` is
+    // resolving a slow reconnect/auto-setup -- `ensureConnected()` itself is
+    // not cancellable, but `sendCommand` checks the signal right after that
+    // await resolves and before the tap is ever dispatched to the device
+    // (`abortSignal` wiring added by `requestTapCoordinates` in this pass).
+    // A tap dispatched after the caller already gave up would be a phantom
+    // action the caller cannot observe or react to.
+    it("never dispatches the tap when the signal is already aborted once ensureConnected resolves", async () => {
+      let resolveConnected!: (value: boolean) => void;
+      const connected = new Promise<boolean>((resolve) => {
+        resolveConnected = resolve;
+      });
+      const { context, sent } = createFakeContext({
+        ensureConnected: async () => connected,
+      });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: true,
+      });
+      const controller = new AbortController();
+
+      const resultPromise = delegate.requestTapCoordinates(
+        10,
+        20,
+        50,
+        5000,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      // Simulate the caller's deadline firing WHILE the slow reconnect is
+      // still in flight, then let the (now-stale) reconnect finish.
+      controller.abort(new Error("outer deadline exceeded"));
+      resolveConnected(true);
+
+      const result = await resultPromise;
+
+      expect(result.success).toBe(false);
+      expect(sent).toHaveLength(0);
+    });
+
+    it("dispatches normally when the signal is never aborted", async () => {
+      const { context, sent } = createFakeContext();
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: true,
+      });
+      const controller = new AbortController();
+
+      const { result } = await callAndResolve(sent, context.requestManager, () =>
+        delegate.requestTapCoordinates(10, 20, 50, 5000, undefined, undefined, controller.signal),
+      );
+
+      expect(result.success).toBe(true);
+      expect(sent).toHaveLength(1);
+    });
+  });
+
   describe("coordinate rounding", () => {
     it("rounds coordinates when configured", async () => {
       const { context, sent } = createFakeContext();

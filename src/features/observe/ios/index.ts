@@ -42,6 +42,7 @@ export type {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyKeyboardResult,
+  CtrlProxyPressKeyResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,

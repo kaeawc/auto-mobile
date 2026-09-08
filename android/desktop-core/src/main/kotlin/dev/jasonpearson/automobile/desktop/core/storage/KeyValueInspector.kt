@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import dev.jasonpearson.automobile.desktop.core.datasource.StorageMutationResult
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.launch
 
@@ -68,7 +69,9 @@ private data class EditingEntryIdentity(
 fun KeyValueInspector(
   keyValueFiles: List<KeyValueFile>,
   onSetValue:
-    (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<Unit>)? =
+    (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<
+        StorageMutationResult
+      >)? =
     null,
   recentlyChangedKeys: Set<String> = emptySet(),
   modifier: Modifier = Modifier,
@@ -90,6 +93,7 @@ fun KeyValueInspector(
   var editValue by remember { mutableStateOf("") }
   var isSaving by remember { mutableStateOf(false) }
   var saveError by remember { mutableStateOf<String?>(null) }
+  var saveWarning by remember { mutableStateOf<String?>(null) }
 
   // Filter entries by search query
   val filteredEntries =
@@ -308,6 +312,7 @@ fun KeyValueInspector(
                   .clickable {
                     selectedEntry = entry
                     editingEntry = null
+                    saveWarning = null
                   }
                   .pointerHoverIcon(PointerIcon.Hand)
                   .background(backgroundColor)
@@ -365,6 +370,7 @@ fun KeyValueInspector(
                                   scope.launch {
                                     isSaving = true
                                     saveError = null
+                                    saveWarning = null
                                     val result =
                                       onSetValue(
                                         file.name,
@@ -373,9 +379,15 @@ fun KeyValueInspector(
                                         entryToSave.type,
                                       )
                                     isSaving = false
+                                    // The user can cancel A or start editing B while A's
+                                    // asynchronous save is in flight. Its outcome belongs
+                                    // only to the editor that submitted it; otherwise A's
+                                    // fallback warning/error appears under B.
+                                    if (editingEntry != entryToSave) return@launch
                                     when (result) {
                                       is Result.Success -> {
-                                        editingEntry = null
+                                        saveWarning = result.data.warning
+                                        if (result.data.warning == null) editingEntry = null
                                       }
                                       is Result.Error -> {
                                         saveError = result.message
@@ -396,15 +408,24 @@ fun KeyValueInspector(
                           Modifier.clickable {
                               editingEntry = null
                               saveError = null
+                              saveWarning = null
                             }
                             .pointerHoverIcon(PointerIcon.Hand),
                       )
                     }
-                    if (saveError != null) {
+                    saveError?.let { error ->
                       Text(
-                        saveError!!,
+                        error,
                         fontSize = 9.sp,
                         color = Color(0xFFE57373),
+                        modifier = Modifier.padding(top = 2.dp),
+                      )
+                    }
+                    saveWarning?.let { warning ->
+                      Text(
+                        warning,
+                        fontSize = 9.sp,
+                        color = Color(0xFFFFB74D),
                         modifier = Modifier.padding(top = 2.dp),
                       )
                     }
@@ -430,6 +451,7 @@ fun KeyValueInspector(
                         modifier =
                           Modifier.clickable {
                               val filePath = selectedFile?.path ?: return@clickable
+                              saveWarning = null
                               editingEntry =
                                 EditingEntryIdentity(
                                   filePath = filePath,

@@ -6,6 +6,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 
 /**
  * Navigates to the home screen using the accessibility service global action
@@ -15,6 +16,14 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
  * result.
  */
 export class HomeScreen extends BaseVisualChange {
+  /**
+   * Deadline for the ADB `KEYCODE_HOME` fallback keyevent. Without a bound a
+   * wedged adb could hang the whole home navigation well past the enclosing
+   * observedInteraction budget; the fallback is also cancellable via the ambient
+   * request signal (issue #6289).
+   */
+  private static readonly HOME_KEYEVENT_TIMEOUT_MS = 3000;
+
   constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
     this.device = device;
@@ -52,6 +61,12 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async executeAndroidHome(): Promise<void> {
+    // Combine (never replace) with the ambient MCP request signal so a cancelled
+    // request aborts the ADB keyevent fallback and the verification reads. Passing
+    // only a private signal would drop the ambient one AdbClient would otherwise
+    // pick up (issue #6289).
+    const signal = combineWithAmbientAbort(undefined);
+
     let globalActionSucceeded = false;
     try {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
@@ -65,7 +80,7 @@ export class HomeScreen extends BaseVisualChange {
     }
 
     if (globalActionSucceeded) {
-      if (await this.verifyAndroidHomeForeground()) {
+      if (await this.verifyAndroidHomeForeground({ signal })) {
         logger.debug("[HOME] Used accessibility service global action");
         return;
       }
@@ -77,9 +92,15 @@ export class HomeScreen extends BaseVisualChange {
       );
     }
 
-    await this.adb.executeCommand("shell input keyevent 3");
+    await this.adb.executeCommand(
+      "shell input keyevent 3",
+      HomeScreen.HOME_KEYEVENT_TIMEOUT_MS,
+      undefined,
+      true,
+      signal,
+    );
 
-    if (!(await this.verifyAndroidHomeForeground())) {
+    if (!(await this.verifyAndroidHomeForeground({ signal }))) {
       throw new ActionableError(
         "Home press did not background the foreground app: neither the accessibility global action nor the ADB KEYCODE_HOME keyevent produced a launcher foreground window",
       );

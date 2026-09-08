@@ -19,6 +19,7 @@ import {
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
+import { computeSafeBarrierResumeStep } from "./BarrierResumeGuard";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
@@ -814,6 +815,23 @@ export class DefaultPlanExecutor implements PlanExecutor {
     executionOptions?: PlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
     const debugMode = isDebugModeEnabled();
+
+    // AI recovery resumes a failed plan at its failed global step index, and each
+    // device track skips lower-indexed steps independently. If that resume index
+    // falls in the middle of a barrier/criticalSection generation, some devices'
+    // arrivals would be skipped while their partners' re-run, splitting the
+    // generation so it never reaches deviceCount and the survivors deadlock at
+    // waitAtBarrier (issue #6234). Rewind the resume point to the start of any
+    // generation it would split so every participant re-arrives together; a
+    // resume point that splits nothing is returned unchanged.
+    const effectiveStartStep = computeSafeBarrierResumeStep(plan, startStep);
+    if (effectiveStartStep !== startStep) {
+      logger.info(
+        `[PARALLEL_EXEC] Rewinding resume step ${startStep} -> ${effectiveStartStep} to avoid ` +
+          "resuming inside a barrier generation (issue #6234)",
+      );
+    }
+    startStep = effectiveStartStep;
 
     logger.info(
       `[PARALLEL_EXEC] Starting parallel execution for ${partitionedPlan.devices.length} devices`,

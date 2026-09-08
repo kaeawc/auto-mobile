@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createExitTracker,
   getFileSize,
+  ProcessTeardownUnconfirmedError,
   waitForExit,
   waitForSpawn,
   type TrackedChildProcess,
@@ -158,6 +159,57 @@ describe("ChildProcessTracker", () => {
       // ...so advancing past the timeout fires no stray SIGKILL.
       timer.advanceTime(5000);
       expect(process.signals).toEqual(["SIGINT", "SIGKILL"]);
+    });
+
+    // Regression (#6307 P1): a generic rejection of exitPromise (the child
+    // 'error' event) used to escalate to SIGKILL and then rethrow the raw
+    // process error unchanged. Because createExitTracker's onError handler
+    // tears down the exit listener as soon as 'error' fires, that SIGKILL is
+    // never actually confirmed to have reaped the process — so a caller
+    // deciding process/resource ownership (e.g. VideoRecorderService)
+    // must see a ProcessTeardownUnconfirmedError here too, the same as the
+    // SIGKILL-timeout case, or it will drop ownership of a capture that may
+    // still be running.
+    test("wraps a generic exitPromise rejection as unconfirmed teardown, not a bare rethrow", async () => {
+      const timer = new FakeTimer();
+      const process = new FakeStoppableProcess();
+      const waitPromise = waitForExit(process, createExitOrErrorPromise(process), {
+        timeoutMs: 5000,
+        timer,
+      });
+
+      const originalError = new Error("spawn failed");
+      process.emit("error", originalError);
+
+      await expect(waitPromise).rejects.toBeInstanceOf(ProcessTeardownUnconfirmedError);
+      await expect(waitPromise).rejects.toThrow("spawn failed");
+      expect(process.signals).toEqual(["SIGINT", "SIGKILL"]);
+
+      try {
+        await waitPromise;
+        throw new Error("expected waitPromise to reject");
+      } catch (error) {
+        expect((error as { cause?: unknown }).cause).toBe(originalError);
+      }
+    });
+
+    // The mirror case: if the process had already been reaped (exitCode set)
+    // before the 'error' event arrived, teardown genuinely is confirmed, so
+    // the raw error should pass through unwrapped rather than being
+    // misclassified as unconfirmed.
+    test("rethrows the raw error unwrapped when the process had already exited", async () => {
+      const timer = new FakeTimer();
+      const process = new FakeStoppableProcess();
+      const waitPromise = waitForExit(process, createExitOrErrorPromise(process), {
+        timeoutMs: 5000,
+        timer,
+      });
+
+      process.exitCode = 0;
+      const originalError = new Error("stderr stream error after exit");
+      process.emit("error", originalError);
+
+      await expect(waitPromise).rejects.toBe(originalError);
     });
   });
 

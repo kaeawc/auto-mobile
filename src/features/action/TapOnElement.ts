@@ -47,6 +47,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
+import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
 import {
@@ -66,7 +67,11 @@ import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
-import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
+import type {
+  WaitForCondition,
+  WaitForConditionResult,
+} from "../observe/interfaces/WaitForCondition";
+import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
@@ -109,6 +114,16 @@ const POST_TAP_SETTLE_MS = 300;
 const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
 const POST_TAP_EFFECT_TIMEOUT_MS = 2500;
 const POST_TAP_EFFECT_POLL_MS = 150;
+
+/**
+ * Minimum wall-clock time a hierarchy-only post-tap frame must hold UNCHANGED
+ * before it is accepted as the settled destination (issue #6284 P1). Activity
+ * transitions commonly take 1–2 seconds, so a transient hierarchy must stay
+ * quiet for a full second before it is terminal evidence. This prevents a
+ * routine delayed destination from being pre-empted by an intermediate frame
+ * that merely survives the first few 150ms polls.
+ */
+const POST_TAP_SETTLE_QUIET_PERIOD_MS = 1000;
 
 /** Brief debounce between the original tap and the retry tap when a ghost tap
  *  was detected. Just enough to let any inflight gesture queue drain. */
@@ -589,17 +604,46 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
-    if (
-      this.device.platform !== "android" ||
-      !previousObservation ||
-      immediateEffect?.screenChanged === true
-    ) {
+    if (this.device.platform !== "android" || !previousObservation) {
       return { effect: immediateEffect, observation: currentObservation };
     }
 
-    // A stable source tree can arrive before Android begins the activity
-    // transition. Wait for an actual post-tap difference instead of treating
-    // that transient stability as proof that the tap had no effect.
+    if (immediateEffect?.screenChanged !== true) {
+      // A stable source tree can arrive before Android begins the activity
+      // transition. Wait for an actual post-tap difference instead of treating
+      // that transient stability as proof that the tap had no effect.
+      return this.waitForPostTapChange(previousObservation, currentObservation, signal);
+    }
+
+    if (immediateEffect.basis !== "viewHierarchy changed") {
+      // A `screenIdentity`/`activeWindow` change is authoritative on its own —
+      // it names a real destination window, so trust it immediately.
+      return { effect: immediateEffect, observation: currentObservation };
+    }
+
+    // Issue #6284: a hierarchy-ONLY change (activeWindow unchanged) is not, by
+    // itself, proof of the DESTINATION screen. The first post-tap observation
+    // uses `changeExpected: false`, so a transient intermediate mutation (a
+    // focused/selected/checked flip, or a partial hierarchy update before a
+    // delayed dialog/navigation) can look identical to a real change on the
+    // very first frame. Settle it across a real stability interval before
+    // trusting it as terminal, so a transient A isn't returned in place of the
+    // actual destination B (`baseline → A → A → B` must reach B).
+    return this.settleHierarchyOnlyChange(previousObservation, currentObservation, signal);
+  }
+
+  /**
+   * The first post-tap observation showed no change against the baseline yet.
+   * Poll (via the injected waiter/FakeTimer seam) for an actual post-tap
+   * difference, then route a hierarchy-only result through the same settle step
+   * a first-frame hierarchy change takes (issue #6284) rather than trusting the
+   * first differing poll as terminal.
+   */
+  private async waitForPostTapChange(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const effectObservation = await this.waitForCondition.execute(
       (observation) => ({
         matched: this.deriveTapEffect(previousObservation, observation)?.screenChanged === true,
@@ -608,11 +652,23 @@ export class TapOnElement extends BaseVisualChange {
         timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
         pollMs: POST_TAP_EFFECT_POLL_MS,
         signal,
+        // One clock domain end-to-end (issue #6284): seed the poll floor from
+        // the device-authored `updatedAt` of the capture we already hold, not
+        // the host clock, so a device whose clock trails the daemon still
+        // clears the floor with a genuinely fresh repeat capture.
+        initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
       },
     );
     const effect = this.deriveTapEffect(previousObservation, effectObservation.observation);
     if (!effectObservation.matched && effect?.screenChanged !== true) {
       return { effect, observation: currentObservation };
+    }
+    if (effect?.basis === "viewHierarchy changed") {
+      return this.settleHierarchyOnlyChange(
+        previousObservation,
+        effectObservation.observation,
+        signal,
+      );
     }
     return {
       effect,
@@ -622,6 +678,131 @@ export class TapOnElement extends BaseVisualChange {
         perfTiming: effectObservation.observation.perfTiming ?? currentObservation.perfTiming,
       },
     };
+  }
+
+  /**
+   * Confirm a hierarchy-only tap effect is the settled DESTINATION rather than a
+   * transient intermediate mutation before trusting it as terminal (issue
+   * #6284). Polls (via the injected waiter/FakeTimer seam) until either:
+   *  - `activeWindow` changes vs the baseline — authoritative, stop at once; or
+   *  - the hierarchy hash holds UNCHANGED for a real quiet period of wall-clock
+   *    time (`POST_TAP_SETTLE_QUIET_PERIOD_MS`) — the transition has settled.
+   *
+   * Settlement is a wall-clock quiet-period DEADLINE, not a count of equal
+   * comparisons, and that is what makes `baseline → A → A → B` reach B. A
+   * comparison count treats the very first poll — taken immediately, with no
+   * `pollMs` sleep yet elapsed — as if it proved stability, so a transient A
+   * that persists just one interval before a delayed B would settle on A. The
+   * deadline instead starts a clock when a hash first appears and accepts it
+   * only once it has genuinely held for the quiet period; a B that arrives after
+   * that interval resets the clock and is reached. A hierarchy-less (null-hash)
+   * poll cannot start or extend a quiet period — it resets the run — so a run of
+   * rootless captures never masquerades as a stable screen.
+   *
+   * Staleness robustness lives in the poll floor, NOT in this predicate and NOT
+   * in `compareViewHierarchy`: the entering reference (seeded here from the
+   * entering capture's `updatedAt`) forces every poll strictly past that
+   * capture, so an unchanged hash across the quiet period is a genuinely-held
+   * fresh screen — never a stale snapshot re-served masking a later fresh
+   * destination. That keeps `compareViewHierarchy` a pure hash diff, so a stale
+   * baseline can never block a legitimate same-window dialog diff (the
+   * entanglement root of the earlier incremental attempt).
+   */
+  private async settleHierarchyOnlyChange(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
+    // Hash whose quiet period is currently being timed, and when that run began.
+    let quietHash: string | null = null;
+    let quietSinceMs = 0;
+    const settled = await this.waitForCondition.execute(
+      (observation) => {
+        const activeWindowChanged =
+          this.compareActiveWindow(previousObservation, observation)?.screenChanged === true;
+        if (activeWindowChanged) {
+          return { matched: true };
+        }
+        const currentHash = this.hashViewHierarchy(observation.viewHierarchy ?? null);
+        const now = this.timer.now();
+        if (currentHash === null) {
+          // A hierarchy-less poll proves nothing about stability; reset the run.
+          quietHash = null;
+          return { matched: false };
+        }
+        if (currentHash !== quietHash) {
+          // A new (or first) hash: start its quiet-period clock now. Never
+          // settles on this frame — a real interval must elapse first.
+          quietHash = currentHash;
+          quietSinceMs = now;
+          return { matched: false };
+        }
+        // Same hash as the run's start: accept only once it has genuinely held
+        // for the full quiet period of wall-clock time.
+        return { matched: now - quietSinceMs >= POST_TAP_SETTLE_QUIET_PERIOD_MS };
+      },
+      {
+        timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
+        pollMs: POST_TAP_EFFECT_POLL_MS,
+        signal,
+        // Device-clock-domain floor seed (issue #6284). See method doc.
+        initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
+      },
+    );
+
+    const effectObservation = this.resolveSettleTimeoutObservation(
+      previousObservation,
+      currentObservation,
+      settled,
+    );
+
+    // Issue #6284: preserve the already-established `screenChanged: true` when
+    // the settle poll's final observation is a DEFINITIVE screen-off terminal
+    // (the device went to sleep mid-settle). That capture legitimately carries
+    // no viewHierarchy, so re-deriving from scratch would find only an unchanged
+    // `activeWindow` and flip the effect back to `screenChanged: false`,
+    // erasing the transition that already entered this settle.
+    const isDefinitiveScreenOffTerminal = settled.screenOff === true;
+    const effect: TapOnElementResult["effect"] = isDefinitiveScreenOffTerminal
+      ? { screenChanged: true, basis: "viewHierarchy changed" }
+      : this.deriveTapEffect(previousObservation, effectObservation);
+    return {
+      effect,
+      observation: {
+        ...effectObservation,
+        gfxMetrics: effectObservation.gfxMetrics ?? currentObservation.gfxMetrics,
+        perfTiming: effectObservation.perfTiming ?? currentObservation.perfTiming,
+      },
+    };
+  }
+
+  /**
+   * Which observation `settleHierarchyOnlyChange` should trust when its poll
+   * timed out. A clean stop (or a screen-off terminal) always yields the poll's
+   * final observation. On timeout, prefer the trusted entering change over a
+   * final poll that is untrustworthy (explicitly stale, or carrying no
+   * hierarchy) so a temporarily-unresponsive proxy doesn't erase a real,
+   * already-observed change; otherwise the final poll is the freshest evidence.
+   */
+  private resolveSettleTimeoutObservation(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+    settled: WaitForConditionResult,
+  ): ObserveResult {
+    const effectObservation = settled.observation;
+    const finalPollIsDefinitiveScreenOff = settled.screenOff === true;
+    if (!settled.timedOut || finalPollIsDefinitiveScreenOff) {
+      return effectObservation;
+    }
+    const currentObservationIsTrustedChange =
+      currentObservation.freshness?.isFresh !== false &&
+      this.deriveTapEffect(previousObservation, currentObservation)?.screenChanged === true;
+    const finalPollIsUntrustworthy =
+      effectObservation.freshness?.isFresh === false ||
+      this.hashViewHierarchy(effectObservation.viewHierarchy ?? null) === null;
+    return currentObservationIsTrustedChange && finalPollIsUntrustworthy
+      ? currentObservation
+      : effectObservation;
   }
 
   /**
@@ -646,6 +827,16 @@ export class TapOnElement extends BaseVisualChange {
     if (!previousObservation || !result.observation || result.effect?.screenChanged !== true) {
       return;
     }
+    if (result.observation.wakefulness === "Asleep") {
+      // Issue #6284: a definitive screen-off terminal legitimately carries no
+      // viewHierarchy, so a re-derivation against it cannot reproduce the
+      // `screenChanged: true` (there is nothing to diff). This is NOT a stale
+      // pre-tap tree the client should re-observe past — it is the real
+      // post-tap state (the screen went off). Retracting freshness here would
+      // stamp the wrong warning ("predates the detected transition") over a
+      // faithful terminal capture, so leave it intact.
+      return;
+    }
     const reDerived = this.deriveTapEffect(previousObservation, result.observation);
     if (reDerived?.screenChanged === true) {
       // The observation being returned is itself consistent with the detected
@@ -657,6 +848,7 @@ export class TapOnElement extends BaseVisualChange {
       ...(existing ?? { isFresh: true }),
       verified: false,
       isFresh: false,
+      category: "effect_inconsistent",
       warning:
         "effect.screenChanged is true, but this observation's own capture still matches the " +
         "pre-action screen — it predates the detected transition. Call observe again for the " +
@@ -689,14 +881,87 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
-  private updateObservationHierarchy(
+  /**
+   * The ONLY sanctioned way to swap an observation's `viewHierarchy` for one
+   * captured later in `execute` (issue #6284). Folding "replace hierarchy" and
+   * "refresh freshness" into one helper means no call site can do the first
+   * without the second: replacing a cached observation's hierarchy with a
+   * freshly-captured one while leaving its OLD `freshness` (e.g. `isFresh:
+   * false` from the pre-tap cache) stamped on the new, just-verified tree would
+   * surface fresh data labelled stale in the response.
+   *
+   * Pass `refreshedFromDevice: true` only when `viewHierarchy` was just captured
+   * from the device on this call (a genuine live re-capture) — that is the case
+   * whose freshness must be realigned. A replacement with data already in hand
+   * (the caller's own hierarchy returned unchanged) leaves freshness untouched.
+   */
+  private replaceObservationHierarchy(
     observeResult: ObserveResult,
     viewHierarchy: ViewHierarchyResult,
+    refreshedFromDevice: boolean,
   ): void {
     observeResult.viewHierarchy = viewHierarchy;
+    // The replacement is device-authored; keep the enclosing observation in
+    // that same clock domain so later freshness floors never compare it with
+    // the host time from the cached observation it replaced.
+    const updatedAt = hierarchyUpdatedAtToMillis(viewHierarchy);
+    if (updatedAt !== undefined) {
+      observeResult.updatedAt = updatedAt;
+    }
     const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
     if (screenSize) {
       observeResult.screenSize = screenSize;
+    }
+    if (refreshedFromDevice) {
+      this.markObservationFreshAfterSyncRefresh(observeResult);
+    }
+  }
+
+  /**
+   * Realign a cached observation's freshness verdict to the live re-capture that
+   * just replaced its hierarchy (issue #6284). The refresh verified the tree
+   * against the device on THIS call, so a lingering pre-refresh `isFresh: false`
+   * verdict no longer describes the attached data.
+   *
+   * Promote ONLY a `cache_age` failure — a stale/unverified/over-budget cache
+   * entry, which is exactly what swapping in a freshly-captured hierarchy
+   * resolves. A `window_identity` failure (wrong-window, status-bar-only,
+   * activity-attribution mismatch, incomplete capture, missing foreground
+   * window — issue #6284 P1) describes WHICH window/app the tree belongs to; the
+   * refresh replaced only `viewHierarchy` and did not recollect or reconcile
+   * `activeWindow`/attribution, and the re-capture may itself be from the wrong
+   * window, so clearing that warning would make an internally-inconsistent
+   * result look trustworthy. A verdict that was already fresh (or absent), or
+   * failed for any other reason, is left untouched. Called exclusively from
+   * {@link replaceObservationHierarchy}.
+   */
+  private markObservationFreshAfterSyncRefresh(observeResult: ObserveResult): void {
+    const freshness = observeResult.freshness;
+    const hierarchy = observeResult.viewHierarchy;
+    const actualTimestamp = hierarchyUpdatedAtToMillis(hierarchy);
+    const hasCompleteLiveHierarchy =
+      hierarchy !== undefined &&
+      typeof hierarchy.hierarchy === "object" &&
+      hierarchy.hierarchy !== null &&
+      !("error" in hierarchy.hierarchy) &&
+      hierarchy.ctrlProxyIncomplete !== true &&
+      hierarchy.fresh !== false &&
+      actualTimestamp !== undefined;
+    if (
+      hasCompleteLiveHierarchy &&
+      freshness?.isFresh === false &&
+      freshness.category === "cache_age"
+    ) {
+      observeResult.freshness = {
+        ...freshness,
+        isFresh: true,
+        verified: true,
+        actualTimestamp,
+        ageMs: 0,
+        staleDurationMs: undefined,
+        warning: undefined,
+        category: undefined,
+      };
     }
   }
 
@@ -1092,6 +1357,15 @@ export class TapOnElement extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult;
     containerFound: boolean;
     stats: SearchUntilStats;
+    /**
+     * True when `viewHierarchy` is a genuine live device re-capture taken during
+     * this search (the caller's initial hierarchy did not already contain the
+     * target), distinct from the common case where the element was found in the
+     * hierarchy the caller already had with no device round-trip. Drives
+     * whether {@link replaceObservationHierarchy} also realigns freshness
+     * (issue #6284).
+     */
+    refreshedFromDevice: boolean;
   }> {
     const viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
@@ -1188,6 +1462,10 @@ export class TapOnElement extends BaseVisualChange {
       viewHierarchy: latestViewHierarchy,
       containerFound: containerFoundEver,
       stats,
+      // `latestViewHierarchy` only diverges from the caller's `viewHierarchy`
+      // when a refresh-loop iteration replaced it with a live device re-capture;
+      // the target being present in the initial hierarchy returns it unchanged.
+      refreshedFromDevice: latestViewHierarchy !== viewHierarchy,
     };
   }
 
@@ -1588,7 +1866,11 @@ export class TapOnElement extends BaseVisualChange {
             this.searchForElement(options, observeResult, signal),
           );
           searchUntilStats = searchOutcome.stats;
-          this.updateObservationHierarchy(observeResult, searchOutcome.viewHierarchy);
+          this.replaceObservationHierarchy(
+            observeResult,
+            searchOutcome.viewHierarchy,
+            searchOutcome.refreshedFromDevice,
+          );
           viewHierarchy = searchOutcome.viewHierarchy;
           if (!searchOutcome.selection.element) {
             await this.handleElementNotFound(
@@ -1678,7 +1960,9 @@ export class TapOnElement extends BaseVisualChange {
               perf.end();
               return { success: false, error: stable.error };
             }
-            this.updateObservationHierarchy(observeResult, stable.viewHierarchy);
+            // The pre-tap stability resolver always returns a hierarchy it just
+            // re-captured live from the device, so its freshness is realigned.
+            this.replaceObservationHierarchy(observeResult, stable.viewHierarchy, true);
             viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             usedParent = stable.usedParent;
@@ -1916,50 +2200,81 @@ export class TapOnElement extends BaseVisualChange {
     skipSemanticLongPress: boolean = false,
   ): Promise<void> {
     if (action === "tap") {
-      const result = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!result.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
+      if (
+        isAndroidDocumentsUiRow(element) &&
+        (await this.tryDocumentsUiRowActivation(element, signal))
+      ) {
+        return;
       }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
     } else if (action === "longPress") {
       await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress);
     } else if (action === "doubleTap") {
-      const first = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!first.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture first tap failed (${first.error}), falling back to ADB`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
       await this.timer.sleep(200);
-      const second = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!second.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture second tap failed (${second.error}), falling back to ADB`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
     }
+  }
+
+  /** Activate a DocumentsUI item through its advertised accessibility delegate (#6335). */
+  private async tryDocumentsUiRowActivation(
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    const selector = stableNodeSelectorForElement(element);
+    // item_root is repeated. Never fall back to the runner's first resource-id match.
+    if (
+      !hasAccessibilityAction(element.actions, "click") ||
+      !selector ||
+      (selector.uniqueId === undefined &&
+        (selector.collectionRow === undefined || selector.collectionColumn === undefined))
+    ) {
+      return false;
+    }
+    try {
+      if (!(await this.accessibilityService.supportsNodeActionSelectors())) {
+        return false;
+      }
+      throwIfAborted(signal);
+      const result = await this.accessibilityService.requestNodeAction("click", selector);
+      return result.success;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`[TapOnElement] DocumentsUI row activation failed: ${error}`);
+      return false;
+    }
+  }
+
+  /** Use input recovery for DocumentsUI rows when semantic activation is unavailable. */
+  private async dispatchCoordinateTapOrAdbFallback(
+    x: number,
+    y: number,
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const requiresAdbInput = isAndroidDocumentsUiRow(element);
+    const result = requiresAdbInput
+      ? { success: false, error: "documentsui-row-input-recovery" }
+      : await this.accessibilityService.requestTapCoordinates(x, y, 10);
+    if (result.success) {
+      return;
+    }
+    if (requiresAdbInput) {
+      logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
+    } else {
+      logger.warn(
+        `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
+      );
+    }
+    await this.adb.executeCommand(
+      `shell input touchscreen tap ${x} ${y}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   /**
@@ -2082,40 +2397,42 @@ export class TapOnElement extends BaseVisualChange {
       return undefined;
     }
 
-    if (action === "tap" || action === "doubleTap") {
-      if (this.isScreenReaderNavigationEnabled(options)) {
-        // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
-        // navigation to the target, then activate.
-        const result = await this.talkBackStrategy.executeTap(
-          this.device.deviceId,
-          element,
-          driver,
-        );
+    // Long press returned above; the remaining actions are tap and doubleTap.
+    if (this.isScreenReaderNavigationEnabled(options)) {
+      // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
+      // navigation to the target, then activate.
+      const result = await this.talkBackStrategy.executeTap(this.device.deviceId, element, driver);
 
-        if (result.success) {
-          return result.screenReaderNavigation;
-        }
-
-        logger.warn(
-          `[TapOnElement] Focus navigation failed (${result.error}), ` +
-            `falling back to coordinate-based tap at (${x}, ${y})`,
-        );
-        screenReaderNavigation = result.screenReaderNavigation;
-      } else if (action === "tap") {
-        // Default (#3936): directly activate the target node via ACTION_CLICK,
-        // without moving the cursor. doubleTap has no single accessibility action,
-        // so it drops straight to the coordinate fallback below.
-        const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
-
-        if (result.success) {
-          return undefined;
-        }
-
-        logger.warn(
-          `[TapOnElement] Direct accessibility activation failed (${result.error}), ` +
-            `falling back to coordinate-based tap at (${x}, ${y})`,
-        );
+      if (result.success) {
+        return result.screenReaderNavigation;
       }
+
+      logger.warn(
+        `[TapOnElement] Focus navigation failed (${result.error}), ` +
+          `falling back to coordinate-based tap at (${x}, ${y})`,
+      );
+      screenReaderNavigation = result.screenReaderNavigation;
+    } else if (action === "tap") {
+      // Default (#3936): directly activate the target node via ACTION_CLICK,
+      // without moving the cursor. doubleTap has no single accessibility action,
+      // so it drops straight to the coordinate fallback below.
+      const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
+
+      if (result.success) {
+        return undefined;
+      }
+
+      logger.warn(
+        `[TapOnElement] Direct accessibility activation failed (${result.error}), ` +
+          `falling back to coordinate-based tap at (${x}, ${y})`,
+      );
+    }
+
+    // DocumentsUI item gestures can be acknowledged without activation, including
+    // this TalkBack fallback path. Use the same row activation/input recovery.
+    if (isAndroidDocumentsUiRow(element)) {
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      return screenReaderNavigation;
     }
 
     // Fallback to coordinate-based taps via accessibility service dispatchGesture

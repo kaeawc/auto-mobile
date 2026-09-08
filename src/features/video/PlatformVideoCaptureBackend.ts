@@ -4,6 +4,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import {
   createExitTracker,
@@ -19,6 +20,7 @@ import type {
   VideoCaptureBackend,
   VideoCaptureConfig,
 } from "./VideoRecorderService";
+import { VideoCaptureFinalizationError } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 
@@ -33,6 +35,17 @@ interface AndroidBackendHandle {
 }
 
 type BackendHandle = AndroidBackendHandle;
+
+// A stop that follows immediately after start races `screenrecord`'s own file
+// flush on the device: pulling before the on-device MP4 is finalized fails
+// with a raw `adb pull failed with exit code 1` and orphans the recording
+// (issue #6291). Poll the device-side file size until it stops growing (or
+// the attempts run out) before ever attempting the pull, and retry the pull
+// itself a bounded number of times in case finalization is still racing it.
+const DEVICE_FILE_FINALIZE_POLL_ATTEMPTS = 5;
+const DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS = 300;
+const PULL_MAX_ATTEMPTS = 3;
+const PULL_RETRY_DELAY_MS = 500;
 
 export function clampBitrateKbps(config: VideoCaptureConfig): number {
   const maxBitrateKbps = Math.max(0, Math.floor(config.maxThroughputMbps * 1000));
@@ -145,83 +158,222 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       `[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`,
     );
 
-    // Give screenrecord extra time to finalize the file on device
-    // Even though the process has exited, file writes may still be in progress
-    logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
-    await this.timer.sleep(1000);
-
-    // Pull the file from the device
-    logger.info(
-      `[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`,
-    );
     const adb = this.adbFactory.create(backendHandle.device);
-    const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
+    let deviceFileFinalized = false;
     try {
-      const pullProcess = await adb.spawn(pullArgs);
-
-      await new Promise<void>((resolve, reject) => {
-        pullProcess.once("exit", (code) => {
-          if (code === 0) {
-            logger.info(`[VideoCapture] File pulled successfully`);
-            resolve();
-          } else {
-            reject(new Error(`adb pull failed with exit code ${code}`));
-          }
-        });
-        pullProcess.once("error", (err) => reject(err));
-      });
-    } finally {
-      // Always clean up the /sdcard temp file, even when the pull failed —
-      // otherwise a failed pull leaks the temp recording on the device on
-      // every stop (issue #4170).
-      logger.info(`[VideoCapture] Cleaning up temp file on device`);
-      const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
       try {
-        const rmProcess = await adb.spawn(rmArgs);
+        // Give screenrecord extra time to finalize the file on device. Even
+        // though the process has exited, file writes may still be in progress.
+        logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
+        await this.timer.sleep(1000);
+        deviceFileFinalized = await this.waitForDeviceFileToFinalize(
+          adb,
+          backendHandle.deviceTempPath,
+        );
+        if (!deviceFileFinalized) {
+          throw new ActionableError(
+            `Device recording ${handle.recordingId} did not finish writing before the finalization deadline. ` +
+              "The device copy was retained; try stopping the recording again before retrying the pull.",
+          );
+        }
 
-        await new Promise<void>((resolve) => {
-          rmProcess.once("exit", () => {
-            logger.info(`[VideoCapture] Temp file cleaned up`);
-            resolve();
-          });
-          rmProcess.once("error", (err) => {
+        logger.info(
+          `[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`,
+        );
+        await this.pullRecordingFileWithRetry(
+          adb,
+          ["pull", backendHandle.deviceTempPath, handle.outputPath],
+          handle.recordingId,
+        );
+      } finally {
+        // A recording that never stabilized might still be open on the device.
+        // Retain it instead of deleting the only potentially completeable copy.
+        // Once it did stabilize, retain the existing cleanup behavior for a
+        // subsequent pull failure.
+        if (!deviceFileFinalized) {
+          logger.warn(
+            `[VideoCapture] Retaining unstable device file ${backendHandle.deviceTempPath} for recovery`,
+          );
+        } else {
+          logger.info(`[VideoCapture] Cleaning up temp file on device`);
+          const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+          try {
+            const rmProcess = await adb.spawn(rmArgs);
+            await new Promise<void>((resolve) => {
+              rmProcess.once("exit", () => {
+                logger.info(`[VideoCapture] Temp file cleaned up`);
+                resolve();
+              });
+              rmProcess.once("error", (err) => {
+                logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+                resolve();
+              });
+            });
+          } catch (err) {
             logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-            resolve();
-          });
-        });
-      } catch (err) {
-        logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+          }
+        }
       }
-    }
 
-    const sizeBytes = await getFileSize(handle.outputPath);
-    logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
-    // Absolute host path leaks the local username; keep it diagnostic-only.
-    logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
+      const sizeBytes = await getFileSize(handle.outputPath);
+      logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
+      logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
+      const codec = await this.codecProbe.codec(handle.outputPath);
 
-    // Android `screenrecord` emits H.264, so this path was coincidentally
-    // correct — but probe the finalized file rather than trusting a constant, so
-    // the two backends stay honest through the same seam (#4965).
-    const codec = await this.codecProbe.codec(handle.outputPath);
-
-    if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
-      logger.warn(
-        `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
+      if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
+        logger.warn(
+          `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
+        );
+      }
+      if (backendHandle.stderr.length > 0) {
+        logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
+      }
+      return {
+        recordingId: handle.recordingId,
+        outputPath: handle.outputPath,
+        startedAt: handle.startedAt,
+        endedAt: backendHandle.exitState.endedAt ?? new Date().toISOString(),
+        sizeBytes,
+        codec,
+      };
+    } catch (error) {
+      // This point is reached only after awaiting the tracked host exit above.
+      // Artifact finalization cannot revive that process, so make the proof
+      // available to the ownership layer instead of retaining a dead handle.
+      throw new VideoCaptureFinalizationError(
+        `Android capture exited but finalization failed: ${errorMessage(error)}`,
+        // An unstable on-device file is deliberately retained above. Keep the
+        // service owner too, so the public stop operation remains a reachable
+        // recovery path instead of orphaning that deviceTempPath.
+        { cause: error, retainOwnership: !deviceFileFinalized },
       );
     }
+  }
 
-    if (backendHandle.stderr.length > 0) {
-      logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
+  /**
+   * Reads the on-device file's size via `stat`. Returns null when the result
+   * cannot be observed, which is distinct from a confirmed zero-byte file.
+   */
+  private async readDeviceFileSizeBytes(
+    adb: AdbExecutor,
+    deviceTempPath: string,
+  ): Promise<number | null> {
+    try {
+      const result = await adb.executeCommand(
+        `shell stat -c %s ${deviceTempPath}`,
+        5000,
+        undefined,
+        true,
+      );
+      const parsed = Number.parseInt(result.stdout.trim(), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    } catch (error) {
+      // A missing/unreadable file here just means "not finalized yet"; the
+      // poll loop and the pull retry below absorb it.
+      logger.debug(
+        `[VideoCapture] Failed to stat device file ${deviceTempPath}: ${errorMessage(error)}`,
+      );
+      return null;
     }
+  }
 
-    return {
-      recordingId: handle.recordingId,
-      outputPath: handle.outputPath,
-      startedAt: handle.startedAt,
-      endedAt: backendHandle.exitState.endedAt ?? new Date().toISOString(),
-      sizeBytes,
-      codec,
-    };
+  /**
+   * Waits for the on-device recording file to stop growing before the caller
+   * pulls it (issue #6291: a stop that lands right after start races
+   * `screenrecord`'s own flush, so pulling too early sees a missing/empty
+   * file and `adb pull` exits 1). Best-effort: if the size never visibly
+   * stabilizes within the attempt budget. A file observed growing but never
+   * stable is retained on the device because a successful `adb pull` can still
+   * produce a truncated MP4. If the file cannot be observed at all, preserve
+   * the existing bounded pull retry as the only recovery path.
+   */
+  private async waitForDeviceFileToFinalize(
+    adb: AdbExecutor,
+    deviceTempPath: string,
+  ): Promise<boolean> {
+    let lastSize = -1;
+    let observedFile = false;
+    let observedNonEmptyFile = false;
+    for (let attempt = 0; attempt < DEVICE_FILE_FINALIZE_POLL_ATTEMPTS; attempt++) {
+      const size = await this.readDeviceFileSizeBytes(adb, deviceTempPath);
+      observedFile ||= size !== null;
+      observedNonEmptyFile ||= size !== null && size > 0;
+      if (size !== null && size > 0 && size === lastSize) {
+        logger.info(`[VideoCapture] Device file finalized at ${size} bytes`);
+        return true;
+      }
+      lastSize = size ?? -1;
+      await this.timer.sleep(DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS);
+    }
+    if (observedNonEmptyFile) {
+      logger.warn(
+        `[VideoCapture] Device file ${deviceTempPath} did not visibly stabilize after ` +
+          `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks`,
+      );
+      return false;
+    }
+    if (observedFile) {
+      logger.warn(
+        `[VideoCapture] Device file ${deviceTempPath} remained empty after ` +
+          `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks; retaining it for recovery`,
+      );
+      return false;
+    }
+    logger.warn(
+      `[VideoCapture] Could not observe device file ${deviceTempPath}; attempting bounded pull recovery`,
+    );
+    return true;
+  }
+
+  /** Spawns `adb pull` once and settles on the process's exit code. */
+  private async pullRecordingFile(adb: AdbExecutor, pullArgs: string[]): Promise<void> {
+    const pullProcess = await adb.spawn(pullArgs);
+    await new Promise<void>((resolve, reject) => {
+      pullProcess.once("exit", (code) => {
+        if (code === 0) {
+          logger.info(`[VideoCapture] File pulled successfully`);
+          resolve();
+        } else {
+          reject(new Error(`adb pull failed with exit code ${code}`));
+        }
+      });
+      pullProcess.once("error", (err) => reject(err));
+    });
+  }
+
+  /**
+   * Retries a failed pull a bounded number of times (issue #6291: finalization
+   * can still be racing the first attempt even after the wait above) before
+   * surfacing a genuine failure as an {@link ActionableError} instead of the
+   * raw `adb pull failed with exit code N` — the raw exec error was leaking
+   * straight to the MCP client with no recovery hint.
+   */
+  private async pullRecordingFileWithRetry(
+    adb: AdbExecutor,
+    pullArgs: string[],
+    recordingId: string,
+  ): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= PULL_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.pullRecordingFile(adb, pullArgs);
+        return;
+      } catch (error) {
+        lastError = error;
+        logger.warn(
+          `[VideoCapture] adb pull attempt ${attempt}/${PULL_MAX_ATTEMPTS} failed for recording ` +
+            `${recordingId}: ${errorMessage(error)}`,
+        );
+        if (attempt < PULL_MAX_ATTEMPTS) {
+          await this.timer.sleep(PULL_RETRY_DELAY_MS);
+        }
+      }
+    }
+    throw new ActionableError(
+      `Failed to pull video recording ${recordingId} from device after ${PULL_MAX_ATTEMPTS} attempts: ` +
+        `${errorMessage(lastError)}`,
+      { cause: lastError },
+    );
   }
 
   async forceStop(handle: RecordingHandle): Promise<void> {

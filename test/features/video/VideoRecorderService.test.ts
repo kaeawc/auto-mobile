@@ -12,6 +12,8 @@ import {
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
 import { FakeSecurePermissions } from "../../fakes/FakeSecurePermissions";
+import { ActionableError } from "../../../src/models";
+import { ProcessTeardownUnconfirmedError } from "../../../src/utils/ChildProcessTracker";
 
 describe("parseVideoRecordingConfig", () => {
   test("returns defaults for null input", () => {
@@ -324,6 +326,57 @@ describe("VideoRecorderService", () => {
     await expect(service.stopRecording(recording.recordingId)).resolves.toMatchObject({
       recordingId: recording.recordingId,
     });
+  });
+
+  test("retains device ownership when a generic backend stop failure has no exit confirmation", async () => {
+    const recording = await service.startRecording({
+      device: { deviceId: "test-device", platform: "android", name: "Android" },
+    });
+    backend.stop = async () => {
+      throw new Error("adb pull failed with exit code 1");
+    };
+
+    await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
+      "adb pull failed with exit code 1",
+    );
+
+    // A raw backend error is not evidence that the device process exited. The
+    // exact handle remains available for a later force-stop retry and blocks a
+    // second capture against the same device.
+    expect(service.listActiveRecordingIds()).toEqual([recording.recordingId]);
+    expect(service.hasActiveRecordingForDevice("test-device")).toBe(true);
+  });
+
+  test("retains device ownership when the backend stop cannot confirm process teardown", async () => {
+    const recording = await service.startRecording({
+      device: { deviceId: "test-device", platform: "android", name: "Android" },
+    });
+    backend.stop = async () => {
+      throw new ProcessTeardownUnconfirmedError(
+        "Process did not exit within 5000ms plus 5000ms after SIGKILL",
+      );
+    };
+
+    let caught: unknown;
+    try {
+      await service.stopRecording(recording.recordingId);
+    } catch (error) {
+      caught = error;
+    }
+
+    // The capture process may still be alive, so ownership must be retained —
+    // otherwise a caller could start a second recording against a device that
+    // still has the old capture process running underneath it.
+    expect(caught).toBeInstanceOf(ActionableError);
+    expect(service.listActiveRecordingIds()).toEqual([recording.recordingId]);
+    expect(service.hasActiveRecordingForDevice("test-device")).toBe(true);
+
+    // The retained handle stays reachable for a later teardown/cleanup retry.
+    backend.forceStop = async (handle) => {
+      backend.forceStopCalls.push(handle);
+    };
+    await service.forceStopRecording(recording.recordingId);
+    expect(service.listActiveRecordingIds()).toEqual([]);
   });
 
   test("rejects a graceful stop that resolves after force-stop begins", async () => {

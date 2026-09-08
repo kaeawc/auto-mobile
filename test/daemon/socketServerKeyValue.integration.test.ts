@@ -9,6 +9,9 @@ import { sendSocketRequest } from "./helpers/socketRequest";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -64,6 +67,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   let server: UnixSocketServer;
   let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
+  let adbClientFactory: AdbClientFactory;
   let androidSetPreference: ReturnType<typeof mock>;
   let androidRemovePreference: ReturnType<typeof mock>;
   let androidClearPreferenceStore: ReturnType<typeof mock>;
@@ -94,6 +98,11 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     originalAndroidGetInstance = AndroidCtrlProxyClient.getInstance;
     originalIosGetInstance = IOSCtrlProxyClient.getInstance;
+    adbClientFactory = {
+      create: () => {
+        throw new Error("Unexpected ADB access");
+      },
+    };
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       setPreference: androidSetPreference,
       removePreference: androidRemovePreference,
@@ -117,6 +126,9 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       new FakeTimer(),
       null,
       { sessionToolSelectionService: profileService },
+      undefined,
+      {},
+      adbClientFactory,
     );
     await server.start();
   });
@@ -283,5 +295,149 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     expect(response.success).toBe(true);
     expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "tags");
     expect(iosSetPreference).not.toHaveBeenCalled();
+  });
+
+  // Issue #6292: the desktop Storage pane sends its mutations over these `ide/*` routes.
+  // When the SDK ContentProvider path is gated because SharedPreferences inspection is
+  // disabled on the app, the Android routes must fall back to the same direct-file
+  // `adb shell run-as` XML edit the MCP tools use — otherwise the pane can read but not
+  // write/delete/clear. iOS has no on-device XML fallback and must never attempt one.
+  describe("SharedPreferences inspection-disabled fallback on the ide/* routes (#6292)", () => {
+    const INSPECTION_DISABLED = "SharedPreferences inspection is disabled";
+
+    function useAndroidClientThrowing(overrides: Partial<Record<string, () => Promise<void>>>) {
+      AndroidCtrlProxyClient.getInstance = mock(() => ({
+        setPreference:
+          overrides.setPreference ??
+          (async () => {
+            throw new Error(INSPECTION_DISABLED);
+          }),
+        removePreference:
+          overrides.removePreference ??
+          (async () => {
+            throw new Error(INSPECTION_DISABLED);
+          }),
+        clearPreferenceStore:
+          overrides.clearPreferenceStore ??
+          (async () => {
+            throw new Error(INSPECTION_DISABLED);
+          }),
+      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    }
+
+    function injectFakeAdb(adb: FakeAdbExecutor): void {
+      adbClientFactory.create = () => adb;
+    }
+
+    test("ide/setKeyValue falls back to the direct-file XML edit and warns to relaunch", async () => {
+      useAndroidClientThrowing({});
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cat shared_prefs/prefs.xml", createExecResult("<map/>", ""));
+      injectFakeAdb(adb);
+
+      const response = await sendRequest(socketPath, "ide/setKeyValue", {
+        deviceId: androidDevice.deviceId,
+        appId: "com.example.app",
+        fileName: "prefs",
+        key: "theme",
+        value: "dark",
+        type: "STRING",
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.result?.warning).toMatch(/relaunch/i);
+      const writeCommand = adb
+        .getExecutedCommands()
+        .find((cmd) => cmd.includes("base64 -d > shared_prefs/prefs.xml"));
+      expect(writeCommand).toBeDefined();
+    });
+
+    test("ide/removeKeyValue falls back to the direct-file XML edit when inspection is disabled", async () => {
+      useAndroidClientThrowing({});
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "cat shared_prefs/prefs.xml",
+        createExecResult('<map><string name="theme">dark</string></map>', ""),
+      );
+      injectFakeAdb(adb);
+
+      const response = await sendRequest(socketPath, "ide/removeKeyValue", {
+        deviceId: androidDevice.deviceId,
+        appId: "com.example.app",
+        fileName: "prefs",
+        key: "theme",
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.result?.warning).toMatch(/relaunch/i);
+      const writeCommand = adb
+        .getExecutedCommands()
+        .find((cmd) => cmd.includes("base64 -d > shared_prefs/prefs.xml"));
+      expect(writeCommand).toBeDefined();
+    });
+
+    test("ide/clearKeyValueFile falls back to the direct-file XML edit when inspection is disabled", async () => {
+      useAndroidClientThrowing({});
+      const adb = new FakeAdbExecutor();
+      injectFakeAdb(adb);
+
+      const response = await sendRequest(socketPath, "ide/clearKeyValueFile", {
+        deviceId: androidDevice.deviceId,
+        appId: "com.example.app",
+        fileName: "prefs",
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.result?.warning).toMatch(/relaunch/i);
+      const writeCommand = adb
+        .getExecutedCommands()
+        .find((cmd) => cmd.includes("base64 -d > shared_prefs/prefs.xml"));
+      expect(writeCommand).toBeDefined();
+    });
+
+    test("a non-inspection SDK failure is surfaced and does NOT trigger the direct-file fallback", async () => {
+      useAndroidClientThrowing({
+        setPreference: async () => {
+          throw new Error("WebSocket not connected");
+        },
+      });
+      const adb = new FakeAdbExecutor();
+      injectFakeAdb(adb);
+
+      const response = await sendRequest(socketPath, "ide/setKeyValue", {
+        deviceId: androidDevice.deviceId,
+        appId: "com.example.app",
+        fileName: "prefs",
+        key: "theme",
+        value: "dark",
+        type: "STRING",
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("WebSocket not connected");
+      expect(adb.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("iOS never attempts the Android direct-file fallback — an SDK error is surfaced", async () => {
+      iosSetPreference.mockImplementation(async () => {
+        throw new Error(INSPECTION_DISABLED);
+      });
+      const adb = new FakeAdbExecutor();
+      injectFakeAdb(adb);
+
+      const response = await sendRequest(socketPath, "ide/setKeyValue", {
+        platform: "ios",
+        deviceId: iosDevice.deviceId,
+        appId: "com.example.app",
+        fileName: "prefs",
+        key: "theme",
+        value: "dark",
+        type: "STRING",
+      });
+
+      expect(response.success).toBe(false);
+      // No adb command was executed: the iOS route has no direct-file fallback.
+      expect(adb.getExecutedCommands()).toHaveLength(0);
+    });
   });
 });

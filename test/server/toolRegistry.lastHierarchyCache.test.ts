@@ -86,6 +86,12 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    // #6227: `setupAutolockedSession` creates its session directly via
+    // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
+    // recorder), so it drives real per-session accessibility-service setup
+    // against a fake device. The shared test preload (test/setup/testPreload.ts)
+    // installs a no-op readiness driver so that setup cannot block on real
+    // `adb`/network.
   });
 
   afterEach(() => {

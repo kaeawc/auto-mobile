@@ -322,14 +322,12 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const decodedTable = decodeURIComponent(table);
   // Always the canonical URI (no limit/offset), never the exact requested
   // URI. notifyDatabaseChanged / table-schema invalidation both fire
-  // notifyResourceUpdated against this canonical form, and
-  // ResourceRegistry.notifyResourceUpdated requires an exact
-  // subscriptions.has(uri) match — echoing a per-page URI here would leave a
-  // client subscribed to a paginated URI never notified after a mutating
-  // sqlQuery (issue #6188). limit/offset stay valid, optional read params
-  // (issue #6133); the resource's subscribable identity is just the table,
-  // not a page of it. Distinct per-page subscription identities would need a
-  // broader resource-subscription redesign, tracked separately.
+  // notifyResourceUpdated against this canonical form. The registry treats
+  // `limit`/`offset` as page-scoping params, so a canonical-URI change fans
+  // out to every subscriber sharing this table's page-independent identity —
+  // the whole-table subscriber and each per-page subscriber alike (issue
+  // #6198), each notified with its own page URI. limit/offset stay valid,
+  // optional read params (issue #6133).
   const uri = buildTableDataUri(deviceId, decodedPath, decodedTable, appId ?? "");
 
   try {
@@ -533,12 +531,18 @@ export function registerDatabaseResources(): void {
 
   // Register template for table data. appId, limit, and offset are all
   // optional and order-independent (issue #6133) — see the template comment.
+  // limit/offset are page-scoping params: a client may subscribe to a specific
+  // page (`&limit=10&offset=20`) as its own subscription identity, and a
+  // canonical-URI change (notifyDatabaseChanged / schema invalidation, which
+  // both fire against the no-limit/offset form) fans out to every per-page
+  // subscriber (issue #6198).
   ResourceRegistry.registerTemplate(
     DATABASE_RESOURCE_TEMPLATES.TABLE_DATA,
     "Table Data",
     "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
     "application/json",
     getTableDataResource,
+    ["limit", "offset"],
   );
 
   // Register template for table structure

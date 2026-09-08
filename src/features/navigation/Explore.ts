@@ -65,10 +65,7 @@ import {
   isPermissionDialog,
   handlePermissionDialog,
 } from "./ExploreBlockerDetection";
-import type {
-  BlockerHandlerDeps,
-  DialogTapActionFactory,
-} from "./ExploreBlockerDetection";
+import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlockerDetection";
 
 // Import validate mode functions
 import {

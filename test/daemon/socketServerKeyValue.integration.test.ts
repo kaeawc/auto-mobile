@@ -127,6 +127,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       null,
       { sessionToolSelectionService: profileService },
       undefined,
+      {},
       adbClientFactory,
     );
     await server.start();

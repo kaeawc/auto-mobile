@@ -295,6 +295,15 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     );
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
+    const stopAcceptingSessionCreations =
+      sessionManager.stopAcceptingSessionCreations.bind(sessionManager);
+    const stopAcceptingSessionCreationsSpy = spyOn(
+      sessionManager,
+      "stopAcceptingSessionCreations",
+    ).mockImplementation(() => {
+      events.push("session:fence");
+      stopAcceptingSessionCreations();
+    });
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
@@ -318,6 +327,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       await daemon.stop();
 
       expect(events[0]).toBe("socket:quiesce");
+      expect(events[1]).toBe("session:fence");
       expect(events.filter((event) => event === "release:session-a:daemon-shutdown")).toHaveLength(
         1,
       );
@@ -332,6 +342,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       expect(sessionManager.getSession("session-b")).toBeNull();
     } finally {
       unsubscribe();
+      stopAcceptingSessionCreationsSpy.mockRestore();
       loggerCloseSpy.mockRestore();
     }
   });

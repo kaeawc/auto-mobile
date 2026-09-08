@@ -2460,11 +2460,18 @@ export class Daemon {
     await runShutdownCleanupStages(
       [
         {
-          // Fence a request that was admitted before shutdown but outlives the
-          // socket server's bounded handler drain. Its eventual pool assignment
-          // must roll back instead of publishing after the release snapshot.
-          name: "device session admission",
-          run: () => this.sessionManager.stopAcceptingSessionCreations(),
+          // Quiesce the control socket synchronously before fencing session
+          // publication. Established clients then receive the stable retryable
+          // shutdown response instead of entering SessionManager during the
+          // cleanup stages below. A request admitted before this barrier may
+          // still outlive the bounded handler drain, so fence its eventual pool
+          // assignment before awaiting that drain.
+          name: "Unix socket and device session admission",
+          run: async () => {
+            const quiescing = this.socketServer?.quiesce();
+            this.sessionManager.stopAcceptingSessionCreations();
+            await quiescing;
+          },
         },
         {
           // Quiesce new recording work and stop owned children before any
@@ -2524,17 +2531,6 @@ export class Daemon {
             // after the transport snapshot below. The later HTTP server stage
             // awaits this same close once active transports have been closed.
             void this.closeHttpListener().catch(() => {});
-          },
-        },
-        {
-          // Reject new control-socket work and drain admitted requests, but keep
-          // subscribed sockets connected until active sessions publish their
-          // daemon-shutdown release below (issue #6336).
-          name: "Unix socket admission",
-          run: async () => {
-            if (this.socketServer) {
-              await this.socketServer.quiesce();
-            }
           },
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },

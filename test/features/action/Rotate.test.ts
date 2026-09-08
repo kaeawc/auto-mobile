@@ -619,12 +619,18 @@ describe("Rotate", () => {
       expect(result.rotationPerformed).toBe(false);
       expect(result.orientationLockState).toBe("locked");
       expect(result.message).toBe("Locked device orientation to landscape.");
+      const commands = fakeAdb.getExecutedCommands();
+      expect(commands.indexOf("shell settings put system user_rotation 1")).toBeGreaterThan(-1);
+      expect(commands.indexOf("shell settings put system user_rotation 1")).toBeLessThan(
+        commands.indexOf("shell settings put system accelerometer_rotation 0"),
+      );
+      expect(fakeAwaitIdle.wasMethodCalled("waitForRotation(1")).toBe(true);
     });
 
     test("locks reverse portrait without forcing canonical portrait rotation (#6350)", async () => {
       // mRotation=2 is reverse portrait. Locking it must preserve the exact
-      // live rotation, rather than writing canonical user_rotation=0 and
-      // rotating the display by 180 degrees.
+      // live rotation by saving user_rotation=2 before disabling auto-rotate,
+      // rather than writing canonical user_rotation=0 and rotating 180 degrees.
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
         createExecResult("1"),
         createExecResult("0"),
@@ -639,8 +645,9 @@ describe("Rotate", () => {
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(false);
       expect(result.orientationLockState).toBe("locked");
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(true);
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(false);
-      expect(fakeAwaitIdle.wasMethodCalled("waitForRotation(")).toBe(false);
+      expect(fakeAwaitIdle.wasMethodCalled("waitForRotation(2")).toBe(true);
     });
 
     test("reports a persistent rotation as unconfirmed when the lock cannot be verified (#6350)", async () => {

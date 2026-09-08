@@ -390,11 +390,27 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape",
     value: number,
     currentOrientation: string,
-  ): Promise<RotateResult> {
+  ): Promise<RotateResult | null> {
+    const liveRotation = await this.readLiveRotation();
+    if (liveRotation === null) {
+      // The normal rotation path can still establish the requested orientation
+      // when the exact live rotation is temporarily unavailable.
+      return null;
+    }
+    const liveOrientation = liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape";
+    if (liveOrientation !== orientation) {
+      // The display changed after the initial read; perform a normal requested
+      // rotation instead of locking a now-opposite orientation.
+      return null;
+    }
+
     try {
-      // Do not write user_rotation here: an already-applied reverse
-      // orientation (mRotation 2 or 3) must remain reverse when locked.
+      // Android applies user_rotation when auto-rotate is disabled. Persist
+      // the exact live value before the lock so stale settings cannot rotate
+      // an already-matching (including reverse) display.
+      await this.writeSystemSetting("user_rotation", String(liveRotation));
       await this.writeSystemSetting("accelerometer_rotation", "0");
+      await this.awaitIdle.waitForRotation(liveRotation);
     } catch (error) {
       logger.warn(`Failed to lock the current ${orientation} orientation: ${error}`, error);
       return {
@@ -411,17 +427,24 @@ export class Rotate extends BaseVisualChange {
     }
 
     const orientationLockState = await this.getOrientationLockState();
-    if (orientationLockState !== "locked") {
+    const confirmedRotation = await this.readLiveRotation();
+    if (orientationLockState !== "locked" || confirmedRotation !== liveRotation) {
+      const achievedOrientation =
+        confirmedRotation === null
+          ? "unknown"
+          : confirmedRotation === 0 || confirmedRotation === 2
+            ? "portrait"
+            : "landscape";
       return {
         success: false,
         orientation,
         value,
-        currentOrientation,
+        currentOrientation: achievedOrientation,
         previousOrientation: currentOrientation,
         rotationPerformed: false,
         orientationLockHandled: false,
         orientationLockState,
-        error: `Device is already in ${orientation} orientation, but the persistent orientation lock could not be confirmed (auto-rotate is ${orientationLockState}).`,
+        error: `Device was already in ${orientation} orientation, but its exact locked rotation could not be confirmed (auto-rotate is ${orientationLockState}).`,
       };
     }
 

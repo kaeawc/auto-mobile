@@ -30,6 +30,8 @@ export interface SettleResult {
   polls: number;
   /** Wall-clock spent waiting (per the injected Timer). */
   waitMs: number;
+  /** Why polling completed. This distinguishes a budget timeout from screen-off. */
+  terminalReason: "settled" | "screen_off" | "timeout";
 }
 
 /**
@@ -46,7 +48,7 @@ export interface SettleResult {
  *   `isSameObservationScreen` gate, so it can never register as settled. This is
  *   the shared diff's conservative cross-screen guard, not a settle-specific one.
  * - A screen-off (Android) capture fast-fails to `settled: false, polls: 1`;
- *   inspect `observation.wakefulness === "Asleep"` to tell it from a real timeout.
+ *   inspect `terminalReason` to tell it from a real timeout.
  */
 export interface SettleObserve {
   execute(options?: SettleOptions): Promise<SettleResult>;

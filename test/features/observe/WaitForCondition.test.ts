@@ -27,6 +27,11 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     viewHierarchy: {
       packageName: "com.example",
       hierarchy: { node: node as any },
+      // The poll loop's device-clock freshness floor (#6284) reads the
+      // hierarchy-owned `updatedAt`, never the (possibly host-created) top-level
+      // one. Mirror the caller's device timestamp here so observations are
+      // admissible, matching the shared helper in SettleObserve.test.ts.
+      updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
     },
     ...extra,
   } as ObserveResult;
@@ -154,7 +159,9 @@ describe("RealWaitForCondition", () => {
     const waitFor = new RealWaitForCondition(fake, timer);
     await waitFor.execute(predicate, { timeoutMs: 2500, pollMs: 150 });
 
-    expect(fake.getExecuteMinTimestamps()).toEqual([0, 10, 20]);
+    // 0 (unseeded baseline) -> 11 (forced strictly past the baseline 10 for a
+    // genuine post-invocation capture) -> 20 (inclusive monotonic floor).
+    expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 20]);
   });
 
   test("built-in `appear` predicate reuses the finder and resolves when the element shows up", async () => {

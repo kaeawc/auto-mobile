@@ -1009,6 +1009,7 @@ export class RealObserveScreen implements ObserveScreen {
           const parallelTasks: Promise<void>[] = [];
           if (hierarchy.wakefulness) {
             result.wakefulness = hierarchy.wakefulness;
+            result.wakefulnessSource = "hierarchy";
           } else {
             parallelTasks.push(
               perf.track("wakefulness", () =>
@@ -1510,7 +1511,15 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const initialTimestamp = this.resolveObservationTimestampMs(result);
-    const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
+    if (initialTimestamp === undefined) {
+      logger.debug(
+        "[OBSERVE] Skipping SystemUI-overlay recapture without a device capture timestamp",
+      );
+      return false;
+    }
+    // `minTimestamp` is interpreted by the device hierarchy source. It is
+    // present only after the guard above proved a hierarchy-owned device stamp.
+    const minTimestamp = initialTimestamp + 1;
     let hierarchy: ObserveResult["viewHierarchy"];
     try {
       // `minTimestamp` rejects the cached (initial) tree; skipping the fresh wait
@@ -1626,7 +1635,13 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const initialTimestamp = this.resolveObservationTimestampMs(result);
-    const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
+    if (initialTimestamp === undefined) {
+      logger.debug("[OBSERVE] Skipping back-stack recapture without a device capture timestamp");
+      return false;
+    }
+    // See the overlay recapture path above: the guard ensures this is a
+    // device-side floor, never a substituted host timestamp.
+    const minTimestamp = initialTimestamp + 1;
     let hierarchy: ObserveResult["viewHierarchy"];
     try {
       // `minTimestamp` rejects the cached (initial) tree; skipping the fresh
@@ -1782,6 +1797,9 @@ export class RealObserveScreen implements ObserveScreen {
       units: "unknown",
     };
     result.wakefulness = hierarchy.wakefulness ?? result.wakefulness;
+    if (hierarchy.wakefulness) {
+      result.wakefulnessSource = "hierarchy";
+    }
     result.intentChooserDetected = hierarchy.intentChooserDetected;
     result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
     result.focusedElement = this.viewHierarchy.findFocusedElement(hierarchy) ?? undefined;
@@ -1945,17 +1963,7 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
-    const candidate = result.viewHierarchy?.updatedAt ?? result.updatedAt;
-    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
-      return candidate;
-    }
-    if (typeof candidate === "string") {
-      const parsed = Date.parse(candidate);
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
-    }
-    return undefined;
+    return result.viewHierarchy?.updatedAt;
   }
 
   /**

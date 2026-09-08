@@ -4,7 +4,7 @@ import type { Platform } from "./Platform";
  * Observed resource state, never a requested provisioning setting.
  * - enabled: verified active (available to run, not necessarily busy).
  * - disabled: verified disabled to reduce resource use.
- * - unsupported: the device cannot provide or control the resource; explain why.
+ * - unsupported: the device cannot provide or control the resource.
  * - unknown: state has not been verified, including mixed or incomplete group evidence.
  */
 export type DeviceResourceState = "enabled" | "disabled" | "unsupported" | "unknown";
@@ -25,8 +25,10 @@ export interface DeviceResourceStatus {
 export type CommonDeviceResource = "backgroundSync" | "searchIndexing" | "animations";
 
 /**
- * JSON-serializable snapshot of a device's logical resources. Each platform key
- * must be present; unverified entries use unknown. Groups are reported independently:
+ * Shared, extensible view of a device's logical resources, serialized as JSON.
+ * Complete platform snapshots use AndroidDeviceResource or AppleDeviceResource;
+ * this base guarantees only its selected keys. Unverified entries use unknown.
+ * Groups are reported independently:
  * one group's state does not imply another group's state or automation capability.
  * See docs/design-docs/device-resources.md for group scope and evidence semantics.
  */

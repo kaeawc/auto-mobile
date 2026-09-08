@@ -5,6 +5,11 @@ property is a JSON object keyed by logical resource name. `AndroidDeviceResource
 and `AppleDeviceResource` add platform-specific keys and preserve AutoMobile's
 `android` and `ios` platform identifiers.
 
+The generic base is a shared view and extension point; its default guarantees only
+the common keys. Producers of complete platform reports use `AndroidDeviceResource`
+or `AppleDeviceResource`. Consumers needing platform narrowing accept their union,
+`AndroidDeviceResource | AppleDeviceResource`, rather than widening to the base.
+
 This contract defines reporting semantics. It does not inspect devices, change
 provisioning settings, suspend services, or expose a new tool. Future producers
 must obtain evidence before reporting an observed state.
@@ -28,15 +33,16 @@ Native service names and commands belong in future platform implementations.
 
 ## Observed state
 
-Every key for the selected platform must be present, including on physical devices
-or images without a particular service. Key presence does not promise support.
+In each concrete platform interface, every key for that platform must be present,
+including on physical devices or images without a particular service. Key presence
+does not promise support.
 
 - `enabled`: verified active and available to run; need not be consuming CPU now.
 - `disabled`: verified disabled to reduce resource use.
-- `unsupported`: the device cannot provide or control the resource. Use `reason`
-  to explain which limitation applies.
+- `unsupported`: the device cannot provide or control the resource. The optional
+  `reason` can explain which limitation applies.
 - `unknown`: not verified. Also use this for mixed or incomplete group evidence,
-  with `reason` explaining the uncertainty.
+  with an optional `reason` explaining the uncertainty.
 
 A group is `enabled` or `disabled` only when evidence covers the whole defined
 group. A single inactive process, absent observation, or requested setting is

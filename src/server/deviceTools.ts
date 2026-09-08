@@ -5101,7 +5101,8 @@ export function registerDeviceTools() {
               state.boot.source === "cold-boot" && !readinessResult.preservedSessionId
                 ? sourceImage
                 : undefined,
-              state.boot.processHandle,
+              // Recovery already registered this process and its output tail.
+              readinessResult.preservedSessionId ? undefined : state.boot.processHandle,
               new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
               verifiedWarmAndroidAvdIdentity,
             );

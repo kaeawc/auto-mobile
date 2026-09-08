@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
+import type { ChildProcess } from "node:child_process";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up } from "../../src/db/migrations/2026_04_02_000_device_sessions";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
@@ -16,6 +17,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceMatcher } from "../../test/fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../../test/fakes/FakeDeviceUtils";
+import { FakeChildProcess } from "../../test/fakes/FakeChildProcess";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -254,6 +256,8 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
       const matcher = new FakeDeviceMatcher();
       const device = h.devices.bootedDevices[0];
       const image = { ...device, deviceId: "emulator-5556", isRunning: false };
+      const recoveredProcess = new FakeChildProcess(h.timer);
+      deviceUtils.setMockChildProcess(image.name, recoveredProcess as unknown as ChildProcess);
       deviceUtils.setBootedDevices("android", [device]);
       deviceUtils.setDeviceImages("android", [image]);
       matcher.setBootedResult(device);
@@ -264,6 +268,8 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
         deviceUtils.setBootedDevices("android", []);
       };
       let readinessAttempts = 0;
+      let recoveredExitListeners = 0;
+      let recoveredOutputListeners = 0;
       let secondOwner: string | undefined;
       DaemonState.getInstance().initialize(h.manager, h.pool);
       setDeviceToolsDependencies({
@@ -275,6 +281,8 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
           if (++readinessAttempts === 1) {
             throw new SystemUiAnrRecoveryRequiredError("System UI ANR");
           }
+          recoveredExitListeners = recoveredProcess.listenerCount("exit");
+          recoveredOutputListeners = recoveredProcess.stdout.listenerCount("data");
           if (client === "agent-A-reassigned") {
             const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
             deviceUtils.setBootedDevices("android", [request.device, otherDevice]);
@@ -308,6 +316,11 @@ test.each(["agent-B", "agent-A", "agent-A-reassigned"])(
         }
         expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(secondOwner ?? owner);
         expect(h.pool.resolveAutolockSessionForMcpSession("agent-B")).toBeUndefined();
+        if (readinessAttempts > 1) {
+          expect(recoveredExitListeners).toBeGreaterThan(0);
+          expect(recoveredProcess.listenerCount("exit")).toBe(recoveredExitListeners);
+          expect(recoveredProcess.stdout.listenerCount("data")).toBe(recoveredOutputListeners);
+        }
         expect(await h.db.selectFrom("device_sessions").selectAll().execute()).toHaveLength(
           secondOwner ? 2 : 1,
         );

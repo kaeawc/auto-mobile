@@ -466,13 +466,17 @@ export class TouchLatencyTracker {
         logger.debug(`[TouchLatency] Taking sample ${i + 1}/${sampleCount}`);
 
         const sampleResult = await this.takeSample(packageName, touchLocation, maxWaitMs, perf, i);
-        reportedLocation = sampleResult.tapPoint;
 
         if (sampleResult.animating) {
           animatingCount++;
         } else if (sampleResult.obstructed) {
           obstructedCount++;
         } else if (sampleResult.latencyMs !== null) {
+          // Only samples that actually injected a tap update the reported
+          // coordinate. Animating/obstructed samples issue no `input tap` and
+          // return the untouched initial `touchLocation`, so reporting their
+          // point would surface a coordinate no sample ever tapped (#6318).
+          reportedLocation = sampleResult.tapPoint;
           measurements.push(sampleResult.latencyMs);
           logger.debug(`[TouchLatency] Sample ${i + 1}: ${sampleResult.latencyMs}ms`);
         } else {

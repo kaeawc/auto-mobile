@@ -202,6 +202,11 @@ export interface RecentAppsArgs {
 
 export interface RotateArgs {
   orientation: "portrait" | "landscape";
+  /**
+   * Android only. `true` keeps the requested orientation locked; `false`
+   * explicitly restores automatic rotation; omit to preserve prior behavior.
+   */
+  lockOrientation?: boolean;
   platform?: Platform;
 }
 

@@ -400,7 +400,44 @@ describe("appId aliases on tool schemas", () => {
   });
 });
 
+describe("rotateSchema", () => {
+  test("documents opt-in persistent locking and explicit automatic-rotation restoration", () => {
+    const persistent = rotateSchema.safeParse({
+      orientation: "landscape",
+      lockOrientation: true,
+      platform: "android",
+    });
+    const restoreAutomatic = rotateSchema.safeParse({
+      orientation: "landscape",
+      lockOrientation: false,
+      platform: "android",
+    });
+    const defaultBehavior = rotateSchema.safeParse({
+      orientation: "landscape",
+      platform: "android",
+    });
+
+    expect(persistent.success).toBe(true);
+    expect(restoreAutomatic.success).toBe(true);
+    expect(defaultBehavior.success).toBe(true);
+  });
+});
+
 describe("generated tool definitions", () => {
+  test("rotate generated schema documents persistent locking and restoration", () => {
+    const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
+      name: string;
+      inputSchema?: { properties?: Record<string, unknown> };
+    }>;
+    const rotate = schemas.find((schema) => schema.name === "rotate");
+
+    expect(rotate?.inputSchema?.properties?.lockOrientation).toEqual({
+      description:
+        "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+      type: "boolean",
+    });
+  });
+
   test("changeLocalization generated schema conditionally requires appId for Android locale changes", () => {
     const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;

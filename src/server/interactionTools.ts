@@ -896,6 +896,12 @@ export const homeScreenSchema = addDeviceTargetingToSchema(
 export const rotateSchema = addDeviceTargetingToSchema(
   z.object({
     orientation: z.enum(["portrait", "landscape"]),
+    lockOrientation: z
+      .boolean()
+      .optional()
+      .describe(
+        "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+      ),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
     // its own.
@@ -1963,8 +1969,11 @@ export function registerInteractionTools() {
     progress?: ProgressCallback,
   ) => {
     try {
+      if (args.lockOrientation !== undefined && device.platform !== "android") {
+        throw new ActionableError("lockOrientation is supported only on Android devices.");
+      }
       const rotate = new Rotate(device);
-      const result = await rotate.execute(args.orientation, progress);
+      const result = await rotate.execute(args.orientation, progress, args.lockOrientation);
 
       return createJSONToolResponse({
         message: `Rotated device to ${args.orientation} orientation`,

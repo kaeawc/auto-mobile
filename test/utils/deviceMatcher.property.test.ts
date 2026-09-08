@@ -237,7 +237,10 @@ describe("compareVersions over long numeric components (property-based, #6321)",
   test("agrees in sign with a BigInt (precision-exact) oracle", () => {
     fc.assert(
       fc.property(bigVersionParts, bigVersionParts, (a, b) => {
-        return Math.sign(compareVersions(bigVersionOf(a), bigVersionOf(b))) === refBigIntCompareSign(a, b);
+        return (
+          Math.sign(compareVersions(bigVersionOf(a), bigVersionOf(b))) ===
+          refBigIntCompareSign(a, b)
+        );
       }),
       LONG_RUN_OPTIONS,
     );

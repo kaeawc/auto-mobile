@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   clearAndroidKeyValueFileDirect,
+  isSharedPreferencesDirectFileFallbackError,
   isSharedPreferencesInspectionDisabledError,
+  isSharedPreferencesMutationDisabledError,
   removeAndroidKeyValueDirect,
   setAndroidKeyValueDirect,
 } from "../../../src/features/storage/AndroidSharedPreferencesKeyValueFile";
@@ -46,6 +48,65 @@ describe("isSharedPreferencesInspectionDisabledError", () => {
 
   test("does not match a non-Error thrown value", () => {
     expect(isSharedPreferencesInspectionDisabledError("boom")).toBe(false);
+  });
+
+  test("does NOT match the distinct mutations-disabled policy error (#6347)", () => {
+    // The inspection gate and the mutation-policy gate are separate SDK refusals; only the
+    // combined predicate below should span both.
+    expect(
+      isSharedPreferencesInspectionDisabledError(
+        new Error("SharedPreferences mutations are disabled by SDK policy"),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isSharedPreferencesMutationDisabledError (#6347)", () => {
+  test("matches the SDK's disabled-mutation policy error text", () => {
+    expect(
+      isSharedPreferencesMutationDisabledError(
+        new Error(
+          "Failed to remove key-value entry: Error: SharedPreferences mutations are disabled by SDK policy",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test("does not match the inspection-disabled error", () => {
+    expect(
+      isSharedPreferencesMutationDisabledError(
+        new Error("SharedPreferences inspection is disabled"),
+      ),
+    ).toBe(false);
+  });
+
+  test("does not match an unrelated error or a non-Error value", () => {
+    expect(isSharedPreferencesMutationDisabledError(new Error("WebSocket not connected"))).toBe(
+      false,
+    );
+    expect(isSharedPreferencesMutationDisabledError("boom")).toBe(false);
+  });
+});
+
+describe("isSharedPreferencesDirectFileFallbackError (#6292, #6347)", () => {
+  test("matches BOTH the inspection-disabled and mutations-disabled SDK gates", () => {
+    expect(
+      isSharedPreferencesDirectFileFallbackError(
+        new Error("SharedPreferences inspection is disabled"),
+      ),
+    ).toBe(true);
+    expect(
+      isSharedPreferencesDirectFileFallbackError(
+        new Error("SharedPreferences mutations are disabled by SDK policy"),
+      ),
+    ).toBe(true);
+  });
+
+  test("does not match a genuine transport/argument failure", () => {
+    expect(
+      isSharedPreferencesDirectFileFallbackError(new Error("run-as: package not debuggable")),
+    ).toBe(false);
+    expect(isSharedPreferencesDirectFileFallbackError("boom")).toBe(false);
   });
 });
 

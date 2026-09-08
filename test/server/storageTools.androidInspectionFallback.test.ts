@@ -30,28 +30,40 @@ const APP_ID = "dev.jasonpearson.automobile.playground";
 const FILE_NAME = "settings";
 
 const INSPECTION_DISABLED_ERROR = () => new Error("SharedPreferences inspection is disabled");
+// Issue #6347: a distinct SDK refusal (SharedPreferencesError.MutationNotAllowed) that the
+// original #6292 fallback (keyed only on "inspection is disabled") did not match, re-opening the
+// setPreference/removeKeyValue asymmetry whenever the app's SDK policy disables mutations.
+const MUTATION_DISABLED_ERROR = () =>
+  new Error("SharedPreferences mutations are disabled by SDK policy");
 
-function inspectionDisabledClient(
+function disabledClient(
+  makeError: () => Error,
   overrides: Partial<AndroidKeyValueClient> = {},
 ): AndroidKeyValueClient {
   return {
     setPreference: async () => {
-      throw INSPECTION_DISABLED_ERROR();
+      throw makeError();
     },
     removePreference: async () => {
-      throw INSPECTION_DISABLED_ERROR();
+      throw makeError();
     },
     clearPreferenceStore: async () => {
-      throw INSPECTION_DISABLED_ERROR();
+      throw makeError();
     },
     listDataStores: async () => {
-      throw INSPECTION_DISABLED_ERROR();
+      throw makeError();
     },
     getDataStore: async () => {
-      throw INSPECTION_DISABLED_ERROR();
+      throw makeError();
     },
     ...overrides,
   };
+}
+
+function inspectionDisabledClient(
+  overrides: Partial<AndroidKeyValueClient> = {},
+): AndroidKeyValueClient {
+  return disabledClient(INSPECTION_DISABLED_ERROR, overrides);
 }
 
 function singleAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
@@ -228,6 +240,80 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
         key: "probeA",
       }),
     ).rejects.toThrow(/debuggable\/test build/);
+  });
+
+  test("setKeyValue falls back to the direct-file path when the SDK reports mutations disabled by policy (#6347)", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(`cat shared_prefs/${FILE_NAME}.xml`, createExecResult("<map/>", ""));
+
+    setStorageToolsDependenciesForTesting({
+      androidClientFactory: () => disabledClient(MUTATION_DISABLED_ERROR),
+      adbClientFactory: singleAdbFactory(adb),
+    });
+
+    const result = await toolHandler("setKeyValue")(ANDROID_DEVICE, {
+      appId: APP_ID,
+      name: FILE_NAME,
+      key: "probeB",
+      value: "2",
+      type: "STRING",
+    });
+
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.success).toBe(true);
+    expect(parsed.warning).toMatch(/relaunch/i);
+    expect(parsed.warning).toContain(APP_ID);
+
+    const writeCommand = adb
+      .getExecutedCommands()
+      .find((cmd) => cmd.includes(`base64 -d > shared_prefs/${FILE_NAME}.xml`));
+    expect(writeCommand).toBeDefined();
+  });
+
+  test("removeKeyValue falls back and removes a key when the SDK reports mutations disabled by policy (#6347)", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence(`cat shared_prefs/${FILE_NAME}.xml`, [
+      createExecResult('<map><string name="probeA">1</string></map>', ""),
+    ]);
+
+    setStorageToolsDependenciesForTesting({
+      androidClientFactory: () => disabledClient(MUTATION_DISABLED_ERROR),
+      adbClientFactory: singleAdbFactory(adb),
+    });
+
+    const result = await toolHandler("removeKeyValue")(ANDROID_DEVICE, {
+      appId: APP_ID,
+      name: FILE_NAME,
+      key: "probeA",
+    });
+
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.success).toBe(true);
+
+    const writeCommand = adb
+      .getExecutedCommands()
+      .find((cmd) => cmd.includes(`base64 -d > shared_prefs/${FILE_NAME}.xml`));
+    expect(writeCommand).toBeDefined();
+    const match = writeCommand!.match(/([A-Za-z0-9+/=]{24,})/);
+    const writtenXml = Buffer.from(match![1], "base64").toString("utf8");
+    expect(writtenXml).not.toContain("probeA");
+  });
+
+  test("clearKeyValueFile falls back when the SDK reports mutations disabled by policy (#6347)", async () => {
+    const adb = new FakeAdbExecutor();
+
+    setStorageToolsDependenciesForTesting({
+      androidClientFactory: () => disabledClient(MUTATION_DISABLED_ERROR),
+      adbClientFactory: singleAdbFactory(adb),
+    });
+
+    const result = await toolHandler("clearKeyValueFile")(ANDROID_DEVICE, {
+      appId: APP_ID,
+      name: FILE_NAME,
+    });
+
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.success).toBe(true);
   });
 
   test("listDataStores rewrites the disabled-inspection error with actionable guidance (no filesystem fallback exists for DataStore)", async () => {

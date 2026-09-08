@@ -1095,8 +1095,20 @@ export class DaemonMcpProxy {
       return;
     }
     const disconnect = Promise.withResolvers<void>();
-    this.daemonShutdownDisconnect = disconnect.promise;
+    const barrier = disconnect.promise
+      .then(() => this.waitForDaemonShutdownRestartWindow())
+      .catch((error) => {
+        // Readiness is re-checked by doConnect; this barrier only prevents the
+        // deterministic stale-PID/no-startup-lock gap from racing that path.
+        logger.warn(`[DaemonMcpProxy] Failed while awaiting daemon restart transition: ${error}`);
+      });
+    this.daemonShutdownDisconnect = barrier;
     this.resolveDaemonShutdownDisconnect = disconnect.resolve;
+    void barrier.then(() => {
+      if (this.daemonShutdownDisconnect === barrier) {
+        this.daemonShutdownDisconnect = null;
+      }
+    });
     // Keep the old client attached long enough to observe peer EOF, but prevent
     // ensureConnected() from treating this quiesced incarnation as reusable.
     this.connected = false;
@@ -1104,9 +1116,23 @@ export class DaemonMcpProxy {
 
   private completeDaemonShutdownDisconnect(): void {
     const resolve = this.resolveDaemonShutdownDisconnect;
-    this.daemonShutdownDisconnect = null;
     this.resolveDaemonShutdownDisconnect = null;
     resolve?.();
+  }
+
+  private async waitForDaemonShutdownRestartWindow(): Promise<void> {
+    const socketPath = this.config.socketPath ?? SOCKET_PATH;
+    const deadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    while (!this.closing && this.timer.now() < deadline) {
+      if (await DaemonClient.isAvailable(socketPath)) {
+        return;
+      }
+      const status = await this.daemonManager.status();
+      if (!status.running || this.daemonManager.isStartupLockHeldByLiveProcess()) {
+        return;
+      }
+      await this.timer.sleep(Math.min(100, deadline - this.timer.now()));
+    }
   }
 
   /**

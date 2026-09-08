@@ -212,19 +212,23 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     const M2 = "replacement-session";
     const oldDaemon = acquiringClient(sessionManager, [M1, "wrong-old-daemon-session"]);
     const replacementDaemon = acquiringClient(sessionManager, [M2]);
+    const manager = matchingDaemonManager();
+    let daemonAvailable = true;
+    isAvailableSpy!.mockImplementation(async () => daemonAvailable);
     let clientFactoryCalls = 0;
     const proxy = new DaemonMcpProxy({
       clientFactory: () => {
         clientFactoryCalls += 1;
         return clientFactoryCalls === 1 ? oldDaemon.client : replacementDaemon.client;
       },
-      daemonManager: matchingDaemonManager(),
-      autoStartDaemon: false,
+      daemonManager: manager,
+      autoStartDaemon: true,
       timer,
     });
 
     try {
       await proxy.callTool("getAndroid", { avdName: "am-api34-ga-arm64" });
+      daemonAvailable = false;
       oldDaemon.client.emitNotification(
         SESSION_RELEASED_NOTIFICATION_METHOD,
         M1,
@@ -239,8 +243,22 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       expect(replacementDaemon.nextIndex()).toBe(0);
 
       oldDaemon.client.emitConnectionClosed();
+      for (let i = 0; i < 20 && timer.getPendingSleepCount() === 0; i++) {
+        await Promise.resolve();
+      }
+
+      // Peer EOF precedes DaemonManager.restart() clearing the old PID record
+      // and taking the startup lock. Do not run doConnect in that deterministic
+      // gap: it would see running=true with no lock holder and reject recovery.
+      expect(timer.getPendingSleeps()).toEqual([100]);
+      expect(manager.startCalled).toBe(false);
+      expect(replacementDaemon.nextIndex()).toBe(0);
+
+      manager.statusResult = { running: false };
+      await timer.advanceTimeAsync(100);
 
       await expect(reacquired).resolves.toEqual(deviceStartResult(M2));
+      expect(manager.startCalled).toBe(true);
       expect(replacementDaemon.nextIndex()).toBe(1);
       expect(sessionManager.getSession(M2)?.hasReceivedHeartbeat).toBe(true);
     } finally {

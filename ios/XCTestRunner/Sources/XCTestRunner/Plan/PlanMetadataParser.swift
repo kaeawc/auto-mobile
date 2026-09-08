@@ -191,7 +191,7 @@ enum PlanMetadataParser {
                 if !rawTrimmed.hasPrefix("-") {
                     break
                 }
-                let item = unquote(rawTrimmed.dropFirst().trimmingCharacters(in: .whitespaces))
+                let item = unquoteFlowScalar(rawTrimmed.dropFirst().trimmingCharacters(in: .whitespaces))
                 if !item.isEmpty {
                     keys.insert(item)
                 }
@@ -280,6 +280,7 @@ enum PlanMetadataParser {
         var keys: [String] = []
         var current = ""
         var itemHasQuotedChar = false
+        var itemHadDoubleQuote = false
         var depth = 0
         var started = false
         var activeQuote: Character?
@@ -291,13 +292,25 @@ enum PlanMetadataParser {
         // is a valid key and is preserved rather than trimmed away (#6097).
         func flushItem() {
             let trimmed = current.trimmingCharacters(in: .whitespaces)
+            let raw: String?
             if !trimmed.isEmpty {
-                keys.append(trimmed)
+                raw = trimmed
             } else if itemHasQuotedChar {
-                keys.append(current)
+                // A quoted scalar whose content is only whitespace (e.g. `" "`) is a valid key; keep
+                // the untrimmed content so the space survives (#6097).
+                raw = current
+            } else {
+                raw = nil
+            }
+            if let raw {
+                // A double-quoted item's escapes were accumulated raw; decode the full escape set
+                // now (issue #6141). A plain/single-quoted item is kept verbatim so a literal
+                // `${...}` placeholder or `\`-containing plain scalar is not mis-decoded.
+                keys.append(itemHadDoubleQuote ? decodeDoubleQuoted(raw) : raw)
             }
             current = ""
             itemHasQuotedChar = false
+            itemHadDoubleQuote = false
         }
 
         // Drop a trailing CR so a CRLF-authored quoted multiline key does not embed `\r` (#6097).
@@ -311,16 +324,12 @@ enum PlanMetadataParser {
                 if let quote = activeQuote {
                     if quote == "\"" {
                         if escaped {
-                            // `\"` decodes cleanly to `"`; any OTHER escape (`\xNN`, `\uNNNN`, `\n`, …)
-                            // is NOT spec-decoded here — keep the backslash so the value layer sees this
-                            // key as low-confidence and over-redacts rather than trusting a coincidental
-                            // (decoy) match (#6097).
-                            if character == "\"" {
-                                current.append("\"")
-                            } else {
-                                current.append("\\")
-                                current.append(character)
-                            }
+                            // Accumulate the escape sequence RAW (`\` + the char); `decodeDoubleQuoted`
+                            // resolves the full escape set at flush (`\xNN`, `\uNNNN`, `\U........`,
+                            // `\n`, `\t`, `\0`, `\/`, …) to the spec-correct key name (issue #6141). A
+                            // `\"` here is a literal quote, not the scalar terminator (#6097).
+                            current.append("\\")
+                            current.append(character)
                             itemHasQuotedChar = true
                             escaped = false
                         } else if character == "\\" {
@@ -346,6 +355,7 @@ enum PlanMetadataParser {
                     inComment = true
                 } else if character == "\"" || character == "'" {
                     activeQuote = character
+                    if character == "\"" { itemHadDoubleQuote = true }
                 } else if character == "[" {
                     depth += 1
                     current.append(character)
@@ -427,40 +437,90 @@ enum PlanMetadataParser {
         return result
     }
 
-    /// Unquote a flow-list scalar: a single-quoted scalar is literal, a double-quoted scalar has its
-    /// backslash escapes resolved (so `"a\"]b"` yields `a"]b`), matching the escape tracking used to
-    /// find the sequence terminator and to split items (#6097).
+    /// Unquote a flow-list scalar: a single-quoted scalar is literal apart from `''` -> `'`, a
+    /// double-quoted scalar has its full escape set resolved (`\xNN`, `\uNNNN`, `\U........`, `\n`,
+    /// `\t`, `\0`, `\/`, …). Matches the escape tracking used to find the sequence terminator and to
+    /// split items (#6097), and the spec-correct decoding snakeyaml gives the Android runner (#6141).
     private static func unquoteFlowScalar(_ value: String) -> String {
         if value.count >= 2 {
             if value.hasPrefix("\"") && value.hasSuffix("\"") {
-                return unescapeDoubleQuoted(String(value.dropFirst().dropLast()))
+                return decodeDoubleQuoted(String(value.dropFirst().dropLast()))
             }
             if value.hasPrefix("'") && value.hasSuffix("'") {
-                return String(value.dropFirst().dropLast())
+                return String(value.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
             }
         }
         return value
     }
 
-    /// Resolve backslash escapes inside a double-quoted YAML scalar: `\` escapes the next character
-    /// literally (so `\"` -> `"`, `\\` -> `\`). Sufficient for key names (#6097).
-    private static func unescapeDoubleQuoted(_ inner: String) -> String {
+    /// Resolve the escape sequences inside a double-quoted YAML scalar to the spec-correct key name
+    /// (issue #6141). iOS has no YAML dependency, so this decodes the escape set the runner cares
+    /// about: `\xNN` / `\uNNNN` / `\U........` hex/Unicode escapes, plus `\n` `\t` `\r` `\0` `\a`
+    /// `\b` `\f` `\v` `\e` `\"` `\\` `\/` `\ ` `\N` `\_` `\L` `\P`. A trailing `\` with nothing to
+    /// escape, or a malformed `\x`/`\u`/`\U` sequence, is kept literal so a bad escape never drops
+    /// data (fail-safe over-capture). An unknown escape drops the backslash and keeps the character,
+    /// matching lenient decoders.
+    private static func decodeDoubleQuoted(_ inner: String) -> String {
         var result = ""
-        var escaped = false
-        for character in inner {
-            if escaped {
+        result.reserveCapacity(inner.count)
+        var iterator = inner.makeIterator()
+        while let character = iterator.next() {
+            guard character == "\\" else {
                 result.append(character)
-                escaped = false
-            } else if character == "\\" {
-                escaped = true
-            } else {
-                result.append(character)
+                continue
+            }
+            guard let escape = iterator.next() else {
+                result.append("\\")
+                break
+            }
+            switch escape {
+            case "0": result.append("\u{0000}")
+            case "a": result.append("\u{0007}")
+            case "b": result.append("\u{0008}")
+            case "t", "\t": result.append("\u{0009}")
+            case "n": result.append("\u{000A}")
+            case "v": result.append("\u{000B}")
+            case "f": result.append("\u{000C}")
+            case "r": result.append("\u{000D}")
+            case "e": result.append("\u{001B}")
+            case " ": result.append("\u{0020}")
+            case "\"": result.append("\"")
+            case "/": result.append("/")
+            case "\\": result.append("\\")
+            case "N": result.append("\u{0085}")
+            case "_": result.append("\u{00A0}")
+            case "L": result.append("\u{2028}")
+            case "P": result.append("\u{2029}")
+            case "x": result.append(readHexScalar(&iterator, digits: 2, fallback: escape))
+            case "u": result.append(readHexScalar(&iterator, digits: 4, fallback: escape))
+            case "U": result.append(readHexScalar(&iterator, digits: 8, fallback: escape))
+            default:
+                // Unknown escape: lenient decoders drop the backslash and keep the character.
+                result.append(escape)
             }
         }
-        if escaped {
-            result.append("\\")
-        }
         return result
+    }
+
+    /// Read exactly `digits` hex characters and return the decoded scalar. On a malformed sequence
+    /// (too few hex digits, or a value that is not a valid Unicode scalar) fall back to emitting the
+    /// escape letter followed by the consumed characters — a bad escape never crashes or drops data.
+    private static func readHexScalar(
+        _ iterator: inout String.Iterator,
+        digits: Int,
+        fallback: Character
+    ) -> String {
+        var hex = ""
+        for _ in 0..<digits {
+            guard let next = iterator.next() else { break }
+            hex.append(next)
+        }
+        if hex.count == digits,
+           let code = UInt32(hex, radix: 16),
+           let scalar = Unicode.Scalar(code) {
+            return String(scalar)
+        }
+        return String(fallback) + hex
     }
 
     private static func parsePlatform(_ value: String) throws -> AutoMobilePlanExecutor.PlanPlatform {

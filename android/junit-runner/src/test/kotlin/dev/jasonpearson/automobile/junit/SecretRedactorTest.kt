@@ -189,12 +189,44 @@ class SecretRedactorTest {
   }
 
   @Test
-  fun `a plain multiline flow scalar captures each line's token (fail-safe over-capture)`() {
-    // A plain (unquoted) scalar spanning lines is captured token-per-line so both are redacted,
-    // rather
-    // than blended into one mis-named key (#6097 Codex — plain-scalar folding).
+  fun `a plain multiline flow scalar folds to one key per YAML spec`() {
+    // A plain (unquoted) scalar spanning lines folds its line break to a space per the YAML spec,
+    // so
+    // `[API⏎TOKEN]` is the single key `API TOKEN` — snakeyaml decodes it exactly (issue #6141).
+    // Still fail-safe: if no parameter matches `API TOKEN`, the value layer over-redacts.
     val yaml = "name: P\nsecretParameters: [\n  API\n  TOKEN\n]\nsteps:\n  - tool: observe"
-    assertEquals(setOf("API", "TOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+    assertEquals(setOf("API TOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `decodes double-quoted hex unicode and control escapes to the spec-correct key name`() {
+    // Issue #6141: the hand-rolled scanner left these escapes literal; snakeyaml spec-decodes them.
+    // `\x54` -> T, `A` -> A, `\U00000042` -> B, plus `\t`/`\n` control escapes.
+    val hex = "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("APITOKEN"), SecretRedactor.parsePlanSecretKeys(hex))
+
+    val unicode = "name: P\nsecretParameters: [\"\\u0041\\U00000042\"]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("AB"), SecretRedactor.parsePlanSecretKeys(unicode))
+
+    val control = "name: P\nsecretParameters: [\"A\\tB\\nC\"]\nsteps:\n  - tool: observe"
+    assertEquals(setOf("A\tB\nC"), SecretRedactor.parsePlanSecretKeys(control))
+  }
+
+  @Test
+  fun `decodes a block-sequence double-quoted hex-escaped key`() {
+    // The block-sequence form is decoded the same way as the flow form (issue #6141).
+    val yaml = "name: P\nsecretParameters:\n  - \"API\\x54OKEN\"\nsteps:\n  - tool: observe"
+    assertEquals(setOf("APITOKEN"), SecretRedactor.parsePlanSecretKeys(yaml))
+  }
+
+  @Test
+  fun `falls back to the best-effort scanner when the substituted plan is not loadable`() {
+    // A substituted value can inject a newline that truncates the flow sequence, so snakeyaml
+    // cannot
+    // load the document. The best-effort scanner still over-captures every declared token so no
+    // secret's value is dropped (issue #6141 fail-safe).
+    val truncated = "name: P\nsecretParameters: [\n  TOKEN,\n  PASSWORD"
+    assertEquals(setOf("TOKEN", "PASSWORD"), SecretRedactor.parsePlanSecretKeys(truncated))
   }
 
   @Test

@@ -60,6 +60,28 @@ class FakeProbeWorker {
   }
 }
 
+/**
+ * A worker that never responds to `postMessage` — simulates a probe
+ * round-trip that wedges mid-flight so only `check()`'s own timeout can
+ * bound the wait (issue #6655).
+ */
+class WedgedProbeWorker {
+  terminateCalls = 0;
+
+  postMessage(_message: { id: number }): void {
+    // Intentionally never posts a response.
+  }
+
+  on(): this {
+    return this;
+  }
+
+  async terminate(): Promise<number> {
+    this.terminateCalls++;
+    return 0;
+  }
+}
+
 describe("DefaultDatabaseHealthProbe", () => {
   let tempDirs: string[] = [];
 
@@ -173,5 +195,49 @@ describe("DefaultDatabaseHealthProbe", () => {
     await probe.check();
 
     expect(workers).toHaveLength(2);
+  });
+
+  test("clears pendingRequest and leaks no timer when check()'s timeout wins over a wedged worker", async () => {
+    const timer = new FakeTimer();
+    const wedgedWorker = new WedgedProbeWorker();
+    const healthyWorkers: FakeProbeWorker[] = [];
+    let workerFactoryCalls = 0;
+    const probe = new DefaultDatabaseHealthProbe({
+      timer,
+      getMigrationsError: () => null,
+      getDatabasePath: () => "/tmp/auto-mobile-test.db",
+      timeoutMs: 100,
+      workerFactory: () => {
+        workerFactoryCalls += 1;
+        if (workerFactoryCalls === 1) {
+          return wedgedWorker;
+        }
+        const worker = new FakeProbeWorker();
+        healthyWorkers.push(worker);
+        return worker;
+      },
+    });
+
+    const firstCheck = probe.check();
+    // Force whichever timer was registered LAST to fire first, simulating a
+    // Timer/runtime that does not guarantee FIFO-among-equal-delay firing
+    // (the fragility #6655 calls out: two independently-armed same-duration
+    // timeouts with no enforced ordering).
+    timer.fireNewestPendingTimeout();
+
+    await expect(firstCheck).rejects.toThrow("Database health probe timed out after 100ms");
+
+    // The losing timer (if the implementation still races two of them) must
+    // not be left pending once check() has settled.
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+
+    // A subsequent check() must attempt a fresh probe rather than
+    // short-circuiting on "Database health probe is already running" because
+    // the abandoned worker's pendingRequest was never cleared.
+    await expect(probe.check()).resolves.toBeUndefined();
+    expect(healthyWorkers).toHaveLength(1);
+
+    await probe.dispose();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

@@ -3,6 +3,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { shellQuote } from "../../../utils/shellQuote";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../../observe/android";
 import type {
@@ -30,6 +31,14 @@ import {
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
 const MIN_APP_LOCALE_API_LEVEL = 33;
 
+// Bounds for waiting on the framework to come back after the legacy (<33)
+// `stop; start` restart. We poll `sys.boot_completed` rather than racing the
+// read-back against an in-progress restart (issue #6346). Values are generous
+// enough for a real cold framework restart but injected via the Timer seam so
+// unit tests drive them deterministically without real sleeps.
+const FRAMEWORK_RESTART_READY_TIMEOUT_MS = 60_000;
+const FRAMEWORK_RESTART_POLL_INTERVAL_MS = 2_000;
+
 /**
  * Android implementation of {@link SystemConfigurationAdapter}. Uses
  * ADB shell commands (with an accessibility-service fast path for
@@ -45,6 +54,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   constructor(
     private readonly device: BootedDevice,
     private readonly adb: AdbExecutor,
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
@@ -65,7 +75,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     options: BroadcastOptions,
     method: string,
   ): Promise<SetLocaleResult> {
-    const previousLanguageTag = await this.getCurrentLocaleTag();
+    // The legacy path can only change the whole device, so the previous value we
+    // record for restore is the persisted system prop we are about to overwrite —
+    // not `getCurrentLocaleTag()`, which can resolve to a per-app override.
+    const previousLanguageTag = await this.readSetting("shell getprop persist.sys.locale");
 
     try {
       await this.runShellCommand(`shell setprop persist.sys.locale ${shellQuote(languageTag)}`);
@@ -76,18 +89,37 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Failed to set locale: ${errorMsg}`,
+        localeScope: "system",
+        error: `Failed to set device-wide locale: ${errorMsg}`,
       };
     }
 
-    const effectiveLanguageTag = await this.getEffectiveLocaleTag();
-    if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
+    // Wait (bounded, via the injected Timer) for the framework to finish
+    // restarting before reading anything back. Racing the read-back against an
+    // in-progress `stop; start` is what made this path report success:false for a
+    // change it had actually applied, and wedged concurrent tools (issue #6346).
+    const frameworkReady = await this.waitForFrameworkReady();
+
+    // Read back the exact prop we wrote. `persist.sys.locale` is a plain system
+    // property, readable even while the framework is still coming up, so this
+    // never races the restart the way the old `am get-config` read-back did.
+    const persistedLanguageTag = await this.readSetting("shell getprop persist.sys.locale");
+    if (!this.localeTagsMatch(persistedLanguageTag, languageTag)) {
       return {
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Read-back verification failed: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`,
+        localeScope: "system",
+        error: `Read-back verification failed: expected persist.sys.locale "${languageTag}" but got "${persistedLanguageTag ?? "null"}"`,
       };
+    }
+
+    if (!frameworkReady) {
+      logger.warn(
+        `[SystemConfigurationManager] Device-wide locale ${languageTag} was applied and persisted, ` +
+          `but the framework did not report boot_completed within ${FRAMEWORK_RESTART_READY_TIMEOUT_MS}ms after stop; start. ` +
+          "Subsequent tools may briefly see the device as not fully booted.",
+      );
     }
 
     const broadcasted = options.broadcast === false ? false : await this.broadcastLocaleChange();
@@ -97,8 +129,42 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       languageTag,
       previousLanguageTag,
       method,
+      localeScope: "system",
       broadcasted,
     };
+  }
+
+  /**
+   * Poll `sys.boot_completed` until the framework reports it is back up after a
+   * `stop; start`, or the bounded timeout elapses. Uses the injected {@link Timer}
+   * so tests drive the restart timing deterministically instead of sleeping.
+   * Returns `true` if the framework became ready, `false` on timeout.
+   */
+  private async waitForFrameworkReady(): Promise<boolean> {
+    const deadline = this.timer.now() + FRAMEWORK_RESTART_READY_TIMEOUT_MS;
+    for (;;) {
+      let bootCompleted: string | null = null;
+      try {
+        const result = await this.adb.executeCommand(
+          "shell getprop sys.boot_completed",
+          undefined,
+          undefined,
+          true,
+        );
+        bootCompleted = normalizeSettingValue(result.stdout);
+      } catch (error) {
+        // Expected while the framework is mid-restart: the shell may briefly
+        // reject commands. Swallow and keep polling until the deadline.
+        logger.debug(`[SystemConfigurationManager] boot_completed probe failed: ${error}`);
+      }
+      if (bootCompleted === "1") {
+        return true;
+      }
+      if (this.timer.now() >= deadline) {
+        return false;
+      }
+      await this.timer.sleep(FRAMEWORK_RESTART_POLL_INTERVAL_MS);
+    }
   }
 
   private async setTargetAppLocale(
@@ -157,6 +223,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       languageTag,
       previousLanguageTag,
       method: `cmd locale set-app-locales ${appId} --user ${targetUserId}`,
+      localeScope: "app",
       broadcasted,
     };
   }

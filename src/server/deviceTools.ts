@@ -3612,6 +3612,7 @@ async function reserveInitialDeviceForReadiness(
   daemonState: DaemonState,
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
+  mcpSessionId: string | undefined,
 ): Promise<void> {
   const devicePool = getStartDevicePool(daemonState);
   if (!devicePool) {
@@ -3622,6 +3623,8 @@ async function reserveInitialDeviceForReadiness(
       boot.device.deviceId,
       boot.device,
       boot.sourceImage?.name ?? boot.device.name,
+      undefined,
+      isDevicePoolAutolockEnabled() ? { mcpSessionId } : undefined,
     ),
   );
 }
@@ -5013,7 +5016,12 @@ export function registerDeviceTools() {
           }
         : undefined);
     const daemonState = DaemonState.getInstance();
-    await reserveInitialDeviceForReadiness(daemonState, state.boot, releaseReadinessReservations);
+    await reserveInitialDeviceForReadiness(
+      daemonState,
+      state.boot,
+      releaseReadinessReservations,
+      args.__mcpSessionId,
+    );
 
     // A new incarnation must not inherit a prior intentional-shutdown marker
     // while its per-device runner setup is in flight.
@@ -5082,18 +5090,24 @@ export function registerDeviceTools() {
         state.boot,
         sourceImage,
       );
+      // Recovery must revalidate the caller through the same autolock path;
+      // a preserved UUID alone is not proof that this client owns the session.
       const boundSessionId =
-        readinessResult.preservedSessionId ??
-        (await bindBootedDeviceSession(
-          state.boot.device,
-          args,
-          state.boot.source === "cold-boot" ? sourceImage : undefined,
-          state.boot.processHandle,
-          new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-          verifiedWarmAndroidAvdIdentity,
-        ));
+        readinessResult.preservedSessionId && !isDevicePoolAutolockEnabled()
+          ? readinessResult.preservedSessionId
+          : await bindBootedDeviceSession(
+              state.boot.device,
+              args,
+              state.boot.source === "cold-boot" && !readinessResult.preservedSessionId
+                ? sourceImage
+                : undefined,
+              // Recovery already registered this process and its output tail.
+              readinessResult.preservedSessionId ? undefined : state.boot.processHandle,
+              new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+              verifiedWarmAndroidAvdIdentity,
+            );
       if (readinessResult.preservedSessionId) {
-        // #6227 round 7: the System UI ANR recovery path above bypasses
+        // #6227 round 7: without autolock, System UI ANR recovery bypasses
         // `bindBootedDeviceSession` (and therefore its own
         // `recordAcquiredSessionReadiness` call) entirely when a preserved
         // session is being reused. But by this point

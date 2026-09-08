@@ -10,6 +10,13 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
 
+type AlreadyAppliedOrientationDecision =
+  | { kind: "handled"; result: RotateResult }
+  | {
+      kind: "requires-rotation";
+      reason: "orientation-differs" | "live-rotation-unavailable" | "live-orientation-changed";
+    };
+
 export class Rotate extends BaseVisualChange {
   // Serializes the read-auto-rotate -> disable -> rotate -> restore-auto-rotate
   // critical section per device, so two concurrent rotations against the SAME
@@ -390,18 +397,18 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape",
     value: number,
     currentOrientation: string,
-  ): Promise<RotateResult | null> {
+  ): Promise<AlreadyAppliedOrientationDecision> {
     const liveRotation = await this.readLiveRotation();
     if (liveRotation === null) {
       // The normal rotation path can still establish the requested orientation
       // when the exact live rotation is temporarily unavailable.
-      return null;
+      return { kind: "requires-rotation", reason: "live-rotation-unavailable" };
     }
     const liveOrientation = liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape";
     if (liveOrientation !== orientation) {
       // The display changed after the initial read; perform a normal requested
       // rotation instead of locking a now-opposite orientation.
-      return null;
+      return { kind: "requires-rotation", reason: "live-orientation-changed" };
     }
 
     try {
@@ -414,15 +421,18 @@ export class Rotate extends BaseVisualChange {
     } catch (error) {
       logger.warn(`Failed to lock the current ${orientation} orientation: ${error}`, error);
       return {
-        success: false,
-        orientation,
-        value,
-        currentOrientation,
-        previousOrientation: currentOrientation,
-        rotationPerformed: false,
-        orientationLockHandled: false,
-        orientationLockState: await this.getOrientationLockState(),
-        error: `Failed to lock the device in its current ${orientation} orientation: ${error}`,
+        kind: "handled",
+        result: {
+          success: false,
+          orientation,
+          value,
+          currentOrientation,
+          previousOrientation: currentOrientation,
+          rotationPerformed: false,
+          orientationLockHandled: false,
+          orientationLockState: await this.getOrientationLockState(),
+          error: `Failed to lock the device in its current ${orientation} orientation: ${error}`,
+        },
       };
     }
 
@@ -436,28 +446,34 @@ export class Rotate extends BaseVisualChange {
             ? "portrait"
             : "landscape";
       return {
-        success: false,
-        orientation,
-        value,
-        currentOrientation: achievedOrientation,
-        previousOrientation: currentOrientation,
-        rotationPerformed: false,
-        orientationLockHandled: false,
-        orientationLockState,
-        error: `Device was already in ${orientation} orientation, but its exact locked rotation could not be confirmed (auto-rotate is ${orientationLockState}).`,
+        kind: "handled",
+        result: {
+          success: false,
+          orientation,
+          value,
+          currentOrientation: achievedOrientation,
+          previousOrientation: currentOrientation,
+          rotationPerformed: false,
+          orientationLockHandled: false,
+          orientationLockState,
+          error: `Device was already in ${orientation} orientation, but its exact locked rotation could not be confirmed (auto-rotate is ${orientationLockState}).`,
+        },
       };
     }
 
     return {
-      success: true,
-      orientation,
-      value,
-      currentOrientation,
-      previousOrientation: currentOrientation,
-      rotationPerformed: false,
-      orientationLockHandled: true,
-      orientationLockState,
-      message: `Locked device orientation to ${orientation}.`,
+      kind: "handled",
+      result: {
+        success: true,
+        orientation,
+        value,
+        currentOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: false,
+        orientationLockHandled: true,
+        orientationLockState,
+        message: `Locked device orientation to ${orientation}.`,
+      },
     };
   }
 
@@ -480,9 +496,9 @@ export class Rotate extends BaseVisualChange {
     autoRotateState: "locked" | "enabled" | "unknown",
     preserveLock: boolean,
     restoreAutomaticRotation: boolean,
-  ): Promise<RotateResult | null> {
+  ): Promise<AlreadyAppliedOrientationDecision> {
     if (currentOrientation !== orientation) {
-      return null;
+      return { kind: "requires-rotation", reason: "orientation-differs" };
     }
 
     const initialOrientationLockState: OrientationLockState =
@@ -499,15 +515,18 @@ export class Rotate extends BaseVisualChange {
       )
     ) {
       return {
-        success: true,
-        orientation,
-        value,
-        currentOrientation,
-        previousOrientation: currentOrientation,
-        rotationPerformed: false,
-        orientationLockHandled: false,
-        orientationLockState: initialOrientationLockState,
-        message: `Device is already in ${orientation} orientation`,
+        kind: "handled",
+        result: {
+          success: true,
+          orientation,
+          value,
+          currentOrientation,
+          previousOrientation: currentOrientation,
+          rotationPerformed: false,
+          orientationLockHandled: false,
+          orientationLockState: initialOrientationLockState,
+          message: `Device is already in ${orientation} orientation`,
+        },
       };
     }
 
@@ -516,7 +535,7 @@ export class Rotate extends BaseVisualChange {
     }
 
     if (!restoreAutomaticRotation) {
-      return null;
+      return { kind: "requires-rotation", reason: "orientation-differs" };
     }
 
     const { achievedOrientation, warning } =
@@ -524,7 +543,24 @@ export class Rotate extends BaseVisualChange {
     const orientationLockState = await this.getOrientationLockState();
     if (orientationLockState !== "unlocked") {
       return {
-        success: false,
+        kind: "handled",
+        result: {
+          success: false,
+          orientation,
+          value,
+          currentOrientation: achievedOrientation,
+          previousOrientation: currentOrientation,
+          rotationPerformed: false,
+          orientationLockHandled: true,
+          orientationLockState,
+          error: `Automatic rotation could not be confirmed as restored (orientation lock is ${orientationLockState}).`,
+        },
+      };
+    }
+    return {
+      kind: "handled",
+      result: {
+        success: true,
         orientation,
         value,
         currentOrientation: achievedOrientation,
@@ -532,20 +568,9 @@ export class Rotate extends BaseVisualChange {
         rotationPerformed: false,
         orientationLockHandled: true,
         orientationLockState,
-        error: `Automatic rotation could not be confirmed as restored (orientation lock is ${orientationLockState}).`,
-      };
-    }
-    return {
-      success: true,
-      orientation,
-      value,
-      currentOrientation: achievedOrientation,
-      previousOrientation: currentOrientation,
-      rotationPerformed: false,
-      orientationLockHandled: true,
-      orientationLockState,
-      warning,
-      message: `Restored automatic rotation; device is currently ${achievedOrientation}.`,
+        warning,
+        message: `Restored automatic rotation; device is currently ${achievedOrientation}.`,
+      },
     };
   }
 
@@ -804,9 +829,12 @@ export class Rotate extends BaseVisualChange {
       preserveLock,
       restoreAutomaticRotation,
     );
-    if (alreadyApplied) {
-      return alreadyApplied;
+    if (alreadyApplied.kind === "handled") {
+      return alreadyApplied.result;
     }
+    logger.debug(
+      `[Rotate] Continuing with requested rotation: ${alreadyApplied.reason.replaceAll("-", " ")}`,
+    );
 
     // Auto-rotate must be off for `user_rotation` writes to take effect,
     // regardless of whether it was already off beforehand. Remember the

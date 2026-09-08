@@ -388,8 +388,20 @@ describe("logger degrades the record itself under a persistent write failure (Co
 
   test("does not double-emit the same record to stderr in `both` mode when the file write also fails", async () => {
     const logDir = mkdtempSync(join(tmpdir(), "am-logger-eisdir-both-"));
-    const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
-    mkdirSync(targetLogFile);
+    // Drive callback + error delivery deterministically. Real Windows EISDIR
+    // may arrive during teardown, making this assertion about OS event timing.
+    const stream = new AsyncFailStream();
+    const failedWrite = spyOn(stream, "write").mockImplementation((_chunk, callback) => {
+      queueMicrotask(() => {
+        const error = new Error("EISDIR: write failed");
+        callback?.(error);
+        stream.emit("error", error);
+      });
+      return true;
+    });
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
+      stream as unknown as fs.WriteStream,
+    );
     const stderr = spyStderr();
 
     let mod: typeof import("../../src/utils/logger") | undefined;
@@ -400,14 +412,16 @@ describe("logger degrades the record itself under a persistent write failure (Co
       mod.logger.info("both-mode record");
       await mod.logger.flush();
     } finally {
-      stderr.restore();
       await mod?.logger.closeAfterFlush();
+      stderr.restore();
+      createWriteStream.mockRestore();
       rmSync(logDir, { recursive: true, force: true });
     }
 
     // `both` already emits every record via writeToConfiguredStderr regardless
     // of file-sink health; the failed file write must not additionally
     // duplicate that exact line.
+    expect(failedWrite).toHaveBeenCalledTimes(1);
     const matches = stderr.lines.filter((line) => line.includes("both-mode record"));
     expect(matches.length).toBe(1);
   });

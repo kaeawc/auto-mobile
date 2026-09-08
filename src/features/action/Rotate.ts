@@ -725,13 +725,16 @@ export class Rotate extends BaseVisualChange {
 
       await perf.track("setRotation", async () => {
         if (canForceAutoRotateOff) {
-          await Promise.all([
-            this.writeSystemSetting("accelerometer_rotation", "0"),
-            this.writeSystemSetting("user_rotation", String(value)),
-          ]);
+          // user_rotation is honored only after automatic rotation is disabled.
+          // Keeping these writes ordered avoids a target write racing ahead of
+          // the lock on devices where the settings provider completes slowly.
+          await this.writeSystemSetting("accelerometer_rotation", "0");
         } else {
-          await this.writeSystemSetting("user_rotation", String(value));
+          logger.debug(
+            "[Rotate] accelerometer_rotation is unconfirmed; writing user_rotation without changing the lock state",
+          );
         }
+        await this.writeSystemSetting("user_rotation", String(value));
       });
 
       // Wait for rotation to complete (also serves as verification)
@@ -783,6 +786,7 @@ export class Rotate extends BaseVisualChange {
         previousOrientation: currentOrientation,
         rotationPerformed: false,
         orientationLockHandled: wasAutoRotateEnabled,
+        orientationLockState: await this.getOrientationLockState(),
         error: `Failed to change device orientation: ${error}`,
       };
     }

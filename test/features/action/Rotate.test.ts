@@ -446,6 +446,50 @@ describe("Rotate", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 1")).toBe(true);
     });
 
+    test("disables auto-rotate before writing a persistent target rotation (#6350)", async () => {
+      fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
+        createExecResult("1"),
+        createExecResult("0"),
+      ]);
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0"),
+      );
+
+      let releaseDisableWrite: (() => void) | undefined;
+      let disableWriteStarted = false;
+      let userRotationWriteStarted = false;
+      const disableWriteGate = new Promise<void>((resolve) => {
+        releaseDisableWrite = resolve;
+      });
+      const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+      fakeAdb.executeCommand = (async (command: string, ...rest: unknown[]) => {
+        if (command.includes("settings put system accelerometer_rotation 0")) {
+          disableWriteStarted = true;
+          await disableWriteGate;
+        }
+        if (command.includes("settings put system user_rotation 1")) {
+          userRotationWriteStarted = true;
+        }
+        return (originalExecuteCommand as (...args: unknown[]) => Promise<ExecResult>)(
+          command,
+          ...rest,
+        );
+      }) as typeof fakeAdb.executeCommand;
+
+      const rotation = rotate.execute("landscape", undefined, true);
+      for (let i = 0; i < 50 && !disableWriteStarted; i++) {
+        await Promise.resolve();
+      }
+
+      expect(disableWriteStarted).toBe(true);
+      expect(userRotationWriteStarted).toBe(false);
+
+      releaseDisableWrite!();
+      const result = await rotation;
+      expect(result.success).toBe(true);
+    });
+
     test("should rotate directly (without unlocking) when orientation is already locked", async () => {
       // Setup: device is landscape with orientation locked
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
@@ -576,6 +620,31 @@ describe("Rotate", () => {
       expect(result.currentOrientation).toBe("portrait");
       expect(result.orientationLockState).toBe("unlocked");
       expect(result.error ?? "").toMatch(/persistent.*could not be confirmed/i);
+    });
+
+    test("reports the remaining lock state after a persistent target write fails (#6350)", async () => {
+      // Disabling auto-rotate can succeed before the target write fails. The
+      // failure result must expose that the device remains locked rather than
+      // leaving callers unable to determine which cleanup action is needed.
+      fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
+        createExecResult("1"),
+        createExecResult("0"),
+      ]);
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=1"),
+      );
+      fakeAdb.setCommandError(
+        "shell settings put system user_rotation 0",
+        new Error("settings provider unavailable"),
+      );
+
+      const result = await rotate.execute("portrait", undefined, true);
+
+      expect(result.success).toBe(false);
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.orientationLockState).toBe("locked");
+      expect(result.error ?? "").toContain("settings provider unavailable");
     });
 
     test("explicitly restores automatic rotation after a persistent request (#6350)", async () => {

@@ -8,13 +8,16 @@ import {
   resetDragAndDropFactory,
   resetImeActionFactory,
   resetPressButtonFactory,
+  resetRotateFactory,
   resetSelectAllTextFactory,
   resetTapAnyElementFactory,
+  rotateHandler,
   selectAllTextHandler,
   setClearTextFactory,
   setDragAndDropFactory,
   setImeActionFactory,
   setPressButtonFactory,
+  setRotateFactory,
   setSelectAllTextFactory,
   setTapAnyElementFactory,
   tapAnyHandler,
@@ -24,6 +27,7 @@ import type {
   DragAndDropArgs,
   ImeActionArgs,
   PressButtonArgs,
+  RotateArgs,
   SelectAllTextArgs,
   TapAnyArgs,
 } from "../../src/server/interactionToolTypes";
@@ -33,6 +37,7 @@ import type {
   DragAndDropResult,
   ImeActionResult,
   PressButtonResult,
+  RotateResult,
   SelectAllTextResult,
   TapOnElementResult,
 } from "../../src/models";
@@ -272,5 +277,57 @@ describe("imeActionHandler (registered handler wiring)", () => {
     const response = (await imeActionHandler(fakeDevice, args)) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe('Executed IME action "done"');
+  });
+});
+
+describe("rotateHandler (registered handler wiring)", () => {
+  const args: RotateArgs = {
+    orientation: "portrait",
+    lockOrientation: true,
+    platform: "android",
+  };
+
+  afterEach(() => {
+    resetRotateFactory();
+  });
+
+  const fakeResult = (overrides: Partial<RotateResult>): RotateResult => ({
+    success: false,
+    orientation: "portrait",
+    value: 0,
+    ...overrides,
+  });
+
+  test("a persistent-lock failure is an MCP error, not a successful rotation", async () => {
+    setRotateFactory(() => ({
+      execute: async () =>
+        fakeResult({
+          error: "Rotated to portrait, but the persistent orientation lock could not be confirmed.",
+          orientationLockState: "unlocked",
+        }),
+    }));
+
+    const response = (await rotateHandler(fakeDevice, args)) as ToolResponse;
+
+    expect(response.isError).toBe(true);
+    expect(parsePayload(response).success).toBe(false);
+    expect(parsePayload(response).message).toContain(
+      "Failed to rotate device: Rotated to portrait",
+    );
+  });
+
+  test("forwards lockOrientation to the rotate implementation", async () => {
+    let receivedLockOrientation: boolean | undefined;
+    setRotateFactory(() => ({
+      execute: async (_orientation, _progress, lockOrientation) => {
+        receivedLockOrientation = lockOrientation;
+        return fakeResult({ success: true });
+      },
+    }));
+
+    const response = (await rotateHandler(fakeDevice, args)) as ToolResponse;
+
+    expect(response.isError).toBeUndefined();
+    expect(receivedLockOrientation).toBe(true);
   });
 });

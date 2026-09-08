@@ -41,6 +41,7 @@ import {
   type DragAndDropResult,
   type ImeActionResult,
   type PressButtonResult,
+  type RotateResult,
   type SelectAllTextResult,
   type TapOnElementResult,
   type TapOnSelectedElement,
@@ -1536,6 +1537,51 @@ export async function imeActionHandler(
   }
 }
 
+// Injection seam for the rotate handler. In particular, persistent-orientation
+// failures must reach MCP clients as errors rather than success-shaped results.
+export type RotateLike = Pick<Rotate, "execute">;
+
+let rotateFactory: (device: BootedDevice) => RotateLike = (device) => new Rotate(device);
+
+export function setRotateFactory(factory: (device: BootedDevice) => RotateLike): void {
+  rotateFactory = factory;
+}
+
+export function resetRotateFactory(): void {
+  rotateFactory = (device) => new Rotate(device);
+}
+
+export function formatRotateMessage(
+  result: Pick<RotateResult, "success" | "orientation" | "error" | "message">,
+): string {
+  if (!result.success) {
+    return `Failed to rotate device: ${result.error || "unknown error"}`;
+  }
+  return result.message ?? `Rotated device to ${result.orientation} orientation`;
+}
+
+export async function rotateHandler(
+  device: BootedDevice,
+  args: RotateArgs,
+  progress?: ProgressCallback,
+) {
+  try {
+    if (args.lockOrientation !== undefined && device.platform !== "android") {
+      throw new ActionableError("lockOrientation is supported only on Android devices.");
+    }
+    const rotate = rotateFactory(device);
+    const result = await rotate.execute(args.orientation, progress, args.lockOrientation);
+    const response = createJSONToolResponse({
+      observation: result.observation,
+      ...result,
+      message: formatRotateMessage(result),
+    });
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to rotate device: ${error}`);
+  }
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -1959,29 +2005,6 @@ export function registerInteractionTools() {
       });
     } catch (error) {
       throw new ActionableError(`Failed to go to home screen: ${error}`);
-    }
-  };
-
-  // Rotate handler
-  const rotateHandler = async (
-    device: BootedDevice,
-    args: RotateArgs,
-    progress?: ProgressCallback,
-  ) => {
-    try {
-      if (args.lockOrientation !== undefined && device.platform !== "android") {
-        throw new ActionableError("lockOrientation is supported only on Android devices.");
-      }
-      const rotate = new Rotate(device);
-      const result = await rotate.execute(args.orientation, progress, args.lockOrientation);
-
-      return createJSONToolResponse({
-        message: `Rotated device to ${args.orientation} orientation`,
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to rotate device: ${error}`);
     }
   };
 

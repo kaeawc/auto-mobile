@@ -14,6 +14,8 @@ Known map fields are declared explicitly so an unchecked `Record<string, ...>`
 cannot stand in for a complete platform snapshot. Compile-only contract fixtures
 run through the normal TypeScript gate. These types do not validate external JSON;
 a future I/O boundary must validate incoming data before constructing a report.
+The interfaces use structural typing: they require the known fields but do not
+strip or reject additional properties on already-assembled objects.
 
 This contract defines reporting semantics. It does not inspect devices, change
 provisioning settings, suspend services, or expose a new tool. Future producers

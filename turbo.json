@@ -196,9 +196,10 @@
       "cache": false
     },
     "typecheck": {
-      "description": "tsgo --noEmit baseline gate (scripts/typecheck-baseline.sh, issue #3001). Cached on src/** + tsconfig + the baseline so an unchanged src/ skips the ~5.6s run; a test/docs/native-only edit is a cache hit. Keyed on declared inputs, not the tsc/tsgo binary, so it is migration-neutral — a TypeScript-version bump changes package.json and the regenerated baseline and busts the hash. Only exit-0 is cached, so a red gate is never memoized.",
+      "description": "tsgo --noEmit baseline gate (scripts/typecheck-baseline.sh, issue #3001). Cached on src/**, compile-only test/**/*.typecheck.ts fixtures, tsconfig, and the baseline; runtime-test/docs/native-only edits are cache hits. Keyed on declared inputs, not the tsc/tsgo binary, so it is migration-neutral — a TypeScript-version bump changes package.json and the regenerated baseline and busts the hash. Only exit-0 is cached, so a red gate is never memoized.",
       "inputs": [
         "src/**",
+        "test/**/*.typecheck.ts",
         "tsconfig.json",
         "scripts/typecheck-baseline.sh",
         "scripts/typecheck-baseline.txt",

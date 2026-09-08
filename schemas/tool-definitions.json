@@ -8018,6 +8018,10 @@
           "type": "string",
           "enum": ["portrait", "landscape"]
         },
+        "lockOrientation": {
+          "description": "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]

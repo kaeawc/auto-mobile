@@ -41,6 +41,7 @@ import {
   type DragAndDropResult,
   type ImeActionResult,
   type PressButtonResult,
+  type RotateResult,
   type SelectAllTextResult,
   type TapOnElementResult,
   type TapOnSelectedElement,
@@ -896,6 +897,12 @@ export const homeScreenSchema = addDeviceTargetingToSchema(
 export const rotateSchema = addDeviceTargetingToSchema(
   z.object({
     orientation: z.enum(["portrait", "landscape"]),
+    lockOrientation: z
+      .boolean()
+      .optional()
+      .describe(
+        "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+      ),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
     // its own.
@@ -1530,6 +1537,51 @@ export async function imeActionHandler(
   }
 }
 
+// Injection seam for the rotate handler. In particular, persistent-orientation
+// failures must reach MCP clients as errors rather than success-shaped results.
+export type RotateLike = Pick<Rotate, "execute">;
+
+let rotateFactory: (device: BootedDevice) => RotateLike = (device) => new Rotate(device);
+
+export function setRotateFactory(factory: (device: BootedDevice) => RotateLike): void {
+  rotateFactory = factory;
+}
+
+export function resetRotateFactory(): void {
+  rotateFactory = (device) => new Rotate(device);
+}
+
+export function formatRotateMessage(
+  result: Pick<RotateResult, "success" | "orientation" | "error" | "message">,
+): string {
+  if (!result.success) {
+    return `Failed to rotate device: ${result.error || "unknown error"}`;
+  }
+  return result.message ?? `Rotated device to ${result.orientation} orientation`;
+}
+
+export async function rotateHandler(
+  device: BootedDevice,
+  args: RotateArgs,
+  progress?: ProgressCallback,
+) {
+  try {
+    if (args.lockOrientation !== undefined && device.platform !== "android") {
+      throw new ActionableError("lockOrientation is supported only on Android devices.");
+    }
+    const rotate = rotateFactory(device);
+    const result = await rotate.execute(args.orientation, progress, args.lockOrientation);
+    const response = createJSONToolResponse({
+      observation: result.observation,
+      ...result,
+      message: formatRotateMessage(result),
+    });
+    return result.success ? response : { ...response, isError: true as const };
+  } catch (error) {
+    throw new ActionableError(`Failed to rotate device: ${error}`);
+  }
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -1953,26 +2005,6 @@ export function registerInteractionTools() {
       });
     } catch (error) {
       throw new ActionableError(`Failed to go to home screen: ${error}`);
-    }
-  };
-
-  // Rotate handler
-  const rotateHandler = async (
-    device: BootedDevice,
-    args: RotateArgs,
-    progress?: ProgressCallback,
-  ) => {
-    try {
-      const rotate = new Rotate(device);
-      const result = await rotate.execute(args.orientation, progress);
-
-      return createJSONToolResponse({
-        message: `Rotated device to ${args.orientation} orientation`,
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to rotate device: ${error}`);
     }
   };
 

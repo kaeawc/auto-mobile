@@ -1451,7 +1451,7 @@ describe("startDevice handler", () => {
     expect(adopterSettled).toBe(false);
     releaseOwnerReadiness();
     const ownerResult = await ownerStart;
-    await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
+    await expect(adopterStart).rejects.toThrow("already assigned to another session");
 
     expect(ownerResult.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);

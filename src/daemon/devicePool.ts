@@ -4891,6 +4891,7 @@ export class DevicePool {
     >,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
+    autolockClient?: { mcpSessionId?: string },
   ): Promise<DeviceReadinessReservation> {
     // The stable-name reservation exists to bridge an Android emulator changing
     // serials across a reboot. iOS UDIDs are stable, so a name reservation there
@@ -4904,6 +4905,9 @@ export class DevicePool {
     await this.assignmentMutex.runExclusive(async () => {
       const pooled = this.devices.get(deviceId);
       if (pooled) {
+        // Acquisition may reboot a device during readiness recovery. Prove
+        // ownership before reserving it or beginning those side effects.
+        this.getOwnedAutolockSession(pooled, autolockClient);
         if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
           await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
         } else {
@@ -5532,14 +5536,14 @@ export class DevicePool {
   /**
    * Lock a device with an autolock session ID.
    *
-   * Generates a new session UUID bound to the device. When autolock is enabled,
+   * Creates a session UUID or reuses the proven caller's live autolock. When enabled,
    * subsequent tool calls from the same MCP session can resolve this UUID
    * implicitly; other clients must include it explicitly. The session has a
    * configurable idle timeout (AUTO_MOBILE_DEVICE_POOL_TIMEOUT).
    *
    * @param deviceId - The device to lock
    * @param platform - Device platform
-   * @returns The generated session ID, or undefined if autolock is disabled
+   * @returns The assigned session ID, or undefined if autolock is disabled
    */
   async autolockDevice(
     deviceId: string,
@@ -5701,6 +5705,32 @@ export class DevicePool {
     mcpSessionId: string | undefined,
     achievedReadiness: DeviceReadinessLevel,
   ): Promise<string | undefined> {
+    const session = this.getOwnedAutolockSession(device, { mcpSessionId });
+    if (!session) {
+      return undefined;
+    }
+    const refreshed = await this.sessionManager.getOrCreateSession(session.sessionId);
+    // Release can finish while activity persistence yields, even under the
+    // assignment mutex. Do not report success for a retired ownership identity.
+    if (
+      refreshed !== session ||
+      !this.isSessionAssignmentCurrent(device, session) ||
+      !this.sessionManager.isAdmittedForAutomation(session)
+    ) {
+      throw new ActionableError(`Device '${device.id}' was released during autolock acquisition.`);
+    }
+    this.sessionManager.setDeviceReadiness(session.sessionId, achievedReadiness);
+    return session.sessionId;
+  }
+
+  private getOwnedAutolockSession(
+    device: PooledDevice,
+    client: { mcpSessionId?: string } | undefined,
+  ): Session | undefined {
+    if (!client) {
+      return undefined;
+    }
+    const { mcpSessionId } = client;
     const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
     if (!session) {
       return undefined;
@@ -5717,18 +5747,7 @@ export class DevicePool {
           "Acquire a different device or wait for its owner to release it.",
       );
     }
-    const refreshed = await this.sessionManager.getOrCreateSession(session.sessionId);
-    // Release can finish while activity persistence yields, even under the
-    // assignment mutex. Do not report success for a retired ownership identity.
-    if (
-      refreshed !== session ||
-      !this.isSessionAssignmentCurrent(device, session) ||
-      !this.sessionManager.isAdmittedForAutomation(session)
-    ) {
-      throw new ActionableError(`Device '${device.id}' was released during autolock acquisition.`);
-    }
-    this.sessionManager.setDeviceReadiness(session.sessionId, achievedReadiness);
-    return session.sessionId;
+    return session;
   }
 
   private throwIfFreshStartAlreadyBound(

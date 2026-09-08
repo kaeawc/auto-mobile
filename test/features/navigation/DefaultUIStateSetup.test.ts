@@ -511,5 +511,37 @@ describe("DefaultUIStateSetup", () => {
       // All prior candidates were attempted before the one that worked.
       expect(tappedTexts).toEqual(["Close", "Cancel", "Dismiss", "×", "✕"]);
     });
+
+    // Regression for issue #6319: an adversarial gap in the #6123 fix. The
+    // outcome check runs through the REAL getCurrentUIState/isModalDismissed
+    // path (not a stubbed getCurrentUIState). When the confirming re-observation
+    // returns no view hierarchy, getCurrentUIState resolves to `undefined`, so
+    // the modal's presence is genuinely unobservable. The old
+    // `!undefined?.modalStack?.some(...)` collapsed to `true`, reporting a
+    // confirmed dismissal with zero positive evidence the modal closed. An
+    // unavailable observation must fall through (no candidate confirms), so the
+    // whole loop returns false.
+    test("tap succeeds but re-observation yields no view hierarchy → must NOT report dismissal (#6319)", async () => {
+      const tappedTexts: string[] = [];
+
+      // Real getCurrentUIState runs: every observation returns a null
+      // hierarchy, so isModalDismissed can never confirm the modal is gone.
+      const setup = makeSetup(() => ({
+        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+      }));
+
+      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+        tappedTexts.push(args.selector.text);
+        // A real element was tapped (tool-wise success), but the outcome is
+        // unverifiable because the re-observation has no hierarchy.
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const result = await tapCloseButtonOf(setup).call(setup, dialog, "android");
+
+      expect(result).toBe(false);
+      // No candidate could be confirmed, so all were attempted.
+      expect(tappedTexts).toEqual(["Close", "Cancel", "Dismiss", "×", "✕"]);
+    });
   });
 });

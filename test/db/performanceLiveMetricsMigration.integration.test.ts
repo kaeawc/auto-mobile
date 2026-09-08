@@ -24,11 +24,7 @@ const LIVE_METRIC_COLUMNS = [
   "node_id",
 ];
 
-async function columnExists(
-  db: Kysely<unknown>,
-  table: string,
-  column: string,
-): Promise<boolean> {
+async function columnExists(db: Kysely<unknown>, table: string, column: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info(${table}) WHERE name = ${column}
   `.execute(db);
@@ -96,7 +92,12 @@ describe("2026_01_30_000_performance_live_metrics migration", () => {
 
     await liveMetricsDown(db);
 
-    const rows = await sql<{ device_id: string; session_id: string; passed: number; p50_ms: number }>`
+    const rows = await sql<{
+      device_id: string;
+      session_id: string;
+      passed: number;
+      p50_ms: number;
+    }>`
       SELECT device_id, session_id, passed, p50_ms
       FROM performance_audit_results
       ORDER BY device_id

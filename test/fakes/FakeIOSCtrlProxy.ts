@@ -31,6 +31,7 @@ import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import type { Timer } from "../../src/utils/SystemTimer";
 import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
 
 /**
@@ -39,6 +40,8 @@ import type { InputKeyModifier, InputKeyName } from "../../src/features/action/I
  * Tracks method calls for test assertions
  */
 export class FakeIOSCtrlProxy implements IOSCtrlProxy {
+  constructor(private readonly timer: Timer = defaultTimer) {}
+
   // Configurable response data
   private hierarchyData: CtrlProxyHierarchy | null = null;
   private screenshotData: string | null = null;
@@ -493,7 +496,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private async applyDelay(operation: string): Promise<void> {
     const delay = this.operationDelays.get(operation);
     if (delay && delay > 0) {
-      await defaultTimer.sleep(delay);
+      await this.timer.sleep(delay);
     }
   }
 

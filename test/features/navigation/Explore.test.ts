@@ -31,7 +31,7 @@ import type { ElementParser } from "../../../src/utils/interfaces/ElementParser"
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
-import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -354,7 +354,13 @@ describe("Explore", () => {
     // forever until the timeout. The no-op must now be counted so the existing
     // stuck-screen accounting stops exploration (partially addresses #6169).
     test("does not loop indefinitely on a deny-only permission dialog", async () => {
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      // The deny control must never be tapped: inject a fake tap action and
+      // assert it is never invoked (issue #6191 — no more TapOnElement.prototype
+      // spy). The blocker handler's post-tap sleep runs on the injected
+      // auto-advancing fakeTimer, so the run stays fast without stubbing a
+      // module-level timer.
+      const fakeTap = new FakeDialogTapAction();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
 
       const denyOnlyDialog = createMockObservation([
         createMockViewHierarchyNode({
@@ -379,11 +385,6 @@ describe("Explore", () => {
         getMostRecentCachedObserveResult: async () => denyOnlyDialog,
       };
 
-      // The deny control must never be tapped.
-      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
-        success: true,
-      } as never);
-
       // maxInteractions and timeout are set generously so the ONLY thing that
       // can terminate the run is the stuck-screen accounting; without the fix
       // this run would spin forever.
@@ -397,14 +398,13 @@ describe("Explore", () => {
       expect(result.stopReason).toContain("stuck");
       // Bounded by the stuck counter, not maxInteractions or the timeout.
       expect(observeCount).toBe(maxNoChange);
-      expect(tapSpy).not.toHaveBeenCalled();
-
-      tapSpy.mockRestore();
+      expect(fakeTap.calls).toEqual([]);
     });
 
     // A grantable permission dialog still taps "Allow" and exploration proceeds.
     test("grants a permission dialog and continues exploring", async () => {
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const fakeTap = new FakeDialogTapAction();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
 
       const grantDialog = createMockObservation([
         createMockViewHierarchyNode({
@@ -430,12 +430,9 @@ describe("Explore", () => {
         getMostRecentCachedObserveResult: async () => normalScreen,
       };
 
-      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
-        success: true,
-      } as never);
-      // handlePermissionDialog sleeps on the real timer after a grant; stub it
-      // so the test stays fast (<100ms).
-      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
+      // handlePermissionDialog sleeps after a grant; that sleep now runs on the
+      // injected auto-advancing fakeTimer (issue #6191), so no defaultTimer stub
+      // is needed to keep the test fast.
       // Successful interactions advance the interaction counter so the run ends
       // deterministically at maxInteractions rather than via stuck detection.
       (explore as any).performInteraction = async () => true;
@@ -447,14 +444,11 @@ describe("Explore", () => {
       });
 
       // The "Allow" button was tapped exactly once, via the permission fast-path.
-      expect(tapSpy).toHaveBeenCalledTimes(1);
+      expect(fakeTap.calls).toHaveLength(1);
       // Exploration continued past the dialog rather than stalling on it.
       expect(result.stopReason).not.toContain("stuck");
       expect(result.interactionsPerformed).toBe(2);
       expect(observeCount).toBeGreaterThan(1);
-
-      tapSpy.mockRestore();
-      sleepSpy.mockRestore();
     });
 
     // Regression: a grant used to report "continue" without clearing the
@@ -464,7 +458,8 @@ describe("Explore", () => {
     // observation on the next prompt could immediately trip the stuck-screen
     // stop despite the intervening successful grant.
     test("resets the no-change streak after granting a permission", async () => {
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const fakeTap = new FakeDialogTapAction();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
 
       const grantDialog = createMockObservation([
         createMockViewHierarchyNode({
@@ -480,11 +475,6 @@ describe("Explore", () => {
         }),
       ]);
 
-      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
-        success: true,
-      } as never);
-      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
-
       // Simulate a streak accrued by an earlier, unrelated ungrantable dialog.
       (explore as any).consecutiveNoChangeCount = 39;
 
@@ -492,10 +482,7 @@ describe("Explore", () => {
 
       expect(outcome).toBe("continue");
       expect((explore as any).consecutiveNoChangeCount).toBe(0);
-      expect(tapSpy).toHaveBeenCalledTimes(1);
-
-      tapSpy.mockRestore();
-      sleepSpy.mockRestore();
+      expect(fakeTap.calls).toHaveLength(1);
     });
 
     test("should detect login screens", async () => {

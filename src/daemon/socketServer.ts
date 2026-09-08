@@ -460,6 +460,7 @@ class McpClientReconnectDeadlineError extends Error {
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
+  private serverClosePromise: Promise<void> | null = null;
   private closing = false;
   private acceptingRequests = false;
   private lifecycleGeneration = 0;
@@ -613,6 +614,7 @@ export class UnixSocketServer {
   async start(): Promise<void> {
     this.closing = false;
     this.acceptingRequests = true;
+    this.serverClosePromise = null;
     this.lifecycleGeneration += 1;
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
@@ -719,6 +721,12 @@ export class UnixSocketServer {
    * Handle a new client connection
    */
   private handleConnection(socket: Socket): void {
+    if (!this.acceptingRequests) {
+      // An accept callback can already be queued when quiesce closes the
+      // listener. End that late connection before it can bind or issue work.
+      socket.end();
+      return;
+    }
     const sessionId = this.idGenerator.next();
     const session: SessionContext = {
       sessionId,
@@ -4814,6 +4822,16 @@ export class UnixSocketServer {
    */
   async quiesce(): Promise<void> {
     this.acceptingRequests = false;
+    // Stop new connections immediately while keeping established notification
+    // subscribers alive long enough to receive session-release frames. Any
+    // connection that has not opted in cannot receive the shutdown reason, so
+    // close it now and let its proxy reconnect to the successor daemon.
+    void this.closeListeningServer(this.isOwnedSocketFile());
+    for (const [sessionId, socket] of this.clientSockets) {
+      if (!this.notificationSubscribers.has(sessionId) && !socket.destroyed) {
+        socket.end();
+      }
+    }
     await this.drainActiveRequestHandlers();
   }
 
@@ -4911,6 +4929,9 @@ export class UnixSocketServer {
   }
 
   private closeListeningServer(ownsSocketPath: boolean): Promise<void> {
+    if (this.serverClosePromise) {
+      return this.serverClosePromise;
+    }
     if (!this.server) {
       return Promise.resolve();
     }
@@ -4921,12 +4942,13 @@ export class UnixSocketServer {
       this.server.unref();
       return Promise.resolve();
     }
-    return new Promise((resolve) => {
+    this.serverClosePromise = new Promise((resolve) => {
       this.server!.close(() => {
         logger.info("Unix socket server closed");
         resolve();
       });
     });
+    return this.serverClosePromise;
   }
 
   private destroyClientSockets(clientSockets: Socket[]): void {

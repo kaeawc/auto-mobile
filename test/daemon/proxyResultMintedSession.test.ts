@@ -1,6 +1,6 @@
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
@@ -303,6 +303,50 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       expect(replacementDaemon.nextIndex()).toBe(1);
     } finally {
       finishAcquisition.resolve();
+      await proxy.close();
+    }
+  });
+
+  test("resolves the shutdown barrier when an in-flight acquisition resets its client (#6336)", async () => {
+    const oldClientClosed = Promise.withResolvers<void>();
+    const oldClientRef: { current: FakeDaemonClient | null } = { current: null };
+    const oldDaemon = new FakeDaemonClient({
+      onCallTool: (toolName) => {
+        if (toolName === "getAndroid") {
+          oldClientRef.current!.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            "released-during-acquisition",
+            "daemon-shutdown",
+          );
+          throw new DaemonUnavailableError("Daemon socket connection lost");
+        }
+      },
+    });
+    oldClientRef.current = oldDaemon;
+    oldDaemon.close = async () => {
+      oldClientClosed.resolve();
+    };
+    const replacementDaemon = acquiringClient(sessionManager, ["replacement-after-reset"]);
+    const clients = [oldDaemon, replacementDaemon.client];
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      const recovery = proxy.callTool("getAndroid", {
+        avdName: "am-api34-ga-arm64",
+      });
+      await oldClientClosed.promise;
+      for (let i = 0; i < 20 && replacementDaemon.nextIndex() === 0; i++) {
+        await Promise.resolve();
+      }
+
+      expect(replacementDaemon.nextIndex()).toBe(1);
+      await expect(recovery).resolves.toEqual(deviceStartResult("replacement-after-reset"));
+    } finally {
       await proxy.close();
     }
   });

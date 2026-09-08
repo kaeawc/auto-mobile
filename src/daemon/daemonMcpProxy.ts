@@ -1544,6 +1544,7 @@ export class DaemonMcpProxy {
     this.invalidateCache();
 
     if (!staleClient) {
+      this.completeDaemonShutdownDisconnect();
       return;
     }
 
@@ -1552,6 +1553,10 @@ export class DaemonMcpProxy {
     } catch (error) {
       logger.warn(`[DaemonMcpProxy] Failed to close stale daemon client: ${error}`);
     }
+    // resetConnection deliberately unregisters the peer-close callback before
+    // closing the stale client. Resolve an armed shutdown barrier explicitly so
+    // the retry cannot wait forever for a callback that can no longer fire.
+    this.completeDaemonShutdownDisconnect();
   }
 
   private subscribeToClientConnectionClosed(client: DaemonClientLike): void {

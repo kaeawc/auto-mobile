@@ -61,9 +61,46 @@ interface ResourceTemplateMetadata {
   regex: RegExp;
   paramNames: string[];
   queryParamNames: string[];
+  // Query-param names that scope a *page* of an otherwise-shared resource
+  // rather than its identity (e.g. `limit`/`offset` on paginated table data).
+  // Two URIs that differ only in these params are distinct subscription
+  // identities but share one underlying resource, so a canonical-URI update
+  // fans out to every per-page subscriber (issue #6198). Empty for
+  // non-paginated templates, which keeps their exact-match notify behavior.
+  paginationParamNames: string[];
 }
 
 const requestedResourceUri = Symbol("requestedResourceUri");
+
+// Collapse a URI to its *page-independent* subscription identity by dropping
+// the declared pagination query params and normalizing the order of the
+// remaining query params. Two URIs that differ only in pagination (e.g.
+// `.../data?appId=x&limit=10&offset=0` vs `.../data?appId=x&limit=10&offset=10`)
+// map to the same identity, so a canonical-URI update fans out to every
+// per-page subscriber (issue #6198). With an empty pagination set this is just
+// query-order normalization — never used for non-paginated templates, whose
+// notify path stays exact-match.
+function computeSubscriptionIdentity(uri: string, paginationParamNames: string[]): string {
+  const queryStart = uri.indexOf("?");
+  if (queryStart < 0) {
+    return uri;
+  }
+  const path = uri.slice(0, queryStart);
+  const pagination = new Set(paginationParamNames);
+  const retained: Array<[string, string]> = [];
+  for (const [name, value] of new URLSearchParams(uri.slice(queryStart + 1))) {
+    if (pagination.has(name)) {
+      continue;
+    }
+    retained.push([name, value]);
+  }
+  if (retained.length === 0) {
+    return path;
+  }
+  retained.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
+  const normalizedQuery = retained.map(([name, value]) => `${name}=${value}`).join("&");
+  return `${path}?${normalizedQuery}`;
+}
 
 export function getRequestedResourceUri(params: Record<string, string>): string | undefined {
   return (params as Record<PropertyKey, unknown>)[requestedResourceUri] as string | undefined;
@@ -187,6 +224,7 @@ class ResourceRegistryClass {
     description: string,
     mimeType: string,
     handler: ResourceTemplateHandler,
+    paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     this.templates.set(uriTemplate, {
@@ -198,6 +236,7 @@ class ResourceRegistryClass {
       regex,
       paramNames,
       queryParamNames,
+      paginationParamNames: paginationParams,
     });
   }
 
@@ -207,6 +246,7 @@ class ResourceRegistryClass {
     description: string,
     mimeType: string,
     handlerWithReadContext: ContextualResourceTemplateHandler,
+    paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     this.templates.set(uriTemplate, {
@@ -218,6 +258,7 @@ class ResourceRegistryClass {
       regex,
       paramNames,
       queryParamNames,
+      paginationParamNames: paginationParams,
     });
   }
 
@@ -401,32 +442,69 @@ class ResourceRegistryClass {
     return new Set(this.subscriptions);
   }
 
-  // Send resource update notification (only if client is subscribed)
-  async notifyResourceUpdated(uri: string): Promise<void> {
-    if (!this.subscriptions.has(uri)) {
-      return;
+  // Resolve which subscribed URIs a change to `uri` should notify. Each
+  // returned URI is echoed verbatim in the notification so a client re-reads
+  // exactly the resource it subscribed to.
+  //
+  // - Exact resources and non-paginated templates keep exact-match semantics:
+  //   only a subscription on this exact URI is notified.
+  // - A paginated template (one that declared pagination params) fans the
+  //   canonical-URI change out to every subscription sharing its page-
+  //   independent identity — the whole-table subscriber plus each per-page
+  //   subscriber, each notified with its own page URI (issue #6198).
+  private resolveNotificationTargets(
+    uri: string,
+    resource: RegisteredResource | undefined,
+    templateMatch: { template: RegisteredResourceTemplate } | undefined,
+  ): string[] {
+    const paginationParamNames = resource
+      ? []
+      : (templateMatch?.template.paginationParamNames ?? []);
+    if (paginationParamNames.length === 0) {
+      return this.subscriptions.has(uri) ? [uri] : [];
     }
 
+    const changedIdentity = computeSubscriptionIdentity(uri, paginationParamNames);
+    const targets: string[] = [];
+    for (const subscribedUri of this.subscriptions) {
+      if (computeSubscriptionIdentity(subscribedUri, paginationParamNames) === changedIdentity) {
+        targets.push(subscribedUri);
+      }
+    }
+    return targets;
+  }
+
+  // Send resource update notification (only if client is subscribed)
+  async notifyResourceUpdated(uri: string): Promise<void> {
     const resource = this.getResource(uri);
     const templateMatch = resource ? undefined : this.matchTemplate(uri);
     if (!resource && !templateMatch) {
       return;
     }
 
+    const targetUris = this.resolveNotificationTargets(uri, resource, templateMatch);
+    if (targetUris.length === 0) {
+      return;
+    }
+
     // Subscriptions are tracked registry-wide, so every live session's server
     // gets the update (issue #3223) — best-effort per server.
     for (const server of this.servers) {
-      try {
-        // Send notification to clients that resource has changed
-        await server.server.notification({
-          method: "notifications/resources/updated",
-          params: {
-            uri: resource ? resource.uri : uri,
-          },
-        });
-      } catch (error) {
-        // Silently ignore notification errors (e.g., when transport is not connected during tests)
-        logger.debug(`[ResourceRegistry] Failed to notify resource update for ${uri}: ${error}`);
+      for (const targetUri of targetUris) {
+        try {
+          // Send notification to clients that resource has changed
+          await server.server.notification({
+            method: "notifications/resources/updated",
+            params: {
+              uri: targetUri,
+            },
+          });
+        } catch (error) {
+          // Silently ignore notification errors (e.g., when transport is not connected during tests)
+          logger.debug(
+            `[ResourceRegistry] Failed to notify resource update for ${targetUri}: ${error}`,
+          );
+        }
       }
     }
   }

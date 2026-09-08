@@ -125,6 +125,153 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   });
 });
 
+describe("ResourceRegistry per-page subscription identities (issue #6198)", () => {
+  const PAGINATED_TEMPLATE = "automobile:pages/{id}/data{?appId,limit,offset}";
+  const CANONICAL_URI = "automobile:pages/one/data?appId=x";
+  const PAGE_A = "automobile:pages/one/data?appId=x&limit=10&offset=0";
+  const PAGE_B = "automobile:pages/one/data?appId=x&limit=10&offset=10";
+
+  function urisNotified(server: FakeMcpServer): string[] {
+    return server.server.notifications
+      .filter((n) => n.method === "notifications/resources/updated")
+      .map((n) => (n.params as { uri: string }).uri);
+  }
+
+  async function subscribe(server: FakeMcpServer, uri: string): Promise<void> {
+    const handler = server.server.handlersBySchema.get(SubscribeRequestSchema);
+    await handler!({ params: { uri } });
+  }
+
+  beforeEach(() => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.clearServersForTesting();
+    ResourceRegistry.registerTemplate(
+      PAGINATED_TEMPLATE,
+      "Paginated",
+      "Paginated test resource",
+      "application/json",
+      async (params) => ({ uri: getRequestedResourceUri(params) ?? "", text: "{}" }),
+      ["limit", "offset"],
+    );
+  });
+
+  test("distinct per-page URIs are tracked as distinct subscription identities", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    await subscribe(server, PAGE_A);
+    await subscribe(server, PAGE_B);
+
+    const subscriptions = ResourceRegistry.getSubscriptions();
+    expect(subscriptions.has(PAGE_A)).toBe(true);
+    expect(subscriptions.has(PAGE_B)).toBe(true);
+    expect(subscriptions.size).toBe(2);
+  });
+
+  test("a canonical-URI update fans out to every per-page subscriber, each with its own page URI", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    await subscribe(server, PAGE_A);
+    await subscribe(server, PAGE_B);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(server).sort()).toEqual([PAGE_A, PAGE_B]);
+  });
+
+  test("the whole-table subscriber and per-page subscribers are all notified", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    await subscribe(server, CANONICAL_URI);
+    await subscribe(server, PAGE_A);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(server).sort()).toEqual([CANONICAL_URI, PAGE_A].sort());
+  });
+
+  test("pagination-only difference is order-independent between subscription and canonical URI", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    // offset before limit, still the same page-independent identity as CANONICAL_URI.
+    const reordered = "automobile:pages/one/data?offset=10&appId=x&limit=10";
+    await subscribe(server, reordered);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(server)).toEqual([reordered]);
+  });
+
+  test("does not fan out to a page of a different identity (differing non-pagination query)", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    const otherApp = "automobile:pages/one/data?appId=y&limit=10&offset=0";
+    await subscribe(server, PAGE_A);
+    await subscribe(server, otherApp);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(server)).toEqual([PAGE_A]);
+  });
+
+  test("does not fan out to a page of a different path", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    const otherRow = "automobile:pages/two/data?appId=x&limit=10&offset=0";
+    await subscribe(server, PAGE_A);
+    await subscribe(server, otherRow);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(server)).toEqual([PAGE_A]);
+  });
+
+  test("no subscribers means no notification even for a paginated template", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(server)).toEqual([]);
+  });
+
+  test("non-paginated resources keep exact-match notify semantics", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    // A non-paginated template (no pagination params declared).
+    ResourceRegistry.registerTemplate(
+      "automobile:plain/{id}{?appId}",
+      "Plain",
+      "Non-paginated test resource",
+      "application/json",
+      async (params) => ({ uri: getRequestedResourceUri(params) ?? "", text: "{}" }),
+    );
+    // A subscription that differs only by a would-be pagination query key.
+    await subscribe(server, "automobile:plain/one?appId=x&limit=10");
+
+    // Firing against the canonical URI must NOT fan out — exact match only.
+    await ResourceRegistry.notifyResourceUpdated("automobile:plain/one?appId=x");
+
+    expect(urisNotified(server)).toEqual([]);
+
+    // The exact subscribed URI is still notified.
+    await ResourceRegistry.notifyResourceUpdated("automobile:plain/one?appId=x&limit=10");
+    expect(urisNotified(server)).toEqual(["automobile:plain/one?appId=x&limit=10"]);
+  });
+
+  test("fan-out reaches every registered server (issue #3223)", async () => {
+    const first = new FakeMcpServer();
+    const second = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(first as unknown as McpServer);
+    ResourceRegistry.registerWithServer(second as unknown as McpServer);
+    await subscribe(first, PAGE_A);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(first)).toEqual([PAGE_A]);
+    expect(urisNotified(second)).toEqual([PAGE_A]);
+  });
+});
+
 describe("ResourceRegistry URI-template matching", () => {
   beforeEach(() => {
     ResourceRegistry.clearResources();

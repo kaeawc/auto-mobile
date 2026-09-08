@@ -47,6 +47,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
+import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
 import {
@@ -2199,50 +2200,81 @@ export class TapOnElement extends BaseVisualChange {
     skipSemanticLongPress: boolean = false,
   ): Promise<void> {
     if (action === "tap") {
-      const result = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!result.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
+      if (
+        isAndroidDocumentsUiRow(element) &&
+        (await this.tryDocumentsUiRowActivation(element, signal))
+      ) {
+        return;
       }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
     } else if (action === "longPress") {
       await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress);
     } else if (action === "doubleTap") {
-      const first = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!first.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture first tap failed (${first.error}), falling back to ADB`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
       await this.timer.sleep(200);
-      const second = await this.accessibilityService.requestTapCoordinates(x, y, 10);
-      if (!second.success) {
-        logger.warn(
-          `[TapOnElement] dispatchGesture second tap failed (${second.error}), falling back to ADB`,
-        );
-        await this.adb.executeCommand(
-          `shell input touchscreen tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-      }
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
     }
+  }
+
+  /** Activate a DocumentsUI item through its advertised accessibility delegate (#6335). */
+  private async tryDocumentsUiRowActivation(
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    const selector = stableNodeSelectorForElement(element);
+    // item_root is repeated. Never fall back to the runner's first resource-id match.
+    if (
+      !hasAccessibilityAction(element.actions, "click") ||
+      !selector ||
+      (selector.uniqueId === undefined &&
+        (selector.collectionRow === undefined || selector.collectionColumn === undefined))
+    ) {
+      return false;
+    }
+    try {
+      if (!(await this.accessibilityService.supportsNodeActionSelectors())) {
+        return false;
+      }
+      throwIfAborted(signal);
+      const result = await this.accessibilityService.requestNodeAction("click", selector);
+      return result.success;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`[TapOnElement] DocumentsUI row activation failed: ${error}`);
+      return false;
+    }
+  }
+
+  /** Use input recovery for DocumentsUI rows when semantic activation is unavailable. */
+  private async dispatchCoordinateTapOrAdbFallback(
+    x: number,
+    y: number,
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const requiresAdbInput = isAndroidDocumentsUiRow(element);
+    const result = requiresAdbInput
+      ? { success: false, error: "documentsui-row-input-recovery" }
+      : await this.accessibilityService.requestTapCoordinates(x, y, 10);
+    if (result.success) {
+      return;
+    }
+    if (requiresAdbInput) {
+      logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
+    } else {
+      logger.warn(
+        `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
+      );
+    }
+    await this.adb.executeCommand(
+      `shell input touchscreen tap ${x} ${y}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   /**
@@ -2365,40 +2397,42 @@ export class TapOnElement extends BaseVisualChange {
       return undefined;
     }
 
-    if (action === "tap" || action === "doubleTap") {
-      if (this.isScreenReaderNavigationEnabled(options)) {
-        // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
-        // navigation to the target, then activate.
-        const result = await this.talkBackStrategy.executeTap(
-          this.device.deviceId,
-          element,
-          driver,
-        );
+    // Long press returned above; the remaining actions are tap and doubleTap.
+    if (this.isScreenReaderNavigationEnabled(options)) {
+      // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
+      // navigation to the target, then activate.
+      const result = await this.talkBackStrategy.executeTap(this.device.deviceId, element, driver);
 
-        if (result.success) {
-          return result.screenReaderNavigation;
-        }
-
-        logger.warn(
-          `[TapOnElement] Focus navigation failed (${result.error}), ` +
-            `falling back to coordinate-based tap at (${x}, ${y})`,
-        );
-        screenReaderNavigation = result.screenReaderNavigation;
-      } else if (action === "tap") {
-        // Default (#3936): directly activate the target node via ACTION_CLICK,
-        // without moving the cursor. doubleTap has no single accessibility action,
-        // so it drops straight to the coordinate fallback below.
-        const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
-
-        if (result.success) {
-          return undefined;
-        }
-
-        logger.warn(
-          `[TapOnElement] Direct accessibility activation failed (${result.error}), ` +
-            `falling back to coordinate-based tap at (${x}, ${y})`,
-        );
+      if (result.success) {
+        return result.screenReaderNavigation;
       }
+
+      logger.warn(
+        `[TapOnElement] Focus navigation failed (${result.error}), ` +
+          `falling back to coordinate-based tap at (${x}, ${y})`,
+      );
+      screenReaderNavigation = result.screenReaderNavigation;
+    } else if (action === "tap") {
+      // Default (#3936): directly activate the target node via ACTION_CLICK,
+      // without moving the cursor. doubleTap has no single accessibility action,
+      // so it drops straight to the coordinate fallback below.
+      const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
+
+      if (result.success) {
+        return undefined;
+      }
+
+      logger.warn(
+        `[TapOnElement] Direct accessibility activation failed (${result.error}), ` +
+          `falling back to coordinate-based tap at (${x}, ${y})`,
+      );
+    }
+
+    // DocumentsUI item gestures can be acknowledged without activation, including
+    // this TalkBack fallback path. Use the same row activation/input recovery.
+    if (isAndroidDocumentsUiRow(element)) {
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      return screenReaderNavigation;
     }
 
     // Fallback to coordinate-based taps via accessibility service dispatchGesture

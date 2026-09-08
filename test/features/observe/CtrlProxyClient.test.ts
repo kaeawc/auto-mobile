@@ -79,6 +79,8 @@ describe("AndroidCtrlProxyClient", function () {
   }
 
   beforeEach(async function () {
+    // Unit tests use fake ADB forwards, so host listeners must not choose their ports.
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     // Create fake timer with auto-advance for async event flushing
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -139,6 +141,7 @@ describe("AndroidCtrlProxyClient", function () {
       await accessibilityServiceClient.close();
     }
     await stopDeviceDataStreamSocketServer();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   class CapturingWebSocket extends FakeWebSocket {

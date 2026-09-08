@@ -65,6 +65,10 @@ import {
   isPermissionDialog,
   handlePermissionDialog,
 } from "./ExploreBlockerDetection";
+import type {
+  BlockerHandlerDeps,
+  DialogTapActionFactory,
+} from "./ExploreBlockerDetection";
 
 // Import validate mode functions
 import {
@@ -101,6 +105,7 @@ export class Explore extends BaseVisualChange {
   private currentTargetEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;
+  private readonly tapActionFactory?: DialogTapActionFactory;
 
   // Constants for safety limits
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
@@ -117,12 +122,25 @@ export class Explore extends BaseVisualChange {
     timer: Timer = defaultTimer,
     navigationManager?: NavigationGraphService,
     sessionUuid?: string,
+    tapActionFactory?: DialogTapActionFactory,
   ) {
     super(device, adb, timer);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.exploredElements = new Map();
     this.elementParser = new DefaultElementParser();
     this.sessionUuid = sessionUuid;
+    this.tapActionFactory = tapActionFactory;
+  }
+
+  /**
+   * Dependencies threaded into the blocker handlers so exploration reuses this
+   * instance's injected `timer` (identical to `defaultTimer` in production) and
+   * lets a test substitute a fake tap action instead of spying on
+   * `TapOnElement.prototype`. `tapActionFactory` is left undefined in
+   * production, so the handlers fall back to constructing `TapOnElement`.
+   */
+  private blockerHandlerDeps(): BlockerHandlerDeps {
+    return { timer: this.timer, tapActionFactory: this.tapActionFactory };
   }
 
   /**
@@ -229,6 +247,7 @@ export class Explore extends BaseVisualChange {
           this.elementParser,
           (p) => this.handleDeadEnd(p),
           progress,
+          this.blockerHandlerDeps(),
         );
         if (blockerHandled) {
           // Re-observe after handling blocker
@@ -524,6 +543,7 @@ export class Explore extends BaseVisualChange {
       this.device,
       this.adb,
       progress,
+      this.blockerHandlerDeps(),
     );
     if (granted) {
       this.consecutiveNoChangeCount = 0;

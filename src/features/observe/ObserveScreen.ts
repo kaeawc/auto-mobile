@@ -1070,11 +1070,20 @@ export class RealObserveScreen implements ObserveScreen {
         // this fallback and leave a readable, package-attributed capture wrongly
         // reporting no foreground window (issue #6220 false-positive).
         if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
-          result.activeWindow = {
-            appId: result.viewHierarchy.packageName,
-            activityName: "",
-            layoutSeqSum: 0,
-          };
+          // Backfill ONLY the missing appId. The legacy query's failure sentinel
+          // is a truthy object that still carries a real `layoutSeqSum` (summed
+          // independently of package/activity parse success) and often an
+          // `activityName`/`type`/`systemOverlay`; replacing the whole object
+          // would zero `layoutSeqSum` and blank those fields, masking
+          // screen-change detection (issue #6320 regression of #6239). Only the
+          // genuinely-absent case constructs a fresh object with empty defaults.
+          result.activeWindow = result.activeWindow
+            ? { ...result.activeWindow, appId: result.viewHierarchy.packageName }
+            : {
+                appId: result.viewHierarchy.packageName,
+                activityName: "",
+                layoutSeqSum: 0,
+              };
         }
 
         if (result.notificationPermissionDetected && result.activeWindow) {

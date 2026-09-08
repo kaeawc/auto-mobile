@@ -122,7 +122,10 @@ describe("issue #6348: preference schemas reject undeclared arguments", () => {
   };
 
   test("setPreference rejects the undeclared fileName key (the #6348 trap)", () => {
-    const result = setPreferenceSchema.safeParse({ ...validSetArgs, fileName: "manual_test_prefs" });
+    const result = setPreferenceSchema.safeParse({
+      ...validSetArgs,
+      fileName: "manual_test_prefs",
+    });
     expect(result.success).toBe(false);
   });
 

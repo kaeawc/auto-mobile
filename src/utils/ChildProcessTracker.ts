@@ -1,8 +1,25 @@
 import { promises as fsPromises } from "node:fs";
+import { errorMessage } from "./describeUnknownError";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { logger } from "./logger";
 
 export const PROCESS_EXIT_TIMEOUT_MS = 5000;
+
+/**
+ * Thrown by {@link waitForExit} when a process still has not been observed to
+ * exit even after escalating to SIGKILL. The signal was sent, but delivery and
+ * reaping are not guaranteed (uninterruptible I/O, a zombie, a wedged host) —
+ * so unlike a normal rejection, the process may still be alive. A caller that
+ * owns process/resource cleanup (e.g. recording ownership) must not treat this
+ * as proof the process is gone: retain whatever handle would let a later pass
+ * retry reaping it, instead of dropping ownership on this error alone.
+ */
+export class ProcessTeardownUnconfirmedError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "ProcessTeardownUnconfirmedError";
+  }
+}
 
 export interface ProcessExitState {
   exitCode?: number | null;
@@ -176,7 +193,24 @@ export async function waitForExit(
     gracefulResult = await waitForExitOrTimeout(exitPromise, timeoutMs, timer);
   } catch (error) {
     forceKillIfRunning(process);
-    throw error;
+    // exitPromise rejected because the child emitted 'error' (e.g. a spawn
+    // failure), not because exit was confirmed — createExitTracker's onError
+    // handler tears down the exit listener once 'error' fires, so no later
+    // "exit" event can ever settle this promise. Sending SIGKILL here does not
+    // itself confirm teardown (issue #6307): unless the process had already
+    // been reaped before this error arrived, rethrowing the raw rejection
+    // would let a caller deciding process/resource ownership (e.g. recording
+    // ownership) mistake "the process reported an error" for "the process is
+    // confirmed gone" and drop ownership of a capture that may still be
+    // running. Wrap it the same way as the SIGKILL-timeout case below so
+    // ownership is retained by default.
+    if (hasExited(process)) {
+      throw error;
+    }
+    throw new ProcessTeardownUnconfirmedError(
+      `Process reported an error before teardown could be confirmed: ${errorMessage(error)}`,
+      { cause: error },
+    );
   }
 
   if (gracefulResult === "exited") {
@@ -186,7 +220,7 @@ export async function waitForExit(
 
   const forceResult = await waitForExitOrTimeout(exitPromise, forceKillTimeoutMs, timer);
   if (forceResult === "timeout") {
-    throw new Error(
+    throw new ProcessTeardownUnconfirmedError(
       `Process did not exit within ${timeoutMs}ms plus ${forceKillTimeoutMs}ms after SIGKILL`,
     );
   }

@@ -68,14 +68,12 @@ export function toDaemonTransportError(error: Error): DaemonUnavailableError {
  *
  * `DaemonClient` used to perform client-side stale-socket recovery: on a failed
  * connect with the PID file's recorded owner confirmed dead, it would unlink the
- * socket/PID files and retry. That unlink had no lock to coordinate against —
- * `UnixSocketServer.start()` (`socketServer.ts`) already unconditionally unlinks
- * the socket path before `listen()`, and that runs under `DaemonManager`'s
- * `O_EXCL` startup lock (`manager.ts`) — so a client-side unlink outside that
- * lock could only ever race a concurrent startup winner and delete ITS live
- * socket: the exact brick #6140 is about. Recovery already happens, correctly,
- * at daemon bind time under a lock; the client now never touches the
- * filesystem, only reads the PID file to decide whether a hint is warranted.
+ * socket/PID files and retry. That unlink had no ownership proof and could race
+ * a concurrent startup winner, deleting its live socket: the exact brick #6140
+ * is about. Recovery is now limited to the daemon bind guard, which requires an
+ * unreachable socket and a positively-dead recorded owner before unlinking; the
+ * client never touches the filesystem and only reads the PID file to decide
+ * whether a hint is warranted.
  */
 export interface DaemonClientRecoveryOptions {
   /** PID-file path consulted for the stale-socket diagnostic hint. Defaults to `PID_FILE_PATH`. */
@@ -216,10 +214,9 @@ export class DaemonClient {
    *
    * Purely observation-only (issue #6140 design change): this NEVER unlinks the
    * socket or PID file, even when the path is a stale non-socket file or the
-   * connect attempt fails. Stale-socket recovery already happens, correctly, at
-   * daemon bind time under `DaemonManager`'s startup lock (`UnixSocketServer.start()`
-   * unconditionally unlinks before `listen()`); a client-side unlink here had no
-   * lock to coordinate against and could only ever delete a concurrent startup
+   * connect attempt fails. The bind guard performs any permitted stale-socket
+   * reclamation only after proving the recorded owner dead; a client-side unlink
+   * here has no equivalent ownership proof and could delete a concurrent startup
    * winner's live socket.
    */
   static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
@@ -273,10 +270,9 @@ export class DaemonClient {
    * change): a failed connect is rethrown as-is, annotated with a diagnostic
    * hint when the PID file names a confirmed-dead process ({@link
    * annotateStaleSocketHint}), but the socket and PID file are never touched.
-   * Recovery is the daemon's own job — `UnixSocketServer.start()` unconditionally
-   * unlinks a stale socket path before `listen()`, under `DaemonManager`'s
-   * `O_EXCL` startup lock — so the next daemon start reclaims a stale socket
-   * regardless of anything this client does.
+   * Recovery is the daemon bind guard's job. It only unlinks after the listener
+   * is unreachable and its recorded owner is positively known to be dead, so a
+   * client can never clobber a concurrent startup winner.
    */
   async connect(timeoutMs: number = this.connectionTimeout, signal?: AbortSignal): Promise<void> {
     if (this.connected) {

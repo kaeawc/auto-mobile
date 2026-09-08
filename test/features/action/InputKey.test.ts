@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { InputKey } from "../../../src/features/action/InputKey";
 import type { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -83,6 +83,31 @@ describe("InputKey", () => {
       "shell input keyevent KEYCODE_DPAD_LEFT",
       "shell input keyevent KEYCODE_DPAD_RIGHT",
     ]);
+  });
+
+  test("sends modifier chords through Android input keycombination", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setAndroidApiLevel(31);
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+
+    const result = await inputKey.press("tab", 500, undefined, ["shift", "ctrl"]);
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_CTRL_LEFT KEYCODE_TAB",
+    ]);
+  });
+
+  test("rejects modifier chords below Android API 31", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setAndroidApiLevel(30);
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+
+    const result = await inputKey.press("tab", 500, undefined, ["shift"]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Android API 31+");
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
   test("does not issue an ADB keyevent when device validation rejects a frame context", async () => {
@@ -194,18 +219,25 @@ describe("InputKey", () => {
     });
   });
 
-  test("returns an explicit unsupported-platform result for iOS", async () => {
+  test("routes iOS discrete keys and modifiers through CtrlProxy", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const inputKey = new InputKey(iosDevice, createAdbFactory(fakeAdb));
+    const requestPressKey = mock(async () => ({ success: true }));
+    const inputKey = new InputKey(
+      iosDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+      () => ({ requestPressKey }),
+    );
 
-    const result = await inputKey.press("enter", 500);
+    const result = await inputKey.press("enter", 500, undefined, ["meta"]);
 
     expect(result).toEqual({
-      success: false,
+      success: true,
       key: "enter",
-      keyCode: "",
-      error: "input/key is unsupported on ios; CtrlProxy does not expose discrete key events",
+      keyCode: "enter",
     });
+    expect(requestPressKey).toHaveBeenCalledWith("enter", ["meta"], 500);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 });

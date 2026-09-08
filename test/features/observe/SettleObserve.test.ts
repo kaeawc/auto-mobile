@@ -24,6 +24,7 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     viewHierarchy: {
       packageName: "com.example",
       hierarchy: { node: node as any },
+      updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
     },
     ...extra,
   } as ObserveResult;
@@ -36,6 +37,7 @@ function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): 
     viewHierarchy: {
       packageName: "com.apple.mobilesafari",
       hierarchy: { node: node as any },
+      updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
     },
     screenIdentity: {
       platform: "ios",
@@ -203,9 +205,11 @@ describe("RealSettleObserve", () => {
     await settle.execute({ timeoutMs: 2500, pollMs: 150 });
 
     const mins = fake.getExecuteMinTimestamps();
-    // First poll seeds from loop-start (0); each subsequent poll waits for a read
-    // strictly newer than the previous observation's timestamp.
-    expect(mins).toEqual([0, 10, 20]);
+    // The first poll carries no floor (0 = baseline). The second is forced
+    // strictly past that baseline (10 -> 11) to obtain a genuine post-invocation
+    // capture; thereafter polls floor inclusively on the monotonic device-domain
+    // `updatedAt` (20), so a static screen cannot false-settle (#6284).
+    expect(mins).toEqual([0, 11, 20]);
     // Monotonic non-decreasing.
     for (let i = 1; i < mins.length; i++) {
       expect(mins[i]!).toBeGreaterThanOrEqual(mins[i - 1]!);

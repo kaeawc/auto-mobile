@@ -16,8 +16,9 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { VideoRecorderService } from "../../src/features/video";
-import type { BootedDevice } from "../../src/models";
+import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/features/video";
+import { ActionableError, type BootedDevice } from "../../src/models";
+import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
   listVideoRecordings,
   interruptVideoRecording,
@@ -145,6 +146,150 @@ describe("videoRecordingManager", () => {
 
     fakeTimer.advanceTime(3000);
     expect(fakeBackend.stopCalls.length).toBe(1);
+  });
+
+  test("retains durable ownership when a generic backend stop failure has no exit confirmation", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+
+    fakeBackend.stop = async () => {
+      throw new Error("adb pull failed with exit code 1");
+    };
+
+    let caught: unknown;
+    try {
+      await stopVideoRecording(active.recordingId);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ActionableError);
+    expect((caught as Error).message).not.toBe("adb pull failed with exit code 1");
+
+    const record = await fakeRepository.getRecording(active.recordingId);
+    expect(record?.status).toBe("recording");
+
+    // The raw error did not prove teardown. Keep the durable row and service
+    // handle so a retry can reach the same capture instead of starting another.
+    fakeBackend.stop = async (handle) => ({
+      recordingId: handle.recordingId,
+      outputPath: handle.outputPath,
+      startedAt: handle.startedAt,
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+      sizeBytes: 10,
+      codec: "h264",
+    });
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow();
+    await expect(stopVideoRecording(active.recordingId)).resolves.toMatchObject({
+      metadata: { recordingId: active.recordingId },
+    });
+  });
+
+  // issue #6307 P2: distinct from the confirmed-teardown case above — when the
+  // backend cannot confirm the device-side process exited
+  // (ProcessTeardownUnconfirmedError), VideoRecorderService deliberately
+  // RETAINS the handle because the capture may still be alive. The manager
+  // must not still mark the durable row "interrupted" in that case: doing so
+  // would drop it from implicit stop discovery and make it archive-eligible
+  // while its in-memory owner keeps blocking a new recording on the device.
+  test("preserves active state when the backend cannot confirm teardown (issue #6307)", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+
+    fakeBackend.stop = async () => {
+      throw new ProcessTeardownUnconfirmedError(
+        "Process did not exit within 5000ms plus 5000ms after SIGKILL",
+      );
+    };
+
+    let caught: unknown;
+    try {
+      await stopVideoRecording(active.recordingId);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ActionableError);
+
+    // The row must stay "recording" (not "interrupted"): the service still
+    // owns the capture and a client listing/checking status must keep seeing
+    // it as active/being torn down, not silently dropped.
+    const record = await fakeRepository.getRecording(active.recordingId);
+    expect(record?.status).toBe("recording");
+
+    // The service retained ownership, so a second recording on the same
+    // device must still be blocked.
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow();
+  });
+
+  test("keeps safety timers armed when a stop retains an unconfirmed capture", async () => {
+    const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 3 });
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+    fakeBackend.stop = async () => {
+      throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+    };
+
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+  });
+
+  test("re-arms a bounded stop retry when the auto-stop callback retains ownership", async () => {
+    const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 1 });
+    let stopAttempts = 0;
+    fakeBackend.stop = async () => {
+      stopAttempts += 1;
+      throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+    };
+
+    fakeTimer.advanceTime(1000);
+    for (let attempt = 0; attempt < 50 && stopAttempts === 0; attempt++) {
+      await defaultTimer.sleep(1);
+    }
+    expect(stopAttempts).toBe(1);
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    // The fired one-shot timeout is replaced by the bounded retained-owner retry.
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+
+    fakeTimer.advanceTime(5000);
+    for (let attempt = 0; attempt < 50 && stopAttempts < 2; attempt++) {
+      await defaultTimer.sleep(1);
+    }
+    expect(stopAttempts).toBe(2);
+  });
+
+  test("interrupts a row after a backend confirms capture exit but finalization fails", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    fakeBackend.stop = async () => {
+      throw new VideoCaptureFinalizationError("capture exited but adb pull failed");
+    };
+
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("interrupted");
+  });
+
+  test("retains a recoverable device artifact owner after finalization fails", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    fakeBackend.stop = async () => {
+      throw new VideoCaptureFinalizationError("device artifact is still settling", {
+        retainOwnership: true,
+      });
+    };
+
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("recording");
+
+    fakeBackend.stop = async (handle) => ({
+      recordingId: handle.recordingId,
+      outputPath: handle.outputPath,
+      startedAt: handle.startedAt,
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+      sizeBytes: 10,
+      codec: "h264",
+    });
+    await expect(stopVideoRecording(active.recordingId)).resolves.toMatchObject({
+      metadata: { recordingId: active.recordingId },
+    });
   });
 
   test("shares manager finalization when shutdown overlaps a user stop", async () => {
@@ -868,6 +1013,27 @@ describe("videoRecordingManager", () => {
       expect(recordings.map((r) => r.recordingId)).toEqual([active.recordingId]);
       // Monitor is cleared once the capture stops.
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("re-arms size monitoring after a cap-triggered stop retains ownership", async () => {
+      const capBytes = baseConfig.maxArchiveSizeMb * 1024 * 1024;
+      await reconfigureRetention(
+        { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
+        async () => capBytes * 2,
+      );
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
+      fakeBackend.stop = async () => {
+        throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+      };
+
+      fakeTimer.advanceTime(1000);
+      await drainAsyncUntil(async () => fakeTimer.getPendingIntervalCount() === 1);
+
+      expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+      // The cap callback cleared its old interval before stop; retained safety
+      // restores it and also schedules a bounded stop retry.
+      expect(fakeTimer.getPendingIntervalCount()).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
     });
 
     test("in-progress recording under the cap keeps running", async () => {

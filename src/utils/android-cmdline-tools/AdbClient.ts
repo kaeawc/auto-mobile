@@ -735,8 +735,15 @@ export class AdbClient implements AdbExecutor {
    * @param timeoutMs - Optional bound on the getprop subprocess. Callers running
    *   under a request deadline (the daemon's append-text path) pass their
    *   remaining budget so a wedged adb cannot outlive the request that asked.
+   * @param signal - Optional cancellation signal. When it fires mid-probe the
+   *   rejection is RE-THROWN (not swallowed to null): a cancelled read must
+   *   propagate so callers such as `Window.getActive` cannot go on to parse a
+   *   post-abort result. Cancellation is never cached as a device verdict.
    */
-  async getAndroidApiLevel(timeoutMs?: number): Promise<number | null> {
+  async getAndroidApiLevel(timeoutMs?: number, signal?: AbortSignal): Promise<number | null> {
+    // A cached value is still a result accepted on behalf of this call.  Do not
+    // let a cancelled request observe it after its deadline has fired.
+    signal?.throwIfAborted();
     if (this.apiLevelCache !== undefined) {
       return this.apiLevelCache;
     }
@@ -747,11 +754,18 @@ export class AdbClient implements AdbExecutor {
         timeoutMs,
         undefined,
         true,
+        signal,
       );
       const parsed = Number.parseInt(result.stdout.trim(), 10);
       this.apiLevelCache = Number.isNaN(parsed) ? null : parsed;
       return this.apiLevelCache;
     } catch (error) {
+      // A cancellation is not a device verdict: rethrow so it propagates out of
+      // getActive instead of being masked as a null API level, and never poison
+      // the cache with it.
+      if (signal?.aborted) {
+        throw error;
+      }
       logger.warn(`[ADB] Failed to read API level: ${error}`);
       // A GENUINE device failure (offline, adb error) is cached as null so a
       // device that cannot answer is not re-probed on every call. But OUR injected

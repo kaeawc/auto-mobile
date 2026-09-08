@@ -153,7 +153,7 @@ describe("assignStableViewIds (#3228)", () => {
     expect(off["view-id"]).toEqual(on["view-id"]);
   });
 
-  test("content-identical duplicates get document-order ordinal suffixes (ids stay unique per capture)", () => {
+  test("content-identical duplicates get document-order ordinal suffixes on EVERY member incl. the first (#6229)", () => {
     const spacer = () => node({ "view-id": generatedUuid("s"), bounds: {} });
     const root = node({ "view-id": generatedUuid("root"), "resource-id": "" }, [
       spacer(),
@@ -164,9 +164,60 @@ describe("assignStableViewIds (#3228)", () => {
     const children = root.node as Record<string, unknown>[];
     const ids = children.map((c) => c["view-id"] as string);
     expect(new Set(ids).size).toBe(3);
-    expect(ids[0].startsWith(STABLE_VIEW_ID_PREFIX)).toBe(true);
-    expect(ids[1]).toBe(`${ids[0]}-2`);
-    expect(ids[2]).toBe(`${ids[0]}-3`);
+    // No member of a duplicate group takes the bare form: the first is `-1`,
+    // reserving the bare `s-<hash>` for genuinely-unique content (issue #6229).
+    expect(ids[0]).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}-1$`));
+    const base = ids[0].replace(/-1$/, "");
+    expect(ids[1]).toBe(`${base}-2`);
+    expect(ids[2]).toBe(`${base}-3`);
+  });
+
+  test("a content hash that occurs exactly once still gets the bare, un-suffixed id (#6229)", () => {
+    // The bare form must remain the invariant for unique content — only
+    // duplicate groups are ordinal-suffixed.
+    const root = node({ "view-id": generatedUuid("root"), "resource-id": "" }, [
+      node({ "view-id": generatedUuid("only"), text: "Solo" }),
+    ]);
+    assignStableViewIds(root);
+    const child = root.node as Record<string, unknown>;
+    expect(child["view-id"]).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}$`));
+  });
+
+  test("uses a new namespace so a legacy bare id cannot select a post-upgrade singleton (#6229)", () => {
+    const root = node({ "view-id": generatedUuid("root") }, [
+      node({ "view-id": generatedUuid("only"), text: "Solo" }),
+    ]);
+    assignStableViewIds(root);
+    const currentId = (root.node as Record<string, unknown>)["view-id"] as string;
+    const legacyId = currentId.replace(STABLE_VIEW_ID_PREFIX, "s-");
+    expect(currentId).toStartWith(STABLE_VIEW_ID_PREFIX);
+    expect(currentId).not.toBe(legacyId);
+  });
+
+  test("removing the original of a duplicate pair does not reassign a bare id it collides with (#6229)", () => {
+    // Capture 1: content-identical peers [A, B]. Under the fixed scheme A is
+    // `s-H-1` (NOT bare) and B is `s-H-2`.
+    const spacer = (seed: string) => node({ "view-id": generatedUuid(seed), bounds: {} });
+    const before = node({ "view-id": generatedUuid("root"), "resource-id": "" }, [
+      spacer("a"),
+      spacer("b"),
+    ]);
+    assignStableViewIds(before);
+    const beforeIds = (before.node as Record<string, unknown>[]).map((c) => c["view-id"] as string);
+    const idA = beforeIds[0];
+    expect(idA).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}-1$`));
+
+    // Capture 2: A removed, B is the sole surviving node with that content. It
+    // is reassigned the bare `s-H` (now unique) — which is NOT equal to the
+    // `s-H-1` a caller observed for A, so the stale selector can no longer
+    // silently land on B.
+    const after = node({ "view-id": generatedUuid("root"), "resource-id": "" }, [spacer("b")]);
+    assignStableViewIds(after);
+    const survivorId = (after.node as Record<string, unknown>)["view-id"] as string;
+    expect(survivorId).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}$`));
+    expect(survivorId).not.toBe(idA);
+    // The survivor's bare id is the same base hash, just without A's `-1`.
+    expect(survivorId).toBe(idA.replace(/-1$/, ""));
   });
 
   test("is idempotent — a second pass changes nothing", () => {

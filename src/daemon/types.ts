@@ -199,6 +199,12 @@ export interface PidFileData {
   startedAt: number;
   /** Daemon version */
   version: string;
+  /**
+   * Launch-capture log inherited from DaemonManager, or null when this daemon
+   * was started directly without one. Missing means an older record whose log
+   * ownership cannot be determined safely.
+   */
+  launchLogPath?: string | null;
   /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
   assetVersion?: string;
   /** Absolute path to the daemon's entry script (build identity) */

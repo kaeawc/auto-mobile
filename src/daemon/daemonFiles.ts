@@ -1,11 +1,19 @@
 import os from "node:os";
 import path from "node:path";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { unlink } from "node:fs/promises";
 import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { logger } from "../utils/logger";
+import type { DaemonLaunchLogOwner, DaemonPidFileEnumeration } from "../utils/logPruner";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
@@ -93,6 +101,92 @@ export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
   socketPaths?: string[];
   expectedPid?: number;
+  /**
+   * Whether this process actually acquired the daemon socket bind. When
+   * explicitly `false`, ALL deletion is suppressed: the process holds an early
+   * owner PID record (issue #2871) — so its own pid passes the `expectedPid`
+   * self-check — yet it never owned the socket. A lock-less contender refused
+   * over a live sibling (issue #6232) is exactly this case; letting its exit
+   * cleanup unlink the shared socket/PID files would brick the live winner (the
+   * #6140 failure mode, new variant). `undefined` preserves the legacy behavior
+   * for callers that do not track socket ownership.
+   */
+  socketBindCommitted?: boolean;
+}
+
+/** Durable companion to a manager's launch-capture log. */
+export function daemonLaunchLogOwnerTombstonePath(launchLogPath: string): string {
+  return `${launchLogPath}.owner`;
+}
+
+/**
+ * A launch log is a new file generation whenever its manager opens it with
+ * truncation. Remove the previous generation's owner evidence first so a PID
+ * reuse cannot make a later sweep treat that stale tombstone as an exact claim
+ * for the newly-created file.
+ */
+export function clearDaemonLaunchLogOwnerTombstoneSync(launchLogPath: string): void {
+  try {
+    unlinkSync(daemonLaunchLogOwnerTombstonePath(launchLogPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+/**
+ * Preserve the exact launch-log association before deleting the PID record.
+ * The PID record is deliberately transient liveness state, but its association
+ * is also the conclusive evidence a later prune needs once shutdown has
+ * completed. The write is replace-atomic so a concurrent sweep sees either the
+ * old complete tombstone or the new complete tombstone, never partial JSON.
+ */
+function persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath: string): void {
+  try {
+    const owner = readDaemonOwnerForRetentionSync(pidFilePath);
+    if (
+      !owner ||
+      typeof owner.launchLogPath !== "string" ||
+      !path.isAbsolute(owner.launchLogPath)
+    ) {
+      return;
+    }
+    const tombstonePath = daemonLaunchLogOwnerTombstonePath(owner.launchLogPath);
+    const temporaryPath = `${tombstonePath}.${process.pid}.tmp`;
+    writeFileSync(temporaryPath, JSON.stringify(owner), { encoding: "utf-8", mode: 0o600 });
+    renameSync(temporaryPath, tombstonePath);
+  } catch (error) {
+    // Cleanup still must remove a dead daemon's sockets/PID record. A failed
+    // tombstone write only makes the next pruning sweep retain the launch log.
+    logSafeDebug(`daemon launch-log owner tombstone write failed: ${error}`, error);
+  }
+}
+
+/**
+ * Read a durable exact owner declaration written at daemon shutdown. Absence
+ * is conclusive only for this sidecar; malformed data is ambiguity and throws
+ * so the log pruner fails closed.
+ */
+export function readDaemonLaunchLogOwnerTombstoneSync(
+  launchLogPath: string,
+): DaemonLaunchLogOwner | undefined {
+  const tombstonePath = daemonLaunchLogOwnerTombstonePath(launchLogPath);
+  if (!existsSync(tombstonePath)) {
+    return undefined;
+  }
+  const owner = JSON.parse(readFileSync(tombstonePath, "utf-8")) as DaemonLaunchLogOwner;
+  if (
+    typeof owner?.pid !== "number" ||
+    !Number.isInteger(owner.pid) ||
+    owner.pid <= 0 ||
+    typeof owner.launchLogPath !== "string" ||
+    !path.isAbsolute(owner.launchLogPath) ||
+    path.resolve(owner.launchLogPath) !== path.resolve(launchLogPath)
+  ) {
+    throw new Error(`Launch-log owner tombstone at ${tombstonePath} is invalid`);
+  }
+  return owner;
 }
 
 /**
@@ -114,6 +208,10 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
 
+  if (options.socketBindCommitted === false) {
+    return false;
+  }
+
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
     return false;
   }
@@ -131,6 +229,7 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
 
   if (existsSync(pidFilePath)) {
     try {
+      persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
       await unlink(pidFilePath);
     } catch {
       // Best-effort cleanup.
@@ -142,6 +241,10 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
 export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): boolean {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
+
+  if (options.socketBindCommitted === false) {
+    return false;
+  }
 
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
     return false;
@@ -160,12 +263,98 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
 
   if (existsSync(pidFilePath)) {
     try {
+      persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
       unlinkSync(pidFilePath);
     } catch {
       // Best-effort cleanup.
     }
   }
   return true;
+}
+
+/**
+ * Basename prefix shared by every default/benchmark daemon pid file
+ * (`auto-mobile-daemon-<uid>.pid`, `auto-mobile-daemon-bench-<token>.pid`, ...).
+ * Isolated daemon namespaces (issue #6140) place their pid files alongside the
+ * default one under the same directory, so this prefix is what lets one process
+ * discover the OTHER namespaces that might share its log dir.
+ */
+const DAEMON_PID_FILE_BASENAME_PREFIX = "auto-mobile-daemon-";
+
+/**
+ * Best-effort debug log that tolerates the `logger`↔`daemonFiles` import cycle.
+ *
+ * `logger.ts` imports this module while it is still initializing (its startup
+ * log-prune sweep reaches here), during which the `logger` const is in its TDZ
+ * and merely touching it throws `ReferenceError: Cannot access 'logger' before
+ * initialization`. These sync helpers can run inside that window, so route their
+ * diagnostics through this wrapper: it drops the line if the logger is not yet
+ * initialized rather than crashing the import (issue #6194).
+ */
+function logSafeDebug(message: string, error: unknown): void {
+  try {
+    logger.debug(message, error);
+  } catch (loggerNotReady) {
+    // `logger` still in its TDZ during the cyclic import; drop the diagnostic
+    // rather than relocate the crash into a best-effort log line.
+    void loggerNotReady;
+  }
+}
+
+/**
+ * Enumerate every daemon pid file that could share a log directory with
+ * `pidFilePath`'s namespace — `pidFilePath` itself plus any sibling
+ * `auto-mobile-daemon-*.pid` in the same directory (other isolated namespaces,
+ * issue #6140) — and report whether that enumeration is COMPLETE
+ * ({@link DaemonPidFileEnumeration}).
+ *
+ * When isolated daemons SHARE an `AUTOMOBILE_LOG_DIR`, a `daemon-launch-*.log`
+ * in that dir may be held by a LIVE daemon from a namespace OTHER than the one
+ * doing the pruning. Checking only the pruning process's own pid file would
+ * miss that and unlink a live daemon's launch log (issue #6194). Enumerating
+ * all co-located pid files lets the pruner retain a launch log while ANY
+ * namespace's daemon is alive.
+ *
+ * A single-directory scan can NEVER prove it discovered every namespace that
+ * could share this log directory — `AUTOMOBILE_LOG_DIR` and
+ * `AUTOMOBILE_DAEMON_PID_FILE_PATH` are independent overrides
+ * (`src/daemon/constants.ts:119-123`), so a peer can leave the log directory at
+ * its default (making it discoverable-looking) while relocating ONLY its pid
+ * file to an arbitrary directory this scan never visits (e.g. `/state/a/daemon.pid`).
+ * That combination is invisible to a directory listing regardless of whether
+ * `pidFilePath` itself is the default location or a custom one — an
+ * unreadable pid-file directory is a second, narrower way discovery can fail.
+ * `uncertain` is therefore ALWAYS set so every caller — default namespace
+ * included — fails closed (retains launch logs) rather than assuming
+ * exhaustiveness it cannot prove (issue #6194). `pidFiles` is still returned
+ * and still checked for liveness first: a genuinely discovered live peer is
+ * caught immediately, and `uncertain` only decides the residual "found nothing
+ * alive" case.
+ *
+ * Deduplicated, and always includes `pidFilePath` so the caller never loses its
+ * own-namespace check.
+ */
+export function listDaemonPidFilesSync(
+  pidFilePath: string = PID_FILE_PATH,
+): DaemonPidFileEnumeration {
+  const dir = path.dirname(pidFilePath);
+  const found = new Set<string>([pidFilePath]);
+  // A directory-listing scan can never prove it enumerated every namespace
+  // sharing this log directory (see docstring) — always uncertain, regardless
+  // of whether `pidFilePath` is the default location or a custom one.
+  const uncertain = true;
+  try {
+    for (const entry of readdirSync(dir)) {
+      if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
+        found.add(path.join(dir, entry));
+      }
+    }
+  } catch (error) {
+    // The pid-file directory could not be read either, so not even the
+    // co-located siblings could be enumerated this time.
+    logSafeDebug(`src/daemon/daemonFiles.ts pidfile dir scan failed: ${error}`, error);
+  }
+  return { pidFiles: [...found], uncertain };
 }
 
 export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFileData | null {
@@ -177,9 +366,44 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
   } catch (error) {
     // A missing/malformed pidfile is expected when the daemon is stale or hasn't
     // written it yet; treating it as "no daemon" is the correct degraded behavior.
-    logger.debug(`src/daemon/daemonFiles.ts pidfile parse failed: ${error}`, error);
+    logSafeDebug(`src/daemon/daemonFiles.ts pidfile parse failed: ${error}`, error);
     return null;
   }
+}
+
+/**
+ * Read the daemon owner declaration for a launch-log RETENTION decision, distinguishing
+ * a CONFIDENTLY-absent pid file (returns `undefined` — no daemon recorded in that
+ * namespace) from a present-but-unreadable/malformed/schema-invalid one (THROWS
+ * — ambiguous).
+ *
+ * The pruner treats a throw as "a live daemon may still own this launch log" and
+ * retains it, so an unreadable OR schema-invalid pid file must NOT be swallowed
+ * to `undefined`/an unusable value the way {@link readPidFileDataSync} does —
+ * that would let a stale launch log be pruned while a live daemon still holds
+ * the inherited fd (issue #6194). A present record whose `pid` field is not a
+ * positive integer (missing, non-numeric, `0`, negative, or non-finite) is just
+ * as ambiguous as a JSON syntax error: it is neither a confidently-absent file
+ * nor a usable pid, so it throws rather than returning it as-is. No logger
+ * reference, so it is safe to call during the cyclic logger import.
+ */
+export function readDaemonOwnerForRetentionSync(
+  pidFilePath: string = PID_FILE_PATH,
+): DaemonLaunchLogOwner | undefined {
+  if (!existsSync(pidFilePath)) {
+    return undefined;
+  }
+  // A read/parse failure propagates on purpose: an existing but unreadable pid
+  // file is ambiguous, and the pruner must fail closed (retain) on ambiguity.
+  const data = JSON.parse(readFileSync(pidFilePath, "utf-8")) as PidFileData;
+  const pid = data?.pid;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+    // A present but schema-invalid record (e.g. `{}`, `{"pid":"123"}`) is
+    // ambiguous, not confidently absent — throw so the caller retains rather
+    // than silently treating this namespace as dead.
+    throw new Error(`Pid file at ${pidFilePath} is present but does not contain a valid pid`);
+  }
+  return { pid, launchLogPath: data.launchLogPath };
 }
 
 export function isProcessRunning(pid: number): boolean {
@@ -198,7 +422,7 @@ export function isProcessRunning(pid: number): boolean {
   } catch (error) {
     // ESRCH (no such process) or EPERM both mean the pid is not a live process
     // we own; reporting "not running" is the safe, correct answer here.
-    logger.debug(`src/daemon/daemonFiles.ts liveness check failed: ${error}`, error);
+    logSafeDebug(`src/daemon/daemonFiles.ts liveness check failed: ${error}`, error);
     return false;
   }
 }

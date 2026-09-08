@@ -538,6 +538,345 @@ describe("Rotate", () => {
       );
     });
 
+    test("settle-waits (retries via the injected Timer) before accepting a transient post-restore read, instead of confirming immediately (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the FIRST confirmation read
+      // catches a transient not-yet-settled WindowManager still reporting
+      // landscape; the SECOND read (after the settle-wait sleep) shows the
+      // sensor has settled on portrait. The settle-wait must retry via
+      // `this.timer.sleep` rather than confirming off the stale first read.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=1"), // post-restore confirm attempt 1: transient/unsettled
+        createExecResult("mRotation=0"), // post-restore confirm attempt 2: settled
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Settled on the requested orientation, not the transient stale read.
+      expect(result.currentOrientation).toBe("portrait");
+      expect(result.warning).toBeUndefined();
+      // The settle-wait must have slept (i.e. actually retried) via the
+      // injected Timer before accepting the second read as final.
+      expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
+    });
+
+    test("does not accept a first post-restore sample matching the requested orientation without confirming it is stable (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the FIRST confirmation read
+      // already matches the requested "portrait" — but the physical sensor
+      // swings it back to landscape moments later. A fix that returns on the
+      // first matching sample without confirming stability would falsely
+      // report "portrait" held; the settle-wait must confirm the match holds
+      // across a second read before accepting it.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-restore confirm attempt 1: matches requested portrait...
+        createExecResult("mRotation=1"), // ...but attempt 2 reveals it swung back to landscape
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Must report the ACTUAL orientation (landscape), not the transient
+      // first-sample match that was never confirmed stable.
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+      // The settle-wait must have kept sampling past the first match.
+      expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
+    });
+
+    test("does not accept a lone match on the FINAL settle-wait attempt, since there is no later sample to confirm it (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the settle-wait budget
+      // (SETTLE_WAIT_MAX_ATTEMPTS=3) is exhausted with landscape, landscape,
+      // then the requested portrait on the very last attempt — a single,
+      // unconfirmed match with no opportunity for a later stability read.
+      // Unconditionally returning that final value would falsely report
+      // "portrait" held; it must instead be reported as unconfirmed.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape
+        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Must NOT report the requested orientation as confirmed off a single,
+      // unconfirmable final-attempt sample.
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+      // The settle-wait must have exhausted its full retry budget (slept
+      // between every attempt) rather than stopping early on the lone match.
+      expect(fakeTimer.getSleepCallCount()).toBe(2);
+    });
+
+    test("does not report a lone final opposite-orientation sample as a confirmed reversion (#6211)", async () => {
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult(""), // settle attempt 1: unreadable
+        createExecResult(""), // settle attempt 2: unreadable
+        createExecResult("mRotation=1"), // settle attempt 3: lone landscape sample
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+      expect(fakeTimer.getSleepCallCount()).toBe(2);
+    });
+
+    test("does not accept a lone match on the FINAL settle-wait attempt after an earlier non-adjacent match resets the streak (#6211)", async () => {
+      // Alternate sequence from the review finding: portrait, landscape,
+      // portrait. The first attempt matches but is immediately broken by the
+      // second (non-matching) attempt, resetting the consecutive-match
+      // streak; the third (final) attempt matches again but, being the last
+      // attempt, has no later sample to confirm it either.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait (lone, then broken)
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (breaks the streak)
+        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match again
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+    });
+
+    test("gives up after the settle-wait budget and honestly reports unconfirmed when the read never settles (#6211)", async () => {
+      // The confirmation read stays unparseable across every settle-wait
+      // attempt (persistent, not transient) — must still end up "unknown"
+      // rather than retrying forever or fabricating a result.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult(""), // every confirm attempt thereafter is unparseable
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning ?? "").toMatch(/could not be confirmed/i);
+    });
+
+    test("confirms the true live orientation (rather than assuming it held) when the auto-rotate restore write fails, and preserves it when it does hold (#6211)", async () => {
+      // waitForRotation has already CONFIRMED the requested rotation while
+      // auto-rotate was forced off. The subsequent accelerometer_rotation=1
+      // restore write then throws — but a REJECTED write does not prove
+      // auto-rotate stayed disabled (the underlying put can time out AFTER
+      // CtrlProxy already applied it), so the code must re-read the live
+      // orientation rather than assume it held. Here the re-read confirms
+      // portrait genuinely still holds, so the confirmed rotation is
+      // preserved with a warning noting the ambiguous restore, not
+      // discarded as an overall failure.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-write-failure confirm reads: portrait genuinely holds
+      ]);
+      fakeAdb.setCommandError(
+        "shell settings put system accelerometer_rotation 1",
+        new Error("device offline"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("portrait");
+      expect(result.previousOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/ambiguous outcome/i);
+      // The restore-write failure must NOT skip re-confirming the live
+      // orientation — it must be re-queried, not assumed (#6211 review).
+      const dumpsysCalls = fakeAdb
+        .getExecutedCommands()
+        .filter((cmd) => cmd.includes('shell dumpsys window | grep -i "mRotation="')).length;
+      expect(dumpsysCalls).toBeGreaterThan(1);
+    });
+
+    test("reflects the true reverted orientation, not the requested one, when an ambiguous restore-write failure turns out to have actually re-enabled auto-rotate (#6211)", async () => {
+      // The accelerometer_rotation=1 restore write throws (ambiguous outcome:
+      // it may have been applied by CtrlProxy before the failure was
+      // reported), and the physical sensor genuinely reverts the device once
+      // auto-rotate is back on. The code must report the ACTUAL confirmed
+      // orientation, not blindly assume the forced rotation still holds just
+      // because the restore write appeared to fail.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check (landscape before)
+        createExecResult("mRotation=1"), // post-write-failure confirm reads: reverted to landscape
+      ]);
+      fakeAdb.setCommandError(
+        "shell settings put system accelerometer_rotation 1",
+        new Error("device offline"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Must report the TRUE confirmed orientation, not the requested one.
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.previousOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+      // The live read confirms landscape, but the rejected restore write does
+      // not prove auto-rotate caused it. Keep the evidence without inventing
+      // that causal outcome in the public message.
+      expect(result.message).toContain("attempting to restore auto-rotate");
+      expect(result.message).toContain("confirmed landscape");
+      expect(result.message).not.toMatch(/auto-rotate reverted/i);
+    });
+
+    test("retains a confirmed stable opposite orientation when the FINAL settle-wait sample fails to read (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the first two post-restore
+      // samples both read landscape (two consecutive matching samples — a
+      // confirmed reversion), but the third (final) settle-wait attempt
+      // fails to parse at all. That read FAILURE must not discard the
+      // already-confirmed landscape reversion in favor of "unknown".
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (confirmed stable)
+        createExecResult(""), // post-restore confirm attempt 3 (final): unparseable
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      // Must report the confirmed landscape reversion, not "unknown".
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+    });
+
+    test("retries the auto-rotate restore write once before treating a transient failure as ambiguous (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. The FIRST
+      // accelerometer_rotation=1 restore write attempt fails transiently
+      // (e.g. a momentary CtrlProxy/ADB hiccup), but a retry of the same
+      // idempotent write succeeds. This must not be reported as an ambiguous
+      // outcome — the retry recovers it cleanly.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait
+        createExecResult("mRotation=0"), // post-restore confirm attempt 2: portrait (confirmed stable)
+      ]);
+
+      let restoreWriteAttempts = 0;
+      const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+      fakeAdb.executeCommand = (async (command: string, ...rest: unknown[]) => {
+        if (command.includes("settings put system accelerometer_rotation 1")) {
+          restoreWriteAttempts++;
+          if (restoreWriteAttempts === 1) {
+            throw new Error("transient device offline");
+          }
+        }
+        return (originalExecuteCommand as (...args: unknown[]) => Promise<ExecResult>)(
+          command,
+          ...rest,
+        );
+      }) as typeof fakeAdb.executeCommand;
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("portrait");
+      // No ambiguity: the retry recovered the restore write cleanly.
+      expect(result.warning).toBeUndefined();
+      // The restore write must have been attempted twice: once, then a retry.
+      expect(restoreWriteAttempts).toBe(2);
+    });
+
+    test("keeps the ambiguous-restore warning state-neutral instead of asserting auto-rotate is enabled (#6211)", async () => {
+      // The accelerometer_rotation=1 restore write fails on both the first
+      // attempt and the retry (persistent, not transient), and the live
+      // confirmation read never settles either. The composed warning must
+      // not claim "auto-rotate is enabled" — that state was never actually
+      // confirmed — while still explaining the ambiguous outcome.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult(""), // every post-restore confirm attempt is unparseable
+      ]);
+      fakeAdb.setCommandError(
+        "shell settings put system accelerometer_rotation 1",
+        new Error("device offline"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.currentOrientation).toBe("unknown");
+      expect(result.warning).toBeDefined();
+      const warning = result.warning ?? "";
+      expect(warning).toMatch(/ambiguous outcome/i);
+      expect(warning).toMatch(/could not be confirmed/i);
+      // State-neutral: must not assert a state that was never confirmed.
+      expect(warning).not.toMatch(/auto-rotate is enabled/i);
+    });
+
     test("serializes concurrent rotations on the same device so auto-rotate restore is not corrupted (#6199)", async () => {
       // Device starts portrait with auto-rotate ON.
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));

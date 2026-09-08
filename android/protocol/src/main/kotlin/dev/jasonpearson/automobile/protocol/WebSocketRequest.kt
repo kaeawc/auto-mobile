@@ -193,6 +193,13 @@ data class RequestSetText(
 ) : WebSocketRequest()
 
 @Serializable
+@SerialName("request_insert_text")
+data class RequestInsertText(
+  override val requestId: String? = null,
+  val text: String,
+) : WebSocketRequest()
+
+@Serializable
 @SerialName("request_ime_action")
 data class RequestImeAction(
   override val requestId: String? = null,

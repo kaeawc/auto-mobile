@@ -256,18 +256,21 @@ data class UpdateServiceResult(
 data class SetKeyValueResult(
   val success: Boolean = true,
   val message: String? = null,
+  val warning: String? = null,
 )
 
 @Serializable
 data class RemoveKeyValueResult(
   val success: Boolean = true,
   val message: String? = null,
+  val warning: String? = null,
 )
 
 @Serializable
 data class ClearKeyValueResult(
   val success: Boolean = true,
   val message: String? = null,
+  val warning: String? = null,
 )
 
 @Serializable

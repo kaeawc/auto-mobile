@@ -4,6 +4,7 @@
  */
 import type { Platform, ElementSelectionStrategy, ImeAction } from "../models";
 import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
+import type { SendKeysCommand, SendKeysSelector } from "../features/action/SendKeys";
 
 // ============================================================================
 // Tool Argument Types
@@ -57,6 +58,14 @@ export interface InputTextArgs {
   imeAction?: ImeAction;
   dismissKeyboard?: boolean;
   platform?: Platform;
+  raw?: boolean;
+  project?: "full" | "skeleton";
+}
+
+export interface SendKeysArgs {
+  commands: SendKeysCommand[];
+  selector?: SendKeysSelector;
+  platform: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";
 }

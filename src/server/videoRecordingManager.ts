@@ -9,6 +9,7 @@ import {
   VideoRecordingHighlightEntry,
   VideoRecordingHighlightInput,
   VideoRecordingMetadata,
+  toActionableError,
 } from "../models";
 import {
   HybridVideoCaptureBackend,
@@ -59,6 +60,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_RETENTION_DAYS = 7;
 const DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES = 60;
 const DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS = 15;
+// A failed safety stop must leave a bounded recovery path. This retry remains
+// deliberately short enough to enforce a duration/size cap, without turning a
+// transient device failure into a tight retry loop.
+const RETAINED_STOP_RETRY_MS = 5000;
 
 /**
  * Time-based retention + in-progress size-cap policy for the video archive
@@ -583,6 +588,37 @@ function clearInProgressSizeCap(recordingId: string): void {
   }
 }
 
+async function rearmRetainedRecordingSafety(recordingId: string): Promise<void> {
+  const deps = await getVideoRecordingDependencies();
+  // A manual retry may have completed while the failed safety callback was
+  // unwinding. Only re-arm work for the durable owner that is still active.
+  if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+    return;
+  }
+  const record = await deps.recordingRepository.getRecording(recordingId);
+  if (!record || record.status !== "recording") {
+    return;
+  }
+  // The repository read can yield while another successful stop releases this
+  // owner. Recheck after it returns so this recovery path cannot re-arm timers
+  // for an already completed recording.
+  if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+    return;
+  }
+
+  clearAutoStop(recordingId);
+  const handle = deps.timer.setTimeout(() => {
+    void stopVideoRecording(recordingId).catch((error) => {
+      logger.warn(`[VideoRecording] Retained safety stop failed for ${recordingId}: ${error}`);
+    });
+  }, RETAINED_STOP_RETRY_MS);
+  autoStopTimers.set(recordingId, { timer: deps.timer, handle });
+
+  const capBytes = Math.floor((record.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+  clearInProgressSizeCap(recordingId);
+  scheduleInProgressSizeCap(recordingId, record.filePath, capBytes, deps);
+}
+
 async function enforceInProgressSizeCap(
   recordingId: string,
   filePath: string,
@@ -1027,10 +1063,64 @@ export async function stopVideoRecording(recordingId?: string): Promise<StopVide
 async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRecordingResult> {
   const { videoRecorderService, recordingRepository, now } = await getVideoRecordingDependencies();
 
+  let metadata: VideoRecordingMetadata;
+  try {
+    metadata = await videoRecorderService.stopRecording(resolvedId);
+  } catch (error) {
+    // A stop failure means one of two very different things at the service
+    // layer (see VideoRecorderService.handleStopFailure), and the durable row
+    // must track which one happened, not assume the worse case unconditionally
+    // (issue #6307 P2):
+    //   - Teardown unconfirmed (e.g. ProcessTeardownUnconfirmedError): the
+    //     service deliberately RETAINS the handle because the capture process
+    //     may still be alive, so a new recording on this device stays blocked.
+    //     Marking the row "interrupted" here would still drop it from implicit
+    //     stop discovery and make it eligible for archive access/deletion,
+    //     even though its in-memory owner is still live and blocking — a
+    //     contradiction between the durable row and the retained owner. Leave
+    //     the row's "recording" status (and its highlight session) intact so
+    //     status/listing keeps reflecting that it is still active/being torn
+    //     down; a later teardown/cleanup retry (shutdown, forceStop) can still
+    //     reach the retained handle.
+    //   - Confirmed teardown (e.g. a genuine `adb pull` failure after
+    //     retries, issue #6291): the backend already tore down the
+    //     device-side process, so ownership was released — clean up the now-
+    //     orphaned "recording" row via the same canonical interruption path
+    //     used elsewhere, instead of leaving it stuck in "recording" forever.
+    const stillOwnedByService = videoRecorderService.listActiveRecordingIds().includes(resolvedId);
+    if (stillOwnedByService) {
+      logger.warn(
+        `[VideoRecording] Stop of ${resolvedId} could not confirm teardown; the service ` +
+          `retained ownership, so its recording row stays active: ${error}`,
+      );
+      // A safety timer can have just fired (or an in-progress size monitor can
+      // have cleared itself) before the failed stop retained ownership. Re-arm
+      // both guards so this potentially live capture does not run indefinitely.
+      void rearmRetainedRecordingSafety(resolvedId).catch((rearmError) => {
+        logger.warn(
+          `[VideoRecording] Failed to re-arm retained safety enforcement for ${resolvedId}: ${rearmError}`,
+          rearmError,
+        );
+      });
+    } else {
+      try {
+        await interruptVideoRecording(resolvedId);
+      } catch (cleanupError) {
+        logger.warn(
+          `[VideoRecording] Failed to clean up orphaned recording ${resolvedId} after a failed stop: ${cleanupError}`,
+          cleanupError,
+        );
+      }
+    }
+    // Surface a structured error rather than the backend's raw exec message
+    // either way.
+    throw toActionableError(error, `Failed to stop video recording ${resolvedId}`);
+  }
+  // A failed stop that retained ownership must keep its original bounded
+  // safety work armed. Clear it only after the backend confirmed success;
+  // confirmed-finalization failures reach interruptVideoRecording above.
   clearAutoStop(resolvedId);
   clearInProgressSizeCap(resolvedId);
-
-  const metadata = await videoRecorderService.stopRecording(resolvedId);
   const highlightSession = disposeHighlightSession(resolvedId);
   if (highlightSession) {
     const finalizedHighlights = finalizeHighlightSession(

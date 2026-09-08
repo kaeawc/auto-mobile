@@ -3,7 +3,10 @@ import { DefaultElementFinder } from "../../../src/features/utility/ElementFinde
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
 import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
-import { assignStableViewIds } from "../../../src/features/observe/android/StableNodeIdentity";
+import {
+  assignStableViewIds,
+  STABLE_VIEW_ID_PREFIX,
+} from "../../../src/features/observe/android/StableNodeIdentity";
 import { toSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import type { ViewHierarchyResult } from "../../../src/models";
 import type { Element } from "../../../src/models/Element";
@@ -84,7 +87,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // Every synthetic id is stable-shaped and unique.
     const stableIds = elements.map((el) => el["view-id"]);
     for (const id of stableIds) {
-      expect(id).toMatch(/^s-[0-9a-f]{16}(-\d+)?$/);
+      expect(id).toMatch(/^s2-[0-9a-f]{16}(-\d+)?$/);
     }
     expect(new Set(stableIds).size).toBe(stableIds.length);
 
@@ -95,7 +98,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // path tapOn uses, against the SAME hierarchy, and assert it resolves to
     // the one element it was derived from — not any other row.
     for (const entry of skeleton) {
-      expect(entry.elementId).toMatch(/^s-[0-9a-f]{16}(-\d+)?$/);
+      expect(entry.elementId).toMatch(/^s2-[0-9a-f]{16}(-\d+)?$/);
       const result = selector.selectByResourceId(viewHierarchy, entry.elementId!);
       expect(result.element).not.toBeNull();
       expect(result.totalMatches).toBe(1);
@@ -105,18 +108,16 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     }
   });
 
-  test("content-identical duplicate nodes get distinct ids, but BOTH the bare first-occurrence id and its ordinal-suffixed peer are rejected as capture-local", () => {
+  test("content-identical duplicate nodes get distinct ordinal ids (NO bare form) and both are rejected as capture-local", () => {
     // Two nodes with completely identical stable content (same class, no
     // text/content-desc/resource-id) — `assignStableViewIds` disambiguates them
-    // with a `-2` ordinal suffix rather than colliding on one hash. The FIRST
-    // occurrence gets the bare `s-<hash>` id (implicitly ordinal 1) - that
-    // bare/ordinal split is assigned by document order AT CAPTURE TIME (see
-    // `StableNodeIdentity.ts`), so BOTH forms are capture-local whenever a
-    // duplicate exists: an insert or reorder before a later capture can hand
-    // the bare id to a different node entirely. Resolving either form here
-    // would therefore risk silently acting on the wrong element - worse than
-    // a clear failure (issue #6218 review threads PRRT_kwDOP-GF5M6foer0 and
-    // follow-up PRRT_kwDOP-GF5M6fomf-).
+    // with document-order ordinals. Under the #6229 fix EVERY member of a
+    // duplicate group is suffixed, so the first is `s-<hash>-1` (NOT bare) and
+    // the second is `s-<hash>-2`; the bare form is reserved for unique content.
+    // Both ordinal forms are still capture-local whenever a duplicate exists,
+    // so resolving either while both peers are present risks silently acting on
+    // the wrong element — worse than a clear failure (issue #6218 review
+    // threads PRRT_kwDOP-GF5M6foer0 and follow-up PRRT_kwDOP-GF5M6fomf-).
     const nodeA = {
       class: "android.view.View",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
@@ -137,16 +138,66 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const idA = (nodeA as Record<string, unknown>)["view-id"] as string;
     const idB = (nodeB as Record<string, unknown>)["view-id"] as string;
 
-    // Deterministic, cleanly disambiguated — not the same value.
+    // Deterministic, cleanly disambiguated — neither is the bare form.
     expect(idA).not.toBe(idB);
-    expect(idA.startsWith("s-")).toBe(true);
-    expect(idB).toBe(`${idA}-2`);
+    expect(idA).toMatch(/^s2-[0-9a-f]{16}-1$/);
+    expect(idB).toBe(`${idA.replace(/-1$/, "")}-2`);
 
-    // Both the bare first-occurrence id and its ordinal-suffixed peer are
-    // rejected outright, not resolved - neither is safe to trust across a
-    // capture boundary while a content-identical duplicate exists.
+    // Both ordinal forms are rejected outright, not resolved - neither is safe
+    // to trust across a capture boundary while a content-identical duplicate
+    // exists.
     expect(() => selector.selectByResourceId(viewHierarchy, idA)).toThrow(/ambiguous/i);
     expect(() => selector.selectByResourceId(viewHierarchy, idB)).toThrow(/ambiguous/i);
+  });
+
+  test("a suffixed id observed for a duplicate does NOT retarget the content-identical survivor after the original is removed (issue #6229)", () => {
+    // Capture 1: content-identical peers [A, B]. A is `s-<hash>-1`, B is
+    // `s-<hash>-2` — A is NOT bare, which is the crux of the #6229 fix.
+    const makeDup = (seedA: string, seedB: string) => ({
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+          clickable: "true",
+          "view-id": generatedViewId(seedA),
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 50, right: 40, bottom: 90 },
+          clickable: "true",
+          "view-id": generatedViewId(seedB),
+        },
+      ],
+    });
+    const original = makeDup("orig-a", "orig-b");
+    assignStableViewIds(original);
+    const observedIdForA = (original.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(observedIdForA).toMatch(/^s2-[0-9a-f]{16}-1$/);
+
+    // Capture 2: A removed; B is the sole surviving content-identical node and
+    // is reassigned the bare `s-<hash>` (now unique). A `tapOn` keyed on A's
+    // observed `s-<hash>-1` must NOT silently land on B — it finds nothing.
+    const afterRemoval = {
+      node: [
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 50, right: 40, bottom: 90 },
+          clickable: "true",
+          "view-id": generatedViewId("orig-b"),
+        },
+      ],
+    };
+    assignStableViewIds(afterRemoval);
+    const survivorId = (afterRemoval.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(survivorId).toMatch(/^s2-[0-9a-f]{16}$/);
+    expect(survivorId).not.toBe(observedIdForA);
+
+    const result = selector.selectByResourceId(
+      { hierarchy: afterRemoval } as ViewHierarchyResult,
+      observedIdForA,
+    );
+    expect(result.element).toBeNull();
+    expect(result.totalMatches).toBe(0);
   });
 
   test("a bare s-<hash> id with no content-identical peer still resolves normally", () => {
@@ -166,7 +217,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     assignStableViewIds(rawRoot);
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
     const id = (rawRoot.node[0] as Record<string, unknown>)["view-id"] as string;
-    expect(id).toMatch(/^s-[0-9a-f]{16}$/);
+    expect(id).toMatch(/^s2-[0-9a-f]{16}$/);
 
     const result = selector.selectByResourceId(viewHierarchy, id);
     expect(result.element).not.toBeNull();
@@ -174,9 +225,43 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(result.element!["content-desc"]).toBe("solo-row");
   });
 
-  test("a real bare Compose resource-id shaped like a synthetic id (s-a / s-a-2) is never misclassified as ambiguous", () => {
+  test("rejects a detectable legacy bare duplicate id instead of treating it as a current singleton", () => {
+    // Before #6229, a duplicate family's first member was bare and later
+    // members started at -2. The new producer reserves -1 for that first
+    // member, so this missing `-1` shape is an explicit legacy signature. It
+    // must not silently resolve as if the bare id meant unique content.
+    const legacyBase = "s-0123456789abcdef";
+    const rawRoot = {
+      node: [
+        {
+          class: "android.view.ViewGroup",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          clickable: "true",
+          "view-id": legacyBase,
+        },
+        {
+          class: "android.view.View",
+          bounds: { left: 0, top: 110, right: 100, bottom: 160 },
+          clickable: "true",
+          "view-id": `${legacyBase}-2`,
+        },
+      ],
+    };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    expect(selector.selectByResourceId(viewHierarchy, legacyBase).element).toBeNull();
+    // Container lookup shares the same selector contract and must not resolve
+    // the legacy bare node before the target's ambiguity guard runs.
+    expect(
+      selector.selectByResourceId(viewHierarchy, "missing-target", {
+        container: { elementId: legacyBase },
+      }).element,
+    ).toBeNull();
+  });
+
+  test("a real bare Compose resource-id shaped like a synthetic id is never misclassified as ambiguous", () => {
     // Review thread PRRT_kwDOP-GF5M6fomgA: `SYNTHETIC_STABLE_VIEW_ID_PATTERN`
-    // must require the producer's EXACT hash width, not merely the `s-`
+    // must require the producer's EXACT hash width, not merely the stable
     // prefix, or a real short Compose testTag colliding with that prefix
     // would be wrongly rejected as an ambiguous synthetic ordinal.
     const rawRoot = {
@@ -184,25 +269,25 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         {
           class: "androidx.compose.ui.platform.ComposeView",
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-          "resource-id": "s-a",
+          "resource-id": `${STABLE_VIEW_ID_PREFIX}a`,
           clickable: "true",
         },
         {
           class: "androidx.compose.ui.platform.ComposeView",
           bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-          "resource-id": "s-a-2",
+          "resource-id": `${STABLE_VIEW_ID_PREFIX}a-2`,
           clickable: "true",
         },
       ],
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    const result = selector.selectByResourceId(viewHierarchy, "s-a-2");
+    const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a-2`);
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!.bounds).toEqual({ left: 0, top: 60, right: 100, bottom: 110 });
 
-    const resultBase = selector.selectByResourceId(viewHierarchy, "s-a");
+    const resultBase = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
     expect(resultBase.element).not.toBeNull();
     expect(resultBase.totalMatches).toBe(1);
     expect(resultBase.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
@@ -232,7 +317,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     assignStableViewIds(original);
     const originalIdB = (original.node[1] as Record<string, unknown>)["view-id"] as string;
-    expect(originalIdB).toMatch(/^s-[0-9a-f]{16}-2$/);
+    expect(originalIdB).toMatch(/^s2-[0-9a-f]{16}-2$/);
 
     const reordered = {
       node: [
@@ -260,11 +345,13 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const reorderedIds = (reordered.node as Record<string, unknown>[]).map(
       (n) => n["view-id"] as string,
     );
-    // Same base hash for all three (content-identical) - inserted node now
-    // owns the un-suffixed base id, and A/B ordinals both shifted by one.
-    expect(reorderedIds[0]).toBe(originalIdB.replace(/-2$/, ""));
+    // Same base hash for all three (content-identical) - every member is
+    // ordinal-suffixed (no bare form for a duplicate group, issue #6229), and
+    // the inserted node now owns `-1` while A/B ordinals both shifted by one.
+    const reorderedBase = originalIdB.replace(/-2$/, "");
+    expect(reorderedIds[0]).toBe(`${reorderedBase}-1`);
     expect(reorderedIds[1]).toBe(originalIdB);
-    expect(reorderedIds[2]).toBe(`${originalIdB.replace(/-2$/, "")}-3`);
+    expect(reorderedIds[2]).toBe(`${reorderedBase}-3`);
 
     const reorderedViewHierarchy: ViewHierarchyResult = { hierarchy: reordered };
 
@@ -275,12 +362,17 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     );
   });
 
-  test("identical controls in two distinct, uniquely-identified containers resolve via tapOn({elementId, container}) instead of being rejected as ambiguous", () => {
-    // Review thread PRRT_kwDOP-GF5M6fouI_: the ambiguity check must be scoped
-    // to the RESOLVED container, not the whole capture. Two containers each
-    // hold one content-identical target node - globally ambiguous (2 nodes
-    // share the base hash), but each container's own subtree contains only
-    // ONE of them, so a `container`-scoped selector must resolve cleanly.
+  test("an ordinal id for identical controls in two containers is rejected as ambiguous even WITH a container selector (issue #6229, review thread PRRT_kwDOP-GF5M6f1gS0)", () => {
+    // Ordinals are assigned by GLOBAL document order (`assignStableViewIds`),
+    // but the ambiguity guard used to count only within the resolved container
+    // (review thread PRRT_kwDOP-GF5M6fouI_). That was unsound: a content-
+    // identical peer OUTSIDE the container still makes an in-container ordinal
+    // capture-local, because removing the in-container original globally
+    // re-ordinals the id onto a surviving peer. A single fresh capture cannot
+    // tell a genuine "one identical target per container" layout apart from a
+    // post-removal reassignment, so the guard now counts over the WHOLE capture
+    // and rejects a globally-ambiguous ordinal even when a container isolates a
+    // single peer. The caller must disambiguate with text/content-desc/bounds.
     const container1 = {
       class: "android.view.ViewGroup",
       bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -314,46 +406,158 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const idInContainer1 = (container1.node[0] as Record<string, unknown>)["view-id"] as string;
     const idInContainer2 = (container2.node[0] as Record<string, unknown>)["view-id"] as string;
 
-    // Same base content hash, disambiguated globally by document order - the
-    // first (container1's) is bare, the second (container2's) is suffixed.
-    expect(idInContainer1).toMatch(/^s-[0-9a-f]{16}$/);
-    expect(idInContainer2).toBe(`${idInContainer1}-2`);
+    // Same base content hash, disambiguated globally by document order - both
+    // are ordinal-suffixed (no bare form for a duplicate group, issue #6229):
+    // container1's is `-1`, container2's is `-2`.
+    expect(idInContainer1).toMatch(/^s2-[0-9a-f]{16}-1$/);
+    expect(idInContainer2).toBe(`${idInContainer1.replace(/-1$/, "")}-2`);
 
     // Without a container, this is genuinely globally ambiguous.
     expect(() => selector.selectByResourceId(viewHierarchy, idInContainer1)).toThrow(/ambiguous/i);
 
-    // Scoped to its OWN container, each resolves cleanly - the peer outside
-    // the container does not block or misdirect resolution inside it.
-    const resultInContainer1 = selector.selectByResourceId(viewHierarchy, idInContainer1, {
-      container: { elementId: "com.app:id/container1" },
-    });
-    expect(resultInContainer1.element).not.toBeNull();
-    expect(resultInContainer1.totalMatches).toBe(1);
-    expect(resultInContainer1.element!.bounds).toEqual({
-      left: 10,
-      top: 10,
-      right: 90,
-      bottom: 40,
-    });
+    // Scoped to its OWN container, it is STILL rejected: the peer in the other
+    // container keeps the ordinal capture-local, so the guard cannot safely
+    // resolve it. (Previously this resolved cleanly, which is exactly the
+    // silent-retarget vector #6229 targets once a peer is removed.)
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, idInContainer1, {
+        container: { elementId: "com.app:id/container1" },
+      }),
+    ).toThrow(/ambiguous/i);
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, idInContainer2, {
+        container: { elementId: "com.app:id/container2" },
+      }),
+    ).toThrow(/ambiguous/i);
+  });
 
-    const resultInContainer2 = selector.selectByResourceId(viewHierarchy, idInContainer2, {
-      container: { elementId: "com.app:id/container2" },
+  test("a suffixed id does NOT silently retarget a content-identical peer in ANOTHER container after the original is removed (issue #6229, review thread PRRT_kwDOP-GF5M6f1gS0)", () => {
+    // Cross-container retarget: content-identical [A, B] in container c1 and an
+    // identical C in c2. Capture 1 assigns global ordinals A=`-1`, B=`-2`,
+    // C=`-3`. A caller observes A as `s-H-1` and scopes a later tapOn to c1.
+    // A is then removed; global re-ordinaling makes surviving B the new `s-H-1`
+    // (and C `s-H-2`). A container-local ambiguity count would see only B in c1
+    // and silently land the caller's stale `s-H-1` on B - a content-identical
+    // peer the caller never selected. The whole-capture count sees B AND C and
+    // rejects it as ambiguous instead.
+    const buildRow = (tag: string) => ({
+      class: "android.view.View",
+      "content-desc": "identical-row",
+      clickable: "true",
+      "view-id": generatedViewId(tag),
     });
-    expect(resultInContainer2.element).not.toBeNull();
-    expect(resultInContainer2.totalMatches).toBe(1);
-    expect(resultInContainer2.element!.bounds).toEqual({
-      left: 10,
-      top: 210,
-      right: 90,
-      bottom: 240,
-    });
+    const makeHierarchy = (rows1: unknown[], rows2: unknown[]) => {
+      const c1 = {
+        class: "android.view.ViewGroup",
+        "resource-id": "com.app:id/c1",
+        node: rows1,
+      };
+      const c2 = {
+        class: "android.view.ViewGroup",
+        "resource-id": "com.app:id/c2",
+        node: rows2,
+      };
+      const root = { node: [c1, c2] };
+      assignStableViewIds(root);
+      return root;
+    };
 
-    // The peer's id, scoped to the WRONG container, correctly finds nothing -
-    // not a misdirected match onto that container's own (different) node.
-    const wrongContainerResult = selector.selectByResourceId(viewHierarchy, idInContainer2, {
-      container: { elementId: "com.app:id/container1" },
+    // Capture 1: [A, B] in c1, C in c2.
+    const capture1 = makeHierarchy([buildRow("A"), buildRow("B")], [buildRow("C")]);
+    const c1Cap1 = (capture1.node[0] as Record<string, unknown>).node as Record<string, unknown>[];
+    const observedIdForA = c1Cap1[0]["view-id"] as string;
+    // A is a member of a duplicate group, so it is ordinal-suffixed (never bare).
+    expect(observedIdForA).toMatch(/^s2-[0-9a-f]{16}-1$/);
+
+    // Capture 2: A removed. c1 now holds only B; c2 still holds C. B and C are
+    // content-identical, so both are re-ordinaled globally (B=`-1`, C=`-2`).
+    const capture2 = makeHierarchy([buildRow("B")], [buildRow("C")]);
+    const c1Cap2 = (capture2.node[0] as Record<string, unknown>).node as Record<string, unknown>[];
+    const survivorIdInC1 = c1Cap2[0]["view-id"] as string;
+    // The surviving in-c1 peer inherits the exact string the caller observed.
+    expect(survivorIdInC1).toBe(observedIdForA);
+
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: capture2 };
+
+    // Resolving the caller's stale `s-H-1` scoped to c1 must NOT land on B: the
+    // still-present identical C in c2 keeps the ordinal capture-local, so the
+    // guard raises ambiguity rather than silently retargeting the wrong peer.
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, observedIdForA, {
+        container: { elementId: "com.app:id/c1" },
+      }),
+    ).toThrow(/ambiguous/i);
+
+    // Same rejection without a container - globally ambiguous either way.
+    expect(() => selector.selectByResourceId(viewHierarchy, observedIdForA)).toThrow(/ambiguous/i);
+  });
+
+  test("a real resource-id colliding with a synthetic ordinal OUTSIDE the container does not suppress ambiguity INSIDE it (issue #6229, review thread PRRT_kwDOP-GF5M6f2X6J)", () => {
+    // c1 holds two content-identical peers, so BOTH are ordinal-suffixed (no
+    // bare form for a duplicate group) and c1 is genuinely ambiguous on its
+    // own. c2 holds an unrelated node whose REAL `resource-id` happens to
+    // equal c1's first peer's synthetic ordinal string. The ambiguity guard's
+    // internal real-id bypass previously checked the WHOLE capture for that
+    // bypass (not just the active container scope), so this collision in c2
+    // made it treat the c1 target as "backed by a real id" and skip the
+    // ambiguity error entirely - even though the container selector scopes
+    // resolution to c1, where no real id exists and the peer is genuinely
+    // ambiguous. Duplicate COUNTING stays global (per the tests above); only
+    // the bypass must stay scoped to the active container.
+    const buildRow = (tag: string) => ({
+      class: "android.view.View",
+      "content-desc": "identical-row",
+      clickable: "true",
+      "view-id": generatedViewId(tag),
     });
-    expect(wrongContainerResult.element).toBeNull();
+    const c1 = {
+      class: "android.view.ViewGroup",
+      "resource-id": "com.app:id/c1",
+      node: [buildRow("A"), buildRow("B")],
+    };
+    const decoy = {
+      class: "android.view.View",
+      bounds: { left: 0, top: 400, right: 100, bottom: 450 },
+      "content-desc": "decoy-node",
+      "view-id": generatedViewId("decoy"),
+    };
+    const c2 = {
+      class: "android.view.ViewGroup",
+      "resource-id": "com.app:id/c2",
+      node: [decoy],
+    };
+    const rawRoot = { node: [c1, c2] };
+    assignStableViewIds(rawRoot);
+
+    const idInContainer1 = (c1.node[0] as Record<string, unknown>)["view-id"] as string;
+    expect(idInContainer1).toMatch(/^s2-[0-9a-f]{16}-1$/);
+
+    // Give the node OUTSIDE c1 a real resource-id equal to that exact ordinal
+    // string - a collision `assignStableViewIds` cannot itself produce, since
+    // real resource-ids and synthetic ids live in separate fields, but the
+    // ambiguity guard's bypass reads the `resource-id` field independently of
+    // scope.
+    (decoy as Record<string, unknown>)["resource-id"] = idInContainer1;
+
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+
+    // Container-scoped to c1: no real id backs `idInContainer1` there, and c1
+    // has two content-identical peers, so this must be rejected as
+    // ambiguous - the real id colliding in c2 must not leak in and suppress
+    // that rejection.
+    expect(() =>
+      selector.selectByResourceId(viewHierarchy, idInContainer1, {
+        container: { elementId: "com.app:id/c1" },
+      }),
+    ).toThrow(/ambiguous/i);
+
+    // Without a container, the whole capture IS the active scope, so the
+    // real id in c2 legitimately wins - this is existing, intentional
+    // behavior (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq)
+    // and must be unaffected by this fix.
+    const result = selector.selectByResourceId(viewHierarchy, idInContainer1);
+    expect(result.element).not.toBeNull();
+    expect(result.element!["content-desc"]).toBe("decoy-node");
   });
 
   test("recomputing the synthetic id over a fresh capture of the same hierarchy is deterministic", () => {
@@ -417,7 +621,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // `syntheticStableViewIdBase` - is the sharpest test of precedence: a real
     // field match must win even when it superficially resembles the
     // synthetic shape.
-    const collidingId = "s-9fb4b913ae97b1c1";
+    const collidingId = `${STABLE_VIEW_ID_PREFIX}9fb4b913ae97b1c1`;
 
     test("a real resource-id control is selected over a smaller id-less node sharing the same synthetic view-id, regardless of relative area", () => {
       // Previously the matcher UNIONED resource-id matches and synthetic
@@ -546,11 +750,11 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     });
   });
 
-  test("a real bare id (view-id: 's-a') that does not match the strict synthetic shape is treated as a plain resource-id, not a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip)", () => {
+  test("a real bare id with the stable prefix but no synthetic shape is treated as a plain resource-id, not a synthetic ordinal (review thread PRRT_kwDOP-GF5M6fo2Ip)", () => {
     // Review thread PRRT_kwDOP-GF5M6fo2Ip: recognition of a synthetic id must
     // be gated on the STRICT producer shape (`syntheticStableViewIdBase`)
     // everywhere a selector is matched against `view-id`, not merely on an
-    // `s-` prefix. "s-a" is far short of the producer's 16-hex-character
+    // stable prefix. The short value is far short of the producer's 16-hex-character
     // hash, so it must never trigger the synthetic view-id fallback: a
     // separate node whose `view-id` merely happens to equal "s-a" (with no
     // matching `resource-id` of its own) must NOT be treated as a match.
@@ -559,7 +763,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         {
           class: "android.widget.Button",
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-          "resource-id": "s-a",
+          "resource-id": `${STABLE_VIEW_ID_PREFIX}a`,
           text: "Real Short Id",
           clickable: "true",
         },
@@ -567,13 +771,13 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
           class: "android.view.View",
           bounds: { left: 0, top: 100, right: 300, bottom: 300 }, // much larger
           clickable: "true",
-          "view-id": "s-a", // superficially resembles the prefix, wrong shape
+          "view-id": `${STABLE_VIEW_ID_PREFIX}a`, // superficially resembles the prefix, wrong shape
         },
       ],
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    const result = selector.selectByResourceId(viewHierarchy, "s-a");
+    const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!.text).toBe("Real Short Id");

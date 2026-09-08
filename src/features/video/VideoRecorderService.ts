@@ -10,6 +10,7 @@ import type {
   BootedDevice,
   VideoResolution,
 } from "../../models";
+import { toActionableError } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import {
@@ -17,6 +18,7 @@ import {
   type SecurePermissions,
 } from "../../utils/filesystem/securePermissions";
 import { combineAbortSignals } from "../../utils/AbortContext";
+import { ProcessTeardownUnconfirmedError } from "../../utils/ChildProcessTracker";
 
 /**
  * Keep only the declared {@link VideoRecordingConfig} fields. A backend that
@@ -73,6 +75,26 @@ export class VideoCaptureStartCleanupError extends Error {
   ) {
     super(message, options);
     this.name = "VideoCaptureStartCleanupError";
+  }
+}
+
+/**
+ * A backend can prove that its capture process exited while still failing to
+ * finalize its artifact.  This is deliberately distinct from an ordinary
+ * stop error: callers may release the capture owner only when that proof is
+ * explicit.
+ */
+export class VideoCaptureFinalizationError extends Error {
+  /**
+   * `true` means the backend left a recoverable device artifact behind. The
+   * service must retain its handle so a later stop can retry finalization.
+   */
+  readonly retainOwnership: boolean;
+
+  constructor(message: string, options?: ErrorOptions & { retainOwnership?: boolean }) {
+    super(message, options);
+    this.name = "VideoCaptureFinalizationError";
+    this.retainOwnership = options?.retainOwnership ?? false;
   }
 }
 
@@ -311,7 +333,12 @@ export class VideoRecorderService {
   private async stopActiveRecording(active: ActiveRecordingState): Promise<VideoRecordingMetadata> {
     const recordingId = active.recordingId;
     const handle = active.handle ?? (await active.startPromise);
-    const stopResult = await this.backend.stop(handle);
+    let stopResult: RecordingResult;
+    try {
+      stopResult = await this.backend.stop(handle);
+    } catch (error) {
+      throw this.handleStopFailure(active, error);
+    }
     if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
     }
@@ -347,6 +374,45 @@ export class VideoRecorderService {
     this.activeRecordings.delete(recordingId);
 
     return metadata;
+  }
+
+  /**
+   * Decides what a failed {@link backend.stop} call means for in-memory
+   * ownership of `active`, and returns the error to throw. Split out of
+   * {@link stopActiveRecording} to keep that method's branching within the
+   * complexity ratchet.
+   */
+  private handleStopFailure(active: ActiveRecordingState, error: unknown): unknown {
+    const recordingId = active.recordingId;
+    if (error instanceof ProcessTeardownUnconfirmedError) {
+      return toActionableError(
+        error,
+        `Recording ${recordingId} could not be confirmed stopped; the capture ` +
+          `process may still be running on the device`,
+      );
+    }
+    if (error instanceof VideoCaptureFinalizationError) {
+      if (error.retainOwnership) {
+        return toActionableError(
+          error,
+          `Recording ${recordingId} stopped but its retained device artifact still needs finalization`,
+        );
+      }
+      // The backend observed its capture exit before artifact finalization
+      // failed. Keeping this handle would permanently block a new capture,
+      // even though force-stop cannot recover the already-removed source.
+      this.activeRecordings.delete(recordingId);
+      return toActionableError(
+        error,
+        `Recording ${recordingId} stopped but could not be finalized`,
+      );
+    }
+    // A backend may fail before, during, or after its platform teardown. A raw
+    // generic error carries no proof that the device capture exited, so it must
+    // not be interpreted as the older Android pull-after-exit case. Retain the
+    // exact handle and durable active state for force-stop/shutdown retry; this
+    // also prevents a second capture against a possibly-live device process.
+    return error;
   }
 
   async forceStopRecording(recordingId: string): Promise<void> {

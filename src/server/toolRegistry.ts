@@ -39,7 +39,11 @@ import {
   getStructuredPayload,
   StructuredToolResponse,
 } from "../utils/toolUtils";
-import { applyJsonSchemaOverride, isInjectedDeviceIdSchema } from "./toolSchemaHelpers";
+import {
+  applyJsonSchemaOverride,
+  canonicalizeDiscriminatedUnionJsonSchema,
+  isInjectedDeviceIdSchema,
+} from "./toolSchemaHelpers";
 import {
   InternalToolName,
   InternalToolPayloads,
@@ -90,20 +94,20 @@ function dropDefaultedKeysFromRequired(jsonSchema: Record<string, unknown>): voi
 }
 
 function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
-  return flattenTopLevelUnion(
-    toJSONSchema(schema, {
-      override: ({ zodSchema, jsonSchema }) => {
-        applyJsonSchemaOverride(zodSchema, jsonSchema);
-        dropDefaultedKeysFromRequired(jsonSchema);
-        if (isInjectedDeviceIdSchema(zodSchema)) {
-          const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-          if (properties) {
-            delete properties.deviceId;
-          }
+  const jsonSchema = toJSONSchema(schema, {
+    override: ({ zodSchema, jsonSchema }) => {
+      applyJsonSchemaOverride(zodSchema, jsonSchema);
+      dropDefaultedKeysFromRequired(jsonSchema);
+      if (isInjectedDeviceIdSchema(zodSchema)) {
+        const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+        if (properties) {
+          delete properties.deviceId;
         }
-      },
-    }),
-  );
+      }
+    },
+  });
+  canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
+  return flattenTopLevelUnion(jsonSchema);
 }
 
 // Progress notification interface
@@ -530,6 +534,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         {
           keepScreenAwake,
           platform: platform === "android" || platform === "ios" ? platform : undefined,
+          // #6227: the persisted/daemon-session path must honor a tool's declared
+          // deviceReadiness the same way the legacy/no-session path below does
+          // (ensureDeviceReady's `readiness` option), so a `booted`-only tool
+          // (e.g. listApps, videoRecordingTools) doesn't pay for (or fail on)
+          // full CtrlProxy accessibility-service setup.
+          deviceReadiness:
+            typeof options.deviceReadiness === "function"
+              ? options.deviceReadiness(args)
+              : options.deviceReadiness,
         },
         execution,
         admittedSession,
@@ -545,6 +558,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // discussion for why the reported #6069 bound-connection bypass could not
         // be reproduced through any current public route in-harness.
         true,
+        signal,
       );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
@@ -819,6 +833,7 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "dragAndDrop",
   "pressButton",
   "inputText",
+  "sendKeys",
   "clearText",
   "imeAction",
 ]);

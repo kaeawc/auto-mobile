@@ -1279,6 +1279,46 @@ describe("IOSCtrlProxyClient", function () {
     });
   });
 
+  describe("requestPressKey", function () {
+    test("should send a discrete key chord and resolve the result", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const resultPromise = testClient.requestPressKey("tab", ["shift", "meta"], 5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = commandPayloads(socket!)[0];
+        expect(sentMessage).toMatchObject({
+          type: "request_press_key",
+          key: "tab",
+          modifiers: ["shift", "meta"],
+        });
+
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "press_key_result",
+            requestId: sentMessage.requestId,
+            success: true,
+            totalTimeMs: 2,
+          }),
+        );
+
+        expect(await resultPromise).toMatchObject({ success: true, totalTimeMs: 2 });
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("command fallback result shapes", function () {
     test("preserves required fields for unsupported non-BaseResult command contracts", async function () {
       const testTimer = fakeTimer;

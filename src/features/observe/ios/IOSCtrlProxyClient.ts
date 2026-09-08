@@ -140,6 +140,7 @@ import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
+import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
@@ -163,6 +164,7 @@ import type {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyKeyboardResult,
+  CtrlProxyPressKeyResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
@@ -249,6 +251,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyTapResult>;
 
   requestDrag(
@@ -307,6 +310,13 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult>;
+
+  requestPressKey(
+    key: InputKeyName,
+    modifiers: InputKeyModifier[],
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyPressKeyResult>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
@@ -375,6 +385,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestVoiceOverState(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult>;
 
   requestVoiceOverActivate(
@@ -2044,6 +2055,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
     return this.hierarchy.getAccessibilityHierarchy(
       queryOptions,
@@ -2051,6 +2064,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       skipWaitForFresh,
       minTimestamp,
       disableAllFiltering,
+      signal,
+      timeoutMs,
     );
   }
 
@@ -2162,8 +2177,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyTapResult> {
-    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
+    return this.gestures.requestTapCoordinates(
+      x,
+      y,
+      duration,
+      timeoutMs,
+      perf,
+      frameContext,
+      signal,
+    );
   }
 
   async requestSwipe(
@@ -2275,6 +2299,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.keyboard.requestKeyboard(action, timeoutMs, perf);
   }
 
+  async requestPressKey(
+    key: InputKeyName,
+    modifiers: InputKeyModifier[],
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyPressKeyResult> {
+    return this.keyboard.requestPressKey(key, modifiers, timeoutMs, perf);
+  }
+
   // ===========================================================================
   // Delegated Public Methods - Navigation
   // ===========================================================================
@@ -2384,8 +2417,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestVoiceOverState(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyVoiceOverResult> {
-    return this.voiceOver.requestVoiceOverState(timeoutMs, perf);
+    return this.voiceOver.requestVoiceOverState(timeoutMs, perf, signal);
   }
 
   async requestVoiceOverActivate(

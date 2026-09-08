@@ -44,6 +44,7 @@ import {
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
+import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 
 describe("AndroidCtrlProxyClient", function () {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -78,6 +79,8 @@ describe("AndroidCtrlProxyClient", function () {
   }
 
   beforeEach(async function () {
+    // Unit tests use fake ADB forwards, so host listeners must not choose their ports.
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     // Create fake timer with auto-advance for async event flushing
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -138,6 +141,7 @@ describe("AndroidCtrlProxyClient", function () {
       await accessibilityServiceClient.close();
     }
     await stopDeviceDataStreamSocketServer();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   class CapturingWebSocket extends FakeWebSocket {
@@ -2647,7 +2651,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       const beforeId = (before.hierarchy.node as any)["view-id"];
       const afterId = (after.hierarchy.node as any)["view-id"];
-      expect(beforeId).toStartWith("s-");
+      expect(beforeId).toStartWith(STABLE_VIEW_ID_PREFIX);
       expect(afterId).toBe(beforeId);
       // Resource-id-backed view-ids pass through untouched.
       expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");

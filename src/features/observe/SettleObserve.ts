@@ -75,6 +75,7 @@ export class RealSettleObserve implements SettleObserve {
       settled: outcome.stopped,
       polls: outcome.polls,
       waitMs: outcome.waitMs,
+      terminalReason: outcome.terminalReason === "matched" ? "settled" : outcome.terminalReason,
     };
   }
 }

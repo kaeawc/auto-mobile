@@ -571,6 +571,8 @@ class RealStorageDataSourceTest {
   @Test
   fun `removeKeyValue succeeds and passes correct arguments`() = runBlocking {
     val client = FakeAutoMobileClient()
+    client.removeKeyValueResult =
+      RemoveKeyValueResult(success = true, warning = "Relaunch the app to apply this change")
     val dataSource =
       RealStorageDataSource(
         clientProvider = { client },
@@ -581,6 +583,10 @@ class RealStorageDataSourceTest {
     val result = dataSource.removeKeyValue("app_prefs", "old_key")
 
     assertTrue(result is Result.Success)
+    assertEquals(
+      "Relaunch the app to apply this change",
+      (result as Result.Success).data.warning,
+    )
     val call = client.removeKeyValueCalls.single()
     assertEquals("emulator-5554", call.deviceId)
     assertEquals("com.example.app", call.appId)
@@ -620,6 +626,8 @@ class RealStorageDataSourceTest {
   @Test
   fun `clearKeyValueFile succeeds and passes correct arguments`() = runBlocking {
     val client = FakeAutoMobileClient()
+    client.clearKeyValueFileResult =
+      ClearKeyValueResult(success = true, warning = "Relaunch the app to apply this change")
     val dataSource =
       RealStorageDataSource(
         clientProvider = { client },
@@ -630,6 +638,10 @@ class RealStorageDataSourceTest {
     val result = dataSource.clearKeyValueFile("app_prefs")
 
     assertTrue(result is Result.Success)
+    assertEquals(
+      "Relaunch the app to apply this change",
+      (result as Result.Success).data.warning,
+    )
     val call = client.clearKeyValueFileCalls.single()
     assertEquals("emulator-5554", call.deviceId)
     assertEquals("com.example.app", call.appId)

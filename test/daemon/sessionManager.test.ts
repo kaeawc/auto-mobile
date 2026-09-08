@@ -3555,4 +3555,33 @@ describe("SessionManager", () => {
       manager.stopCleanupTimer();
     }
   });
+
+  describe("setDeviceReadiness (#6227 round 7)", () => {
+    test("records a level when none is recorded yet", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      sessionManager.setDeviceReadiness("session-1", "booted");
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
+    });
+
+    test("raises the recorded level from booted to automationReady", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      sessionManager.setDeviceReadiness("session-1", "booted");
+      sessionManager.setDeviceReadiness("session-1", "automationReady");
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+    });
+
+    test("does NOT downgrade automationReady to booted (monotonic)", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      sessionManager.setDeviceReadiness("session-1", "automationReady");
+      sessionManager.setDeviceReadiness("session-1", "booted");
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+    });
+
+    test("re-recording the same level is a no-op", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      sessionManager.setDeviceReadiness("session-1", "automationReady");
+      sessionManager.setDeviceReadiness("session-1", "automationReady");
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+    });
+  });
 });

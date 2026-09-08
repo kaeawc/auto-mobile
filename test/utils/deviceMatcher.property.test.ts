@@ -88,7 +88,11 @@ describe("compareVersions (property-based)", () => {
 // oracle over the full (components, letter, qpr) triple, rather than only
 // example-based tests, per the tracking issue's explicit ask -- the
 // interactions between the three parts are easy to under-specify by hand.
-const letterOrUndefined = fc.option(fc.constantFrom("A", "L", "Q", "Z"), { nil: undefined });
+// Single- and multi-letter qualifiers (#6326): multi-letter codenames must
+// order under the same total-order contract as the single trailing letter.
+const letterOrUndefined = fc.option(fc.constantFrom("A", "L", "Q", "Z", "LA", "LB", "SV", "LZ"), {
+  nil: undefined,
+});
 const qprOrUndefined = fc.option(fc.nat(5), { nil: undefined });
 const releaseQualifier = fc.record({
   parts: versionParts,

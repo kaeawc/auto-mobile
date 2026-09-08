@@ -38,6 +38,12 @@ import {
 } from "./constants";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
+  DaemonSocketReachability,
+  type DaemonSocketReachabilityLike,
+} from "./daemonSocketReachability";
+import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
+import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../utils/fileLock";
+import {
   ListChangedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
   type ListChangedKind,
@@ -72,6 +78,13 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { ToolRegistry } from "../server/toolRegistry";
 import { validateTypeForPlatform } from "../server/storageTools";
+import {
+  clearAndroidKeyValueFileDirect,
+  directFileFallbackRelaunchWarning,
+  removeAndroidKeyValueDirect,
+  setAndroidKeyValueDirect,
+  withAndroidSharedPreferencesInspectionFallback,
+} from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -95,7 +108,10 @@ import {
   isInputKeyName,
   type InputKeyName,
 } from "../features/action/InputKey";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
@@ -116,6 +132,145 @@ import {
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
+
+/**
+ * Bound on the observation-only liveness probe a LOCK-LESS bind runs against an
+ * existing socket before it would unlink it (issue #6232). Kept short — it only
+ * needs to answer "is a daemon accepting right now?" — and matches the sibling
+ * probe timeouts in {@link DaemonManager}.
+ */
+const SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
+
+/**
+ * Seams governing whether a socket bind may reclaim an EXISTING socket file
+ * (issue #6232).
+ *
+ * Every launch path must prove an existing socket is stale before unlinking it.
+ * A startup lock coordinates cooperating managers, but does not prove that a
+ * direct daemon does not still own the socket.
+ */
+export interface SocketBindGuardOptions {
+  /**
+   * Observation-only reachability probe used by every bind. Injected so a
+   * test can drive the live/stale outcome deterministically without a real
+   * socket; defaults to the real {@link DaemonSocketReachability}.
+   */
+  reachability?: DaemonSocketReachabilityLike;
+  /**
+   * Observation-only owner-liveness check used by every bind to
+   * disambiguate a NOT-reachable probe (issue #6232). A probe that fails to
+   * connect is NOT proof the socket is dead — a live daemon can transiently
+   * refuse or time out under an accept backlog or mid-startup (see
+   * {@link DaemonManager.status}). Consulting whether a live process is still
+   * recorded as the socket's owner lets the guard fail CLOSED on that
+   * inconclusive case instead of unlinking a live daemon's socket. Injected so a
+   * test can drive the outcome deterministically without a real PID file;
+   * defaults to reading the daemon PID record.
+   */
+  ownerLiveness?: SocketOwnerLiveness;
+  /**
+   * Cross-process lock held across the whole probe → reclaim → `listen()`
+   * sequence so two concurrent binders cannot both reclaim/unlink the same
+   * socket path (issue #6232, W5). The reachability probe and owner-liveness
+   * checks are observation-only: two lock-less `start()` calls over a
+   * genuinely-dead ownerless socket can BOTH pass them, then one binds while
+   * the other unlinks the freshly-bound path in the gap before its own
+   * `listen()`. Serializing the sequence on a single shared lock closes that
+   * TOCTOU: the loser cannot enter the reclaim window until the winner has
+   * bound, at which point its probe sees a reachable socket and it refuses.
+   * Injected so a test can drive contention deterministically; defaults to the
+   * canonical {@link tryAcquireExclusiveLock} primitive keyed on a lock file
+   * beside the socket path.
+   */
+  bindLock?: SocketReclaimLock;
+}
+
+/**
+ * The cross-process lock guarding the reclaim → bind sequence (issue #6232, W5).
+ * A non-blocking single attempt: {@link acquire} returns false when another live
+ * process already holds it (a concurrent bind is in flight), and the caller then
+ * fails CLOSED rather than racing it. {@link release} drops the lock once the
+ * socket is bound (or the bind fails), so the window it covers is only the brief
+ * reclaim-and-listen interval, never the daemon's whole lifetime.
+ */
+export interface SocketReclaimLock {
+  acquire(): boolean;
+  release(): void;
+}
+
+/**
+ * Default {@link SocketReclaimLock}: the canonical `O_EXCL` file lock
+ * ({@link tryAcquireExclusiveLock}) on `<socketPath>.bind.lock`. Deterministic
+ * per socket path so every binder — manager-launched or hand-launched —
+ * contends on the same file, and distinct from both the socket itself and the
+ * `DaemonManager` startup lock. A per-instance owner token makes release
+ * incarnation-aware, and a lock left by a crashed holder is reclaimed on the
+ * next attempt via the primitive's dead-PID check.
+ */
+function defaultSocketReclaimLock(socketPath: string, ownerToken: string): SocketReclaimLock {
+  const lockFilePath = `${socketPath}.bind.lock`;
+  return {
+    acquire: () => tryAcquireExclusiveLock(lockFilePath, { ownerToken }),
+    release: () => releaseExclusiveLock(lockFilePath, process.pid, ownerToken),
+  };
+}
+
+/**
+ * Observation-only check for whether a live daemon process (other than this one)
+ * is still recorded as the control socket's owner (issue #6232). Reads the PID
+ * record only — it never touches the socket file, so it introduces no new
+ * destructive actor on the path.
+ */
+export interface SocketOwnerLiveness {
+  getOwnerStatus(): SocketOwnerStatus;
+}
+
+export type SocketOwnerStatus = "live" | "dead" | "unknown";
+
+/**
+ * Default {@link SocketOwnerLiveness}: only a recorded foreign PID that is
+ * positively dead proves the socket reclaimable. Missing or self-overwritten
+ * records are unknown, never permission to unlink.
+ *
+ * IMPORTANT: this default reads the CURRENT on-disk record. A caller that
+ * overwrites the shared PID file with its own record BEFORE it reaches the bind
+ * guard (as `Daemon.start()` does via its early-owner record) MUST NOT rely on
+ * this default — by then the file names the caller, so a live sibling reads back
+ * as `pid === process.pid` and this returns `false`, which would authorize
+ * unlinking the live socket. Such a caller injects an
+ * {@link import("./incumbentOwnerGuard").IncumbentOwnerGuard}-backed liveness that
+ * consults an incumbent snapshot captured before the overwrite (issue #6232).
+ */
+const defaultSocketOwnerLiveness: SocketOwnerLiveness = {
+  getOwnerStatus(): SocketOwnerStatus {
+    const pidData = readPidFileDataSync();
+    if (!pidData || pidData.pid === process.pid) {
+      return "unknown";
+    }
+    return isProcessRunning(pidData.pid) ? "live" : "dead";
+  },
+};
+
+/**
+ * Resolve {@link SocketBindGuardOptions} to their concrete defaults (issue #6232).
+ * Kept out of the constructor so its `??` fallbacks do not add to the
+ * constructor's already-at-threshold complexity.
+ */
+function resolveSocketBindGuard(
+  bindGuard: SocketBindGuardOptions,
+  socketPath: string,
+  bindLockOwnerToken: string,
+): {
+  reachability: DaemonSocketReachabilityLike;
+  ownerLiveness: SocketOwnerLiveness;
+  bindLock: SocketReclaimLock;
+} {
+  return {
+    reachability: bindGuard.reachability ?? new DaemonSocketReachability(),
+    ownerLiveness: bindGuard.ownerLiveness ?? defaultSocketOwnerLiveness,
+    bindLock: bindGuard.bindLock ?? defaultSocketReclaimLock(socketPath, bindLockOwnerToken),
+  };
+}
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -306,6 +461,7 @@ export class UnixSocketServer {
   private closing = false;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
+  private readonly adbClientFactory: AdbClientFactory;
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
@@ -335,6 +491,12 @@ export class UnixSocketServer {
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
+  /** Observation-only liveness probe used before an existing socket's reclaim (issue #6232). */
+  private readonly socketReachability: DaemonSocketReachabilityLike;
+  /** Observation-only owner check that fails every bind closed on an inconclusive probe (issue #6232). */
+  private readonly socketOwnerLiveness: SocketOwnerLiveness;
+  /** Cross-process lock serializing the reclaim → bind sequence against a concurrent binder (issue #6232, W5). */
+  private readonly socketReclaimLock: SocketReclaimLock;
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
@@ -406,12 +568,27 @@ export class UnixSocketServer {
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
+    bindGuard: SocketBindGuardOptions = {},
+    adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
     this.idGenerator = idGenerator;
+    // The reclaim lock's per-instance owner token comes from the module default
+    // generator, NOT the injected `idGenerator` — that one is reserved for socket
+    // SESSION ids, and consuming it here would shift every session id a test
+    // pins to the injected sequence.
+    const resolvedBindGuard = resolveSocketBindGuard(
+      bindGuard,
+      socketPath,
+      defaultIdGenerator.next(),
+    );
+    this.socketReachability = resolvedBindGuard.reachability;
+    this.socketOwnerLiveness = resolvedBindGuard.ownerLiveness;
+    this.socketReclaimLock = resolvedBindGuard.bindLock;
+    this.adbClientFactory = adbClientFactory;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -437,50 +614,99 @@ export class UnixSocketServer {
     // access control (issue #4750).
     await ensureSecureDir(path.dirname(this.socketPath));
 
-    // Remove existing socket file if it exists
-    if (existsSync(this.socketPath)) {
-      await unlink(this.socketPath);
+    // Hold a single cross-process lock across the whole reclaim → `listen()`
+    // sequence (issue #6232, W5). The reachability/owner checks below are
+    // observation-only, so two concurrent binders can BOTH judge a stale socket
+    // reclaimable and then race unlink-vs-listen, leaving the winner bound to an
+    // fd whose pathname the loser deleted. Serializing on `<socket>.bind.lock`
+    // makes the sequence atomic: a losing binder cannot enter the reclaim window
+    // until the winner has bound, at which point its own probe sees a reachable
+    // socket and it refuses. A live holder means another launch is mid-bind, so
+    // fail CLOSED rather than racing it (recoverable via `--daemon restart`).
+    // A stale lock from a crashed holder is reclaimed by the primitive's dead-PID
+    // check on the next attempt.
+    if (!this.socketReclaimLock.acquire()) {
+      throw new ActionableError(
+        `Refusing to bind: another AutoMobile process is currently reclaiming or binding the daemon socket ${this.socketPath}. ` +
+          "Two concurrent launches cannot bind the same socket; let the in-flight one finish, then re-observe, or run `--daemon restart`.",
+      );
     }
+    try {
+      // Reclaim any existing socket file before listen(). Under this reclaim lock
+      // the unlink is exclusive across processes. A LOCK-LESS bind — a
+      // hand-launched daemon that bypassed the manager — must still NOT unlink a
+      // live sibling's socket: doing so bricks every existing client (issue #6232,
+      // the #6140 failure mode via a bypassed launch path). So probe first and
+      // refuse when a live daemon still owns it.
+      if (existsSync(this.socketPath)) {
+        await this.reclaimExistingSocketBeforeBind();
+      }
 
-    this.server = createServer((socket) => {
-      this.handleConnection(socket);
-    });
+      this.server = createServer((socket) => {
+        this.handleConnection(socket);
+      });
 
-    // Fan list-changed events out to subscribed socket clients (issue #3223).
-    // Subscribed here (not in the daemon) so a socket-server recreation during
-    // recovery re-wires itself; close() unsubscribes symmetrically.
-    this.listChangedUnsubscribe?.();
-    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
-      this.broadcastListChanged(kind);
-    });
+      // Fan list-changed events out to subscribed socket clients (issue #3223).
+      // Subscribed here (not in the daemon) so a socket-server recreation during
+      // recovery re-wires itself; close() unsubscribes symmetrically.
+      this.listChangedUnsubscribe?.();
+      this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+        this.broadcastListChanged(kind);
+      });
 
-    // Fan session-release events out to subscribed proxy clients (issue #4610),
-    // so a proxy clears its remembered binding on a real release instead of the
-    // replay-TTL guess. Subscribed here (not in the daemon) for the same
-    // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
-    this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-      (sessionId, reason, snapshot) => {
-        this.clearBoundMcpClientsForReleasedSession(sessionId);
-        this.broadcastSessionReleased(sessionId, reason, snapshot);
-      },
+      // Fan session-release events out to subscribed proxy clients (issue #4610),
+      // so a proxy clears its remembered binding on a real release instead of the
+      // replay-TTL guess. Subscribed here (not in the daemon) for the same
+      // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
+      this.sessionReleaseUnsubscribe?.();
+      this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+        (sessionId, reason, snapshot) => {
+          this.clearBoundMcpClientsForReleasedSession(sessionId);
+          this.broadcastSessionReleased(sessionId, reason, snapshot);
+        },
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        this.server!.listen(this.socketPath, () => {
+          this.socketFileIdentity = this.readSocketFileIdentity();
+          logger.info(`Unix socket server listening on ${this.socketPath}`);
+          // Restrict the bound socket to the owner (0o600) before start() resolves,
+          // so no client can connect while it is still world-accessible. listen()
+          // creates the socket at the umask default (issue #4750).
+          secureFile(this.socketPath).then(resolve).catch(reject);
+        });
+
+        this.server!.on("error", (error) => {
+          logger.error(`Unix socket server error: ${error}`);
+          reject(error);
+        });
+      });
+    } finally {
+      // Release once the socket is bound (or the bind failed): the lock only
+      // needs to cover the brief unlink-and-listen window. Past a committed bind
+      // the reachability probe alone protects the live socket from later binders.
+      this.socketReclaimLock.release();
+    }
+  }
+
+  /**
+   * Reclaim an existing socket file before `listen()`, refusing to clobber a live
+   * sibling (issue #6232). A startup lock is not ownership evidence, and a
+   * failed probe is inconclusive. Reclaim requires both an unreachable probe and
+   * a positively dead recorded owner.
+   */
+  private async reclaimExistingSocketBeforeBind(): Promise<void> {
+    const reachable = await this.socketReachability.isReachable(
+      this.socketPath,
+      SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
     );
-
-    return new Promise((resolve, reject) => {
-      this.server!.listen(this.socketPath, () => {
-        this.socketFileIdentity = this.readSocketFileIdentity();
-        logger.info(`Unix socket server listening on ${this.socketPath}`);
-        // Restrict the bound socket to the owner (0o600) before start() resolves,
-        // so no client can connect while it is still world-accessible. listen()
-        // creates the socket at the umask default (issue #4750).
-        secureFile(this.socketPath).then(resolve).catch(reject);
-      });
-
-      this.server!.on("error", (error) => {
-        logger.error(`Unix socket server error: ${error}`);
-        reject(error);
-      });
-    });
+    if (reachable || this.socketOwnerLiveness.getOwnerStatus() !== "dead") {
+      throw new ActionableError(
+        `Refusing to bind: the AutoMobile daemon socket ${this.socketPath} is still reachable or its former owner is not positively known to be dead. ` +
+          "A startup lock and an inconclusive liveness probe do not authorize unlinking a socket that may still be live. Stop the running daemon or run `--daemon restart` to replace it.",
+      );
+    }
+    await unlink(this.socketPath);
   }
 
   /**
@@ -2527,26 +2753,43 @@ export class UnixSocketServer {
           throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-        const { platform, client } = await this.resolveKeyValueMutationClient(
+        const { platform, client, device } = await this.resolveKeyValueMutationClient(
           args.platform,
           args.deviceId,
         );
+        const appId = args.appId;
+        const fileName = args.fileName;
+        const key = args.key;
+        let usedDirectFileFallback = false;
         if (args.value === null || args.value === undefined) {
-          await client.removePreference(args.appId, args.fileName, args.key);
+          ({ usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+            platform,
+            device,
+            appId,
+            fileName,
+            () => client.removePreference(appId, fileName, key),
+            (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          ));
         } else {
           // Enforce the same cross-platform type guidance as the MCP-tool path
           // (storageTools.ts) before dispatch, so a platform-incompatible type
           // fails with an actionable error rather than deeper in the client (#5022).
           validateTypeForPlatform(platform, args.type as KeyValueType);
-          await client.setPreference(
-            args.appId,
-            args.fileName,
-            args.key,
-            args.value,
-            args.type as KeyValueType,
-          );
+          const value = args.value;
+          const type = args.type as KeyValueType;
+          ({ usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+            platform,
+            device,
+            appId,
+            fileName,
+            () => client.setPreference(appId, fileName, key, value, type),
+            (adb) =>
+              setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+          ));
         }
-        return { success: true };
+        return usedDirectFileFallback
+          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
+          : { success: true };
       }
       case "ide/removeKeyValue": {
         const args = request.params as {
@@ -2560,9 +2803,24 @@ export class UnixSocketServer {
           throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-        const { client } = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
-        await client.removePreference(args.appId, args.fileName, args.key);
-        return { success: true };
+        const { platform, client, device } = await this.resolveKeyValueMutationClient(
+          args.platform,
+          args.deviceId,
+        );
+        const appId = args.appId;
+        const fileName = args.fileName;
+        const key = args.key;
+        const { usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+          platform,
+          device,
+          appId,
+          fileName,
+          () => client.removePreference(appId, fileName, key),
+          (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+        );
+        return usedDirectFileFallback
+          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
+          : { success: true };
       }
       case "ide/clearKeyValueFile": {
         const args = request.params as {
@@ -2575,9 +2833,23 @@ export class UnixSocketServer {
           throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-        const { client } = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
-        await client.clearPreferenceStore(args.appId, args.fileName);
-        return { success: true };
+        const { platform, client, device } = await this.resolveKeyValueMutationClient(
+          args.platform,
+          args.deviceId,
+        );
+        const appId = args.appId;
+        const fileName = args.fileName;
+        const { usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+          platform,
+          device,
+          appId,
+          fileName,
+          () => client.clearPreferenceStore(appId, fileName),
+          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+        );
+        return usedDirectFileFallback
+          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
+          : { success: true };
       }
       default:
         return undefined;
@@ -2593,7 +2865,11 @@ export class UnixSocketServer {
   private async resolveKeyValueMutationClient(
     platformValue: string | undefined,
     deviceId: string,
-  ): Promise<{ platform: "android" | "ios"; client: KeyValueMutationClient }> {
+  ): Promise<{
+    platform: "android" | "ios";
+    client: KeyValueMutationClient;
+    device: BootedDevice;
+  }> {
     const platform = platformValue ?? "android";
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
@@ -2607,8 +2883,38 @@ export class UnixSocketServer {
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
-        : AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-    return { platform, client };
+        : AndroidCtrlProxyClient.getInstance(targetDevice, this.adbClientFactory);
+    return { platform, client, device: targetDevice };
+  }
+
+  /**
+   * Run a key-value mutation from an `ide/*` route through the shared SharedPreferences
+   * inspection-disabled fallback (issue #6292). On Android, if the SDK ContentProvider path
+   * is gated because inspection is disabled, this falls back to the same direct-file
+   * `adb shell run-as` XML edit the MCP `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`
+   * tools use — so the desktop Storage pane can write/delete/clear even when inspection is
+   * off, exactly like the MCP path. iOS has no on-device XML fallback, so `viaSdk` runs alone.
+   * Returns whether the direct-file fallback ran, so the caller can surface a relaunch warning.
+   */
+  private async runIdeKeyValueMutation(
+    platform: "android" | "ios",
+    device: BootedDevice,
+    appId: string,
+    fileName: string,
+    viaSdk: () => Promise<void>,
+    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
+  ): Promise<{ usedDirectFileFallback: boolean }> {
+    if (platform !== "android") {
+      await viaSdk();
+      return { usedDirectFileFallback: false };
+    }
+    return withAndroidSharedPreferencesInspectionFallback(
+      appId,
+      fileName,
+      () => this.adbClientFactory.create(device),
+      viaSdk,
+      viaDirectFile,
+    );
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
@@ -3300,10 +3606,14 @@ export class UnixSocketServer {
           });
         }
 
+        // Forward the execution tracker's abort signal (this bound-session path
+        // is NOT wrapped in runWithAbortSignal, so there is no ambient signal for
+        // press to pick up): without it, session teardown mid-home-press leaves
+        // the ADB dispatch and foreground-verification reads running (issue #6289).
         const pressButton = new PressButton(targetDevice);
         return args.frameContext === undefined
-          ? await pressButton.press(args.button, remainingTimeoutMs)
-          : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
+          ? await pressButton.press(args.button, remainingTimeoutMs, undefined, signal)
+          : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext, signal);
       },
     );
 

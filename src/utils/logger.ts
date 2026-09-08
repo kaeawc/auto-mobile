@@ -3,9 +3,9 @@
  */
 import fs from "fs";
 import path from "path";
-import { statAsync, renameAsync } from "./io";
+import { statAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
-import { pruneLogFiles } from "./logPruner";
+import { pruneLogFiles, type DaemonPidFileEnumeration } from "./logPruner";
 import {
   resolveAutomobileLogFormat,
   resolveAutomobileLogSink,
@@ -185,13 +185,15 @@ interface FailureProneStream {
 // (c) the diagnostic stays valid NDJSON in json mode (issue #6179).
 //
 // Deliberately NOT listening for 'close': checkAndRotateLog() ends the active
-// stream on purpose at the size cap and immediately opens its replacement —
-// a normal, expected close with no error. Clearing `logStream` on every close
-// (regardless of cause) raced that legitimate rotation and could drop the
-// freshly-opened replacement stream right after rotating, breaking logging
-// for the rest of the process. An unexpected close without a preceding
-// 'error' is rare enough (and self-healing via the next write's lazy retry
-// once a subsequent write actually fails) that it doesn't need a handler here.
+// stream on purpose at the size cap, awaits that close (see closeLogStream /
+// closeStreamBeforeRotation, issue #6149), and only then opens its
+// replacement — a normal, expected close with no error. Clearing `logStream`
+// on every close (regardless of cause) raced that legitimate rotation and
+// could drop the freshly-opened replacement stream right after rotating,
+// breaking logging for the rest of the process. An unexpected close without a
+// preceding 'error' is rare enough (and self-healing via the next write's
+// lazy retry once a subsequent write actually fails) that it doesn't need a
+// handler here.
 const attachStreamFailureHandlers = (stream: FailureProneStream, target: string): void => {
   stream.on("error", (error) => {
     try {
@@ -238,23 +240,67 @@ function fileLogPaths(): { dir: string; path: string } | undefined {
 }
 
 interface EndableLogStream {
-  end(callback: () => void): void;
-  once(event: "error", listener: (error: Error) => void): void;
-  off(event: "error", listener: (error: Error) => void): void;
+  end(callback?: () => void): void;
+  once(event: "error" | "close", listener: (...args: any[]) => void): void;
+  off(event: "error" | "close", listener: (...args: any[]) => void): void;
+  // Node/Bun WriteStreams expose this once the fd has actually been released.
+  // Optional so plain EventEmitter fakes that never set it still type-check.
+  readonly closed?: boolean;
 }
 
-/** Resolves when a log stream has finished, or rejects if closing it fails. */
+/**
+ * Resolves once a log stream has ACTUALLY closed (its file descriptor
+ * released), or rejects if closing it failed.
+ *
+ * `WriteStream.end(callback)` fires its callback on writable completion — the
+ * same moment as the `finish` event — but the underlying fd is only released
+ * later, on the `close` event. On Bun (and Node) the observed order is: end
+ * callback, then `finish`, then `close`. Reopening the same path on the earlier
+ * `finish` signal therefore still races bun's epoll registration for the not-
+ * yet-released fd and can throw `EEXIST: ... epoll_ctl` on the replacement
+ * stream's construction — the exact race rotation exists to avoid (issue
+ * #6149). So we drive `end()` to start the shutdown but wait for `close`.
+ *
+ * Two more orderings, both confirmed on Node 24 and Bun 1.2.14:
+ *  - An `error` during shutdown (e.g. a failing fd, `/dev/full`) does NOT mean
+ *    the fd was released — `close` still follows. Settling on `error` alone
+ *    let the caller rename/reopen the path while the old descriptor was still
+ *    live, recreating the exact race this function exists to avoid. The error
+ *    is recorded and still surfaced (so the failure is not silently lost) but
+ *    only once the confirming `close` actually arrives.
+ *  - A stream whose fd was already released before this call (e.g. a repeated
+ *    `logger.close()` / `closeAfterFlush()`) never emits a second `close` —
+ *    Node/Bun only fire it once per stream — so waiting for a listener would
+ *    hang forever. Check `closed` up front and resolve immediately.
+ */
 export function closeLogStream(stream: EndableLogStream): Promise<void> {
+  if (stream.closed) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
-    const onError = (error: Error): void => {
+    let settled = false;
+    let pendingError: Error | undefined;
+    const settle = (run: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       stream.off("error", onError);
-      reject(error);
+      stream.off("close", onClose);
+      run();
     };
+    // Do NOT settle here — only record the error and keep waiting for the
+    // `close` that confirms the fd is actually released.
+    const onError = (error: Error): void => {
+      pendingError = error;
+    };
+    const onClose = (): void => settle(() => (pendingError ? reject(pendingError) : resolve()));
     stream.once("error", onError);
-    stream.end(() => {
-      stream.off("error", onError);
-      resolve();
-    });
+    stream.once("close", onClose);
+    // Start the shutdown; the `close` listener above (not end()'s finish-time
+    // callback, and not a same-tick `error`) is what actually resolves this
+    // promise once the fd is released.
+    stream.end();
   });
 }
 
@@ -269,9 +315,82 @@ const MAX_LOG_FILES = 10;
 // host. A live process's active log has a recent mtime and is never touched.
 const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+// Whether a daemon is currently running (owns the pidfile and is alive). A
+// `daemon-launch-<pid>.log`'s fd is inherited by the detached daemon child, so
+// it must not be swept while that daemon is live even though the manager named
+// in the filename has exited (issue #6194). The daemon pidfile module is
+// required lazily so this foundational logger module keeps no static import of
+// it (daemonFiles.ts imports THIS module) and it is resolved only at sweep time.
+//
+// Crucially this considers EVERY daemon namespace that could own a launch log
+// in the shared log dir — the pruning process's own pid file plus co-located
+// isolated-namespace pid files (issue #6140) — not just this process's own.
+// When isolated daemons share an `AUTOMOBILE_LOG_DIR`, a launch log there can be
+// held by a LIVE daemon in a different namespace; checking only our own would
+// unlink it (the exact #6194 data-loss). The concrete pid enumeration is passed
+// to `pruneLogFiles` via `daemonPidFiles` + `readDaemonOwner` below.
+const isDaemonRunning = (): boolean => {
+  try {
+    const { readPidFileDataSync, isProcessRunning, listDaemonPidFilesSync } =
+      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+    const { pidFiles, uncertain } = listDaemonPidFilesSync();
+    // Enumeration incomplete (custom namespace / failed scan): a live daemon may
+    // exist in a namespace we could not discover — retain rather than risk it.
+    if (uncertain) {
+      return true;
+    }
+    return pidFiles.some((pidFilePath) => {
+      const data = readPidFileDataSync(pidFilePath);
+      return data ? isProcessRunning(data.pid) : false;
+    });
+  } catch (error) {
+    // If the daemon pidfile can't be resolved, keep launch logs rather than
+    // risk unlinking one a live daemon still holds — the safe direction here.
+    logger.debug(`daemon liveness probe for log pruning failed: ${error}`, error);
+    return true;
+  }
+};
+
+// Enumerate the daemon pid files of every namespace that could own a launch log
+// in this shared log dir (plus whether that enumeration is complete). Passed to
+// `pruneLogFiles` as a THUNK so the enumeration — and the `daemonFiles` require
+// it drives — is evaluated LAZILY at sweep time, never during this module's own
+// init. An eager call here reached `listDaemonPidFilesSync` before `export const
+// logger` (below) was initialized; its error path then touched `logger` in its
+// TDZ and aborted the import with a ReferenceError (issue #6194).
+const daemonPidFiles = (): DaemonPidFileEnumeration => {
+  try {
+    const { listDaemonPidFilesSync } =
+      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+    return listDaemonPidFilesSync();
+  } catch (error) {
+    // The pidfile module could not be resolved, so no namespace could be
+    // enumerated — carry uncertainty so `pruneLogFiles` retains launch logs.
+    logger.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
+    return { pidFiles: [], uncertain: true };
+  }
+};
+
+const readDaemonOwner = (pidFilePath: string) => {
+  // Deliberately NOT wrapped in a swallowing catch: `readDaemonOwnerForRetentionSync`
+  // returns undefined only for a confidently-absent file and THROWS on an
+  // unreadable/malformed one, and that throw must propagate to `pruneLogFiles`'s
+  // retain-on-ambiguity path rather than be flattened to "absent" (issue #6194).
+  const { readDaemonOwnerForRetentionSync } =
+    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+  return readDaemonOwnerForRetentionSync(pidFilePath);
+};
+
+const readDaemonLaunchLogOwnerTombstone = (launchLogPath: string) => {
+  const { readDaemonLaunchLogOwnerTombstoneSync } =
+    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
+  return readDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+};
+
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
 // beyond the cap, and (b) other processes' logs that are stale by mtime — never
-// another live process's current file. See logPruner.ts.
+// another live process's current file, nor a daemon-launch log while a daemon is
+// running (its inherited fd). See logPruner.ts.
 const pruneOldLogFiles = (): Promise<void> => {
   if (!logsDir) {
     return Promise.resolve();
@@ -281,6 +400,15 @@ const pruneOldLogFiles = (): Promise<void> => {
     ownPrefix: ownLogPrefix,
     maxOwnFiles: MAX_LOG_FILES,
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
+    // Namespace-aware retention: read every co-located namespace's exact
+    // launch-log ownership declaration (issue #6194).
+    // Passed as the thunk itself (not `daemonPidFiles()`) so enumeration is
+    // deferred to sweep time — an eager call crashed the cyclic logger import
+    // before `logger` was initialized (issue #6194).
+    daemonPidFiles,
+    readDaemonOwner,
+    readDaemonLaunchLogOwnerTombstone,
+    isDaemonRunning,
   });
 };
 
@@ -295,6 +423,109 @@ if (logsDir) {
   });
 }
 
+// Closes the active stream ahead of rotation and WAITS for it to actually
+// finish before the caller opens a replacement at the same path. A
+// fire-and-forget `end()` races bun's epoll registration for the reused fd:
+// opening the new WriteStream while the old one's close is still in flight
+// can throw `EEXIST: file already exists, epoll_ctl` on the new stream's own
+// construction (issue #6149). A stream failing to close cleanly must not
+// block rotation itself, so that failure is caught and logged here rather
+// than propagated — the caller still proceeds to open the replacement.
+const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<void> => {
+  try {
+    await closeLogStream(stream);
+  } catch (closeError) {
+    await reportLogFailure("Failed to close log stream before rotation", closeError);
+  }
+};
+
+// Closes the oversized active stream, renames it to a timestamped backup, and
+// opens a fresh replacement at the original path. Split out of
+// checkAndRotateLog so each step reads at its own nesting level instead of
+// stacking inside that function's existing try/if/if.
+const rotateLogFile = async (paths: { dir: string; path: string }): Promise<void> => {
+  const closingStream = logStream;
+  logStream = undefined;
+  if (closingStream) {
+    await closeStreamBeforeRotation(closingStream);
+  }
+
+  // Create backup filename with timestamp, scoped to this process's PID so
+  // rotation never collides with another process's files.
+  const timestamp = new Date().toISOString().replace(/:/g, "-");
+  const backupPath = path.join(paths.dir, `${ownLogPrefix}-${timestamp}.log`);
+
+  // Check if file still exists right before rename to avoid race condition
+  if (fs.existsSync(paths.path)) {
+    // Rename current log file to backup
+    await fs.promises.rename(paths.path, backupPath);
+  }
+
+  // Always create a new log stream after rotation attempt
+  logStream = openLogStream(paths.path);
+
+  // Prune old log files to stay within the cap
+  await pruneOldLogFiles();
+};
+
+// A single check-and-maybe-rotate cycle runs at a time, and every write
+// serializes against it (see writeToFile). While it is set, `logStream` may
+// be briefly undefined — the old stream is closing and the replacement is not
+// yet open — so a concurrent write that opened its own stream at the same
+// path would recreate the very epoll EEXIST race rotation's close-before-
+// reopen exists to avoid (issue #6149). Sharing this promise makes back-to-
+// back writes join the in-flight cycle instead of starting a second
+// close/reopen.
+//
+// The lock covers the size CHECK as well as the rotation itself, not just
+// the rotation — see checkAndRotateLocked. Guarding only rotateLogFile() left
+// a TOCTOU window: two concurrent callers could both read "oversized" before
+// either rotated, the first would rotate and clear this flag, and the second
+// — still holding its now-stale size result — would rotate again on the
+// freshly-created, small replacement file (#6149 round 3).
+let rotationInFlight: Promise<void> | undefined;
+
+// Re-checks the file size and rotates if it is still oversized. Called only
+// while holding `rotationInFlight` (see checkAndRotateLog), so a concurrent
+// caller can never act on a size read before an earlier caller's rotation
+// already shrank the file.
+const checkAndRotateLocked = async (paths: { dir: string; path: string }): Promise<void> => {
+  if (!fs.existsSync(paths.path)) {
+    return;
+  }
+  const stats = await statAsync(paths.path);
+  if (stats.size >= MAX_LOG_SIZE) {
+    await rotateLogFile(paths);
+  }
+};
+
+// Start a check-and-maybe-rotate cycle if none is running, and return the
+// shared promise so concurrent callers JOIN the in-flight cycle instead of
+// racing their own stat/rotate at the same path (issue #6149).
+const beginOrJoinRotationCheck = (paths: { dir: string; path: string }): Promise<void> => {
+  if (!rotationInFlight) {
+    rotationInFlight = checkAndRotateLocked(paths).finally(() => {
+      rotationInFlight = undefined;
+    });
+  }
+  return rotationInFlight;
+};
+
+// A failed shared rotation is observed by both the writer that started it and
+// writers that were waiting behind it. The promise's `finally` clears the
+// in-flight marker before any waiter resumes, so recovery can safely publish a
+// replacement stream here. Keep this idempotent: several joined writers can
+// observe the same failure, but only the first one needs to reopen the stream.
+const recoverFromFailedRotation = async (
+  paths: { dir: string; path: string },
+  error: unknown,
+): Promise<void> => {
+  if (logStream?.destroyed || !logStream?.writable) {
+    logStream = openLogStream(paths.path);
+  }
+  await reportLogFailure("Log rotation failed", error);
+};
+
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
   const paths = fileLogPaths();
@@ -302,36 +533,9 @@ const checkAndRotateLog = async (): Promise<void> => {
     return;
   }
   try {
-    if (fs.existsSync(paths.path)) {
-      const stats = await statAsync(paths.path);
-      if (stats.size >= MAX_LOG_SIZE) {
-        // Close current stream
-        logStream?.end();
-
-        // Create backup filename with timestamp, scoped to this process's PID so
-        // rotation never collides with another process's files.
-        const timestamp = new Date().toISOString().replace(/:/g, "-");
-        const backupPath = path.join(paths.dir, `${ownLogPrefix}-${timestamp}.log`);
-
-        // Check if file still exists right before rename to avoid race condition
-        if (fs.existsSync(paths.path)) {
-          // Rename current log file to backup
-          await renameAsync(paths.path, backupPath);
-        }
-
-        // Always create a new log stream after rotation attempt
-        logStream = openLogStream(paths.path);
-
-        // Prune old log files to stay within the cap
-        await pruneOldLogFiles();
-      }
-    }
-  } catch (err) {
-    // If rotation fails, ensure we have a valid log stream
-    if (logStream?.destroyed || !logStream?.writable) {
-      logStream = openLogStream(paths.path);
-    }
-    await reportLogFailure("Log rotation failed", err);
+    await beginOrJoinRotationCheck(paths);
+  } catch (error) {
+    await recoverFromFailedRotation(paths, error);
   }
 };
 
@@ -478,6 +682,26 @@ const writeToFile = async (line: string): Promise<void> => {
   if (!logFilePath) {
     // Stderr-only sink: no file stream is ever expected here.
     return;
+  }
+  // Serialize this write against any in-flight rotation. During rotation
+  // `logStream` is transiently undefined (old stream closing, replacement not
+  // yet open); without this wait, the lazy reopen below would observe that gap
+  // and open a second stream at the same path while the old fd is still
+  // closing — the exact epoll EEXIST race rotation guards against (issue
+  // #6149). Wait for rotation to publish the fresh stream, then use it.
+  while (rotationInFlight) {
+    try {
+      await rotationInFlight;
+    } catch (error) {
+      // The initiating writer handles a failed rotation in checkAndRotateLog,
+      // but a writer that joined before it settled gets here first and used to
+      // escape without writing its record. Give every joiner the same
+      // recovery/degradation path so a file-only sink never silently loses it.
+      const paths = fileLogPaths();
+      if (paths) {
+        await recoverFromFailedRotation(paths, error);
+      }
+    }
   }
   if (!logStream) {
     // A prior open attempt failed — e.g. bun's transient EEXIST/epoll race

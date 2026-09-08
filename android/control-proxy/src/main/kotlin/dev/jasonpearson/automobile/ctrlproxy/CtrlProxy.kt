@@ -1980,6 +1980,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
+  override fun requestInsertText(requestId: String?, text: String) =
+    performInsertText(requestId, text)
+
   override fun requestImeAction(requestId: String?, action: String) =
     performImeAction(requestId, action)
 
@@ -4123,35 +4126,192 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       }
 
-      // Trigger a hierarchy refresh after successful text input
-      // This ensures the next observe will get the updated text
-      if (success) {
-        serviceScope.launch {
-          try {
-            // Wait for UI to settle (no accessibility events for 50ms), then extract hierarchy.
-            // This best-effort follow-up must not delay the set_text_result acknowledgement.
-            val freshHierarchy =
-              hierarchyDebouncer.extractAfterQuiescence(
-                quiescenceMs = 50L,
-                maxWaitMs = 500L,
-                pollIntervalMs = 10L,
-              )
-            if (freshHierarchy != null) {
-              broadcastHierarchyUpdate(freshHierarchy, sync = true)
-            }
-          } catch (e: CancellationException) {
-            throw e
-          } catch (e: Exception) {
-            Log.w(TAG, "Failed to refresh hierarchy after text input", e)
-          }
-        }
-      }
+      if (success) refreshHierarchyAfterTextInput()
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing set text", e)
       kotlinx.coroutines.runBlocking {
         broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
+      }
+    }
+  }
+
+  /**
+   * Publishes the settled text state after a successful text mutation without delaying its result.
+   */
+  private fun refreshHierarchyAfterTextInput() {
+    serviceScope.launch {
+      try {
+        val freshHierarchy =
+          hierarchyDebouncer.extractAfterQuiescence(
+            quiescenceMs = 50L,
+            maxWaitMs = 500L,
+            pollIntervalMs = 10L,
+          )
+        if (freshHierarchy != null) {
+          broadcastHierarchyUpdate(freshHierarchy, sync = true)
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
+      }
+    }
+  }
+
+  /**
+   * Insert text at the focused field's current selection using accessibility actions.
+   *
+   * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build the
+   * new value from the node's UTF-16 selection range, then restore the caret immediately after the
+   * inserted text. This matches ordinary typing: a collapsed selection inserts at the caret, while
+   * a non-empty selection is replaced.
+   */
+  private fun performInsertText(requestId: String?, text: String) {
+    val startTime = System.currentTimeMillis()
+    perfProvider.serial("performInsertText")
+
+    try {
+      val targetNode = findFocusedEditableNode(rootInActiveWindow)
+      if (targetNode == null) {
+        perfProvider.end()
+        launchRequestScope(requestId) {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "No focused editable node found",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      if (targetNode.isPassword) {
+        targetNode.recycle()
+        perfProvider.end()
+        kotlinx.coroutines.runBlocking {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "Cannot insert text into a password field without exposing its original value",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      val currentText = targetNode.text?.toString().orEmpty()
+      val rawStart = targetNode.textSelectionStart
+      val rawEnd = targetNode.textSelectionEnd
+      val hasValidSelection = rawStart in 0..currentText.length && rawEnd in 0..currentText.length
+      if (!hasValidSelection) {
+        targetNode.recycle()
+        perfProvider.end()
+        kotlinx.coroutines.runBlocking {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "Focused editable node did not report a valid text selection",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      val actionIds = targetNode.actionList.map { it.id }.toSet()
+      val requiredActions =
+        mapOf(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION to
+            "ACTION_SET_SELECTION",
+        )
+      val unsupportedAction = requiredActions.entries.firstOrNull { it.key !in actionIds }
+      if (unsupportedAction != null) {
+        targetNode.recycle()
+        perfProvider.end()
+        kotlinx.coroutines.runBlocking {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "Focused editable node does not support ${unsupportedAction.value}",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      val selectionStart = minOf(rawStart, rawEnd).coerceIn(0, currentText.length)
+      val selectionEnd = maxOf(rawStart, rawEnd).coerceIn(selectionStart, currentText.length)
+      val updatedText =
+        currentText.substring(0, selectionStart) + text + currentText.substring(selectionEnd)
+      val updatedCaret = selectionStart + text.length
+
+      val setTextArguments =
+        android.os.Bundle().apply {
+          putCharSequence(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+            updatedText,
+          )
+        }
+      val setTextSucceeded =
+        targetNode.performAction(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
+          setTextArguments,
+        )
+      val selectionSucceeded =
+        if (setTextSucceeded) {
+          val selectionArguments =
+            android.os.Bundle().apply {
+              putInt(
+                android.view.accessibility.AccessibilityNodeInfo
+                  .ACTION_ARGUMENT_SELECTION_START_INT,
+                updatedCaret,
+              )
+              putInt(
+                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
+                updatedCaret,
+              )
+            }
+          targetNode.performAction(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+            selectionArguments,
+          )
+        } else {
+          false
+        }
+      targetNode.recycle()
+      perfProvider.end()
+
+      val success = setTextSucceeded && selectionSucceeded
+      val partialApplication = setTextSucceeded && !selectionSucceeded
+      val error =
+        when {
+          !setTextSucceeded -> "ACTION_SET_TEXT returned false"
+          !selectionSucceeded ->
+            "Text was inserted, but ACTION_SET_SELECTION returned false; do not retry"
+          else -> null
+        }
+      kotlinx.coroutines.runBlocking {
+        broadcastInsertTextResult(
+          requestId,
+          success,
+          error,
+          System.currentTimeMillis() - startTime,
+          partialApplication,
+        )
+      }
+      if (setTextSucceeded) refreshHierarchyAfterTextInput()
+    } catch (e: Exception) {
+      perfProvider.end()
+      Log.e(TAG, "Error inserting text", e)
+      kotlinx.coroutines.runBlocking {
+        broadcastInsertTextResult(
+          requestId,
+          false,
+          e.message,
+          System.currentTimeMillis() - startTime,
+        )
       }
     }
   }
@@ -5751,6 +5911,35 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
+    }
+  }
+
+  /** Broadcast insert text result to WebSocket clients. */
+  private suspend fun broadcastInsertTextResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+    partialApplication: Boolean = false,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "insert_text_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson("insert_text_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
+          if (error != null) {
+            put("error", error)
+          }
+          if (partialApplication) {
+            put("partialApplication", true)
+          }
+        }
+      }
     }
   }
 

@@ -76,6 +76,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     dismissKeyboard: Boolean,
   ) {}
 
+  override fun requestInsertText(requestId: String?, text: String) {}
+
   override fun requestImeAction(requestId: String?, action: String) {}
 
   override fun requestSelectAll(requestId: String?) {}
@@ -320,6 +322,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     dismissKeyboard: Boolean,
     frameContext: String?,
   ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard, frameContext)
+
+  override fun requestInsertText(requestId: String?, text: String) =
+    record("requestInsertText", requestId, text)
 
   override fun requestImeAction(requestId: String?, action: String) =
     record("requestImeAction", requestId, action)

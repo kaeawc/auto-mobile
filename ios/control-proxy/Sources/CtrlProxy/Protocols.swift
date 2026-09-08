@@ -154,6 +154,9 @@ public protocol GesturePerforming {
     /// keyboard is visible after the requested action.
     func keyboard(action: String) throws -> Bool
 
+    /// Press one discrete keyboard key with the supplied modifier chord.
+    func pressKey(key: String, modifiers: [String]) throws
+
     // MARK: - Clipboard
 
     /// Perform clipboard operation (get, copy, clear, paste)

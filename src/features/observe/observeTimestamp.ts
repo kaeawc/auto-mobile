@@ -1,3 +1,5 @@
+import type { ViewHierarchyResult } from "../../models";
+
 /**
  * Coerce an `ObserveResult.updatedAt` to a number of milliseconds since epoch.
  *
@@ -20,4 +22,20 @@ export function updatedAtToMillis(updatedAt: string | number): number {
   }
   const parsed = Date.parse(updatedAt);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Return the device-authored timestamp carried by a hierarchy capture.
+ *
+ * `ObserveResult.updatedAt` is deliberately excluded here: it is also the
+ * host-created timestamp of an incomplete/base observation. Passing that value
+ * to a device-side `minTimestamp` mixes clock domains and can either reject a
+ * current capture or admit a cached one. Callers that need a freshness floor
+ * must therefore use only this hierarchy-owned value.
+ */
+export function hierarchyUpdatedAtToMillis(
+  hierarchy: Pick<ViewHierarchyResult, "updatedAt"> | undefined,
+): number | undefined {
+  const updatedAt = hierarchy?.updatedAt;
+  return typeof updatedAt === "number" && Number.isFinite(updatedAt) ? updatedAt : undefined;
 }

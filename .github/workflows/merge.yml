@@ -1503,7 +1503,12 @@ jobs:
 
   swift-code-coverage:
     name: "Swift Code Coverage"
-    runs-on: macos-26
+    # Self-hosted routing: merge runs triggered by kaeawc (push/merge to main) run
+    # on the self-hosted Apple Silicon runner (label automobile-mac); anyone else's
+    # merge falls back to the GitHub-hosted macos-26 runner. This workflow triggers
+    # on push, so github.actor (not pull_request.user) identifies the actor. No
+    # setup-xcode step, so it uses the runner's ambient Xcode.
+    runs-on: ${{ github.actor == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

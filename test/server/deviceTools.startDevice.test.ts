@@ -375,6 +375,43 @@ describe("startDevice handler", () => {
     expect(childProcess.killed).toBe(false);
   });
 
+  // #6227 (round 5 P1): `prepareStartDeviceRunnerReadiness` already completed
+  // before `bindBootedDeviceSession` binds the session, so the acquisition
+  // path must record `automationReady` on the freshly-bound session — not
+  // leave it `undefined`, which would make the first subsequent
+  // `automationReady` tool call redundantly re-run CtrlProxy setup.
+  it("records automationReady on the session bound after a successful cold boot (#6227 round 5)", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    const childProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      coldBootImage.name,
+      childProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.source).toBe("cold-boot");
+    const sessionUuid = result.sessionUuid as string;
+    expect(sessionUuid).toBeDefined();
+    expect(daemonSessionManager!.getDeviceReadiness(sessionUuid)).toBe("automationReady");
+  });
+
   it("tracks the process handle for a public Android cold boot", async () => {
     const recoveryKeys = [
       "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
@@ -618,6 +655,67 @@ describe("startDevice handler", () => {
     });
     expect(pool.getIdleDevices()).toEqual([]);
     expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe("emulator-5556");
+  });
+
+  // #6227 round 7: `bootAndPrepareDevice` bypasses `bindBootedDeviceSession`
+  // (and its `recordAcquiredSessionReadiness` call) entirely when a preserved
+  // session comes back from System UI ANR recovery. By this point
+  // `ensureCtrlProxyReady` already succeeded on the replacement device (the
+  // second `readinessAttempts` call above), so the achieved level is
+  // `automationReady` just like a freshly-bound session — it must be recorded
+  // rather than left `undefined`, or the first `automationReady` tool call
+  // after recovery would redundantly re-run CtrlProxy setup.
+  it("records automationReady for a preserved session recovered from a System UI ANR (#6227 round 7)", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.sessionUuid).toBe("owner-session");
+    expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
   });
 
   it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
@@ -1353,7 +1451,7 @@ describe("startDevice handler", () => {
     expect(adopterSettled).toBe(false);
     releaseOwnerReadiness();
     const ownerResult = await ownerStart;
-    await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
+    await expect(adopterStart).rejects.toThrow("already assigned to another session");
 
     expect(ownerResult.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);

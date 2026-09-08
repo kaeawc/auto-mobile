@@ -2,7 +2,7 @@
  * Video recording module exports
  */
 
-export { VideoRecorderService } from "./VideoRecorderService";
+export { VideoCaptureFinalizationError, VideoRecorderService } from "./VideoRecorderService";
 export type {
   VideoCaptureBackend,
   VideoCaptureConfig,

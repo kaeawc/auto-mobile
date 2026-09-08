@@ -348,7 +348,7 @@ class RealStorageDataSource(
     key: String,
     value: String?,
     type: KeyValueType,
-  ): Result<Unit> {
+  ): Result<StorageMutationResult> {
     val provider =
       clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
@@ -367,7 +367,7 @@ class RealStorageDataSource(
             type.protocolName,
             platform.protocolName,
           )
-        if (result.success) Result.Success(Unit)
+        if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
       }
     } catch (e: McpConnectionException) {
@@ -377,7 +377,10 @@ class RealStorageDataSource(
     }
   }
 
-  override suspend fun removeKeyValue(fileName: String, key: String): Result<Unit> {
+  override suspend fun removeKeyValue(
+    fileName: String,
+    key: String,
+  ): Result<StorageMutationResult> {
     val provider =
       clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
@@ -387,7 +390,7 @@ class RealStorageDataSource(
       val client = provider()
       withContext(Dispatchers.IO) {
         val result = client.removeKeyValue(device, pkg, fileName, key, platform.protocolName)
-        if (result.success) Result.Success(Unit)
+        if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
       }
     } catch (e: McpConnectionException) {
@@ -397,7 +400,7 @@ class RealStorageDataSource(
     }
   }
 
-  override suspend fun clearKeyValueFile(fileName: String): Result<Unit> {
+  override suspend fun clearKeyValueFile(fileName: String): Result<StorageMutationResult> {
     val provider =
       clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
@@ -407,7 +410,7 @@ class RealStorageDataSource(
       val client = provider()
       withContext(Dispatchers.IO) {
         val result = client.clearKeyValueFile(device, pkg, fileName, platform.protocolName)
-        if (result.success) Result.Success(Unit)
+        if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to clear key value file"))
       }
     } catch (e: McpConnectionException) {

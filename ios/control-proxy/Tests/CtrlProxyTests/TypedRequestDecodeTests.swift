@@ -139,6 +139,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .requestImeAction: #"{"action":"done"}"#,
             .requestSelectAll: "{}",
             .requestKeyboard: #"{"action":"open"}"#,
+            .requestPressKey: #"{"key":"tab","modifiers":["shift"]}"#,
             .requestPressButton: #"{"action":"home"}"#,
             .requestPressHome: "{}",
             .requestPressBack: "{}",

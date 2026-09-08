@@ -1648,7 +1648,16 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    runs-on: macos-26
+    # Deliberate exception to the "PR jobs stay hosted" rule (the other PR jobs
+    # below keep that rule). SwiftLint is the cheapest PR job to self-host: it
+    # checks out and runs a lint script only — no secrets, no Xcode toolchain, no
+    # simulator — so kaeawc-authored PRs route to the self-hosted Apple Silicon
+    # runner (label automobile-mac) for fast feedback; every other author falls
+    # back to GitHub-hosted macos-26. NOTE: the author guard is a default, not a
+    # security boundary — a PR supplies its own workflow file and could target
+    # self-hosted regardless. The real gate is the repo's all_external_contributors
+    # fork-PR approval policy, which holds untrusted PRs until manually approved.
+    runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     steps:
@@ -1676,6 +1685,8 @@ jobs:
   swift-code-coverage:
     timeout-minutes: 20
     name: "Swift Code Coverage"
+    # See swiftlint: pull-request YAML must not schedule work on a self-hosted
+    # runner. Trusted post-merge work retains the automobile-mac route.
     runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -1701,6 +1712,8 @@ jobs:
 
   ios-swift-packages:
     name: "Swift Packages (${{ matrix.config.name }})"
+    # Pull-request YAML is untrusted, including for repository members, so the
+    # package matrix always uses the GitHub-hosted runner from its configuration.
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -1725,6 +1738,8 @@ jobs:
         with:
           lfs: false
 
+      # Pin every package build to the matrix toolchain. This is the supported
+      # compiler floor, not an ambient-runner compatibility check.
       - name: "Select Xcode ${{ matrix.config.xcode }}"
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -2095,6 +2110,8 @@ jobs:
   ios-spm-root-package-build:
     timeout-minutes: 20
     name: "Build Root SPM Package"
+    # Pull-request YAML must remain off self-hosted runners. The root manifest
+    # needs the Swift 6.3 toolchain from Xcode 26.5.
     runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -2109,6 +2126,7 @@ jobs:
       # ships with Xcode 26.5. Xcode 26.0 ships Swift 6.2 and cannot even parse
       # a 6.3 manifest, so this floor-guarantee job builds on 26.5 to match the
       # published SDK's toolchain floor and every other Swift-package job here.
+      # Select it explicitly so this job verifies the published compiler floor.
       - name: "Select Xcode 26.5"
         uses: maxim-lobanov/setup-xcode@v1
         with:

@@ -196,6 +196,16 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize request_insert_text`() {
+    val message = """{"type":"request_insert_text","requestId":"insert-1","text":"Hello World"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestInsertText>(request)
+    assertEquals("insert-1", request.requestId)
+    assertEquals("Hello World", request.text)
+  }
+
+  @Test
   fun `deserialize request_ime_action`() {
     val message = """{"type":"request_ime_action","requestId":"ime-1","action":"search"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)

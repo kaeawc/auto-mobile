@@ -30,14 +30,45 @@ the exact arguments supported by your connection.
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                          |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                        |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                     |
-| ⌨️ <code>inputText</code>     | Types text; its optional mode is Android-only.                       |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.        |
+| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility.                        |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                        |
-| 🗑️ <code>clearText</code>     | Clears the focused input.                                            |
+| 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                     |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                               |
-| ↩️ <code>imeAction</code>     | Performs an IME action.                                              |
+| ↩️ <code>imeAction</code>     | Legacy standalone IME action; disabled by default.                   |
 | 🔘 <code>pressButton</code>   | Presses a device or navigation button.                               |
 | ⌨️ <code>keyboard</code>      | Opens, closes, or detects the on-screen keyboard.                    |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                      |
+
+`sendKeys` accepts one optional field selector and an ordered sequence of up to
+100 commands:
+
+```json
+{
+  "selector": { "text": "Email" },
+  "commands": [
+    { "action": "type", "text": "name@example.com" },
+    { "action": "key", "key": "tab" },
+    { "action": "type", "text": "replacement", "operation": "replace", "mode": "a11y" },
+    { "action": "key", "key": "enter", "modifiers": ["shift"] }
+  ]
+}
+```
+
+Text defaults to `operation: "insert"` and `mode: "auto"`. Modes are `auto`,
+`a11y`, `eventLast`, `eventAll`, and `eventOnly`. They select Android delivery
+strategies; iOS accepts the same values for cross-platform plans and reports the
+actual `xcuiTypeText` mechanism as `resolvedMode`. Raw keys are `enter`, `tab`,
+`escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
+`ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,
+`send`, and `go` perform the corresponding IME action and ignore modifiers. A
+standalone `{ "action": "clear" }` command clears the focused field. Execution
+stops on the first failure and returns compact command metadata plus the final
+observation without copying type-command text into the metadata.
+
+`sendKeys` becomes default-enabled when the bundled CtrlProxy artifacts reach
+0.0.68. Until then, `inputText` remains the default compatibility path; a local
+fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
 
 ??? note "Pinch rotation semantics"
 
@@ -128,6 +159,7 @@ the exact arguments supported by your connection.
 | 🔓 <code>wakeAndUnlock</code>                                                  | Wakes and unlocks the keyguard.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 🌍 <code>changeLocalization</code>                                             | Changes locale, time zone, text direction, time format, and calendar.                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ⚙️ <code>getDeviceState</code> / ⚙️ <code>setDeviceState</code>                | Reads or changes Do Not Disturb, simulator biometric enrollment, and network condition. Degraded profiles — including `offline` — are best-effort cellular shaping on an Android emulator (`adb emu network …`/`gsm data off` plus a best-effort Wi-Fi disable), reported `partial`: they may not affect Wi-Fi or app traffic. Only reset to `none` is fully verified. A session restores the network to a clean `none` state on release. Unsupported on physical Android and all iOS. |
+| 🔠 <code>displayConfig</code>                                                  | Reads or sets font/text scale, effective display density, and light/dark theme for adaptive-layout and large-font accessibility testing. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only, via `simctl ui appearance`; physical iOS is unsupported. Disabled by default — enable it with `setToolEnabled` (case-sensitive `displayConfig`) or `--enable-tool displayConfig` before use.                |
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime.                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator.                                                                                                                                                                                                                                                                                                                                                                                                                                           |

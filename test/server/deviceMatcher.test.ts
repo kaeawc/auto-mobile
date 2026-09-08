@@ -1,6 +1,10 @@
 import { describe, it, expect } from "bun:test";
 import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import {
+  canonicalReleaseVersionsByApiLevel,
+  versionToApiLevelRange,
+} from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { SeededRandom } from "../fakes/SeededRandom";
 
 const matcher = new DefaultDeviceMatcher();
@@ -98,6 +102,65 @@ describe("compareVersions", () => {
     expect(compareVersions("12L-QPR1", "12L-QPR2")).toBeLessThan(0);
     expect(compareVersions("12L-QPR1", "12L")).toBeGreaterThan(0);
     expect(compareVersions("12L-QPR1", "12")).toBeGreaterThan(0);
+  });
+
+  it("parses and totally orders a multi-letter codename qualifier (#6326)", () => {
+    // Multi-letter qualifiers previously failed to parse and degraded to a NaN
+    // comparison; they must now order like any other trailing qualifier.
+    expect(compareVersions("12", "12LA")).toBeLessThan(0);
+    expect(compareVersions("12LA", "13")).toBeLessThan(0);
+    // Lexicographic order over the qualifier string, including the prefix case
+    // (a shorter qualifier that prefixes a longer one sorts first).
+    expect(compareVersions("12L", "12LA")).toBeLessThan(0);
+    expect(compareVersions("12LA", "12LB")).toBeLessThan(0);
+    expect(compareVersions("12LB", "12LA")).toBeGreaterThan(0);
+    expect(compareVersions("12LA", "12LA")).toBe(0);
+    // Case-insensitive, like the single-letter qualifier.
+    expect(compareVersions("12la", "12LA")).toBe(0);
+  });
+
+  it("orders a multi-letter qualifier with a QPR suffix (#6326)", () => {
+    expect(compareVersions("12LA-QPR1", "12LA-QPR2")).toBeLessThan(0);
+    expect(compareVersions("12LA-QPR1", "12LA")).toBeGreaterThan(0);
+    expect(compareVersions("12LA-QPR2", "12LB")).toBeLessThan(0);
+  });
+});
+
+describe("compareVersions cross-checked against the canonical release table (#6326)", () => {
+  const canonical = canonicalReleaseVersionsByApiLevel();
+
+  it("orders every adjacent canonical release pair by ascending API level", () => {
+    for (let i = 1; i < canonical.length; i++) {
+      const lower = canonical[i - 1];
+      const higher = canonical[i];
+      expect(compareVersions(lower.version, higher.version)).toBeLessThan(0);
+      expect(compareVersions(higher.version, lower.version)).toBeGreaterThan(0);
+    }
+  });
+
+  it("agrees with AvdConfigReader's API-level ranges for every canonical pair", () => {
+    // For any two shipped releases whose API-level ranges do not overlap, the
+    // matcher's ordering must match the API-level ordering. This ties
+    // compareVersions directly to AvdConfigReader.versionToApiLevelRange so the
+    // canonical table stays the single source of truth (e.g. "12L" -> API 32
+    // must sort above "12" -> API 31 and below "13" -> API 33).
+    for (const a of canonical) {
+      for (const b of canonical) {
+        const rangeA = versionToApiLevelRange(a.version);
+        const rangeB = versionToApiLevelRange(b.version);
+        expect(rangeA).toBeDefined();
+        expect(rangeB).toBeDefined();
+        if (!rangeA || !rangeB) {
+          continue;
+        }
+        const sign = Math.sign(compareVersions(a.version, b.version));
+        if (rangeA.max < rangeB.min) {
+          expect(sign).toBe(-1);
+        } else if (rangeB.max < rangeA.min) {
+          expect(sign).toBe(1);
+        }
+      }
+    }
   });
 });
 

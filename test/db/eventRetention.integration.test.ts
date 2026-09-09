@@ -213,6 +213,54 @@ describe("event repository retention (#2799)", () => {
     }
   });
 
+  describe("counter is not reset when a cleanup is already in progress (#6657)", () => {
+    test("a bailed-out call while a cleanup is in flight leaves the counter armed for the next insert", async () => {
+      const { db, sqls } = await createInstrumentedTestDatabase();
+      try {
+        const checkInterval = 3;
+        const state = createRetentionState();
+        // One insert away from tripping the gate.
+        state.insertsSinceCleanup = checkInterval - 1;
+
+        // This insert trips the gate and starts (but does not finish) the
+        // async cleanup body — it is parked on the real DB's count(*) query.
+        const first = pruneEventTableByCount(db, "log_events", state, 1000, checkInterval);
+
+        // A burst of checkInterval-worth of further inserts lands before that
+        // cleanup resolves. Each is fired without awaiting the prior one, so
+        // they run synchronously up to their own guard check while `first`
+        // is still parked on its own `await` — the exact interleaving from a
+        // sustained write burst.
+        const burst: Promise<void>[] = [];
+        for (let i = 0; i < checkInterval; i++) {
+          burst.push(pruneEventTableByCount(db, "log_events", state, 1000, checkInterval));
+        }
+
+        // Buggy behavior: the counter was zeroed by `first` before the
+        // in-progress check, so every burst call above would already have
+        // re-tripped and re-zeroed it, ending near 0 (well under
+        // checkInterval) and silently discarding the in-flight cleanup's
+        // gate. Fixed behavior: none of the bailed-out burst calls reset the
+        // counter, so it stays >= checkInterval.
+        expect(state.cleanupInProgress).toBe(true);
+        expect(state.insertsSinceCleanup).toBeGreaterThanOrEqual(checkInterval);
+
+        await Promise.all(burst);
+        await first;
+        expect(state.cleanupInProgress).toBe(false);
+
+        // With the counter left armed, the very next insert retries the gate
+        // immediately rather than waiting another full checkInterval.
+        sqls.length = 0;
+        await pruneEventTableByCount(db, "log_events", state, 1000, checkInterval);
+        expect(countOccurrences(sqls, "count(")).toBe(1);
+        expect(state.insertsSinceCleanup).toBe(0);
+      } finally {
+        await db.destroy();
+      }
+    });
+  });
+
   describe("batched multi-row INSERT (#3138)", () => {
     const BATCH_REPOS = [
       {

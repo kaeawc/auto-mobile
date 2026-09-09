@@ -1039,10 +1039,20 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    # The macOS installer path remains per-PR coverage. For kaeawc-authored PRs,
+    # send just that matrix leg to the idle Apple Silicon runner to avoid the
+    # GitHub-hosted macOS queue; Ubuntu and every other author stay hosted. This
+    # is a required check, so automobile-mac must remain online and awake: GitHub
+    # cannot fall back to a hosted runner after a self-hosted job has queued. The
+    # author guard is a default, not a security boundary; all_external_contributors
+    # fork-PR approval policy is the gate for untrusted workflow changes.
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc') && fromJSON('["self-hosted", "automobile-mac"]') || matrix.os }}
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
+      # Minimal setup must not restart a daemon owned by the persistent runner
+      # account. The product default remains to migrate stale daemons for users.
+      AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION: "true"
       # ffmpeg is a large, slow install (it has timed out this job) and video
       # recording is not exercised here — skip it.
       AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
@@ -1061,6 +1071,20 @@ jobs:
         with:
           lfs: false
 
+      - name: "Confirm clean installer fixture"
+        if: env.RUN_INSTALLER == 'true'
+        shell: bash
+        run: |
+          # Refuse pre-existing files or symlinked parents before allowing cleanup
+          # of any project target supported by the minimal installer.
+          for directory in .codex .cursor .vscode; do
+            test ! -L "$directory"
+          done
+          for config in .mcp.json .codex/config.toml .cursor/mcp.json .vscode/mcp.json; do
+            test ! -e "$config"
+            test ! -L "$config"
+          done
+
       - name: "Run Installer (minimal)"
         if: env.RUN_INSTALLER == 'true'
         shell: bash
@@ -1075,17 +1099,29 @@ jobs:
           echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
           exit 0
 
-      - name: "Run Uninstaller"
+      - name: "Remove generated project MCP configuration"
         if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
           set -uo pipefail
           set +e
-          bash ./scripts/uninstall.sh --all --force 2>&1 | tee ci-logs/uninstaller.log
-          uninstall_status=${PIPESTATUS[0]}
+          # No client installed is a valid installer outcome. Each target was
+          # absent before this run, so remove only files this run could create.
+          cleanup_status=0
+          for directory in .codex .cursor .vscode; do
+            if [[ -L "$directory" ]]; then
+              echo "Refusing cleanup through symlink: $directory" >&2
+              cleanup_status=1
+            fi
+          done
+          if [[ "$cleanup_status" -eq 0 ]]; then
+            for config in .mcp.json .codex/config.toml .cursor/mcp.json .vscode/mcp.json; do
+              rm -f -- "$config" || cleanup_status=1
+            done
+          fi
           set -e
-          echo "UNINSTALL_EXIT_CODE=${uninstall_status}" >> "$GITHUB_ENV"
+          echo "UNINSTALL_EXIT_CODE=${cleanup_status}" >> "$GITHUB_ENV"
           exit 0
 
       - name: "Upload Logs"

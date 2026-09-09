@@ -164,14 +164,34 @@ class BunSqliteDriver implements Driver {
   }
 }
 
+// One parked operation in the FIFO admission queue (#6699). `kind` decides the
+// admission rule: a "txn" needs exclusive access (no owner, no active queries)
+// and blocks everything behind it until it can run; a "query" runs as soon as no
+// transaction holds the connection, concurrently with other queued queries.
+interface AdmissionWaiter {
+  kind: "txn" | "query";
+  owner: symbol;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
 export class BunSqliteConnectionState {
   readonly #databaseSource: BunDatabase | (() => BunDatabase);
   readonly #beforeQuery?: () => Promise<void>;
   #db: BunDatabase | null = null;
   #transactionOwner: symbol | null = null;
-  #pendingTransactions = 0;
   #activeQueries = 0;
-  #waiters: Array<() => void> = [];
+  // FIFO admission queue over the singleton connection (#6699). Replaces the old
+  // broadcast waiter array: each state change wakes only the next eligible
+  // waiter — one transaction (exclusively) or a run of consecutive queries
+  // (concurrent reads) — via #pump, never the whole queue. Admission is strictly
+  // first-come, so a sustained transaction stream cannot starve an earlier-queued
+  // query (it queues ahead of later transactions), and a sustained query stream
+  // cannot starve an earlier-queued transaction (later queries queue behind it).
+  #queue: Array<AdmissionWaiter> = [];
+  // Test seam: cumulative waiter resolutions. Pins that one completion resumes
+  // only the eligible waiter(s), not every parked operation (the old herd).
+  #resumeCount = 0;
   #statementCache = new Map<string, BunStatement>();
   #closed = false;
   readonly #maxRetryAttempts: number;
@@ -213,7 +233,7 @@ export class BunSqliteConnectionState {
       this.#closed ||
       !this.#db ||
       this.#transactionOwner !== null ||
-      this.#pendingTransactions > 0 ||
+      this.#queue.length > 0 ||
       this.#activeQueries > 0
     ) {
       return;
@@ -228,19 +248,22 @@ export class BunSqliteConnectionState {
 
   async beginTransaction(owner: symbol): Promise<void> {
     this.#assertOpen();
-    this.#pendingTransactions += 1;
-    try {
-      await this.#reserveTransaction(owner);
-    } finally {
-      this.#pendingTransactions -= 1;
-      this.#notifyWaiters();
+    // A nested beginTransaction on a lease that already holds the lock would wait
+    // forever for itself (deadlocking the daemon's only connection); fail fast
+    // with a clear error, mirroring the old #reserveTransaction carve-out.
+    if (this.#transactionOwner === owner) {
+      throw new ActionableError("Nested transactions are not supported by BunSqliteDialect");
     }
+    // Queue for exclusive access. #pump admits this waiter (setting
+    // #transactionOwner to `owner`) only once no owner holds the lock and no
+    // query is active, and only when it reaches the front of the FIFO.
+    await this.#acquire("txn", owner);
 
     try {
       await this.executeQuery(CompiledQuery.raw("begin"), owner);
     } catch (error) {
       this.#transactionOwner = null;
-      this.#notifyWaiters();
+      this.#pump();
       throw error;
     }
   }
@@ -291,7 +314,7 @@ export class BunSqliteConnectionState {
       }
     } finally {
       this.#activeQueries -= 1;
-      this.#notifyWaiters();
+      this.#pump();
     }
   }
 
@@ -442,7 +465,9 @@ export class BunSqliteConnectionState {
       this.#db.close();
       this.#db = null;
     }
-    this.#notifyWaiters();
+    // #closed is set above, so #pump now drains the queue by rejecting every
+    // parked waiter with the closed-database error instead of admitting it.
+    this.#pump();
   }
 
   #getDatabase(): BunDatabase {
@@ -507,57 +532,91 @@ export class BunSqliteConnectionState {
     }
   }
 
-  async #reserveTransaction(owner: symbol): Promise<void> {
-    // A nested beginTransaction on a lease that already holds the transaction
-    // lock would busy-loop forever here (the owner waiting for itself to
-    // release), deadlocking the daemon's only DB connection. Mirror
-    // #enterQuery's `=== owner` carve-out by failing fast with a clear error
-    // instead. The caller (beginTransaction) still decrements
-    // #pendingTransactions and wakes waiters in its finally, so no counter leak.
-    if (this.#transactionOwner === owner) {
-      throw new ActionableError("Nested transactions are not supported by BunSqliteDialect");
-    }
-    while (this.#transactionOwner !== null || this.#activeQueries > 0) {
-      this.#assertOpen();
-      await this.#waitForStateChange();
-    }
-    this.#assertOpen();
-    this.#transactionOwner = owner;
-  }
-
   async #enterQuery(owner: symbol): Promise<void> {
-    while (
-      (this.#transactionOwner !== null && this.#transactionOwner !== owner) ||
-      (this.#transactionOwner === null && this.#pendingTransactions > 0)
-    ) {
-      // Bail if the handle closed while queued so a parked query can't spin
-      // forever after shutdown (issue #2792). Thrown before the activeQueries
-      // increment, so no counter is leaked.
-      this.#assertOpen();
-      await this.#waitForStateChange();
+    // A statement issued by the lease that currently holds the transaction is
+    // part of that transaction's own body (begin/commit/rollback plus the work
+    // between them, all routed through executeQuery with the holding owner). It
+    // bypasses the queue so the transaction can make progress while it holds the
+    // connection exclusively.
+    if (this.#transactionOwner === owner) {
+      this.#activeQueries += 1;
+      return;
     }
-    this.#activeQueries += 1;
+    // Otherwise queue behind anything already waiting; #pump increments
+    // #activeQueries when (and only when) it admits this waiter.
+    await this.#acquire("query", owner);
   }
 
   #clearTransactionOwner(owner: symbol): void {
     if (this.#transactionOwner === owner) {
       this.#transactionOwner = null;
-      this.#notifyWaiters();
+      this.#pump();
     }
   }
 
-  async #waitForStateChange(): Promise<void> {
-    await new Promise<void>((resolve) => {
-      this.#waiters.push(resolve);
+  // Park a transaction reservation or a query at the back of the FIFO admission
+  // queue and wait until #pump admits it (or rejects it because the connection
+  // closed while it waited, preserving the shutdown-safety of the old
+  // #assertOpen re-check, issue #2792). #pump is the sole authority that mutates
+  // #transactionOwner / #activeQueries on admission, so a resolved waiter may
+  // proceed immediately without re-checking any predicate.
+  #acquire(kind: AdmissionWaiter["kind"], owner: symbol): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.#queue.push({ kind, owner, resolve, reject });
+      this.#pump();
     });
   }
 
-  #notifyWaiters(): void {
-    const waiters = this.#waiters;
-    this.#waiters = [];
-    for (const waiter of waiters) {
-      waiter();
+  // Admit as many front waiters as can proceed right now, resolving ONLY those
+  // — never broadcasting to the whole queue (the old #notifyWaiters thundering
+  // herd, issue #6699). Strict FIFO: a head transaction that cannot run yet
+  // blocks everything behind it, so it is never starved by a later query stream,
+  // and an earlier-queued query is never starved by a later transaction stream.
+  #pump(): void {
+    while (this.#queue.length > 0) {
+      const front = this.#queue[0];
+      if (this.#closed) {
+        this.#queue.shift();
+        this.#resumeCount += 1;
+        front.reject(new Error("Cannot use a closed database"));
+        continue;
+      }
+      if (front.kind === "txn") {
+        // A transaction needs exclusive access: no owner holds the lock and no
+        // query is in flight. If it cannot run yet it stays at the head, blocking
+        // later operations until it can (FIFO fairness / no transaction starvation).
+        if (this.#transactionOwner === null && this.#activeQueries === 0) {
+          this.#queue.shift();
+          this.#transactionOwner = front.owner;
+          this.#resumeCount += 1;
+          front.resolve();
+        }
+        // Either a transaction now holds the connection exclusively, or the head
+        // transaction is still blocked; nothing behind it proceeds either way.
+        return;
+      }
+      // Head is a query: it runs as soon as no transaction holds the lock.
+      // Consecutive head queries are concurrent reads, so keep admitting them.
+      if (this.#transactionOwner === null) {
+        this.#queue.shift();
+        this.#activeQueries += 1;
+        this.#resumeCount += 1;
+        front.resolve();
+        continue;
+      }
+      // A transaction holds the connection; queries wait behind it.
+      return;
     }
+  }
+
+  /** Test seam (#6699): cumulative waiter resolutions across the queue's life. */
+  get resumeCount(): number {
+    return this.#resumeCount;
+  }
+
+  /** Test seam (#6699): operations currently parked in the admission queue. */
+  get queuedWaiterCount(): number {
+    return this.#queue.length;
   }
 }
 

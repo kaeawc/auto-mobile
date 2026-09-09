@@ -8,8 +8,15 @@ import { logger } from "../logger";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
+import { defaultTimer, Timer } from "../SystemTimer";
 
 type SigningStyle = "automatic" | "manual";
+
+// Bound on the xcodebuild availability probe inside detectTeamIdsFromXcode
+// (issue #6585): a stalled `xcodebuild -version` must never block callers
+// (e.g. physical-device CtrlProxy startup) indefinitely, regardless of
+// whether the underlying Xcodebuild dependency enforces its own timeout.
+const XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
 
 interface SigningIdentity {
   name: string;
@@ -63,6 +70,7 @@ interface XcodeSigningDependencies {
   mkdir: (path: string) => Promise<void>;
   homedir: () => string;
   now: () => number;
+  timer?: Timer;
 }
 
 const plistParser = new Parser({
@@ -88,6 +96,7 @@ const createDefaultDependencies = (): XcodeSigningDependencies => ({
   mkdir: async (path) => fs.mkdir(path, { recursive: true }),
   homedir,
   now: () => Date.now(),
+  timer: defaultTimer,
 });
 
 const parsePlistValue = (node: PlistNode | undefined): unknown => {
@@ -312,12 +321,24 @@ export class XcodeSigningManager {
       const projectExists = await this.dependencies
         .stat(projectPath)
         .then(() => true)
-        .catch(() => false);
+        .catch((statError: unknown) => {
+          // ENOENT (and ENOTDIR, when a path segment isn't a directory) mean
+          // "no project here" -- the expected shape for an installed
+          // (non-checkout) AutoMobile. Anything else (permissions, IO) is
+          // unexpected and worth a trace rather than a silent [] (#6585 P2).
+          const code = (statError as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== "ENOENT" && code !== "ENOTDIR") {
+            logger.warn(
+              `[XcodeSigning] Unexpected error checking for Xcode project at ${projectPath}: ${errorMessage(statError)}`,
+            );
+          }
+          return false;
+        });
       if (!projectExists) {
         return [];
       }
 
-      const available = await this.dependencies.xcodebuild.isAvailable();
+      const available = await this.probeXcodebuildAvailability();
       if (!available) {
         return [];
       }
@@ -337,6 +358,47 @@ export class XcodeSigningManager {
     } catch (error) {
       logger.warn(`[XcodeSigning] Failed to detect team IDs: ${errorMessage(error)}`);
       return [];
+    }
+  }
+
+  /**
+   * Bound `xcodebuild.isAvailable()` with our own timer/abort race, on top of
+   * whatever timeout the injected dependency enforces internally. Callers
+   * (fakes in tests, or a future dependency implementation) cannot be relied
+   * on to bound themselves, and a stalled `xcodebuild -version` must never
+   * block `detectTeamIdsFromXcode` -- and by extension physical-device
+   * CtrlProxy startup -- indefinitely (issue #6585).
+   */
+  private async probeXcodebuildAvailability(): Promise<boolean> {
+    const timer = this.dependencies.timer ?? defaultTimer;
+    const controller = new AbortController();
+    let timeoutId: NodeJS.Timeout | undefined;
+    const availabilityPromise = this.dependencies.xcodebuild.isAvailable({
+      timeoutMs: XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
+      signal: controller.signal,
+    });
+    availabilityPromise.catch(() => {
+      // The race below owns the result; this also handles a rejection after
+      // the timeout has already won (e.g. an abort-driven rejection).
+    });
+    const timeout = new Promise<false>((resolve) => {
+      timeoutId = timer.setTimeout(() => {
+        controller.abort();
+        resolve(false);
+      }, XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([
+        availabilityPromise.then(
+          (available) => available,
+          () => false,
+        ),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutId) {
+        timer.clearTimeout(timeoutId);
+      }
     }
   }
 

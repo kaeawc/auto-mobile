@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash, X509Certificate } from "crypto";
 import { join, resolve } from "path";
 import { XcodeSigningManager } from "../../../src/utils/ios-cmdline-tools/XcodeSigning";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
+import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const CERT_BASE64 =
@@ -117,9 +118,11 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
       mkdir: async () => {},
       homedir: () => "/Users/test",
       now: () => fakeTimer.now(),
+      timer: fakeTimer,
     },
     writtenFiles,
     xcodebuildArgs,
+    fakeTimer,
   };
 };
 
@@ -452,8 +455,56 @@ describe("XcodeSigningManager", () => {
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
     const { deps, xcodebuildArgs } = createFakeDependencies();
     deps.stat = async () => {
-      throw new Error("ENOENT: no such file or directory");
+      const error = new Error("ENOENT: no such file or directory") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
     };
+    const manager = new XcodeSigningManager(deps);
+
+    const teamIds = await manager.detectTeamIdsFromXcode();
+
+    expect(teamIds).toEqual([]);
+    expect(xcodebuildArgs.length).toBe(0);
+  });
+
+  // #6585 P2: a stat() failure that is NOT "no such file" (permissions, IO)
+  // must not be silently treated as a clean "no project here" -- it should
+  // still fail safe ([]) but be surfaced via logger.warn rather than masked.
+  test("logs (does not silently mask) a non-ENOENT stat error and still fails safe", async () => {
+    const launchCwd = resolve("/Users/test/permission-denied");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+    const { deps, xcodebuildArgs } = createFakeDependencies();
+    deps.stat = async () => {
+      const error = new Error("EACCES: permission denied") as NodeJS.ErrnoException;
+      error.code = "EACCES";
+      throw error;
+    };
+    const warnSpy = spyOn(logger, "warn");
+    const manager = new XcodeSigningManager(deps);
+
+    const teamIds = await manager.detectTeamIdsFromXcode();
+
+    expect(teamIds).toEqual([]);
+    expect(xcodebuildArgs.length).toBe(0);
+    expect(
+      warnSpy.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          (call[0].includes("EACCES") || call[0].includes("Unexpected error")),
+      ),
+    ).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  // #6585 P1: a stalled `xcodebuild -version` (isAvailable() never settles)
+  // must not block detectTeamIdsFromXcode -- and by extension physical-device
+  // CtrlProxy startup -- indefinitely. The probe must be bounded even though
+  // the injected xcodebuild fake never resolves or rejects on its own.
+  test("bounds a hanging xcodebuild.isAvailable() probe instead of hanging forever", async () => {
+    const launchCwd = resolve("/Users/test/hanging-probe");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+    const { deps, xcodebuildArgs } = createFakeDependencies();
+    deps.xcodebuild.isAvailable = () => new Promise<boolean>(() => {});
     const manager = new XcodeSigningManager(deps);
 
     const teamIds = await manager.detectTeamIdsFromXcode();

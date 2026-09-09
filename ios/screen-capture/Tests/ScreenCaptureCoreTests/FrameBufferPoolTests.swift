@@ -4,39 +4,39 @@ import XCTest
 
 final class FrameBufferPoolTests: XCTestCase {
 
-    func testCopiesBytesExactly() {
+    func testCopiesBytesExactly() throws {
         let pool = FrameBufferPool()
         let source: [UInt8] = (0..<256).map { UInt8($0) }
-        let data = source.withUnsafeBytes { buffer in
-            pool.makeData(copyingFrom: buffer.baseAddress!, count: source.count)
+        let data = try source.withUnsafeBytes { buffer in
+            pool.makeData(copyingFrom: try XCTUnwrap(buffer.baseAddress), count: source.count)
         }
         XCTAssertEqual(Array(data), source)
     }
 
-    func testZeroCountReturnsEmptyData() {
+    func testZeroCountReturnsEmptyData() throws {
         let pool = FrameBufferPool()
         let source: [UInt8] = [1, 2, 3]
-        let data = source.withUnsafeBytes { buffer in
-            pool.makeData(copyingFrom: buffer.baseAddress!, count: 0)
+        let data = try source.withUnsafeBytes { buffer in
+            pool.makeData(copyingFrom: try XCTUnwrap(buffer.baseAddress), count: 0)
         }
         XCTAssertTrue(data.isEmpty)
     }
 
-    func testReleasedSlabIsRecycledForNextSameSizeFrame() {
+    func testReleasedSlabIsRecycledForNextSameSizeFrame() throws {
         let pool = FrameBufferPool()
         let source = [UInt8](repeating: 0xAB, count: 4096)
 
         // Compare backing addresses (as bit patterns, never dereferenced) across a
         // release: the second allocation should reuse the first slab.
-        let firstAddress: UInt = source.withUnsafeBytes { buffer in
-            var data: Data? = pool.makeData(copyingFrom: buffer.baseAddress!, count: source.count)
-            let address = data!.withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
+        let firstAddress: UInt = try source.withUnsafeBytes { buffer in
+            var data: Data? = pool.makeData(copyingFrom: try XCTUnwrap(buffer.baseAddress), count: source.count)
+            let address = try XCTUnwrap(data).withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
             data = nil  // last reference released -> custom deallocator returns the slab
             return address
         }
 
-        let secondAddress: UInt = source.withUnsafeBytes { buffer in
-            let data = pool.makeData(copyingFrom: buffer.baseAddress!, count: source.count)
+        let secondAddress: UInt = try source.withUnsafeBytes { buffer in
+            let data = pool.makeData(copyingFrom: try XCTUnwrap(buffer.baseAddress), count: source.count)
             return data.withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
         }
 
@@ -46,12 +46,12 @@ final class FrameBufferPoolTests: XCTestCase {
         )
     }
 
-    func testLargerFreeSlabSatisfiesSmallerRequest() {
+    func testLargerFreeSlabSatisfiesSmallerRequest() throws {
         let pool = FrameBufferPool()
         let big = [UInt8](repeating: 0x11, count: 8192)
-        let bigAddress: UInt = big.withUnsafeBytes { buffer in
-            var data: Data? = pool.makeData(copyingFrom: buffer.baseAddress!, count: big.count)
-            let address = data!.withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
+        let bigAddress: UInt = try big.withUnsafeBytes { buffer in
+            var data: Data? = pool.makeData(copyingFrom: try XCTUnwrap(buffer.baseAddress), count: big.count)
+            let address = try XCTUnwrap(data).withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
             data = nil
             return address
         }
@@ -59,8 +59,8 @@ final class FrameBufferPoolTests: XCTestCase {
         // A smaller frame reuses the larger freed slab (capacity fits) rather than
         // allocating a new one; the returned Data still exposes only the smaller count.
         let small = [UInt8](repeating: 0x22, count: 1000)
-        let (smallAddress, smallData): (UInt, Data) = small.withUnsafeBytes { buffer in
-            let data = pool.makeData(copyingFrom: buffer.baseAddress!, count: small.count)
+        let (smallAddress, smallData): (UInt, Data) = try small.withUnsafeBytes { buffer in
+            let data = pool.makeData(copyingFrom: try XCTUnwrap(buffer.baseAddress), count: small.count)
             return (data.withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }, data)
         }
 

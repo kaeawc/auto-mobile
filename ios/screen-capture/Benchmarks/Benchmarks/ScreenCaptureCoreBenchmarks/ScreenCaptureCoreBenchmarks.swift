@@ -91,8 +91,11 @@ let benchmarks: @Sendable () -> Void = {
     // Isolates copy #1 (the encoder's copy-out of the CMBlockBuffer). The real encoder
     // path is device-only; these two siblings model its before/after in one run.
     Benchmark("encoder copy-out — Data(bytes:) + assemble (copy #1 present)") { benchmark in
+        guard let baseAddress = blockBufferBytes.baseAddress else {
+            preconditionFailure("Compressed benchmark fixture must be non-empty")
+        }
         for _ in benchmark.scaledIterations {
-            let copied = Data(bytes: blockBufferBytes.baseAddress!, count: blockBufferBytes.count)
+            let copied = Data(bytes: baseAddress, count: blockBufferBytes.count)
             blackHole(
                 try AnnexBConverter.assembleAccessUnit(
                     fromAvcc: copied, nalUnitHeaderLength: 4,
@@ -103,9 +106,12 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("encoder copy-out — Data(bytesNoCopy:) + assemble (copy #1 elided)") { benchmark in
+        guard let baseAddress = blockBufferBytes.baseAddress else {
+            preconditionFailure("Compressed benchmark fixture must be non-empty")
+        }
         for _ in benchmark.scaledIterations {
             let wrapped = Data(
-                bytesNoCopy: blockBufferBytes.baseAddress!,
+                bytesNoCopy: baseAddress,
                 count: blockBufferBytes.count, deallocator: .none
             )
             blackHole(
@@ -137,14 +143,20 @@ let benchmarks: @Sendable () -> Void = {
     // faulting of a fresh slab (unpooled) vs recycling one (pooled). CPU/wall is the
     // story here, not allocation count.
     Benchmark("raw frame copy — 1080p BGRA via FrameBufferPool (pooled)") { benchmark in
+        guard let baseAddress = rawFrame.baseAddress else {
+            preconditionFailure("Raw benchmark fixture must be non-empty")
+        }
         for _ in benchmark.scaledIterations {
-            blackHole(rawFramePool.makeData(copyingFrom: rawFrame.baseAddress!, count: rawFrame.count))
+            blackHole(rawFramePool.makeData(copyingFrom: baseAddress, count: rawFrame.count))
         }
     }
 
     Benchmark("raw frame copy — 1080p BGRA via Data(bytes:) (unpooled)") { benchmark in
+        guard let baseAddress = rawFrame.baseAddress else {
+            preconditionFailure("Raw benchmark fixture must be non-empty")
+        }
         for _ in benchmark.scaledIterations {
-            blackHole(Data(bytes: rawFrame.baseAddress!, count: rawFrame.count))
+            blackHole(Data(bytes: baseAddress, count: rawFrame.count))
         }
     }
 }

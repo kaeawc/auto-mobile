@@ -41,13 +41,13 @@ public final class FrameBufferPool: @unchecked Sendable {
     /// A `Data` of exactly `count` bytes copied from `source`, backed by a pooled (or
     /// freshly allocated) slab that returns to this pool when the `Data` is released.
     /// A non-positive `count` yields an empty `Data` (nothing to pool).
-    public func makeData(copyingFrom source: UnsafeRawPointer, count: Int) -> Data {
-        guard count > 0 else { return Data() }
-        let slab = takeSlab(minimumCapacity: count)
-        slab.pointer.copyMemory(from: source, byteCount: count)
+    public func makeData(copyingFrom source: UnsafeRawPointer, count byteCount: Int) -> Data {
+        guard byteCount > 0 else { return Data() }
+        let slab = takeSlab(minimumCapacity: byteCount)
+        slab.pointer.copyMemory(from: source, byteCount: byteCount)
         return Data(
             bytesNoCopy: slab.pointer,
-            count: count,
+            count: byteCount,
             deallocator: .custom { [self] _, _ in giveBack(slab) }
         )
     }

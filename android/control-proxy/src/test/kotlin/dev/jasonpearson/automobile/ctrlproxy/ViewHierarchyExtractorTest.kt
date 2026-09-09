@@ -29,6 +29,36 @@ class ViewHierarchyExtractorTest {
   private val json = Json { ignoreUnknownKeys = true }
 
   @Test
+  fun `raw hierarchy reports both checkable states and omits checked for other nodes`() {
+    for ((checkable, checked) in listOf(true to false, true to true, false to false)) {
+      val node = android.view.accessibility.AccessibilityNodeInfo.obtain()
+      node.className = "android.widget.Switch"
+      node.text = "Hotspot"
+      node.isVisibleToUser = true
+      node.isCheckable = checkable
+      node.isChecked = checked
+      node.setBoundsInScreen(Rect(0, 0, 100, 100))
+      android.view.accessibility.AccessibilityNodeInfo::class
+        .java
+        .getMethod("setSealed", Boolean::class.javaPrimitiveType)
+        .invoke(node, true)
+
+      val result = extractor.extractFromActiveWindow(node, disableAllFiltering = true)
+      assertNull(result!!.error)
+      val rawNode = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
+      assertEquals(
+        if (checkable) kotlinx.serialization.json.JsonPrimitive(checked.toString()) else null,
+        rawNode["checked"],
+      )
+      assertEquals(
+        if (checkable) kotlinx.serialization.json.JsonPrimitive("true") else null,
+        rawNode["checkable"],
+      )
+      node.recycle()
+    }
+  }
+
+  @Test
   fun `snapshot options reject unsafe bounds`() {
     assertThrows(IllegalArgumentException::class.java) {
       HierarchySnapshotOptions(maxDepth = -1)

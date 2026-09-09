@@ -158,14 +158,25 @@ export class ClearText extends BaseVisualChange {
       !viewHierarchy.hierarchy.error &&
       !hasFocusedTextInput(viewHierarchy, this.parser)
     ) {
-      const refreshedObserveResult = await this.refreshFocusedTextInputObservation(viewHierarchy);
-      if (!refreshedObserveResult) {
+      const refreshedObserveResult = await this.refreshFocusedTextInputObservation(
+        viewHierarchy,
+      ).catch((error: unknown) => {
+        logger.warn("[ClearText] Focus refresh unavailable; trying live clearing", error);
+        return undefined;
+      });
+      if (
+        refreshedObserveResult?.viewHierarchy &&
+        !hasFocusedTextInput(refreshedObserveResult.viewHierarchy, this.parser)
+      ) {
         return {
           success: false,
           error: "No focused editable node found",
         };
       }
-      fallbackObserveResult = refreshedObserveResult;
+      fallbackObserveResult = refreshedObserveResult ?? {
+        ...observeResult,
+        viewHierarchy: undefined,
+      };
     }
 
     // Use accessibility service (fastest method, ~50-80ms vs ~200-500ms for ADB deletes)
@@ -186,6 +197,7 @@ export class ClearText extends BaseVisualChange {
     return this.executeAdbClearText(fallbackObserveResult);
   }
 
+  /** Returns a fresh usable hierarchy, or undefined when focus cannot be determined. */
   private async refreshFocusedTextInputObservation(
     viewHierarchy: ViewHierarchyResult,
   ): Promise<ObserveResult | undefined> {
@@ -210,8 +222,7 @@ export class ClearText extends BaseVisualChange {
     const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
     return refreshedObserveResult.freshness?.isFresh !== false &&
       refreshedViewHierarchy &&
-      !refreshedViewHierarchy.hierarchy.error &&
-      hasFocusedTextInput(refreshedViewHierarchy, this.parser)
+      !refreshedViewHierarchy.hierarchy.error
       ? refreshedObserveResult
       : undefined;
   }

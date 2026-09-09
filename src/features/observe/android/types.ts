@@ -47,6 +47,7 @@ export const quoteForAdbArg = (value: string): string => {
  * Interface for accessibility service node format
  */
 export interface AccessibilityNode {
+  actions?: string[];
   text?: string;
   "content-desc"?: string;
   "resource-id"?: string;

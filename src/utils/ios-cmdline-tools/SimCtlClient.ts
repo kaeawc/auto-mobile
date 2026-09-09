@@ -1919,9 +1919,12 @@ export class SimCtlClient implements SimCtl {
     // Parse the text output to find LCD screen information
     const lines = result.stdout.split("\n");
     let inLCDScreen = false;
-    let width = 0;
-    let height = 0;
-    let uiScale = 1;
+    // Accumulated per-section so a later section's fields can never mix with
+    // an earlier section's fields (issue #6584). Reset whenever a new LCD
+    // section starts.
+    let sectionWidth = 0;
+    let sectionHeight = 0;
+    let sectionUiScale: number | null = null;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -1929,6 +1932,9 @@ export class SimCtlClient implements SimCtl {
       // Look for LCD screen section
       if (line.includes("LCD:") || line.includes("Screen Type: Integrated")) {
         inLCDScreen = true;
+        sectionWidth = 0;
+        sectionHeight = 0;
+        sectionUiScale = null;
         continue;
       }
 
@@ -1938,8 +1944,8 @@ export class SimCtlClient implements SimCtl {
           // Extract dimensions from format "Pixel Size: {1179, 2556}"
           const pixelSizeMatch = line.match(/Pixel Size:\s*\{(\d+),\s*(\d+)\}/);
           if (pixelSizeMatch) {
-            width = parseInt(pixelSizeMatch[1], 10);
-            height = parseInt(pixelSizeMatch[2], 10);
+            sectionWidth = parseInt(pixelSizeMatch[1], 10);
+            sectionHeight = parseInt(pixelSizeMatch[2], 10);
           }
         }
 
@@ -1947,23 +1953,29 @@ export class SimCtlClient implements SimCtl {
           // Extract UI scale from format "Preferred UI Scale: 3"
           const uiScaleMatch = line.match(/Preferred UI Scale:\s*(\d+(?:\.\d+)?)/);
           if (uiScaleMatch) {
-            uiScale = parseFloat(uiScaleMatch[1]);
+            sectionUiScale = parseFloat(uiScaleMatch[1]);
           }
         }
       }
 
-      // Reset flag if we encounter a new port section
+      // Section closes at the next Port: line. Only commit the accumulated
+      // values, and stop scanning, once this section carries both a pixel
+      // size and a UI scale — never let a later, incomplete section overwrite
+      // or blend with an earlier complete one.
       if (line.startsWith("Port:") && inLCDScreen) {
+        if (
+          sectionWidth > 0 &&
+          sectionHeight > 0 &&
+          sectionUiScale !== null &&
+          sectionUiScale > 0
+        ) {
+          return {
+            width: Math.round(sectionWidth / sectionUiScale),
+            height: Math.round(sectionHeight / sectionUiScale),
+          } as ScreenSize;
+        }
         inLCDScreen = false;
       }
-    }
-
-    // If we found valid dimensions, apply UI scale and return logical size
-    if (width > 0 && height > 0 && uiScale > 0) {
-      return {
-        width: Math.round(width / uiScale),
-        height: Math.round(height / uiScale),
-      } as ScreenSize;
     }
 
     throw new ActionableError("Unable to determine screen size from provided data.");

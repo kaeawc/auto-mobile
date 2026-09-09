@@ -450,6 +450,24 @@ describe("IOSCtrlProxyManager", function () {
       expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
     });
+
+    test("releases the port and clears the map entry within the deadline when forceStopForShutdown never resolves", async function () {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const timer = new FakeTimer();
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(() => {
+        return new Promise<void>(() => {});
+      });
+
+      const evicted = IOSCtrlProxyManager.evict(testDevice.deviceId, timer);
+
+      await Promise.resolve();
+      timer.advanceTime(1_000);
+      await evicted;
+
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
+    });
   });
 
   describe("getServicePort", function () {

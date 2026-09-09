@@ -463,12 +463,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Safe to call for a device that was never constructed via `getInstance` —
    * `PortManager.release` is a no-op when nothing is allocated for the id.
    */
-  public static async evict(deviceId: string): Promise<void> {
+  public static async evict(deviceId: string, timer: Timer = defaultTimer): Promise<void> {
     const instance = IOSCtrlProxyManager.instances.get(deviceId);
     if (instance) {
       IOSCtrlProxyManager.instances.delete(deviceId);
       try {
-        await instance.forceStopForShutdown();
+        // Bound the force-stop the same way shutdownAll() does: a hung
+        // runner cleanup must not block the port release / map deletion
+        // below, which the caller's deleteDevice verification depends on
+        // (issue #6580).
+        await IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
       } catch (error) {
         logger.warn(
           `[IOSCtrlProxy] Failed to stop instance ${deviceId} during eviction: ${errorMessage(error)}`,

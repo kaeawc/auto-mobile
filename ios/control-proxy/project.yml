@@ -2,7 +2,7 @@ name: CtrlProxy
 options:
   bundleIdPrefix: dev.jasonpearson.automobile
   deploymentTarget:
-    iOS: "15.0"
+    iOS: "17.0"
   xcodeVersion: "15.0"
 
 configFiles:
@@ -83,7 +83,7 @@ targets:
         # mode with complete strict-concurrency (the project base is Swift 5 /
         # `targeted`), and the iOS 17 platform floor the rewrite is built against
         # (`OSAllocatedUnfairLock` etc.) so `CLANG_WARN_UNGUARDED_AVAILABILITY`
-        # doesn't flag 16/17-only APIs the project's 15.0 default would reject.
+        # doesn't flag 16/17-only APIs.
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"

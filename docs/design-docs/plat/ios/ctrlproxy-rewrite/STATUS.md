@@ -191,7 +191,7 @@ _additive_ `CtrlProxyRewriteUITests` `bundle.ui-testing` target compiles `Source
 directly (so XCUITest is visible to the `@MainActor` UI domain), pinned to the SPM `.v6` contract
 via per-target settings (`SWIFT_VERSION = 6.0`, `SWIFT_STRICT_CONCURRENCY = complete`,
 `IPHONEOS_DEPLOYMENT_TARGET = 17.0` — the rewrite's `OSAllocatedUnfairLock` floor; the project
-default is 15.0/Swift-5/`targeted`), embedding `ObjCExceptionCatcher`, wired into the app scheme's
+default is now 17.0/Swift-5/`targeted`), embedding `ObjCExceptionCatcher`, wired into the app scheme's
 test action. The reference `CtrlProxy`/`CtrlProxyUITests` targets are left pristine (retired only
 once the rewrite's UI-test smoke passes on a simulator — §9). A minimal `@MainActor` runner
 (`Tests/CtrlProxyRewriteUITests/`) drives the public `CtrlProxy` surface. `build-for-testing` of the

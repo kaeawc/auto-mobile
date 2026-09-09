@@ -15,6 +15,7 @@ import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
@@ -3101,6 +3102,50 @@ describe("IOSCtrlProxyManager", function () {
         expect(
           Object.keys(spawn.options?.env ?? {}).some((key) => key.startsWith("SIMCTL_CHILD_")),
         ).toBe(false);
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
+    test("startOnSimulator() gives the resident runner its own process signal, not the ambient request signal (issue #6410)", async function () {
+      // The runner is a shared, long-lived resident process serving every session
+      // targeting this device. Binding its OS-level kill to whichever MCP
+      // request happened to start it would let an unrelated request cancellation
+      // SIGTERM a runner that is already healthy and serving other work.
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const fakeBuilder = {
+          getXctestrunPath: async () => "/tmp/test.xctestrun",
+          getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor,
+        );
+
+        const ambientRequestController = new AbortController();
+        await runWithAbortSignal(ambientRequestController.signal, () =>
+          (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator(),
+        );
+
+        const spawn = fakeExecutor.getSpawnedProcesses()[0];
+        expect(spawn.options?.signal).toBeDefined();
+        expect(spawn.options?.signal).not.toBe(ambientRequestController.signal);
+
+        // Cancelling the ambient request that started the runner must not reach
+        // the runner's own lifecycle controller.
+        ambientRequestController.abort();
+        expect(spawn.options?.signal?.aborted).toBe(false);
+
+        // Only stop() (or forceRestart(), which calls stop()) may abort it.
+        await manager.stop();
+        expect(spawn.options?.signal?.aborted).toBe(true);
       } finally {
         PortManager.setPortAvailabilityCheckerForTesting(null);
       }

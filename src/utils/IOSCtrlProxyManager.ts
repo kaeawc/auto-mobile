@@ -255,6 +255,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // XCUITest process state
   private xcTestProcessId: number | null = null;
   private xcTestProcess: ChildProcess | null = null;
+  // Owns the resident runner's process-lifecycle abort signal (issue #6410).
+  // Deliberately NOT the ambient per-request signal: this runner is shared
+  // across every session targeting the device and must outlive whichever
+  // request happened to start it. Only stop()/forceRestart() may abort it, so
+  // SharedCtrlProxyStart's teardown accounting stays the single authority
+  // deciding when the runner actually goes away.
+  private runnerAbortController: AbortController | null = null;
 
   // Process supervision
   private readonly processSupervisor: ProcessSupervisor;
@@ -1248,6 +1255,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.processSupervisor.stop();
 
+    // stop() is the ONLY place (besides forceRestart(), which calls stop())
+    // permitted to abort the resident runner's process-lifecycle signal —
+    // never an ambient per-request cancellation (issue #6410).
+    this.runnerAbortController?.abort(new Error("iOS CtrlProxy runner stopped"));
+    this.runnerAbortController = null;
+
     if (this.useRemoteRunner()) {
       try {
         if (this.xcTestProcessId) {
@@ -1671,10 +1684,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // / isDaemonManagedSimulatorXcodebuildProcess).
     // `xcodebuild` itself becomes the detached process-group leader. This keeps
     // terminateProcessTree's group cleanup effective without a shell wrapper.
+    // The signal is THIS manager's own runnerAbortController, never the ambient
+    // per-request signal (issue #6410) — the runner is shared across every
+    // session targeting this device and must outlive whichever request started
+    // it; only stop()/forceRestart() abort this controller.
+    this.runnerAbortController = new AbortController();
     const child = await this.xcodebuild.startStreaming(args, {
       detached: true,
       env: { ...process.env, ...runnerEnv },
       stdio: ["ignore", "pipe", "pipe"],
+      signal: this.runnerAbortController.signal,
     });
 
     child.on("error", (error) => {
@@ -2825,10 +2844,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // can later discover/own/recover this process by reading its env via `ps eww`.
     // xcodebuild itself is the detached process-group leader, so the manager's
     // existing terminateProcessTree() ownership semantics remain intact.
+    // The signal is THIS manager's own runnerAbortController, never the ambient
+    // per-request signal (issue #6410) — see the simulator call site for why.
+    this.runnerAbortController = new AbortController();
     const child = await this.xcodebuild.startStreaming(args, {
       detached: true,
       env: { ...process.env, ...runnerEnv },
       stdio: ["ignore", "pipe", "pipe"],
+      signal: this.runnerAbortController.signal,
     });
 
     child.on("error", (error) => {

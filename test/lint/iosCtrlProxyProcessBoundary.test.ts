@@ -351,4 +351,27 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
       "src/utils/ios/IOSCtrlProxyProcessClient.ts",
     );
   });
+
+  test("both resident-runner startStreaming call sites pass an explicit process signal (issue #6410)", () => {
+    // XcodebuildClient.startStreaming only forwards a signal to spawn when the
+    // caller explicitly supplies one — it never defaults that wiring to the
+    // ambient per-request signal. Both IOSCtrlProxyManager call sites (simulator
+    // and physical device) MUST supply their own runner-owned signal rather than
+    // silently relying on that default, or the resident runner would have no
+    // lifecycle-abort wiring at all. A regression here (dropping the `signal:`
+    // line from either call) must fail loudly instead of just changing runtime
+    // behavior silently.
+    const manager = readFileSync(join(ROOT, "src/utils/IOSCtrlProxyManager.ts"), "utf8");
+    const callSitePattern = /this\.xcodebuild\.startStreaming\(args,\s*\{/g;
+    const callSiteStarts = [...manager.matchAll(callSitePattern)].map((match) => match.index);
+    expect(callSiteStarts).toHaveLength(2);
+    for (const start of callSiteStarts) {
+      // The options object closes well within 300 characters at both call
+      // sites; slicing a fixed window (rather than brace-matching through the
+      // nested `env: { ...process.env, ...runnerEnv }`) keeps this a plain
+      // source-text assertion, consistent with the rest of this file.
+      const window = manager.slice(start, start + 300);
+      expect(window).toMatch(/signal:\s*this\.runnerAbortController\.signal/);
+    }
+  });
 });

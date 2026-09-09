@@ -3,6 +3,7 @@ import { XcodebuildClient } from "../../../src/utils/ios-cmdline-tools/Xcodebuil
 import type { ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../../../src/utils/runnerReadinessConfig";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 
@@ -243,5 +244,90 @@ describe("XcodebuildClient streaming runner", () => {
     await expect(
       timer.resolvePromise(client.startStreaming(["test-without-building"])),
     ).rejects.toThrow("xcodebuild failed to start: Error: posix_spawn: executable missing");
+  });
+
+  test("does not hand the ambient request signal to the resident spawn (issue #6410)", async () => {
+    // A resident runner started inside runWithAbortSignal(requestSignal, ...) must
+    // NOT bind spawn's `signal` option to that ambient request signal — a later
+    // cancellation of the STARTING request would otherwise SIGTERM the shared,
+    // long-lived runner. The startup availability probe may still inherit the
+    // ambient signal (bounding how long the probe waits); only the spawn wiring
+    // must not.
+    const child = new FakeChildProcess();
+    let capturedSpawnOptions: import("node:child_process").SpawnOptions | undefined;
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (_command, _args, options) => {
+        capturedSpawnOptions = options;
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    const requestController = new AbortController();
+    const result = await runWithAbortSignal(requestController.signal, () =>
+      client.startStreaming(["test-without-building"], {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+
+    expect(result).toBe(child);
+    expect(capturedSpawnOptions?.signal).toBeUndefined();
+  });
+
+  test("forwards an explicitly supplied process signal to the resident spawn", async () => {
+    // A caller that explicitly opts in to a process-lifecycle signal (rather than
+    // relying on the ambient request signal) must still have it reach spawn.
+    const child = new FakeChildProcess();
+    let capturedSpawnOptions: import("node:child_process").SpawnOptions | undefined;
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (_command, _args, options) => {
+        capturedSpawnOptions = options;
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    const ownedController = new AbortController();
+    await client.startStreaming(["test-without-building"], {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      signal: ownedController.signal,
+    });
+
+    expect(capturedSpawnOptions?.signal).toBe(ownedController.signal);
+  });
+
+  test("aborting the ambient request signal after startStreaming resolves does not kill the child", async () => {
+    const child = new FakeChildProcess();
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (_command, _args, _options) => {
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    const requestController = new AbortController();
+    let killed = false;
+    (child as unknown as { kill: () => void }).kill = () => {
+      killed = true;
+    };
+
+    await runWithAbortSignal(requestController.signal, () =>
+      client.startStreaming(["test-without-building"], {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+
+    requestController.abort();
+
+    expect(killed).toBe(false);
   });
 });

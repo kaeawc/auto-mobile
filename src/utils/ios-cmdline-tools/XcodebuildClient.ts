@@ -19,6 +19,14 @@ export interface XcodebuildStreamingOptions {
   readonly detached?: boolean;
   readonly stdio?: SpawnOptions["stdio"];
   readonly timeoutMs?: number;
+  /**
+   * Used for BOTH the pre-spawn availability probe (defaulting to the ambient
+   * request signal, like short-lived reads) AND — ONLY if explicitly supplied
+   * here — the spawned child's OS-level kill wiring (issue #6410). Leave this
+   * unset for a resident/shared runner meant to outlive the caller's request;
+   * supply a caller-owned `AbortController.signal` here only when the spawned
+   * process's lifetime should genuinely be tied to that specific signal.
+   */
   readonly signal?: AbortSignal;
 }
 
@@ -181,16 +189,31 @@ export class XcodebuildClient implements Xcodebuild {
    * Launch a long-lived xcodebuild invocation without a shell. Callers retain
    * lifecycle ownership of the returned child, while this boundary owns binary
    * resolution, availability diagnostics, and argv-safe process creation.
+   *
+   * Two DIFFERENT signals are in play here, deliberately kept apart (issue
+   * #6410). The *startup* signal — `options.signal ?? getAbortSignal()` —
+   * bounds only the pre-spawn availability probe (`isAvailableWithin`); it is
+   * correct for that probe to inherit the ambient per-request abort signal, the
+   * same way short-lived reads do (see `AbortContext.ts`). The *process*
+   * signal handed to `spawnProcess` is different: this runner is meant to
+   * outlive the request that happened to start it (it is a shared, long-lived
+   * resident process — see the callers' `SharedCtrlProxyStart` ownership).
+   * Node's `signal` spawn option kills the child for the child's entire
+   * lifetime with no way to detach afterward, so it must NEVER default to the
+   * ambient request signal. Only a signal the caller explicitly supplies is
+   * forwarded to spawn; callers that want the runner's OS-level kill wired to
+   * a signal must own that AbortController themselves and abort it only from
+   * their own teardown path.
    */
   async startStreaming(
     args: string[],
     options: XcodebuildStreamingOptions = {},
   ): Promise<ChildProcess> {
-    const signal = options.signal ?? getAbortSignal();
+    const startupSignal = options.signal ?? getAbortSignal();
     if (
       !(await this.isAvailableWithin(
         options.timeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
-        signal,
+        startupSignal,
       ))
     ) {
       throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
@@ -201,7 +224,7 @@ export class XcodebuildClient implements Xcodebuild {
       env: options.env,
       stdio: options.stdio,
       shell: false,
-      signal,
+      signal: options.signal,
     });
 
     try {

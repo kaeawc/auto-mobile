@@ -439,7 +439,7 @@ describe("XcodeSigningManager", () => {
       "-project",
       join(launchCwd, "ios", "control-proxy", "CtrlProxy.xcodeproj"),
       "-scheme",
-      "CtrlProxyApp",
+      "AutoMobileTest",
     ]);
   });
 });

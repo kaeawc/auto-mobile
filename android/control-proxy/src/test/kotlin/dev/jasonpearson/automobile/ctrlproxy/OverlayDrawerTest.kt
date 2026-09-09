@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.animation.ValueAnimator
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.RectF
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
@@ -24,19 +23,32 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class OverlayDrawerTest {
 
-  private fun boxShape(): HighlightShape =
-    HighlightShape(type = "box", bounds = HighlightBounds(x = 0, y = 0, width = 120, height = 80))
+  private fun circleShape(): HighlightShape =
+    HighlightShape(
+      type = "circle",
+      bounds = HighlightBounds(x = 0, y = 0, width = 120, height = 80),
+    )
 
   private fun createDrawer(view: HighlightOverlayView): OverlayDrawer {
     val overlayManager = mockk<OverlayManager>(relaxed = true)
     every { overlayManager.show() } returns true
-    val drawer =
-      OverlayDrawer(
-        overlayManager = overlayManager,
-        colorParser = { Color.RED },
-      )
+    val drawer = OverlayDrawer(overlayManager = overlayManager)
     drawer.attachView(view)
     return drawer
+  }
+
+  @Test
+  fun `unsupported shapes are rejected before opening overlay`() {
+    val drawer = OverlayDrawer()
+    for (type in listOf("box", "path")) {
+      val result =
+        drawer.addHighlight(
+          "h",
+          HighlightShape(type = type, bounds = HighlightBounds(0, 0, 120, 80)),
+        )
+      assertEquals(false, result.success)
+      assertTrue(result.error!!.contains("Only hand-drawn circle"))
+    }
   }
 
   @Test
@@ -46,7 +58,7 @@ class OverlayDrawerTest {
     val canvas = mockk<Canvas>(relaxed = true)
 
     // addHighlight schedules the initial redraw.
-    assertTrue(drawer.addHighlight("h", boxShape()).success)
+    assertTrue(drawer.addHighlight("h", circleShape()).success)
     val animator: ValueAnimator = drawer.getAnimatorForTest("h")!!
 
     // Frame 1: consume the pending invalidate, then advance the animator. The
@@ -70,7 +82,7 @@ class OverlayDrawerTest {
     val drawer = createDrawer(view)
     val canvas = mockk<Canvas>(relaxed = true)
 
-    assertTrue(drawer.addHighlight("h", boxShape()).success)
+    assertTrue(drawer.addHighlight("h", circleShape()).success)
     val afterAdd = drawer.snapshotRebuildCountForTest()
 
     repeat(10) { drawer.draw(canvas) }
@@ -79,7 +91,7 @@ class OverlayDrawerTest {
     assertEquals(afterAdd, drawer.snapshotRebuildCountForTest())
 
     // A change to the highlight set does rebuild it exactly once.
-    assertTrue(drawer.addHighlight("h2", boxShape()).success)
+    assertTrue(drawer.addHighlight("h2", circleShape()).success)
     assertEquals(afterAdd + 1, drawer.snapshotRebuildCountForTest())
   }
 
@@ -89,7 +101,7 @@ class OverlayDrawerTest {
     val drawer = createDrawer(view)
     val canvas = mockk<Canvas>(relaxed = true)
 
-    assertTrue(drawer.addHighlight("h", boxShape()).success)
+    assertTrue(drawer.addHighlight("h", circleShape()).success)
     val animator: ValueAnimator = drawer.getAnimatorForTest("h")!!
 
     // Advance into the display phase where drawProgress == 1 (all segments drawn).

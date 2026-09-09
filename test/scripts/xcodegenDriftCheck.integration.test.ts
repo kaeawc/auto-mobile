@@ -25,7 +25,7 @@ const tempDirs: string[] = [];
 // UUIDs, different order — a pure reorder that must NOT be reported as drift.
 const declarationOrderProject = `// !$*UTF8*$!
 	targets = (
-		829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+		829FFB06AC273BEE7049A7F2 /* AutoMobileTest */,
 		E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
 		61A21F82A43E4D436CD13CCD /* CtrlProxy */,
 	);
@@ -33,7 +33,7 @@ const declarationOrderProject = `// !$*UTF8*$!
 const alphabeticalOrderProject = `// !$*UTF8*$!
 	targets = (
 		61A21F82A43E4D436CD13CCD /* CtrlProxy */,
-		829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+		829FFB06AC273BEE7049A7F2 /* AutoMobileTest */,
 		E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
 	);
 `;

@@ -3009,16 +3009,12 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: {
           x: 10,
           y: 20,
           width: 100,
           height: 80,
-        },
-        style: {
-          strokeColor: "#FF0000",
-          strokeWidth: 4,
         },
       };
 
@@ -3079,9 +3075,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -3133,9 +3128,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -3199,9 +3193,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {

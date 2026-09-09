@@ -1013,20 +1013,13 @@ describe("IOSCtrlProxyClient", function () {
         testTimer,
       );
       const shape: HighlightShape = {
-        type: "path",
-        points: [
-          { x: 1.2, y: 3.4 },
-          { x: 5.6, y: 7.8 },
-        ],
+        type: "circle",
+
         bounds: {
           x: 10.2,
           y: 20.8,
           width: 100.4,
           height: 80.6,
-        },
-        style: {
-          strokeColor: "#FF0000",
-          strokeWidth: 4,
         },
       };
 
@@ -1082,7 +1075,7 @@ describe("IOSCtrlProxyClient", function () {
         testTimer,
       );
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: {
           x: 10,
           y: 20,

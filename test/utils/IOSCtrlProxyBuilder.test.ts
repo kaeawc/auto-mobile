@@ -26,6 +26,21 @@ describe("IOSCtrlProxyBuilder", function () {
   let originalRunnerSha256Target: string | undefined;
   let tempDir: string;
 
+  test("finds legacy fixture bundles and prefers the renamed product", async () => {
+    const builder = IOSCtrlProxyBuilder.getInstance();
+    const products = spyOn(builder, "getBuildProductsPath").mockResolvedValue(tempDir);
+    try {
+      const legacy = path.join(tempDir, "CtrlProxyApp.app");
+      const renamed = path.join(tempDir, "AutoMobileTest.app");
+      await fs.mkdir(legacy);
+      expect(await builder.getAppBundlePath()).toBe(legacy);
+      await fs.mkdir(renamed);
+      expect(await builder.getAppBundlePath()).toBe(renamed);
+    } finally {
+      products.mockRestore();
+    }
+  });
+
   beforeEach(async function () {
     // Save original environment
     originalProjectRoot = process.env.AUTOMOBILE_PROJECT_ROOT;
@@ -142,7 +157,7 @@ describe("IOSCtrlProxyBuilder", function () {
       const builder = IOSCtrlProxyBuilder.getInstance();
       const config = builder.getConfig();
 
-      expect(config.scheme).toBe("CtrlProxyApp");
+      expect(config.scheme).toBe("AutoMobileTest");
       expect(config.destination).toBe("generic/platform=iOS Simulator");
       // Off the world-writable /tmp default onto a uid-private ~/.auto-mobile
       // subdir (issue #4759). Compare against getTempDir() so the assertion is
@@ -266,7 +281,10 @@ describe("IOSCtrlProxyBuilder", function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const productsDir = path.join(derivedDataPath, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+      await fs.writeFile(
+        path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+        "mock",
+      );
 
       const cacheDir = path.join(tempDir, "cache");
       await fs.mkdir(cacheDir, { recursive: true });
@@ -299,7 +317,7 @@ describe("IOSCtrlProxyBuilder", function () {
         const productsDir = path.join(derivedDataPath, "Build", "Products");
         await fs.mkdir(productsDir, { recursive: true });
         await fs.writeFile(
-          path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"),
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
           "mock",
         );
         const cacheDir = path.join(tempDir, "cache");
@@ -343,7 +361,7 @@ describe("IOSCtrlProxyBuilder", function () {
         const productsDir = path.join(derivedDataPath, "Build", "Products");
         await fs.mkdir(productsDir, { recursive: true });
         await fs.writeFile(
-          path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"),
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
           "mock",
         );
         const cacheDir = path.join(tempDir, "cache");
@@ -443,7 +461,7 @@ describe("IOSCtrlProxyBuilder", function () {
       const buildDir = path.join(productsDir, "Debug-iphonesimulator");
       await fs.mkdir(buildDir, { recursive: true });
 
-      const xctestrunFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
+      const xctestrunFile = path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun");
       await fs.writeFile(xctestrunFile, "mock xctestrun content");
 
       const builder = IOSCtrlProxyBuilder.getInstance({
@@ -461,11 +479,11 @@ describe("IOSCtrlProxyBuilder", function () {
 
       const oldFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.0-arm64-x86_64.xctestrun",
       );
       const newFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(oldFile, "old content");
       await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
@@ -514,7 +532,7 @@ describe("IOSCtrlProxyBuilder", function () {
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
@@ -547,7 +565,7 @@ describe("IOSCtrlProxyBuilder", function () {
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
@@ -564,7 +582,7 @@ describe("IOSCtrlProxyBuilder", function () {
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
       // Make the source older so a naive newest-mtime pick would prefer the copy.
@@ -586,7 +604,7 @@ describe("IOSCtrlProxyBuilder", function () {
     test("sanitizes the device id used in the copy filename", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphoneos.xctestrun");
+      const sourcePath = path.join(productsDir, "AutoMobileTest_iphoneos.xctestrun");
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
@@ -601,7 +619,7 @@ describe("IOSCtrlProxyBuilder", function () {
     test("throws an actionable error when the xctestrun has no UI-test bundle (EC4)", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
+      const sourcePath = path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun");
       await fs.writeFile(
         sourcePath,
         [
@@ -629,11 +647,11 @@ describe("IOSCtrlProxyBuilder", function () {
 
       const oldFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.0-arm64-x86_64.xctestrun",
       );
       const newFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(oldFile, "old content");
       await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
@@ -721,7 +739,7 @@ describe("IOSCtrlProxyBuilder", function () {
 
       expect(result.success).toBe(true);
       expect(result.xctestrunPath).toBe(
-        path.join(derivedDataPath, "Build", "Products", "CtrlProxyApp_iphonesimulator.xctestrun"),
+        path.join(derivedDataPath, "Build", "Products", "AutoMobileTest_iphonesimulator.xctestrun"),
       );
       expect(downloader.downloadedUrls.length).toBe(1);
       expect(downloader.extractedPaths[0]).toBe(derivedDataPath);
@@ -1366,7 +1384,10 @@ describe("IOSCtrlProxyBuilder", function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const productsDir = path.join(derivedDataPath, "Build", "Products");
       await fs.mkdir(path.join(productsDir, "Debug-iphonesimulator"), { recursive: true });
-      await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+      await fs.writeFile(
+        path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+        "mock",
+      );
 
       const cacheDir = path.join(tempDir, "cache");
       await fs.mkdir(cacheDir, { recursive: true });

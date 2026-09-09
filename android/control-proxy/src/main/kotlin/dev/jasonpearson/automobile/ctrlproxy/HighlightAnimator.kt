@@ -30,7 +30,7 @@ internal class HighlightAnimator(
   fun startFadeOut(highlightId: String) {
     cancelInternal(highlightId, updateState = false)
 
-    // Total animation: fade-in (1s) + display (2s) + fade-out (3s) = 6s
+    // Total animation: draw (500ms) + display (500ms) + fade-out (200ms) = 1.2s
     val totalDuration = fadeInDurationMs + displayDurationMs + fadeOutDurationMs
     val fadeInEnd = fadeInDurationMs.toFloat() / totalDuration
     val displayEnd = (fadeInDurationMs + displayDurationMs).toFloat() / totalDuration

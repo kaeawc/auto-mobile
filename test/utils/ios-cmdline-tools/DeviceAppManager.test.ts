@@ -21,7 +21,7 @@ const createTempDir = async (): Promise<string> => {
 };
 
 const createFixtureApp = async (root: string): Promise<string> => {
-  const appDir = join(root, "CtrlProxyApp.app");
+  const appDir = join(root, "AutoMobileTest.app");
   await fs.mkdir(appDir, { recursive: true });
   await fs.writeFile(join(appDir, "Info.plist"), "info", "utf-8");
   return appDir;
@@ -64,7 +64,7 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app",
+                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
               },
             ],
           };
@@ -74,7 +74,7 @@ describe("DeviceAppManager", () => {
       if (command.includes("device copy from")) {
         const destination = parseArgValue(command, "--destination");
         if (destination) {
-          const target = join(destination, "CtrlProxyApp.app");
+          const target = join(destination, "AutoMobileTest.app");
           await fs.mkdir(target, { recursive: true });
           await fs.copyFile(join(fixtureApp, "Info.plist"), join(target, "Info.plist"));
         }
@@ -445,7 +445,7 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app",
+                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
               },
             ],
           };
@@ -455,7 +455,7 @@ describe("DeviceAppManager", () => {
       if (command.includes("device copy from")) {
         const destination = parseArgValue(command, "--destination");
         if (destination) {
-          const target = join(destination, "CtrlProxyApp.app");
+          const target = join(destination, "AutoMobileTest.app");
           await fs.mkdir(target, { recursive: true });
           await fs.copyFile(join(fixtureApp, "Info.plist"), join(target, "Info.plist"));
         }
@@ -495,7 +495,7 @@ describe("DeviceAppManager", () => {
     expect(installIdx).toBeGreaterThanOrEqual(0);
     // Must uninstall (wipes data) before reinstalling the copied bundle.
     expect(uninstallIdx).toBeLessThan(installIdx);
-    expect(commands[installIdx]).toContain("CtrlProxyApp.app");
+    expect(commands[installIdx]).toContain("AutoMobileTest.app");
   });
 
   test("clearAppDataViaReinstall preserves app data when bundle resolution fails", async () => {
@@ -584,7 +584,7 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app",
+                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
               },
             ],
           };
@@ -594,7 +594,7 @@ describe("DeviceAppManager", () => {
       if (command.includes("device copy from")) {
         const destination = parseArgValue(command, "--destination");
         if (destination) {
-          const target = join(destination, "CtrlProxyApp.app");
+          const target = join(destination, "AutoMobileTest.app");
           await fs.mkdir(target, { recursive: true });
           await fs.copyFile(join(fixtureApp, "Info.plist"), join(target, "Info.plist"));
         }
@@ -685,7 +685,7 @@ describe("DeviceAppManager launch (devicectl)", () => {
               result: {
                 process: {
                   processIdentifier: 4321,
-                  executable: "file:///CtrlProxyApp.app/CtrlProxyApp",
+                  executable: "file:///AutoMobileTest.app/AutoMobileTest",
                 },
               },
             }),
@@ -995,7 +995,7 @@ describe("findRunningProcessPid", () => {
 });
 
 describe("DeviceAppManager terminate (devicectl)", () => {
-  const bundlePath = "/private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app";
+  const bundlePath = "/private/var/containers/Bundle/Application/ABC/AutoMobileTest.app";
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",
@@ -1051,7 +1051,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
             JSON.stringify({
               result: {
                 runningProcesses: [
-                  { processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` },
+                  { processIdentifier: 4321, executable: `${bundlePath}/AutoMobileTest` },
                 ],
               },
             }),
@@ -1180,7 +1180,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
             JSON.stringify({
               result: {
                 runningProcesses: [
-                  { processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` },
+                  { processIdentifier: 4321, executable: `${bundlePath}/AutoMobileTest` },
                 ],
               },
             }),
@@ -1233,7 +1233,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
             JSON.stringify({
               result: {
                 runningProcesses: [
-                  { processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` },
+                  { processIdentifier: 4321, executable: `${bundlePath}/AutoMobileTest` },
                 ],
               },
             }),
@@ -1300,7 +1300,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
 });
 
 describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
-  const bundlePath = "/private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app";
+  const bundlePath = "/private/var/containers/Bundle/Application/ABC/AutoMobileTest.app";
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",

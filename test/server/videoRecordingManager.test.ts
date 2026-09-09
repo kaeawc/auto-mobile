@@ -588,7 +588,7 @@ describe("videoRecordingManager", () => {
   test("delete failure leaves an interrupted row that does not block retry", async () => {
     const active = await startVideoRecording({ device: testDevice });
     const highlightShape = {
-      type: "box",
+      type: "circle",
       bounds: { x: 5, y: 15, width: 50, height: 60 },
     } as const;
     fakeTimer.advanceTime(500);
@@ -696,7 +696,7 @@ describe("videoRecordingManager", () => {
 
   test("records highlight timelines for scheduled highlights", async () => {
     const highlightShapeOne = {
-      type: "box",
+      type: "circle",
       bounds: { x: 10, y: 20, width: 30, height: 40 },
     } as const;
     const highlightShapeTwo = {
@@ -750,7 +750,7 @@ describe("videoRecordingManager", () => {
 
   test("records scheduled highlight timelines for iOS recordings", async () => {
     const highlightShape = {
-      type: "box",
+      type: "circle",
       bounds: { x: 10, y: 20, width: 30, height: 40 },
     } as const;
 
@@ -786,7 +786,7 @@ describe("videoRecordingManager", () => {
 
   test("uses iOS overlay lifetime for long recording highlight timelines", async () => {
     const highlightShape = {
-      type: "box",
+      type: "circle",
       bounds: { x: 10, y: 20, width: 30, height: 40 },
     } as const;
 
@@ -821,7 +821,7 @@ describe("videoRecordingManager", () => {
 
   test("records dynamic highlight events during recording", async () => {
     const highlightShape = {
-      type: "box",
+      type: "circle",
       bounds: { x: 5, y: 15, width: 50, height: 60 },
     } as const;
 

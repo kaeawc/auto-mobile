@@ -61,7 +61,7 @@ list_watch_files() {
   local watch_dirs=(
     "${CTRL_PROXY_IOS_DIR}/Sources"
     "${CTRL_PROXY_IOS_DIR}/Tests"
-    "${CTRL_PROXY_IOS_DIR}/CtrlProxyApp"
+    "${CTRL_PROXY_IOS_DIR}/AutoMobileTest"
   )
   local extra_files=(
     "${CTRL_PROXY_IOS_DIR}/project.yml"
@@ -141,7 +141,7 @@ build_ctrl_proxy_ios() {
 
   log_info "Building CtrlProxy iOS (build-for-testing)..."
   if ! (cd "${CTRL_PROXY_IOS_DIR}" && xcodebuild build-for-testing \
-      -scheme CtrlProxyApp \
+      -scheme AutoMobileTest \
       -destination "generic/platform=iOS Simulator" \
       -derivedDataPath "${DERIVED_DATA_PATH}" \
       -quiet); then

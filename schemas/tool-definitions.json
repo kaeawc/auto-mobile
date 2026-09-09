@@ -1971,7 +1971,7 @@
   },
   {
     "name": "highlight",
-    "description": "Draw a visual highlight around a UI element.",
+    "description": "Draw a red hand-drawn circle around a UI element.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1994,312 +1994,54 @@
           "type": "string"
         },
         "shape": {
-          "description": "Optional highlight shape definition",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "box"
-                },
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "y": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "width": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "height": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "sourceWidth": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "sourceHeight": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": ["x", "y", "width", "height"],
-                  "additionalProperties": false
-                },
-                "style": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "strokeColor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "strokeWidth": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "exclusiveMinimum": 0
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dashPattern": {
-                          "anyOf": [
-                            {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                              }
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "smoothing": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "tension": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "capStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["butt", "round", "square"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "joinStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["miter", "round", "bevel"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["type", "bounds"],
-              "additionalProperties": false
+          "description": "Optional bounds for a red hand-drawn circle",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "circle"
             },
-            {
+            "bounds": {
               "type": "object",
               "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "circle"
+                "x": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 },
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "y": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "width": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "height": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "sourceWidth": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "sourceHeight": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": ["x", "y", "width", "height"],
-                  "additionalProperties": false
+                "y": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 },
-                "style": {
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sourceWidth": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "strokeColor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "strokeWidth": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "exclusiveMinimum": 0
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dashPattern": {
-                          "anyOf": [
-                            {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                              }
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "smoothing": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "tension": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "capStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["butt", "round", "square"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "joinStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["miter", "round", "bevel"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceHeight": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     },
                     {
                       "type": "null"
@@ -2307,191 +2049,12 @@
                   ]
                 }
               },
-              "required": ["type", "bounds"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "path"
-                },
-                "points": {
-                  "minItems": 2,
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "x": {
-                        "type": "number"
-                      },
-                      "y": {
-                        "type": "number"
-                      }
-                    },
-                    "required": ["x", "y"],
-                    "additionalProperties": false
-                  }
-                },
-                "bounds": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "x": {
-                          "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
-                        },
-                        "y": {
-                          "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
-                        },
-                        "width": {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "height": {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "sourceWidth": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "sourceHeight": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": ["x", "y", "width", "height"],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "style": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "strokeColor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "strokeWidth": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "exclusiveMinimum": 0
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dashPattern": {
-                          "anyOf": [
-                            {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                              }
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "smoothing": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "tension": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "capStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["butt", "round", "square"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "joinStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["miter", "round", "bevel"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["type", "points"],
+              "required": ["x", "y", "width", "height"],
               "additionalProperties": false
             }
-          ]
+          },
+          "required": ["type", "bounds"],
+          "additionalProperties": false
         },
         "elementId": {
           "description": "Resource ID, e.g. com.app:id/btn_login",
@@ -12434,312 +11997,54 @@
                 "type": "string"
               },
               "shape": {
-                "description": "Highlight shape",
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "box"
-                      },
-                      "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "x": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "y": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "width": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "height": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "sourceWidth": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "sourceHeight": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["x", "y", "width", "height"],
-                        "additionalProperties": false
-                      },
-                      "style": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "strokeColor": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "strokeWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "exclusiveMinimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "dashPattern": {
-                                "anyOf": [
-                                  {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "number",
-                                      "exclusiveMinimum": 0
-                                    }
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "smoothing": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "tension": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "capStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["butt", "round", "square"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "joinStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "required": ["type", "bounds"],
-                    "additionalProperties": false
+                "description": "Red hand-drawn circle bounds",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "circle"
                   },
-                  {
+                  "bounds": {
                     "type": "object",
                     "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "circle"
+                      "x": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
-                      "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "x": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "y": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "width": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "height": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "sourceWidth": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "sourceHeight": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["x", "y", "width", "height"],
-                        "additionalProperties": false
+                      "y": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
-                      "style": {
+                      "width": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "height": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "sourceWidth": {
                         "anyOf": [
                           {
-                            "type": "object",
-                            "properties": {
-                              "strokeColor": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "strokeWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "exclusiveMinimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "dashPattern": {
-                                "anyOf": [
-                                  {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "number",
-                                      "exclusiveMinimum": 0
-                                    }
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "smoothing": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "tension": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "capStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["butt", "round", "square"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "joinStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "sourceHeight": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
                           },
                           {
                             "type": "null"
@@ -12747,191 +12052,12 @@
                         ]
                       }
                     },
-                    "required": ["type", "bounds"],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "path"
-                      },
-                      "points": {
-                        "minItems": 2,
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "x": {
-                              "type": "number"
-                            },
-                            "y": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["x", "y"],
-                          "additionalProperties": false
-                        }
-                      },
-                      "bounds": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "x": {
-                                "type": "integer",
-                                "minimum": -9007199254740991,
-                                "maximum": 9007199254740991
-                              },
-                              "y": {
-                                "type": "integer",
-                                "minimum": -9007199254740991,
-                                "maximum": 9007199254740991
-                              },
-                              "width": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              "height": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              "sourceWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "sourceHeight": {
-                                "anyOf": [
-                                  {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["x", "y", "width", "height"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "style": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "strokeColor": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "strokeWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "exclusiveMinimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "dashPattern": {
-                                "anyOf": [
-                                  {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "number",
-                                      "exclusiveMinimum": 0
-                                    }
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "smoothing": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "tension": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "capStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["butt", "round", "square"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "joinStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "required": ["type", "points"],
+                    "required": ["x", "y", "width", "height"],
                     "additionalProperties": false
                   }
-                ]
+                },
+                "required": ["type", "bounds"],
+                "additionalProperties": false
               },
               "timing": {
                 "description": "Highlight timing",

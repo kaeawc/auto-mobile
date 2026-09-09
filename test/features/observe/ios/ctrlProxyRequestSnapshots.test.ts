@@ -302,7 +302,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       "CtrlProxyHighlights.requestAddHighlight (box shape; bounds are rounded by the builder)",
     invoke: (h) =>
       new CtrlProxyHighlights(h.context).requestAddHighlight("hl-1", {
-        type: "box",
+        type: "circle",
         bounds: {
           x: 10.4,
           y: 20.6,
@@ -311,15 +311,6 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
           sourceWidth: 390,
           sourceHeight: 844,
         },
-        style: {
-          strokeColor: "#FF0000",
-          strokeWidth: 3.5,
-          dashPattern: [4, 2],
-          smoothing: "bezier",
-          tension: 0.5,
-          capStyle: "round",
-          joinStyle: "miter",
-        },
       }),
   },
   {
@@ -327,11 +318,8 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     builder: "CtrlProxyHighlights.requestAddHighlight (path shape with points)",
     invoke: (h) =>
       new CtrlProxyHighlights(h.context).requestAddHighlight("hl-2", {
-        type: "path",
-        points: [
-          { x: 1.5, y: 2.5 },
-          { x: 3.5, y: 4.5 },
-        ],
+        type: "circle",
+
         bounds: { x: 1, y: 2, width: 10, height: 12 },
       }),
   },

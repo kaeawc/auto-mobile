@@ -1,8 +1,9 @@
+import AppKit
 import CoreMedia
 import CoreVideo
 import Foundation
-import ScreenCaptureKit
 import ScreenCaptureCore
+import ScreenCaptureKit
 
 /// The subset of `SCStream` operations `SimulatorCaptureSession` drives. Wrapping
 /// them in a protocol is the seam that lets unit tests inject a fake stream and
@@ -14,11 +15,14 @@ protocol CaptureStream: AnyObject, Sendable {
         _ output: SCStreamOutput,
         type: SCStreamOutputType,
         sampleHandlerQueue: DispatchQueue?
-    ) throws
+    )
+        throws
     func removeStreamOutput(_ output: SCStreamOutput, type: SCStreamOutputType) throws
     func startCapture() async throws
     func stopCapture() async throws
     func updateConfiguration(_ configuration: SCStreamConfiguration) async throws
+    @MainActor
+    func updateContentFilter(_ filter: SCContentFilter) async throws
 }
 
 // SCStream's start/stop/updateConfiguration each hop to ScreenCaptureKit's own
@@ -28,10 +32,10 @@ protocol CaptureStream: AnyObject, Sendable {
 extension SCStream: @retroactive @unchecked Sendable {}
 extension SCStream: CaptureStream {}
 
-// SCWindow is an immutable snapshot of window metadata (id, frame, owning app) that
-// `main.swift` resolves on the main actor and hands to the nonisolated `start`, so it
-// is safe to send. `@retroactive` because the conformance is added to an SDK type this
-// package does not own.
+/// SCWindow is an immutable snapshot of window metadata (id, frame, owning app) that
+/// `main.swift` resolves on the main actor and hands to the nonisolated `start`, so it
+/// is safe to send. `@retroactive` because the conformance is added to an SDK type this
+/// package does not own.
 extension SCWindow: @retroactive @unchecked Sendable {}
 
 /// Streams BGRA frames from a single iOS Simulator window via ScreenCaptureKit.
@@ -76,6 +80,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// True while an async `updateConfiguration` dispatched by `reconfigure` is in
     /// flight, so a burst of same-size frames does not spawn overlapping updates.
     private var _reconfiguring = false
+    private var _overlaySourceRect = CGRect.zero
+    private var _updatingOverlay = false
+    private var overlayTask: Task<Void, Never>?
 
     /// Pixel format requested from ScreenCaptureKit — 32BGRA for the raw path,
     /// 420v (NV12) for the lowest-CPU encode path. Set once in `start()` before
@@ -87,10 +94,10 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     private let queue = DispatchQueue(label: "automobile.simulator-capture.frames")
     let firstFrameSignal = FirstFrameSignal()
 
-    // The `stream`/`configuredPixel*` accessors are `internal` (not `private`) and
-    // `stateLock`-guarded so `@testable` tests can seed and inspect lifecycle state
-    // that `start()` would otherwise set only behind a real `SCWindow`. They are not
-    // part of the production API surface.
+    /// The `stream`/`configuredPixel*` accessors are `internal` (not `private`) and
+    /// `stateLock`-guarded so `@testable` tests can seed and inspect lifecycle state
+    /// that `start()` would otherwise set only behind a real `SCWindow`. They are not
+    /// part of the production API surface.
     var stream: CaptureStream? {
         get { stateLock.lock(); defer { stateLock.unlock() }; return _stream }
         set { stateLock.lock(); _stream = newValue; stateLock.unlock() }
@@ -139,13 +146,15 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         self.writer = writer
         self.makeStream = makeStream
         self.diagnosticSink = diagnosticSink
-        self.encodeSettings = encode
+        encodeSettings = encode
         self.onFatalError = onFatalError
     }
 
     /// Whether this session encodes H.264 in-process instead of streaming raw
     /// BGRA.
-    var isEncoding: Bool { encodeSettings != nil }
+    var isEncoding: Bool {
+        encodeSettings != nil
+    }
 
     func start(window: SCWindow, fps: Int, audio: Bool) async throws {
         self.fps = fps
@@ -177,6 +186,21 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
 
         let stream = makeStream(filter, config, self)
         try await beginCapture(with: stream, audio: audio)
+        overlayTask = Task { @MainActor [weak self] in
+            var previous = "independent"
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 150_000_000)
+                    guard let self else { return }
+                    previous = try await self.refreshOverlayCapture(window: window, previous: previous)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self?.handleFatalStop(error: error)
+                    return
+                }
+            }
+        }
     }
 
     /// Wires outputs onto an already-built stream and starts it. Split out from
@@ -208,9 +232,13 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             let capture = Task {
                 do {
                     try await stream.startCapture()
-                    if race.finish() { continuation.resume() }
+                    if race.finish() {
+                        continuation.resume()
+                    }
                 } catch {
-                    if race.finish() { continuation.resume(throwing: error) }
+                    if race.finish() {
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
             Task {
@@ -227,6 +255,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     func stop() async {
+        overlayTask?.cancel()
+        overlayTask = nil
         // Scoped `withLock` (not `lock()`/`unlock()`): the latter is unavailable from
         // an async context in the Swift 6 language mode, and scoped locking also makes
         // it structurally impossible to hold the lock across the `await` below.
@@ -257,7 +287,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     // MARK: - SCStreamOutput
 
     func stream(
-        _ stream: SCStream,
+        _: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
@@ -269,11 +299,13 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             return
         }
         guard type == .screen else { return }
+        guard !stateLock.withLock({ _updatingOverlay }) else { return }
 
         // Drop non-complete statuses (idle, blank, suspended, stopped) so we
         // don't re-emit identical pixels or partial buffers.
         if let status = SimulatorCaptureSession.frameStatus(of: sampleBuffer),
-           status != .complete {
+           status != .complete
+        {
             return
         }
 
@@ -354,7 +386,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
 
     // MARK: - SCStreamDelegate
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    func stream(_: SCStream, didStopWithError error: Error) {
         handleFatalStop(error: error)
     }
 
@@ -365,6 +397,73 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     // MARK: - Internals
+
+    /// Include only this Simulator and overlays owned by this exact helper binary.
+    /// Other desktop windows must never enter the stream, even during retargeting.
+    @MainActor
+    private func refreshOverlayCapture(window original: SCWindow, previous: String) async throws -> String {
+        if previous == "independent" {
+            // Keep idle capture cheap: only ask ScreenCaptureKit for fresh
+            // objects when a highlight window exists for this target.
+            let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] ?? []
+            guard windows.contains(where: {
+                $0[kCGWindowName as String] as? String == SimulatorHighlightOverlay.title(windowID: original.windowID)
+            }) else { return previous }
+        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard !Task.isCancelled, let stream else { return previous }
+        guard let window = content.windows.first(where: {
+            $0.windowID == original.windowID && $0.owningApplication?.processID == original.owningApplication?.processID
+                && isSimulatorWindow(bundleIdentifier: $0.owningApplication?.bundleIdentifier)
+        }) else {
+            if previous == "independent" {
+                return previous
+            }
+            throw OverlayError("Simulator window is no longer visible")
+        }
+        let overlays = content.windows.filter { candidate in
+            guard candidate.title == SimulatorHighlightOverlay.title(windowID: window.windowID),
+                  let pid = candidate.owningApplication?.processID,
+                  let executable = NSRunningApplication(processIdentifier: pid)?.executableURL,
+                  let ownExecutable = Bundle.main.executableURL else { return false }
+            return executable.resolvingSymlinksInPath() == ownExecutable.resolvingSymlinksInPath()
+        }
+        let display = content.displays.first { $0.frame.contains(window.frame) }
+        let includeOverlay = !overlays.isEmpty && display != nil
+        let key: String
+        if includeOverlay, let display {
+            key = "\(display.displayID):\(window.frame):\(overlays.map(\.windowID).sorted())"
+        } else {
+            key = "independent"
+        }
+        guard key != previous else { return previous }
+        let filter: SCContentFilter
+        let sourceRect: CGRect
+        if includeOverlay, let display {
+            filter = SCContentFilter(display: display, including: [window] + overlays)
+            sourceRect = window.frame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+        } else {
+            filter = SCContentFilter(desktopIndependentWindow: window)
+            sourceRect = .zero
+        }
+        stateLock.withLock { _updatingOverlay = true; _overlaySourceRect = sourceRect }
+        defer { stateLock.withLock { _updatingOverlay = false } }
+        try await stream.updateContentFilter(filter)
+        var size = currentConfiguredSize()
+        if includeOverlay {
+            let windowSize = H264EncodeMath.EncoderSize(
+                width: Int(window.frame.width),
+                height: Int(window.frame.height)
+            )
+            let target = isEncoding ? (H264EncodeMath.resolveEncoderScale(windowSize) ?? windowSize) : windowSize
+            size = (target.width, target.height)
+            stateLock.withLock { _configuredPixelWidth = size.width; _configuredPixelHeight = size.height }
+        }
+        await applyStreamConfiguration(stream: stream, width: size.width, height: size.height)
+        forceKeyFrameLatch.request()
+        return key
+    }
 
     /// Snapshot of the encode pipeline under `stateLock`, for use on the frame queue.
     private func currentPipeline() -> EncodePipeline? {
@@ -418,7 +517,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         guard let stream = _stream else { return nil }
         _configuredPixelWidth = width
         _configuredPixelHeight = height
-        if _reconfiguring { return nil }
+        if _reconfiguring {
+            return nil
+        }
         _reconfiguring = true
         return stream
     }
@@ -443,6 +544,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// warning. Reads only the set-once `configuredPixelFormat`/`fps`/`audioEnabled`.
     private func applyStreamConfiguration(stream: CaptureStream, width: Int, height: Int) async {
         let updated = SCStreamConfiguration()
+        updated.sourceRect = stateLock.withLock { _overlaySourceRect }
         updated.width = width
         updated.height = height
         updated.pixelFormat = configuredPixelFormat
@@ -450,7 +552,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         updated.showsCursor = false
         updated.scalesToFit = false
         updated.capturesAudio = audioEnabled
-        updated.sampleRate = 8_000
+        updated.sampleRate = 8000
         updated.channelCount = 1
 
         // Retry once on failure before giving up: `updateConfiguration` can fail
@@ -495,7 +597,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         fps: Int,
         audio: Bool,
         pixelFormat: OSType = kCVPixelFormatType_32BGRA
-    ) -> SCStreamConfiguration {
+    )
+        -> SCStreamConfiguration
+    {
         let config = SCStreamConfiguration()
         // Logical (points) size; the delivered CVPixelBuffer is in native
         // pixels (2x/3x for Retina), and downstream consumers must use
@@ -507,16 +611,15 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         config.showsCursor = false
         config.scalesToFit = false
         config.capturesAudio = audio
-        config.sampleRate = 8_000
+        config.sampleRate = 8000
         config.channelCount = 1
         return config
     }
 
     private static func frameStatus(of sampleBuffer: CMSampleBuffer) -> SCFrameStatus? {
-        guard
-            let attachments = CMSampleBufferGetSampleAttachmentsArray(
-                sampleBuffer, createIfNecessary: false
-            ) as? [[SCStreamFrameInfo: Any]],
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(
+            sampleBuffer, createIfNecessary: false
+        ) as? [[SCStreamFrameInfo: Any]],
             let info = attachments.first,
             let rawStatus = info[.status] as? Int,
             let status = SCFrameStatus(rawValue: rawStatus)
@@ -537,7 +640,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
 /// exits and the supervisor relaunches the helper with a fresh IDR.
 struct EncoderOutputOverflowError: Error, CustomStringConvertible {
     let message: String
-    var description: String { message }
+    var description: String {
+        message
+    }
 }
 
 struct StartCaptureTimeoutError: Error, CustomStringConvertible {
@@ -559,7 +664,9 @@ final class StartRaceState: @unchecked Sendable {
     func finish() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        if finished { return false }
+        if finished {
+            return false
+        }
         finished = true
         return true
     }

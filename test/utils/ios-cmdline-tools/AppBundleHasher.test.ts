@@ -62,13 +62,13 @@ const bundle = (root: string, files: Record<string, string>, options: BundleOpti
   };
 };
 
-const ROOT = "/CtrlProxyApp.app";
+const ROOT = "/AutoMobileTest.app";
 const hashOf = (files: Record<string, string>, options?: BundleOptions): Promise<string> =>
   hashAppBundle(ROOT, bundle(ROOT, files, options));
 
 const baseFiles: Record<string, string> = {
   "Info.plist": "info",
-  CtrlProxyApp: "mach-o-binary",
+  AutoMobileTest: "mach-o-binary",
   "Frameworks/Lib.framework/Lib": "lib-binary",
 };
 
@@ -81,12 +81,12 @@ describe("hashAppBundle", () => {
   // identical builds must NOT change the hash.
   const skipArtifacts: ReadonlyArray<{ label: string; extra: Record<string, string> }> = [
     { label: "_CodeSignature contents", extra: { "_CodeSignature/CodeResources": "signature" } },
-    { label: "SC_Info supplemental data", extra: { "SC_Info/CtrlProxyApp.sinf": "sc-info" } },
+    { label: "SC_Info supplemental data", extra: { "SC_Info/AutoMobileTest.sinf": "sc-info" } },
     { label: "embedded.mobileprovision", extra: { "embedded.mobileprovision": "provision" } },
     { label: "PkgInfo", extra: { PkgInfo: "APPL????" } },
     {
       label: "a top-level .xcent entitlements blob",
-      extra: { "CtrlProxyApp.xcent": "entitlements" },
+      extra: { "AutoMobileTest.xcent": "entitlements" },
     },
     {
       label: "a nested .xcent entitlements blob",
@@ -104,10 +104,10 @@ describe("hashAppBundle", () => {
     const withAll = {
       ...baseFiles,
       "_CodeSignature/CodeResources": "signature",
-      "SC_Info/CtrlProxyApp.sinf": "sc-info",
+      "SC_Info/AutoMobileTest.sinf": "sc-info",
       "embedded.mobileprovision": "provision",
       PkgInfo: "APPL????",
-      "CtrlProxyApp.xcent": "entitlements",
+      "AutoMobileTest.xcent": "entitlements",
     };
     expect(await hashOf(withAll)).toBe(await hashOf(baseFiles));
   });
@@ -132,7 +132,7 @@ describe("hashAppBundle", () => {
   });
 
   test("distinguishes two files with swapped contents (position is not conflated)", async () => {
-    const swapped = { ...baseFiles, "Info.plist": "mach-o-binary", CtrlProxyApp: "info" };
+    const swapped = { ...baseFiles, "Info.plist": "mach-o-binary", AutoMobileTest: "info" };
     expect(await hashOf(swapped)).not.toBe(await hashOf(baseFiles));
   });
 });

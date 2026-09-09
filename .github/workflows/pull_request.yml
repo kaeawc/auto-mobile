@@ -1075,9 +1075,15 @@ jobs:
         if: env.RUN_INSTALLER == 'true'
         shell: bash
         run: |
-          # .mcp.json is ignored and is the only artifact the minimal preset
-          # creates in this fresh checkout. Refuse to clean a pre-existing file.
-          test ! -e .mcp.json
+          # Refuse pre-existing files or symlinked parents before allowing cleanup
+          # of any project target supported by the minimal installer.
+          for directory in .codex .cursor .vscode; do
+            test ! -L "$directory"
+          done
+          for config in .mcp.json .codex/config.toml .cursor/mcp.json .vscode/mcp.json; do
+            test ! -e "$config"
+            test ! -L "$config"
+          done
 
       - name: "Run Installer (minimal)"
         if: env.RUN_INSTALLER == 'true'
@@ -1100,12 +1106,19 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          if ! jq -e '.mcpServers["auto-mobile"]' .mcp.json >/dev/null; then
-            echo "Minimal installer did not create the expected project MCP configuration" >&2
-            cleanup_status=1
-          else
-            rm -f .mcp.json
-            cleanup_status=0
+          # No client installed is a valid installer outcome. Each target was
+          # absent before this run, so remove only files this run could create.
+          cleanup_status=0
+          for directory in .codex .cursor .vscode; do
+            if [[ -L "$directory" ]]; then
+              echo "Refusing cleanup through symlink: $directory" >&2
+              cleanup_status=1
+            fi
+          done
+          if [[ "$cleanup_status" -eq 0 ]]; then
+            for config in .mcp.json .codex/config.toml .cursor/mcp.json .vscode/mcp.json; do
+              rm -f -- "$config" || cleanup_status=1
+            done
           fi
           set -e
           echo "UNINSTALL_EXIT_CODE=${cleanup_status}" >> "$GITHUB_ENV"

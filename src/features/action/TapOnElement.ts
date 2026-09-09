@@ -151,6 +151,7 @@ export class TapOnElement extends BaseVisualChange {
   private strategy: TapStrategy;
   private longPressMetadataDetector: LongPressMetadataDetector;
   private readonly waitForCondition: WaitForCondition;
+  private static readonly SEARCH_POLL_INTERVAL_MS = 50;
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
@@ -1400,8 +1401,21 @@ export class TapOnElement extends BaseVisualChange {
         offScreenRejections += 1;
       }
       const deadline = startTime + searchDurationMs;
-      while (this.timer.now() < deadline) {
+      // Fast cached iOS responses must yield just like device round-trips.
+      // Keep an independent request ceiling even if the wall clock moves backward.
+      const maxRequests = Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS);
+      let nextPollAt = startTime;
+      while (this.timer.now() < deadline && requestCount < maxRequests) {
         throwIfAborted(signal);
+        const delayMs = Math.min(nextPollAt, deadline) - this.timer.now();
+        if (delayMs > 0) {
+          await this.timer.sleep(delayMs);
+          throwIfAborted(signal);
+        }
+        if (this.timer.now() >= deadline) {
+          break;
+        }
+        nextPollAt = this.timer.now() + TapOnElement.SEARCH_POLL_INTERVAL_MS;
         const remainingTimeMs = Math.max(0, deadline - this.timer.now());
         const refreshedHierarchy = await this.refreshViewHierarchy(
           remainingTimeMs,

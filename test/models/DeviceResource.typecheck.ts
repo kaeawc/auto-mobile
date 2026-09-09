@@ -13,6 +13,10 @@ type Assert<Condition extends true> = Condition;
 export type DeviceResourceContractChecks = [
   Assert<AndroidDeviceResource extends DeviceResource ? true : false>,
   Assert<AppleDeviceResource extends DeviceResource ? true : false>,
+  Assert<Omit<DeviceResourceMap, "wallpaperRendering"> extends DeviceResourceMap ? false : true>,
+  Assert<Omit<DeviceResourceMap, "widgets"> extends DeviceResourceMap ? false : true>,
+  Assert<Omit<DeviceResourceMap, "liveActivities"> extends DeviceResourceMap ? false : true>,
+  Assert<"healthServices" extends keyof AppleDeviceResource["resources"] ? true : false>,
   Assert<{} extends AndroidDeviceResource["resources"] ? false : true>,
   Assert<{} extends AppleDeviceResource["resources"] ? false : true>,
   Assert<"icloudSync" extends keyof AndroidDeviceResource["resources"] ? false : true>,

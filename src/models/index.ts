@@ -19,6 +19,8 @@ export * from "./DeepLinkResult";
 export * from "./DisplayedTimeMetric";
 export * from "./Device";
 export * from "./DeviceResource";
+export * from "./DeviceResourceConfiguration";
+export * from "./deviceResourceDescriptions";
 export * from "./DeviceLockState";
 export * from "./DeviceSession";
 export * from "./DragAndDropOptions";

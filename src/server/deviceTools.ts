@@ -4,6 +4,16 @@ import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
+import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
+import { registerDeviceResourceTools } from "./deviceResourceTools";
+import {
+  DefaultDeviceResourceController,
+  type DeviceResourceController,
+} from "../utils/deviceResourceController";
+import type {
+  DeviceResourceConfiguration,
+  DeviceResourceConfigurationResult,
+} from "../models/DeviceResourceConfiguration";
 import {
   type BootedDeviceDiscovery,
   type DeviceImageDiscovery,
@@ -358,6 +368,11 @@ const iosProvisionDeviceSpecSchema = z
 export const provisionDeviceSchema = z
   .object({
     operationId: z.string().min(1).describe("Caller-generated idempotency key"),
+    resources: deviceResourceConfigurationSchema
+      .optional()
+      .describe(
+        "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+      ),
     device: withCanonicalDiscriminatedUnionJsonSchema(
       z.discriminatedUnion("platform", [
         z
@@ -392,9 +407,13 @@ export const provisionDeviceSchema = z
       .positive()
       .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
       .optional()
-      .describe("Total provision, boot, and readiness timeout in ms"),
+      .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
   })
-  .strict();
+  .strict()
+  .refine((args) => !args.resources || args.boot !== false, {
+    path: ["resources"],
+    message: "Resource configuration requires boot=true.",
+  });
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -564,6 +583,7 @@ export interface ProvisionDeviceArgs {
   };
   boot: boolean;
   readiness: "automation" | "none";
+  resources?: DeviceResourceConfiguration;
   timeoutMs?: number;
   __mcpSessionId?: string;
   /** Daemon-provided remaining transport budget. */
@@ -659,6 +679,7 @@ export interface ListDevicesArgs {
 }
 
 export interface DeviceToolsDependencies {
+  deviceResourceControllerFactory: () => DeviceResourceController;
   deviceManagerFactory: () => PlatformDeviceManager;
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
@@ -2968,6 +2989,7 @@ let moduleDependencies: DeviceToolsDependencies | null = null;
 function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
+      deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       notifyResourcesChanged: defaultNotifyResourcesChanged,
@@ -3020,6 +3042,8 @@ function resolveDeviceToolsLifecycleCoordinator(
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
+    deviceResourceControllerFactory:
+      deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
     notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
@@ -3075,6 +3099,7 @@ function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
         boot: args.boot,
         readiness: args.readiness,
         timeoutMs: args.timeoutMs,
+        ...(args.resources ? { resources: args.resources } : {}),
       }),
     )
     .digest("hex");
@@ -3205,10 +3230,16 @@ async function waitForSharedOperation<T>(
 
 function createProvisionDeviceResponse(result: Record<string, unknown>) {
   const device = result.device as { name: string; platform: string };
-  return createJSONToolResponse({
-    message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})`,
-    ...result,
-  });
+  const resources = result.resources as DeviceResourceConfigurationResult | undefined;
+  const resourceFailure = resources?.success === false;
+  return {
+    ...createJSONToolResponse({
+      message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})${resourceFailure ? "; requested resource configuration was not fully applied" : ""}`,
+      ...result,
+      ...(resources ? { success: resources.success } : {}),
+    }),
+    ...(resourceFailure ? { isError: true } : {}),
+  };
 }
 
 function validateBootIdentity(
@@ -4126,7 +4157,7 @@ export function registerDeviceTools() {
         (await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal))
       ) {
         const replayResult = backfillProvisionDeviceCutout(args, operation.result);
-        if (replayResult !== operation.result) {
+        if (args.resources || replayResult !== operation.result) {
           await completeProvisionDeviceOperation(store, args.operationId, replayResult);
         }
         return replayResult;
@@ -4292,11 +4323,20 @@ export function registerDeviceTools() {
     return await trackDeviceAcquisitionReadiness(
       deviceReadinessLockKey(liveSession.device.platform, liveSession.device.deviceId),
       async () => {
+        const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
+        if (args.resources) {
+          result.resources = await applyProvisionDeviceResources(
+            args,
+            deps,
+            liveSession.device,
+            totalDeadlineMs,
+            signal,
+          );
+        }
         if (args.readiness === "automation") {
           const perf = createPerformanceTracker(true);
           perf.serial("provisionDeviceReplay");
           try {
-            const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
             await ensureProvisionDeviceReadiness(
               args,
               deps,
@@ -4887,7 +4927,12 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
-  ): Promise<{ device: BootedDevice; sessionId: string; source: "booted" | "cold-boot" }> {
+  ): Promise<{
+    device: BootedDevice;
+    sessionId: string;
+    source: "booted" | "cold-boot";
+    resources?: DeviceResourceConfigurationResult;
+  }> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
     const bootService = new DeviceBootService({
       deviceManager,
@@ -4902,6 +4947,7 @@ export function registerDeviceTools() {
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
     let releaseReadinessReservation: (() => Promise<void>) | undefined;
+    let resources: DeviceResourceConfigurationResult | undefined;
     try {
       const alreadyBooted = await runProvisionDeviceWithinDeadline(
         deps.timer,
@@ -4946,6 +4992,13 @@ export function registerDeviceTools() {
       const sessionId = await trackDeviceAcquisitionReadiness(
         deviceReadinessLockKey(boot.device.platform, boot.device.deviceId),
         async () => {
+          resources = await applyProvisionDeviceResources(
+            args,
+            deps,
+            boot!.device,
+            totalDeadlineMs,
+            lifecycleLease.signal,
+          );
           await ensureProvisionDeviceReadiness(
             args,
             deps,
@@ -4974,7 +5027,12 @@ export function registerDeviceTools() {
         },
       );
       ownershipTransferred = true;
-      return { device: boot.device, sessionId, source: boot.source };
+      return {
+        device: boot.device,
+        sessionId,
+        source: boot.source,
+        resources,
+      };
     } catch (error) {
       if (!ownershipTransferred) {
         void cancelUnownedColdBoot(boot);
@@ -4996,6 +5054,21 @@ export function registerDeviceTools() {
     readiness: ProvisionDeviceArgs["readiness"],
   ): DeviceReadinessLevel {
     return readiness === "automation" ? "automationReady" : "booted";
+  }
+
+  async function applyProvisionDeviceResources(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    device: BootedDevice,
+    deadlineMs: number,
+    signal?: AbortSignal,
+  ): Promise<DeviceResourceConfigurationResult | undefined> {
+    if (!args.resources) {
+      return undefined;
+    }
+    return deps
+      .deviceResourceControllerFactory()
+      .setResources({ device, resources: args.resources, deadlineMs, signal });
   }
 
   async function reserveProvisionDeviceReadiness(
@@ -5037,10 +5110,13 @@ export function registerDeviceTools() {
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
     createdByOperation: boolean,
     perf: ReturnType<typeof createPerformanceTracker>,
-    booted: { device: BootedDevice; sessionId: string } | undefined,
+    booted:
+      | { device: BootedDevice; sessionId: string; resources?: DeviceResourceConfigurationResult }
+      | undefined,
   ): Record<string, unknown> {
     return {
       operationId: args.operationId,
+      ...(booted?.resources ? { resources: booted.resources } : {}),
       device: booted?.device ?? provisioned.device,
       requestedSpec: args.device.spec,
       resolvedSpec: provisioned.resolvedSpec,
@@ -5992,6 +6068,7 @@ export function registerDeviceTools() {
   };
 
   // Register with the tool registry
+  registerDeviceResourceTools(getDeviceToolsDependencies);
   ToolRegistry.register(
     "listDeviceImages",
     "List device images",

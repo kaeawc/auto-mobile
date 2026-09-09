@@ -20,6 +20,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -246,6 +247,105 @@ describe("provisionDevice handler", () => {
   afterEach(() => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
+  });
+
+  test("resource settings require booting and reject profiles and raw daemon labels", () => {
+    const args = provisionTestArgs("ios", "resource-schema");
+    expect(
+      provisionDeviceSchema.safeParse({
+        ...args,
+        boot: false,
+        resources: { wallpaperRendering: "disabled" },
+      }).success,
+    ).toBe(false);
+    expect(
+      provisionDeviceSchema.safeParse({ ...args, resources: { profile: "efficient" } }).success,
+    ).toBe(false);
+    expect(
+      provisionDeviceSchema.safeParse({ ...args, resources: { "com.apple.apsd": "disabled" } })
+        .success,
+    ).toBe(false);
+  });
+
+  test.each(["ios", "android"] as const)(
+    "applies %s resources before automation readiness and includes verified results",
+    async (platform) => {
+      const resources = new FakeDeviceResourceController();
+      const order: string[] = [];
+      resources.onRequest = async () => {
+        order.push("resources");
+      };
+      exactProvisioner.provision = async () => provisionedTestDevice(platform, false);
+      deviceManager.setBootedDevices(platform, [
+        {
+          name: provisionTestArgs(platform, "unused").device.name,
+          platform,
+          deviceId: platform === "ios" ? "SIM-123" : "emulator-5554",
+        },
+      ]);
+      setDeviceToolsDependencies({
+        deviceResourceControllerFactory: () => resources,
+        ensureCtrlProxyReady: async () => {
+          order.push("readiness");
+        },
+      });
+      const args = {
+        ...provisionTestArgs(platform, `resources-${platform}`),
+        resources: { wallpaperRendering: "disabled" as const },
+      };
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+      expect(order).toEqual(["resources", "readiness"]);
+      expect(resources.requests[0]!.device.platform).toBe(platform);
+      expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+        success: true,
+        resources: { success: true, resources: { wallpaperRendering: { state: "disabled" } } },
+      });
+    },
+  );
+
+  test("a changed resource request conflicts with a reused operation ID", async () => {
+    const resources = new FakeDeviceResourceController();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    setDeviceToolsDependencies({ deviceResourceControllerFactory: () => resources });
+    const tool = ToolRegistry.getTool("provisionDevice")!;
+    const args = {
+      ...provisionTestArgs("android", "resource-conflict"),
+      readiness: "none" as const,
+      resources: { wallpaperRendering: "disabled" as const },
+    };
+    await tool.handler(args);
+    const response = await tool.handler({ ...args, resources: { wallpaperRendering: "enabled" } });
+    expect((response as any).isError).toBe(true);
+    expect(JSON.parse((response as any).content[0].text).error.code).toBe("operation_conflict");
+    expect(resources.requests).toHaveLength(1);
+  });
+
+  test("unsupported resources return an explicit error while preserving the provisioned identity", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.success = false;
+    resources.result.resources = {
+      wallpaperRendering: { state: "unsupported", reason: "Android control deferred" },
+    };
+    resources.result.changed = [];
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    setDeviceToolsDependencies({ deviceResourceControllerFactory: () => resources });
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "unsupported-resources"),
+      readiness: "none",
+      resources: { wallpaperRendering: "disabled" },
+    });
+    expect((response as any).isError).toBe(true);
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      success: false,
+      device: { deviceId: "emulator-5554" },
+      resources: { resources: { wallpaperRendering: { state: "unsupported" } } },
+    });
   });
 
   test("accepts omitted boot and readiness with their documented defaults", () => {
@@ -1240,58 +1340,83 @@ describe("provisionDevice handler", () => {
     expect(second.sessionId).not.toBe(first.sessionId);
   });
 
-  test("returns a completed boot operation while its session is still live", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
+  test.each([false, true])(
+    "returns a completed boot operation while its session is still live (resource verification: %s)",
+    async (configureResources) => {
+      const resourceController = new FakeDeviceResourceController();
+      setDeviceToolsDependencies({ deviceResourceControllerFactory: () => resourceController });
+      const timer = new FakeTimer();
+      const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        undefined,
+        deviceManager,
+      );
+      const bootedDevice = {
         name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-      },
-    });
-
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-live-session",
-      device: {
         platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
+        deviceId: "mock-phone-api-36-a",
+      };
+      deviceManager.setDeviceImages("android", [
+        {
+          name: "phone-api-36-a",
+          platform: "android",
+          isRunning: false,
         },
-      },
-      boot: true,
-      readiness: "automation" as const,
-    };
+      ]);
+      await pool.initializeWithDevices([bootedDevice]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+        },
+      });
 
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+      const args = {
+        operationId: "operation-live-session",
+        ...(configureResources ? { resources: { wallpaperRendering: "disabled" as const } } : {}),
+        device: {
+          platform: "android" as const,
+          name: "phone-api-36-a",
+          spec: {
+            runtime: "system-images;android-36;google_apis;x86_64",
+            deviceType: "pixel_9",
+          },
+        },
+        boot: true,
+        readiness: "automation" as const,
+      };
 
-    expect(second).toEqual(first);
-    expect(exactProvisioner.requests).toHaveLength(1);
-    expect(deviceManager.getCallCount("startDevice")).toBe(1);
-    expect(readinessCalls).toBe(2);
-    sessionManager.stopCleanupTimer();
-  });
+      const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+      const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+      expect(second).toEqual(first);
+      expect(exactProvisioner.requests).toHaveLength(1);
+      expect(deviceManager.getCallCount("startDevice")).toBe(1);
+      expect(readinessCalls).toBe(2);
+      expect(resourceController.requests).toHaveLength(configureResources ? 2 : 0);
+      if (configureResources) {
+        resourceController.result = {
+          ...resourceController.result,
+          success: false,
+          resources: { wallpaperRendering: { state: "unknown", reason: "drift" } },
+        };
+        const drift = await tool.handler(args);
+        expect((drift as any).isError).toBe(true);
+        expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
+          success: false,
+        });
+      }
+      sessionManager.stopCleanupTimer();
+    },
+  );
 
   // #6227 (round 6 P1): `readiness: "none"` deliberately skips CtrlProxy /
   // accessibility-service setup in `ensureProvisionDeviceReadiness`, so the

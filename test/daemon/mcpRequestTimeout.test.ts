@@ -93,6 +93,11 @@ describe("resolveMcpRequestTimeoutMs", () => {
   }
 
   const cases: TimeoutCase[] = [
+    {
+      name: "setDeviceResources floor when timeoutMs omitted",
+      tool: "setDeviceResources",
+      expected: 305_000,
+    },
     // --- Tool floors applied when the client omits timeoutMs (base -> DEFAULT) ---
     {
       name: "tool without a floor -> default",
@@ -880,6 +885,18 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
       345_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport alive through an explicit resource-configuration budget", () => {
+    const request: DaemonRequest = {
+      id: "resources",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "setDeviceResources", arguments: { timeoutMs: 300_000 } },
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
   });
 

@@ -54,6 +54,11 @@ export class CachingContentHashProvider implements ContentHashProvider {
   // started before an invalidate must NOT repopulate the cache with a stale hash,
   // so a result is only cached when the generation is unchanged since it began.
   private readonly generation = new Map<string, number>();
+  // Single-flight: concurrent resolveContentHash calls for the same key share this
+  // in-flight promise instead of each starting their own (expensive) computeHash
+  // (#6654). Cleared once the computation settles (success or failure) so a later
+  // call recomputes rather than being poisoned by a stale/failed entry.
+  private readonly inFlight = new Map<string, Promise<string | null>>();
 
   constructor(private readonly hasher: AppContentHasher) {}
 
@@ -67,6 +72,23 @@ export class CachingContentHashProvider implements ContentHashProvider {
     if (cached !== undefined) {
       return cached;
     }
+    const existing = this.inFlight.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const promise = this.computeAndCache(device, packageId, versionCode, key).finally(() => {
+      this.inFlight.delete(key);
+    });
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
+  private async computeAndCache(
+    device: BootedDevice,
+    packageId: string,
+    versionCode: number,
+    key: string,
+  ): Promise<string | null> {
     const genKey = `${device.deviceId}::${packageId}`;
     const startGeneration = this.generation.get(genKey) ?? 0;
     try {

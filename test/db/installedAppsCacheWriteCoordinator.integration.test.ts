@@ -149,4 +149,65 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     expect(coordinator.markRebuilt(deviceId, generation)).toBe(true);
     expect(coordinator.isDirty(deviceId)).toBe(false);
   });
+
+  test("releaseDevice returns the tracked-device count to zero across many unique ids (#6704)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceIds = Array.from({ length: 50 }, (_, index) => `released-device-${index}`);
+
+    // Simulate pool removal for each: a final invalidate() (which leaves a
+    // generation + dirty entry), then release.
+    for (const deviceId of deviceIds) {
+      await coordinator.invalidate(deviceId, async () => undefined);
+    }
+    expect(coordinator.trackedDeviceCount()).toBe(deviceIds.length);
+
+    for (const deviceId of deviceIds) {
+      await coordinator.releaseDevice(deviceId);
+    }
+    // No idle per-device state retained after every device is released.
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+  });
+
+  test("a rebuild captured before releaseDevice cannot commit afterward (#6704)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "released-device-stale";
+
+    // The device was used (invalidated at least once), so its generation is >= 1
+    // when a lagging rebuild captures it.
+    await coordinator.invalidate(deviceId, async () => undefined);
+    const generation = coordinator.beginRebuild(deviceId);
+
+    // Pool removal releases the device before the lagging rebuild commits.
+    await coordinator.releaseDevice(deviceId);
+
+    const writes: string[] = [];
+    const staleRebuild = coordinator.commitRebuild(deviceId, generation, async () => {
+      writes.push("stale");
+    });
+    await expect(staleRebuild).resolves.toBe(false);
+    expect(writes).toEqual([]);
+    // The fenced attempt leaked no bookkeeping.
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+  });
+
+  test("re-adding a released device id starts from clean state (#6704)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "released-device-reuse";
+
+    await coordinator.invalidate(deviceId, async () => undefined);
+    await coordinator.releaseDevice(deviceId);
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+    expect(coordinator.isDirty(deviceId)).toBe(false);
+
+    // Reused serial: a fresh rebuild at generation 0 commits normally.
+    const generation = coordinator.beginRebuild(deviceId);
+    expect(generation).toBe(0);
+    const writes: string[] = [];
+    await expect(
+      coordinator.commitRebuild(deviceId, generation, async () => {
+        writes.push("fresh");
+      }),
+    ).resolves.toBe(true);
+    expect(writes).toEqual(["fresh"]);
+  });
 });

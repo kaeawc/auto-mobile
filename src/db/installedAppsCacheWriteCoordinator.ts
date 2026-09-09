@@ -11,8 +11,17 @@ export interface InstalledAppsCacheWriteCoordinator {
   commitRebuild(deviceId: string, generation: number, write: () => Promise<void>): Promise<boolean>;
   isDirty(deviceId: string): boolean;
   markRebuilt(deviceId: string, generation: number): boolean;
-  invalidateWithoutWrite(deviceId: string): void;
+  invalidateWithoutWrite(deviceId: string): number;
   invalidate(deviceId: string, write: () => Promise<void>): Promise<void>;
+  /**
+   * Permanently forgets a device identifier once the caller is certain it is
+   * gone (e.g. after pool removal's final `invalidate()` has drained). Fences
+   * out any rebuild whose captured generation predates this call, then only
+   * deletes the per-device bookkeeping if nothing bumped the generation again
+   * while this call was waiting on the device's write tail. Safe to call from
+   * a hot path that reuses device ids: a reused id simply starts clean.
+   */
+  releaseDevice(deviceId: string): Promise<void>;
 }
 
 export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledAppsCacheWriteCoordinator {
@@ -64,12 +73,49 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
     }
   }
 
-  invalidateWithoutWrite(deviceId: string): void {
+  invalidateWithoutWrite(deviceId: string): number {
     const generation = (this.generations.get(deviceId) ?? 0) + 1;
     this.generations.set(deviceId, generation);
     // A failed stale-marker write leaves old DB rows physically fresh. Keep the
     // cache bypassed until ListInstalledApps successfully commits a replacement.
     this.dirtyGenerations.set(deviceId, generation);
+    return generation;
+  }
+
+  async releaseDevice(deviceId: string): Promise<void> {
+    // Fence: bump the generation the same way invalidate() does, so a rebuild
+    // that already captured an older generation cannot later commit against
+    // this device id even if it is reused before cleanup below runs.
+    const fenceGeneration = this.invalidateWithoutWrite(deviceId);
+
+    // Drain: wait behind any write already queued for this device (including
+    // the final invalidate() write this call is expected to follow) before
+    // treating the device as idle.
+    await this.enqueue(deviceId, async () => undefined);
+
+    // Delete only if no newer work bumped the generation again while this
+    // call was waiting on the tail above (e.g. the device id was reused and
+    // invalidated/rebuilt in the meantime). Leaving the entries in that case
+    // keeps them for that newer generation instead of resetting it to 0.
+    if (this.generations.get(deviceId) === fenceGeneration) {
+      this.generations.delete(deviceId);
+      this.dirtyGenerations.delete(deviceId);
+    }
+  }
+
+  /**
+   * Test-only diagnostic: number of device identifiers with any retained
+   * bookkeeping (generation, dirty-generation, or in-flight tail). Not part
+   * of the {@link InstalledAppsCacheWriteCoordinator} interface — production
+   * callers have no use for it.
+   */
+  trackedDeviceCount(): number {
+    const deviceIds = new Set<string>([
+      ...this.generations.keys(),
+      ...this.dirtyGenerations.keys(),
+      ...this.tails.keys(),
+    ]);
+    return deviceIds.size;
   }
 
   private async enqueue<T>(deviceId: string, work: () => Promise<T>): Promise<T> {

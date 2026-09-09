@@ -966,7 +966,9 @@ jobs:
         # BATS pass used to run inline inside the required Fast Validation job and
         # dominated its wall-clock. It now runs as a parallel matrix leg, matching
         # merge.yml, and is gated by the required "Shell Tests" roll-up.
-        os: [ubuntu-latest, macos-latest]
+        # Keep the portable PR lane on Linux. The equivalent macOS lane runs in
+        # nightly.yml so slow hosted macOS capacity is off the merge path.
+        os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1039,7 +1041,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1232,7 +1234,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1278,7 +1280,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

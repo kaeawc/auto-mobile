@@ -150,10 +150,19 @@ describe("NavigationRetention prune", () => {
     await db.destroy();
   });
 
-  function retention(config = CONFIG): NavigationRetention {
-    return new NavigationRetention(db, config, async (filePath) => {
-      removed.push(filePath);
-    });
+  function retention(
+    config = CONFIG,
+    yieldBetweenBatches?: () => Promise<void>,
+  ): NavigationRetention {
+    return new NavigationRetention(
+      db,
+      config,
+      async (filePath) => {
+        removed.push(filePath);
+      },
+      undefined,
+      yieldBetweenBatches,
+    );
   }
 
   async function seedNode(screen: string, timestamp: number): Promise<number> {
@@ -337,6 +346,31 @@ describe("NavigationRetention prune", () => {
       .executeTakeFirst();
     expect(nodeCount).toBe(1);
     expect(Number(edgeCount?.c)).toBe(1);
+  });
+
+  test("chunks overdue TTL cleanup and yields between committed batches", async () => {
+    const nodeId = await seedNode("Home", 100);
+    const bkOld = await buildKey(APP, 1);
+    const bkNew = await buildKey(APP, 2);
+    for (let i = 0; i < 5; i++) {
+      await nodeObs(nodeId, bkOld, `old-${i}`, 100 + i);
+    }
+    await nodeObs(nodeId, bkNew, "active", 100_000);
+
+    let yields = 0;
+    let readAfterFirstYield: Promise<unknown> | undefined;
+    const summary = await retention(
+      { ...CONFIG, evictionChunkSize: 2 },
+      async () => {
+        yields += 1;
+        readAfterFirstYield ??= db.selectFrom("navigation_build_keys").selectAll().execute();
+        await readAfterFirstYield;
+      },
+    ).prune(50_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(5);
+    expect(yields).toBeGreaterThan(0);
+    await expect(readAfterFirstYield).resolves.toHaveLength(2);
   });
 
   // ---- LRU size cap (backstop) ----

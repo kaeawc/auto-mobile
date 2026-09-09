@@ -57,6 +57,46 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
     });
   };
 
+  const missingSelectorCases: { selector: Partial<TapOnElementOptions>; message: string }[] = [
+    {
+      selector: { elementId: "missing-id" },
+      message: "Element not found with provided elementId 'missing-id'",
+    },
+    {
+      selector: { testTag: "nonexistent-tag-xyz" },
+      message: "Element not found with provided testTag 'nonexistent-tag-xyz'",
+    },
+    { selector: { text: "Missing" }, message: "Element not found with provided text 'Missing'" },
+    {
+      selector: { textAny: ["Missing", "Absent"] },
+      message: "Element not found with any provided text 'Missing', 'Absent'",
+    },
+    {
+      selector: { accessibilityLink: "Missing link" },
+      message: "Element not found with provided accessibilityLink 'Missing link'",
+    },
+  ];
+
+  for (const { selector, message } of missingSelectorCases) {
+    for (const container of [undefined, { text: "Settings" }, { elementId: "settings-id" }]) {
+      test(`missing ${Object.keys(selector)[0]} preserves selector and container context ${JSON.stringify(container)}`, async () => {
+        const tapOn = createTapOnElement(new FakeScreenshotCapturer(), new FakeVisionAnalyzer(), {
+          ...enabledVisionConfig,
+          enabled: false,
+        });
+        const containerHint = container
+          ? container.elementId
+            ? " within container elementId 'settings-id'"
+            : " within container text 'Settings'"
+          : "";
+
+        await expect(
+          tapOn["handleElementNotFound"]({ action: "tap", ...selector, container }),
+        ).rejects.toThrow(message + containerHint);
+      });
+    }
+  }
+
   test("throws enriched error with navigation steps (high confidence)", async () => {
     const capturer = new FakeScreenshotCapturer();
     capturer.setPaths(["/screenshot.png"]);

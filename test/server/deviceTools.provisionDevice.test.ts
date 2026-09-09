@@ -1430,7 +1430,7 @@ describe("provisionDevice handler", () => {
     }
   });
 
-  test("associates a live autolock session with a reconnected MCP client", async () => {
+  test("reconnecting during recovery preserves the live session and completed operation", async () => {
     const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
@@ -1477,6 +1477,27 @@ describe("provisionDevice handler", () => {
           })) as any
         ).content[0].text,
       );
+      const recoveringDevice = {
+        ...bootedDevice,
+        deviceId: "recovering-device",
+        name: "Recovery AVD",
+      };
+      await pool.addDevice(recoveringDevice);
+      const recovery = await pool.reserveDeviceForShutdown(recoveringDevice.deviceId, undefined, {
+        mcpSessionId: "mcp-session-reconnected",
+        expectedSessionId: undefined,
+      });
+      const rejected = await tool.handler({ ...args, __mcpSessionId: "mcp-session-reconnected" });
+      expect(JSON.stringify(rejected)).toContain("recovering a device");
+      expect(sessionManager.getSession(first.sessionId)).not.toBeNull();
+      expect(pool.getDevice(bootedDevice.deviceId)?.sessionId).toBe(first.sessionId);
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-original")).toBe(
+        first.sessionId,
+      );
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected")).toBeUndefined();
+      expect(operationStore.failCalls).toBe(0);
+      recovery!.releaseRecoveryRouteLease();
+      await recovery!.release();
       const second = JSON.parse(
         (
           (await tool.handler({

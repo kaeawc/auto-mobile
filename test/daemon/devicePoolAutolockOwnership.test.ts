@@ -372,3 +372,154 @@ test("System UI recovery rejects a remapped client while its first target is idl
     }
   });
 });
+
+test.each([false, true])(
+  "recovery route lease survives readiness and releases after failure=%s",
+  async (failReadiness) => {
+    await withAutolock(async () => {
+      const deviceUtils = new FakeDeviceUtils();
+      const h = await harness(deviceUtils);
+      const matcher = new FakeDeviceMatcher();
+      const device = h.devices.bootedDevices[0];
+      const image = { ...device, deviceId: "emulator-5556", isRunning: false };
+      const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
+      const recoveredProcess = new FakeChildProcess(h.timer);
+      deviceUtils.setMockChildProcess(image.name, recoveredProcess as unknown as ChildProcess);
+      deviceUtils.setBootedDevices("android", [device]);
+      deviceUtils.setDeviceImages("android", [image]);
+      matcher.setBootedResult(device);
+      matcher.setImageResult(image);
+      const kill = deviceUtils.killDevice.bind(deviceUtils);
+      deviceUtils.killDevice = async (target, options) => {
+        await kill(target, options);
+        deviceUtils.setBootedDevices("android", []);
+      };
+      let readinessAttempts = 0;
+      let remapError: unknown;
+      DaemonState.getInstance().initialize(h.manager, h.pool);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => deviceUtils,
+        deviceMatcherFactory: () => matcher,
+        timer: h.timer,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async (request) => {
+          ++readinessAttempts;
+          if (readinessAttempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR");
+          }
+          deviceUtils.setBootedDevices("android", [request.device, otherDevice]);
+          await h.pool.addDevice(otherDevice);
+          remapError = await h.pool
+            .autolockDevice(otherDevice.deviceId, "android", "agent-A")
+            .catch((error: unknown) => error);
+          if (failReadiness) {
+            throw new Error("replacement readiness failed");
+          }
+        },
+      });
+      registerDeviceTools();
+      try {
+        const acquiring = ToolRegistry.getTool("getAndroid")!.handler({
+          deviceId: device.deviceId,
+          __mcpSessionId: "agent-A",
+        });
+        if (failReadiness) {
+          await expect(acquiring).rejects.toThrow("replacement readiness failed");
+        } else {
+          const sessionId = getDeviceSessionIdFromResult(await acquiring);
+          expect(h.manager.getSession(sessionId!)?.assignedDevice).toBe(image.deviceId);
+          expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(sessionId);
+        }
+        expect(readinessAttempts).toBe(2);
+        expect(remapError).toMatchObject({
+          message: expect.stringContaining("recovering a device"),
+        });
+        expect(h.pool.getDevice(otherDevice.deviceId)?.sessionId).toBeNull();
+        expect(
+          await h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-A"),
+        ).toBeDefined();
+      } finally {
+        resetDeviceToolsDependencies();
+        DaemonState.getInstance().reset();
+        ToolRegistry.clearTools();
+        await h.close();
+      }
+    });
+  },
+);
+
+test("cancelling a shutdown reservation releases only its recovery route lease", async () => {
+  await withAutolock(async () => {
+    const h = await harness();
+    const controller = new AbortController();
+    try {
+      const pending = h.pool.reserveDeviceForShutdown("emulator-5554", controller.signal, {
+        mcpSessionId: "agent-A",
+        expectedSessionId: undefined,
+      });
+      queueMicrotask(() => controller.abort(new Error("cancelled recovery")));
+      await expect(pending).rejects.toThrow("cancelled recovery");
+      const retry = await h.pool.reserveDeviceForShutdown("emulator-5554", undefined, {
+        mcpSessionId: "agent-A",
+        expectedSessionId: undefined,
+      });
+      expect(retry).toBeDefined();
+      retry!.releaseRecoveryRouteLease();
+      await retry!.release();
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+test("a competing recovery cannot release the first recovery route lease", async () => {
+  await withAutolock(async () => {
+    const deviceUtils = new FakeDeviceUtils();
+    const h = await harness(deviceUtils);
+    const otherDevice = {
+      ...h.devices.bootedDevices[0],
+      deviceId: "emulator-5558",
+      name: "Other AVD",
+    };
+    try {
+      deviceUtils.setBootedDevices("android", [...h.devices.bootedDevices, otherDevice]);
+      await h.pool.addDevice(otherDevice);
+      const firstPending = h.pool.reserveDeviceForShutdown("emulator-5554", undefined, {
+        mcpSessionId: "agent-A",
+        expectedSessionId: undefined,
+      });
+      const competing = h.pool.reserveDeviceForShutdown("emulator-5554", undefined, {
+        mcpSessionId: "agent-A",
+        expectedSessionId: undefined,
+      });
+      const first = await firstPending;
+      expect(first).toBeDefined();
+      await expect(competing).rejects.toThrow("already shutting down");
+      await expect(
+        h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-A"),
+      ).rejects.toThrow("recovering a device");
+      first!.releaseRecoveryRouteLease();
+      await first!.release();
+      const newer = await h.pool.reserveDeviceForShutdown("emulator-5554", undefined, {
+        mcpSessionId: "agent-A",
+        expectedSessionId: undefined,
+      });
+      first!.releaseRecoveryRouteLease();
+      await expect(
+        h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-A"),
+      ).rejects.toThrow("recovering a device");
+      const otherSession = await h.pool.autolockDevice(otherDevice.deviceId, "android", "agent-B");
+      await expect(
+        h.pool.attachAutolockSessionToMcpSession(otherSession!, "agent-A"),
+      ).rejects.toThrow("recovering a device");
+      expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBeUndefined();
+      expect((await h.repository.getSession(otherSession!))?.mcp_session_id).toBe("agent-B");
+      newer!.releaseRecoveryRouteLease();
+      await newer!.release();
+      await h.pool.attachAutolockSessionToMcpSession(otherSession!, "agent-A");
+      expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(otherSession);
+    } finally {
+      await h.close();
+    }
+  });
+});

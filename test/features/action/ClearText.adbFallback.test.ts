@@ -16,6 +16,7 @@ describe("ClearText Android ADB fallback", () => {
   let fakeA11yService: FakeCtrlProxy;
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let observedSpy: ReturnType<typeof spyOn> | null = null;
+  let refreshSpy: ReturnType<typeof spyOn> | null = null;
 
   const focusedFieldObserve = (text: string): ObserveResult => ({
     timestamp: Date.now(),
@@ -57,7 +58,19 @@ describe("ClearText Android ADB fallback", () => {
     },
   });
 
-  const runClearText = (observeResult: ObserveResult) => {
+  const hierarchyErrorObserve = (): ObserveResult => ({
+    timestamp: Date.now(),
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy: {
+      hierarchy: { error: "Accessibility hierarchy unavailable" },
+    } as any,
+  });
+
+  const runClearText = (
+    observeResult: ObserveResult,
+    configure?: (clearText: ClearText) => void,
+  ) => {
     const clearText = new ClearText(device, fakeAdb as any);
     observedSpy = spyOn(
       clearText as unknown as {
@@ -65,6 +78,7 @@ describe("ClearText Android ADB fallback", () => {
       },
       "observedInteraction",
     ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
+    configure?.(clearText);
     return clearText.execute();
   };
 
@@ -79,8 +93,10 @@ describe("ClearText Android ADB fallback", () => {
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     observedSpy?.mockRestore();
+    refreshSpy?.mockRestore();
     getInstanceSpy = null;
     observedSpy = null;
+    refreshSpy = null;
   });
 
   test("clears via the accessibility service and never touches ADB when a11y succeeds", async () => {
@@ -91,13 +107,34 @@ describe("ClearText Android ADB fallback", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
-  test("rejects an accessibility success when no editable field is focused", async () => {
-    const result = await runClearText(noFocusedFieldObserve());
+  test("rejects an accessibility success when no editable field remains focused after refresh", async () => {
+    const result = await runClearText(noFocusedFieldObserve(), (clearText) => {
+      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(noFocusedFieldObserve());
+    });
 
     expect(result).toEqual({
       success: false,
       error: "No focused editable node found",
     });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("uses a refreshed focused field before accepting accessibility success", async () => {
+    const result = await runClearText(noFocusedFieldObserve(), (clearText) => {
+      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
+        focusedFieldObserve("hello"),
+      );
+    });
+
+    expect(result.success).toBe(true);
+    expect(refreshSpy).toHaveBeenCalledWith({ skipWaitForFresh: false });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("preserves the accessibility path when the hierarchy contains an error", async () => {
+    const result = await runClearText(hierarchyErrorObserve());
+
+    expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 

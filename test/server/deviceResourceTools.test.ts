@@ -83,6 +83,25 @@ describe("setDeviceResources", () => {
     expect(JSON.parse(response.content[0].text).success).toBe(true);
   });
 
+  test("forwards restoration through the same device lifecycle path", async () => {
+    const restore = {
+      deviceId: "emulator-5580",
+      bootId: "11111111-1111-4111-8111-111111111111",
+      userId: 0,
+      entries: [
+        { resource: "animations", kind: "global", target: "animator_duration_scale", value: null },
+      ],
+    };
+    const android = {
+      platform: "android" as const,
+      deviceId: "emulator-5580",
+      name: "resource-lab",
+    };
+    await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(android, { restore });
+    expect(controller.requests[0]).toMatchObject({ device: android, resources: {}, restore });
+    expect(controller.requests[0]!.signal).toBeDefined();
+  });
+
   test("accepts injected execution metadata and honors the transport deadline", async () => {
     const tool = ToolRegistry.getTool("setDeviceResources")!;
     await tool.deviceAwareHandler!(device, {

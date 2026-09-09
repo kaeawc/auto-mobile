@@ -144,11 +144,9 @@ or restores the exact job without rebooting, then verifies both the override and
 job registration. Runtime discovery is shared within a request. Group membership
 does not overlap, so enabling one resource cannot silently restore another.
 
-Broad `backgroundSync`, `icloudSync`, `googlePlayServices`, and `animations`
-controls remain unsupported. Physical iOS devices and all Android resource
-mutations return `unsupported` with a reason. Android accepts the same configuration
-contract; its service catalog and control implementation are deferred. A request
-may apply supported entries and report unsupported entries in the same result.
+Broad `backgroundSync` and `icloudSync` remain unsupported. Physical iOS devices
+remain unsupported. Android controls are described below; requests can apply
+supported entries and report unsupported entries in the same result.
 
 Results contain `requested`, a `resources` map of observed states for requested
 entries, `services` with per-daemon evidence, `changed` (resource groups with
@@ -173,3 +171,65 @@ purchases, or other automation capabilities work. Continue to report capabilitie
 separately using AutoMobile's existing supported/partial/unavailable/unsupported
 conventions. Only mark a capability unavailable because of a disabled resource
 when its dependency is known for the device and app context.
+
+## Android controls
+
+Android emulator controls are independent and opt-in. Optional-app groups disable
+only installed system packages in a fixed catalog for the current Android user.
+They preserve ContactsProvider, CalendarProvider, MediaProvider, DocumentsUI,
+SystemUI, the launcher, credentials, networking and automation packages. Active
+apps, default role holders, the selected keyboard and enabled accessibility
+services are protected. If role inspection is unavailable, package disablement
+fails closed; older Android versions can still support individual settings.
+
+- `animations` sets the three system animation scales to zero or one.
+- `screensavers` controls dream activation, separately from wallpaper and widgets.
+- `backup` controls Backup Manager for the current user.
+- `mailApp`, `calendarApp`, `contactsApp`, `mapsApp`, `videoApp`, `musicApp`,
+  `photosApp`, `assistantApp`, `digitalWellbeing`, `printing`, `accessibilityApps`,
+  `textToSpeech`, and `wallpaperApps` control optional applications. Disabling an
+  app removes its integrations and intent handlers. Wallpaper picker removal
+  is not equivalent to disabling wallpaper rendering.
+- `healthConnect`, `adServices`, `onDevicePersonalization`, `storeApp`,
+  `dialerApp`, `messagesApp`, `googlePlayServices` and `googleServicesFramework`
+  are explicit feature tradeoffs. Shared Google infrastructure must remain
+  enabled for workloads that depend on its notifications or authentication.
+  Mainline/APEX containers are never removed.
+
+An Android response can include a `restore` receipt. Pass it back as
+`setDeviceResources({restore: receipt, ...deviceTargeting})`, without `resources`,
+to restore the exact previous overrides. Receipts are restricted to the same
+emulator serial, boot ID and user. This prevents accidental restoration onto a
+recycled emulator. They preserve default package state and absent settings;
+`enabled` is an explicit enable operation, not a substitute for restoration.
+Default override restoration may report observed state `unknown` while returning
+`success: true`: the original override was verified, but the runtime's effective
+default was not inferred. Save the receipt from partial-error responses too.
+A request cancelled before returning a response may have made partial changes;
+inspect/reconcile state rather than assuming rollback. Receipts are not a durable
+transaction journal and do not promise restoration across reboot or lost responses.
+
+Android `changed` records targets for which a native write was attempted. Each
+successful target is re-read; failed or ignored writes produce an error result.
+No package availability observation proves it consumes CPU, and no resource
+configuration result promises measured performance gains.
+
+## Android provisioning hardware
+
+`provisionDevice.device.spec.configuration` accepts `memoryMb`, `cpuCores`,
+`gpuMode`, `screenWidth`, `screenHeight`, `screenDensity`, `cameraFront`,
+`cameraBack`, `audioInput`, and `audioOutput`. These persist in the AVD configuration
+before boot. GPU modes are `auto`, `host`, `software`, `swiftshader`, `lavapipe`,
+and `swangle`; actual backend availability depends on the installed emulator and
+host. Camera values are `none` or `emulated`. Existing modern Play-image minimum
+memory checks remain in effect. Replay can reconcile hardware only while the
+AVD is stopped; a mismatched running device is an identity conflict.
+
+Headless launch controls the window independently of audio.
+`AUTOMOBILE_EMULATOR_AUDIO=false` passes `-no-audio`; otherwise the emulator and
+AVD audio settings apply. `AUTOMOBILE_EMULATOR_HEADLESS` retains its existing
+platform defaults. This changes the old implicit headless-audio-off behavior.
+Audio-dependent workflows can now run headless.
+
+Further Android work and the measurement protocol are tracked in
+[Android emulator optimization](android-emulator-optimization.md).

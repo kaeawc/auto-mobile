@@ -1629,6 +1629,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.throwIfLaunchCancelled(avdName, isCancelled);
   }
 
+  private emulatorAudioArguments(): string[] {
+    return process.env.AUTOMOBILE_EMULATOR_AUDIO === "false" ? ["-no-audio"] : [];
+  }
+
   private async startEmulatorProcess(
     avdName: string,
     requestedExtraArgs?: readonly string[],
@@ -1691,8 +1695,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       `Emulator display mode: ${headlessMode.headless ? "headless" : "windowed"} (${headlessMode.reason})`,
     );
     if (headlessMode.headless) {
-      args.push("-no-window", "-no-audio");
+      args.push("-no-window");
     }
+    args.push(...this.emulatorAudioArguments());
     const extraArgsRaw = process.env.AUTOMOBILE_EMULATOR_ARGS;
     if (requestedExtraArgs) {
       args.push(...requestedExtraArgs);

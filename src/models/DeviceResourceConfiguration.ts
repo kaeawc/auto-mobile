@@ -1,4 +1,5 @@
 import type { DeviceResourceStatus } from "./DeviceResource";
+import type { AndroidResourceRestoration } from "./AndroidResourceRestoration";
 import type { ConfigurableDeviceResource } from "./deviceResourceDescriptions";
 export type { ConfigurableDeviceResource } from "./deviceResourceDescriptions";
 
@@ -19,4 +20,6 @@ export interface DeviceResourceConfigurationResult {
   changed: ConfigurableDeviceResource[];
   /** Evidence covers this boot. Persistence is not inferred from a write. */
   verification: "current_boot";
+  /** Android prior overrides; pass to setDeviceResources.restore during this boot. */
+  restore?: AndroidResourceRestoration;
 }

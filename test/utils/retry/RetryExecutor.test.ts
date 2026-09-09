@@ -214,11 +214,12 @@ describe("DefaultRetryExecutor", () => {
       expect(removed).toBe(added);
     });
 
-    it("removes the abort listener when abort wins the race mid-sleep", async () => {
-      // Manual FakeTimer: the sleep never resolves, so the only way execute()
-      // settles is via the abort listener. This pins that `finally` runs after
-      // the race settles (a `return Promise.race` without `await` would remove
-      // the listener before it could fire and hang here).
+    it("removes the abort listener and clears the pending timeout when abort wins the race mid-sleep", async () => {
+      // Manual FakeTimer: the scheduled timeout never fires on its own, so the
+      // only way execute() settles is via the abort listener. This pins that
+      // `finally` runs after the race settles (a `return` without `await`
+      // would remove the listener/timeout before they could fire and hang
+      // here).
       const controller = new AbortController();
       const signal = controller.signal;
       let removed = 0;
@@ -236,7 +237,10 @@ describe("DefaultRetryExecutor", () => {
       );
 
       await Promise.resolve();
-      expect(timer.getPendingSleepCount()).toBe(1);
+      // The delay is scheduled via timer.setTimeout (not timer.sleep), so it
+      // shows up as a pending timeout, not a pending sleep.
+      expect(timer.getPendingSleepCount()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(1);
 
       controller.abort();
       const result = await resultPromise;
@@ -245,21 +249,49 @@ describe("DefaultRetryExecutor", () => {
       expect(result.error?.message).toBe("Operation aborted");
       expect(result.attempts).toBe(1);
       expect(removed).toBe(1);
-      // The losing sleep stays registered on the fake timer; it is bounded
-      // (one per abort) and pre-existing behavior.
-      expect(timer.getPendingSleepCount()).toBe(1);
+      // #6707: the losing timer.setTimeout(...) must be cleared when abort
+      // wins the race, so no timer lingers past the aborted sleep. Previously
+      // this stayed at 1 (leaked) — the fix clears the handle unconditionally
+      // in `finally`.
+      expect(timer.getPendingTimeoutCount()).toBe(0);
     });
 
-    it("settles when the injected sleep aborts the signal synchronously", async () => {
-      // timer.sleep() is evaluated before the abort-promise executor runs, so a
-      // Timer that aborts synchronously must be caught by the recheck inside the
-      // executor; otherwise the listener registers after the event already fired
-      // and execute() never settles.
+    it("does not accumulate pending timers across many aborted retries", async () => {
+      // #6707: each aborted sleepUnlessAborted() call must clear its
+      // timer.setTimeout handle. Without the fix, every aborted retry leaks
+      // one pending timeout on the fake timer, so pending count grows
+      // unboundedly across executions; with the fix it stays at 0.
+      const executions = 25;
+      for (let i = 0; i < executions; i++) {
+        const controller = new AbortController();
+        const resultPromise = executor.execute(
+          async () => {
+            throw new Error("Retry");
+          },
+          { signal: controller.signal, delays: 100, maxAttempts: 3 },
+        );
+
+        await Promise.resolve();
+        controller.abort();
+        const result = await resultPromise;
+
+        expect(result.success).toBe(false);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(timer.getPendingSleepCount()).toBe(0);
+      }
+    });
+
+    it("settles when the injected setTimeout aborts the signal synchronously", async () => {
+      // timer.setTimeout() is evaluated before the abort-listener registration
+      // below it, so a Timer that aborts synchronously as a side effect of
+      // scheduling must be caught by the recheck inside the executor;
+      // otherwise the listener registers after the event already fired and
+      // execute() never settles.
       const controller = new AbortController();
       class SyncAbortingTimer extends FakeTimer {
-        override sleep(ms: number): Promise<void> {
+        override setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
           controller.abort();
-          return super.sleep(ms);
+          return super.setTimeout(callback, ms);
         }
       }
       const abortingExecutor = new DefaultRetryExecutor(new SyncAbortingTimer());

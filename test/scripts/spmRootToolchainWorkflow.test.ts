@@ -41,6 +41,19 @@ describe("root SPM toolchain floor workflow", () => {
     expect(runsOn).toContain("|| matrix.os");
   });
 
+  test("isolates installer side effects on the persistent runner", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const steps = loadJobSteps(".github/workflows/pull_request.yml", "installer-minimal");
+    const fixture = stepNamed(steps, "Confirm clean installer fixture");
+    const cleanup = stepNamed(steps, "Remove generated project MCP configuration");
+
+    expect(jobs["installer-minimal"]?.env?.AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION).toBe("true");
+    expect(fixture?.run).toContain("test ! -e .mcp.json");
+    expect(cleanup?.run).toContain(".mcpServers[\"auto-mobile\"]");
+    expect(cleanup?.run).toContain("rm -f .mcp.json");
+    expect(cleanup?.run).not.toContain("uninstall.sh");
+  });
+
   test("pins the Swift package matrix to its configured Xcode floor", () => {
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "ios-swift-packages");
     const selectXcode = stepNamed(steps, "Select Xcode ${{ matrix.config.xcode }}");

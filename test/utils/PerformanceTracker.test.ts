@@ -157,6 +157,85 @@ describe("PerformanceTracker", function () {
       expect(timings).toHaveLength(1);
       expect(timings[0].name).toBe("unclosed");
     });
+
+    // Issue #6706: a single mutable `current` cursor, shared ambiently across
+    // concurrent branches, misparents timings when one branch opens a nested
+    // block while a sibling branch is still in flight on the same tracker.
+    describe("concurrent branches (issue #6706)", function () {
+      test("a branch opening a nested block does not misparent a concurrent sibling's timing", async function () {
+        tracker.parallel("root");
+
+        // Branch A gets its own independent cursor, anchored to whatever is
+        // current right now ("root"). Opening a nested block on the fork
+        // must not move the tracker's own cursor out from under branch B.
+        const branchA = tracker.fork();
+        const parkedA = deferred();
+        let endedA = false;
+
+        const branchAPromise = (async () => {
+          branchA.serial("A-child");
+          await parkedA.promise;
+          branchA.end();
+          endedA = true;
+        })();
+
+        // Branch A has opened "A-child" and is now parked awaiting
+        // parkedA.promise -- it has NOT called end() yet. Branch B runs to
+        // completion on the ORIGINAL tracker while that block is still open.
+        expect(endedA).toBe(false);
+        tracker.trackSync("B", () => {
+          fakeTimer.advanceTime(1);
+        });
+
+        // Release branch A and let it close its own block.
+        parkedA.resolve();
+        await branchAPromise;
+        expect(endedA).toBe(true);
+
+        tracker.end(); // close "root"
+
+        const timings = tracker.getTimings() as TimingEntry[];
+        expect(timings).toHaveLength(1);
+
+        const root = timings[0];
+        expect(root.name).toBe("root");
+        const rootChildren = root.children as Record<string, TimingEntry>;
+        expect(Array.isArray(rootChildren)).toBe(false);
+
+        // B must be root's sibling entry, not nested inside A-child.
+        expect(Object.keys(rootChildren).sort()).toEqual(["A-child", "B"]);
+
+        const aChild = rootChildren["A-child"];
+        expect(aChild).toBeDefined();
+        const aChildChildren = aChild.children as TimingEntry[];
+        expect(Array.isArray(aChildChildren)).toBe(true);
+        expect(aChildChildren).toHaveLength(0);
+
+        expect(rootChildren["B"]).toBeDefined();
+        expect(rootChildren["B"].name).toBe("B");
+      });
+
+      test("ending a fork does not close a block owned by the tracker it was forked from", function () {
+        tracker.parallel("root");
+        const branchA = tracker.fork();
+
+        // The fork never opened anything of its own, so it is already at its
+        // floor ("root"). end() on it must be a no-op rather than reaching
+        // past its floor and closing "root" out from under the tracker that
+        // produced it.
+        branchA.end();
+        branchA.end();
+
+        tracker.trackSync("stillInsideRoot", () => {});
+        tracker.end();
+
+        const timings = tracker.getTimings() as TimingEntry[];
+        expect(timings).toHaveLength(1);
+        expect(timings[0].name).toBe("root");
+        const rootChildren = timings[0].children as Record<string, TimingEntry>;
+        expect(Object.keys(rootChildren)).toEqual(["stillInsideRoot"]);
+      });
+    });
   });
 
   describe("NoOpPerformanceTracker", function () {
@@ -496,4 +575,16 @@ async function trackWithDelay(
   });
   timer.advanceTime(ms);
   await promise;
+}
+
+/**
+ * A promise plus its own resolve function, for parking a branch mid-flight
+ * without relying on real timers.
+ */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }

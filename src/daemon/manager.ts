@@ -30,6 +30,7 @@ import {
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_DELAY_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
   DEFAULT_DAEMON_PORT,
@@ -1795,7 +1796,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Failing loudly here, naming the orphan, is strictly better than that.
     await this.assertNoSurvivingDaemonBeforeRestart(restartOptions);
     // Wait a bit before starting
-    await this.timer.sleep(1000);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     await this.start(restartOptions);
   }
 

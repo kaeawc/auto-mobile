@@ -226,6 +226,16 @@ export const DAEMON_SHUTDOWN_TIMEOUT_MS = 10000;
 /** Stable control-socket error used to signal a retryable shutdown transition. */
 export const DAEMON_SHUTTING_DOWN_ERROR_MESSAGE = "Daemon is shutting down";
 
+/** Deliberate no-process/no-lock pause between explicit restart stop and start. */
+export const DAEMON_RESTART_HANDOFF_DELAY_MS = 1_000;
+
+/**
+ * How long a recovering proxy preserves an explicit restart's empty handoff
+ * before it may auto-start a replacement itself. Keep headroom beyond the
+ * manager's deliberate delay for scheduling and readiness polling.
+ */
+export const DAEMON_RESTART_HANDOFF_TIMEOUT_MS = DAEMON_RESTART_HANDOFF_DELAY_MS + 500;
+
 /**
  * Minimum age (ms since startedAt) before the proxy will restart a daemon on
  * version mismatch. Prevents thrash when concurrent agents on different versions

@@ -4,7 +4,11 @@ import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
+  DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_VERSION,
+} from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -301,8 +305,14 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       manager.statusResult = { running: false };
       await timer.advanceTimeAsync(100);
 
+      expect(manager.startCalled).toBe(false);
+      expect(replacementDaemon.nextIndex()).toBe(0);
+
+      daemonAvailable = true;
+      await timer.advanceTimeAsync(100);
+
       await expect(reacquired).resolves.toEqual(deviceStartResult(M2));
-      expect(manager.startCalled).toBe(true);
+      expect(manager.startCalled).toBe(false);
       expect(replacementDaemon.nextIndex()).toBe(1);
       expect(sessionManager.getSession(M2)?.hasReceivedHeartbeat).toBe(true);
     } finally {
@@ -346,6 +356,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
 
       manager.statusResult = { running: false };
       await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS);
+      await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
 
       await expect(reacquired).resolves.toEqual(deviceStartResult(M2));
       expect(manager.startCalled).toBe(true);

@@ -18,6 +18,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
 } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -1933,9 +1934,10 @@ describe("DaemonMcpProxy", () => {
       const manager = matchingDaemonManager();
       const timer = new FakeTimer();
       let availabilityChecks = 0;
+      let successorAvailable = false;
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
         availabilityChecks += 1;
-        return availabilityChecks === 1;
+        return availabilityChecks === 1 || successorAvailable;
       });
 
       const proxy = new DaemonMcpProxy({
@@ -1957,9 +1959,116 @@ describe("DaemonMcpProxy", () => {
         manager.statusResult = { running: false };
         await timer.advanceTimeAsync(100);
 
+        expect(timer.getPendingSleeps()).toEqual([100]);
+        expect(manager.startCalled).toBe(false);
+        expect(freshClient.connectCallCount).toBe(0);
+
+        successorAvailable = true;
+        await timer.advanceTimeAsync(100);
+
         await expect(recovery).resolves.toEqual(recoveredResult);
         expect(quiescedClient.closeCallCount).toBe(1);
-        expect(manager.startCalled).toBe(true);
+        expect(manager.startCalled).toBe(false);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { text: "Button" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("waits through a successor startup lock when auto-start is disabled (#6336)", async () => {
+      const recoveredResult = { content: [{ type: "text", text: "joined successor" }] };
+      const quiescedClient = new ScriptedDaemonClient({
+        toolError: new DaemonShuttingDownError(),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        toolResult: recoveredResult,
+      });
+      const clients = [quiescedClient, freshClient];
+      const manager = matchingDaemonManager();
+      const timer = new FakeTimer();
+      let availabilityChecks = 0;
+      let successorAvailable = false;
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
+        availabilityChecks += 1;
+        return availabilityChecks === 1 || successorAvailable;
+      });
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: manager,
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        const recovery = proxy.callTool("tapOn", { text: "Button" });
+        for (let i = 0; i < 20 && timer.getPendingSleepCount() === 0; i++) {
+          await Promise.resolve();
+        }
+
+        manager.statusResult = { running: false };
+        await timer.advanceTimeAsync(100);
+        manager.startupLockHeldByLiveProcess = true;
+        await timer.advanceTimeAsync(100);
+
+        expect(timer.getPendingSleeps()).toEqual([100]);
+        expect(freshClient.connectCallCount).toBe(0);
+
+        successorAvailable = true;
+        await timer.advanceTimeAsync(100);
+
+        await expect(recovery).resolves.toEqual(recoveredResult);
+        expect(manager.startCalled).toBe(false);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { text: "Button" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("bounds an empty restart handoff before auto-starting a replacement (#6336)", async () => {
+      const recoveredResult = { content: [{ type: "text", text: "self-started replacement" }] };
+      const quiescedClient = new ScriptedDaemonClient({
+        toolError: new DaemonShuttingDownError(),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        toolResult: recoveredResult,
+      });
+      const clients = [quiescedClient, freshClient];
+      const manager = matchingDaemonManager();
+      const timer = new FakeTimer();
+      let availabilityChecks = 0;
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
+        availabilityChecks += 1;
+        return availabilityChecks === 1;
+      });
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: manager,
+        autoStartDaemon: true,
+        timer,
+      });
+
+      try {
+        const recovery = proxy.callTool("tapOn", { text: "Button" });
+        for (let i = 0; i < 20 && timer.getPendingSleepCount() === 0; i++) {
+          await Promise.resolve();
+        }
+
+        manager.statusResult = { running: false };
+        await timer.advanceTimeAsync(100);
+        expect(manager.startCalled).toBe(false);
+
+        await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
+
+        await expect(recovery).resolves.toEqual(recoveredResult);
+        expect(manager.startCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
           { toolName: "tapOn", params: { text: "Button" } },
         ]);

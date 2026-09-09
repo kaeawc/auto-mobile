@@ -7,6 +7,7 @@ import {
   DefaultIOSCtrlProxyBundleDownloader,
   assertZipEntriesContained,
 } from "../../src/utils/IOSCtrlProxyBundleDownloader";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function () {
   let tempDir: string;
@@ -89,6 +90,36 @@ describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function (
 
       // The traversal target must not have been written to the parent directory.
       await expect(fs.access(path.join(tempDir, "escapee.txt"))).rejects.toThrow();
+    });
+
+    test("does not block the event loop during extraction (#6574)", async function () {
+      const zip = new AdmZip();
+      for (let i = 0; i < 30; i++) {
+        zip.addFile(`Build/Products/file-${i}.bin`, Buffer.from("x".repeat(20_000)));
+      }
+      const bundlePath = path.join(tempDir, "bundle.zip");
+      await fs.writeFile(bundlePath, zip.toBuffer());
+
+      const destination = path.join(tempDir, "extract");
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader();
+
+      // Real wall-clock timer (not a fake): this test proves actual OS-thread
+      // yielding, which a logical/fake clock cannot observe.
+      let ticks = 0;
+      const interval = defaultTimer.setInterval(() => {
+        ticks++;
+      }, 1);
+
+      try {
+        await downloader.extractBundle(bundlePath, destination);
+      } finally {
+        defaultTimer.clearInterval(interval);
+      }
+
+      // A macrotask timer scheduled before extractBundle must get a chance to
+      // run WHILE extraction is in flight, proving the main event loop was
+      // never monopolized by synchronous decompress/write work (issue #6574).
+      expect(ticks).toBeGreaterThan(0);
     });
   });
 });

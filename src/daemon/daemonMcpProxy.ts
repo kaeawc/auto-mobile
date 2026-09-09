@@ -20,6 +20,7 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
 } from "./constants";
 import { PROGRESS_NOTIFICATION_METHOD, type DaemonNotification, type DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
@@ -1150,16 +1151,39 @@ export class DaemonMcpProxy {
 
   private async waitForDaemonShutdownRestartWindow(): Promise<void> {
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
-    const deadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    let deadline =
+      this.timer.now() + Math.max(DAEMON_STARTUP_TIMEOUT_MS, DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
+    let emptyHandoffDeadline: number | undefined;
     while (!this.closing && this.timer.now() < deadline) {
       if (await DaemonClient.isAvailable(socketPath)) {
         return;
       }
       const status = await this.daemonManager.status();
-      if (!status.running || this.daemonManager.isStartupLockHeldByLiveProcess()) {
+      const startupLockHeld = this.daemonManager.isStartupLockHeldByLiveProcess();
+      if (startupLockHeld && this.config.autoStartDaemon) {
+        // doConnect() may now join the lock holder through DaemonManager.start().
         return;
       }
-      await this.timer.sleep(Math.min(100, deadline - this.timer.now()));
+      if (startupLockHeld || status.running) {
+        // A successor has begun publishing ownership. Clients with auto-start
+        // disabled cannot join its lock, so keep their barrier active until its
+        // socket becomes reachable under the overall startup deadline.
+        emptyHandoffDeadline = undefined;
+      } else {
+        // Explicit restart deliberately leaves no PID and no startup lock while
+        // it pauses between stop and start. Preserve that handoff instead of
+        // racing to start a daemon with this proxy's potentially different
+        // options.
+        emptyHandoffDeadline ??= this.timer.now() + DAEMON_RESTART_HANDOFF_TIMEOUT_MS;
+        // A short startup-timeout override must not truncate the complete
+        // bounded restart preflight after the empty handoff is first observed.
+        deadline = Math.max(deadline, emptyHandoffDeadline);
+        if (this.timer.now() >= emptyHandoffDeadline) {
+          return;
+        }
+      }
+      const waitDeadline = emptyHandoffDeadline ?? deadline;
+      await this.timer.sleep(Math.min(100, waitDeadline - this.timer.now()));
     }
   }
 
@@ -1624,8 +1648,12 @@ export class DaemonMcpProxy {
     this.connectionClosedUnsubscribe?.();
     this.connectionClosedUnsubscribe = client.onConnectionClosed(() => {
       if (this.client === client) {
-        void this.resetConnection();
+        // EOF is the only connection-wide shutdown signal an idle proxy receives,
+        // and a subscribed release notification can be lost while the old socket
+        // drains. Arm the same successor barrier before reset detaches this client.
+        this.waitForDaemonShutdownDisconnect();
         this.completeDaemonShutdownDisconnect();
+        void this.resetConnection();
       }
     });
   }

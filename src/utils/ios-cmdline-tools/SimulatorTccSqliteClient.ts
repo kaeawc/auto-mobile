@@ -55,6 +55,20 @@ export interface SimulatorTccSqliteClientDependencies {
 
 const nodeFileSystem: TccDatabaseFileSystem = { stat };
 
+/**
+ * Resolve the CoreSimulator device set root: `CORESIMULATOR_DEVICE_SET_PATH`
+ * when set, otherwise the default `~/Library/Developer/CoreSimulator/Devices`
+ * layout. Shared by every reader that needs a simulator's per-device data
+ * root (issue #6583) so the "honor a custom device set" fix lives in one
+ * place instead of being re-derived per call site.
+ */
+export function defaultDeviceSetRoot(homeDirectory: string): string {
+  const configured = process.env.CORESIMULATOR_DEVICE_SET_PATH?.trim();
+  return configured
+    ? configured
+    : join(homeDirectory, "Library", "Developer", "CoreSimulator", "Devices");
+}
+
 export function tccServiceForPermission(permission: string): string {
   return permission.startsWith("kTCCService")
     ? permission

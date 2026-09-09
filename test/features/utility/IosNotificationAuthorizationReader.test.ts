@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import * as path from "path";
 import {
   BulletinBoardAuthorizationReader,
   extractSectionDataBase64,
   parseSettingsFromNestedXml,
+  resolveDeviceDataRoot,
   type BulletinBoardReaderDeps,
 } from "../../../src/features/utility/ios/IosNotificationAuthorizationReader";
 
@@ -118,6 +120,81 @@ describe("parseSettingsFromNestedXml", () => {
       notificationCenterSetting: 2,
       pushSettings: 63,
     });
+  });
+
+  // Issue #6583: the archive's $objects array is a flat, order-dependent list
+  // that can contain more than one dict shaped like the settings dict. A decoy
+  // dict carrying only `authorizationStatus` (no sibling settings keys) must
+  // lose to the real settings dict that also carries `pushSettings`/`alertType`,
+  // even though the decoy appears first in document order.
+  test("selects the coherent settings dict, not the first authorizationStatus match", () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+\t<key>$archiver</key>
+\t<string>NSKeyedArchiver</string>
+\t<key>$objects</key>
+\t<array>
+\t\t<string>$null</string>
+\t\t<dict>
+\t\t\t<key>authorizationStatus</key>
+\t\t\t<integer>0</integer>
+\t\t</dict>
+\t\t<dict>
+\t\t\t<key>alertType</key>
+\t\t\t<integer>1</integer>
+\t\t\t<key>authorizationStatus</key>
+\t\t\t<integer>2</integer>
+\t\t\t<key>lockScreenSetting</key>
+\t\t\t<integer>2</integer>
+\t\t\t<key>notificationCenterSetting</key>
+\t\t\t<integer>2</integer>
+\t\t\t<key>pushSettings</key>
+\t\t\t<integer>63</integer>
+\t\t</dict>
+\t</array>
+</dict>
+</plist>`;
+    expect(parseSettingsFromNestedXml(xml)).toEqual({
+      authorizationStatus: 2,
+      alertType: 1,
+      lockScreenSetting: 2,
+      notificationCenterSetting: 2,
+      pushSettings: 63,
+    });
+  });
+});
+
+describe("resolveDeviceDataRoot", () => {
+  const original = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+  const restoreEnv = () => {
+    if (original === undefined) {
+      delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    } else {
+      process.env.CORESIMULATOR_DEVICE_SET_PATH = original;
+    }
+  };
+
+  test("honors CORESIMULATOR_DEVICE_SET_PATH when set", () => {
+    process.env.CORESIMULATOR_DEVICE_SET_PATH = "/custom/device-set";
+    try {
+      expect(resolveDeviceDataRoot(SIM_UDID, "/home/tester")).toBe(
+        path.join("/custom/device-set", SIM_UDID),
+      );
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test("falls back to the default CoreSimulator device set layout", () => {
+    delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    try {
+      expect(resolveDeviceDataRoot(SIM_UDID, "/home/tester")).toBe(
+        path.join("/home/tester", "Library", "Developer", "CoreSimulator", "Devices", SIM_UDID),
+      );
+    } finally {
+      restoreEnv();
+    }
   });
 });
 

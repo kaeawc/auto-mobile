@@ -3,11 +3,51 @@ import { GrantIosSimulatorPermissions } from "../../../src/features/action/Grant
 import {
   IosSimulatorPermissions,
   SqliteTccPermissionReader,
+  type IosSimulatorPrivacyClient,
   type SqliteCommandExecutor,
   type TccPermissionReader,
 } from "../../../src/features/action/IosSimulatorPermissions";
-import type { BootedDevice } from "../../../src/models";
+import type { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+
+const buildExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
+  stdout,
+  stderr,
+  toString: () => stdout,
+  trim: () => stdout.trim(),
+  includes: (value: string) => stdout.includes(value),
+});
+
+/**
+ * A privacy client whose `executeCommandArgs` calls never resolve on their
+ * own — the test resolves them one at a time via `resolveNext` — so ordering
+ * (does the next call start before or after the previous one resolves?) can
+ * be observed directly instead of inferred from timing (issue #6581).
+ */
+class DeferredPrivacyClient implements IosSimulatorPrivacyClient {
+  readonly startedArgs: string[][] = [];
+  private pending: Array<() => void> = [];
+
+  executeCommandArgs(args: string[]): Promise<ExecResult> {
+    this.startedArgs.push(args);
+    return new Promise<ExecResult>((resolve) => {
+      this.pending.push(() => resolve(buildExecResult("")));
+    });
+  }
+
+  /** Resolve the oldest still-pending call. Throws if none is pending. */
+  resolveNext(): void {
+    const next = this.pending.shift();
+    if (!next) {
+      throw new Error("no pending executeCommandArgs call to resolve");
+    }
+    next();
+  }
+
+  get pendingCount(): number {
+    return this.pending.length;
+  }
+}
 
 const simulatorDevice: BootedDevice = {
   name: "iPhone 16",
@@ -164,6 +204,45 @@ describe("IosSimulatorPermissions", () => {
         timeoutMs: undefined,
       },
     ]);
+  });
+
+  test("serializes per-permission simctl privacy calls for the same device (issue #6581)", async () => {
+    const deferred = new DeferredPrivacyClient();
+    const action = new IosSimulatorPermissions(simulatorDevice, deferred);
+
+    const resultPromise = action.setPermissions("grant", "com.example.app", [
+      "camera",
+      "location",
+      "contacts",
+    ]);
+
+    // Only the first call should have started; the second must not start
+    // until the first's promise resolves.
+    expect(deferred.startedArgs).toEqual([
+      ["privacy", simulatorDevice.deviceId, "grant", "camera", "com.example.app"],
+    ]);
+
+    deferred.resolveNext();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deferred.startedArgs).toEqual([
+      ["privacy", simulatorDevice.deviceId, "grant", "camera", "com.example.app"],
+      ["privacy", simulatorDevice.deviceId, "grant", "location", "com.example.app"],
+    ]);
+
+    deferred.resolveNext();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deferred.startedArgs).toEqual([
+      ["privacy", simulatorDevice.deviceId, "grant", "camera", "com.example.app"],
+      ["privacy", simulatorDevice.deviceId, "grant", "location", "com.example.app"],
+      ["privacy", simulatorDevice.deviceId, "grant", "contacts", "com.example.app"],
+    ]);
+
+    deferred.resolveNext();
+    const result = await resultPromise;
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(3);
   });
 
   test("queries TCC permission state and reports unknown reset rows", async () => {

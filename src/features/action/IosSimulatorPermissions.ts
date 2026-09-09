@@ -211,26 +211,30 @@ export class IosSimulatorPermissions {
       };
     }
 
-    const results: IosSimulatorPermissionCommandResult[] = await Promise.all(
-      normalizedPermissions.map(async (permission) => {
-        try {
-          const result = await this.simctl.executeCommandArgs([
-            "privacy",
-            this.device.deviceId,
-            action,
-            permission,
-            normalizedAppId,
-          ]);
-          return { permission, success: true, stdout: result.stdout, stderr: result.stderr };
-        } catch (error) {
-          return {
-            permission,
-            success: false,
-            error: errorMessage(error),
-          };
-        }
-      }),
-    );
+    // Serialized (not Promise.all): concurrent `simctl privacy` invocations for
+    // the same device/app race each other against the simulator's shared
+    // TCC.db and against simctl's own app-relaunch side effect, producing
+    // spurious per-permission failures (issue #6581). One permission's grant
+    // must fully apply before the next one starts.
+    const results: IosSimulatorPermissionCommandResult[] = [];
+    for (const permission of normalizedPermissions) {
+      try {
+        const result = await this.simctl.executeCommandArgs([
+          "privacy",
+          this.device.deviceId,
+          action,
+          permission,
+          normalizedAppId,
+        ]);
+        results.push({ permission, success: true, stdout: result.stdout, stderr: result.stderr });
+      } catch (error) {
+        results.push({
+          permission,
+          success: false,
+          error: errorMessage(error),
+        });
+      }
+    }
 
     const failedCount = results.filter((result) => !result.success).length;
 

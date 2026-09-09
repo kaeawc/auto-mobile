@@ -404,6 +404,54 @@ describe("IOSCtrlProxyManager", function () {
     });
   });
 
+  describe("evict", function () {
+    test("stops the instance, deletes the map entry, and releases the port", async function () {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeDefined();
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockResolvedValue();
+
+      await IOSCtrlProxyManager.evict(testDevice.deviceId);
+
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      const second = IOSCtrlProxyManager.getInstance(testDevice);
+      expect(second).not.toBe(first);
+    });
+
+    test("leaves other devices' instances and port reservations untouched", async function () {
+      const otherDevice: BootedDevice = {
+        deviceId: "22222222-2222-2222-2222-222222222222",
+        platform: "ios",
+        name: "Other iPhone",
+      };
+      const evicted = IOSCtrlProxyManager.getInstance(testDevice);
+      const other = IOSCtrlProxyManager.getInstance(otherDevice);
+      spyOn(evicted as any, "forceStopForShutdown").mockResolvedValue();
+
+      await IOSCtrlProxyManager.evict(testDevice.deviceId);
+
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(PortManager.getPort(otherDevice.deviceId)).toBeDefined();
+      expect(IOSCtrlProxyManager.getInstance(otherDevice)).toBe(other);
+    });
+
+    test("is a no-op when no instance was ever constructed for the device id", async function () {
+      // No instance exists for this device after resetInstances() in beforeEach.
+      await expect(IOSCtrlProxyManager.evict(testDevice.deviceId)).resolves.toBeUndefined();
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+    });
+
+    test("still releases the port and clears the map entry when stopping fails", async function () {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      spyOn(first as any, "forceStopForShutdown").mockRejectedValue(new Error("stop failed"));
+
+      await IOSCtrlProxyManager.evict(testDevice.deviceId);
+
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
+    });
+  });
+
   describe("getServicePort", function () {
     test("should return default port 8765", function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);

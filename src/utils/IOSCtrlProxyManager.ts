@@ -456,6 +456,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
+   * Evict a single device's manager instance and its `PortManager` reservation.
+   * Call this from device teardown/destroy so a deleted-or-evicted device does
+   * not permanently retain a manager (and its two process supervisors) or a
+   * port reservation for the remainder of the daemon's lifetime (issue #6580).
+   * Safe to call for a device that was never constructed via `getInstance` —
+   * `PortManager.release` is a no-op when nothing is allocated for the id.
+   */
+  public static async evict(deviceId: string): Promise<void> {
+    const instance = IOSCtrlProxyManager.instances.get(deviceId);
+    if (instance) {
+      IOSCtrlProxyManager.instances.delete(deviceId);
+      try {
+        await instance.forceStopForShutdown();
+      } catch (error) {
+        logger.warn(
+          `[IOSCtrlProxy] Failed to stop instance ${deviceId} during eviction: ${errorMessage(error)}`,
+        );
+      }
+    }
+    PortManager.release(deviceId);
+  }
+
+  /**
    * Stop all active instances (for shutdown)
    */
   public static async shutdownAll(timer: Timer = defaultTimer): Promise<void> {

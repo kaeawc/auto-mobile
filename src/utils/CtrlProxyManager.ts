@@ -230,6 +230,18 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   /**
+   * Evict a single device's manager instance. Mirrors
+   * `IOSCtrlProxyManager.evict` so both platforms share the same per-device
+   * teardown seam (issue #6580) — call this from device teardown/destroy so a
+   * deleted device does not retain a manager for the daemon's lifetime.
+   * `AndroidCtrlProxyManager` holds no `PortManager` reservation, so deleting
+   * the map entry is the entire eviction.
+   */
+  public static evict(deviceId: string): void {
+    AndroidCtrlProxyManager.instances.delete(deviceId);
+  }
+
+  /**
    * Prefetch the accessibility service APK asynchronously.
    * Call this at server startup to warm the cache before first device connection.
    * This is a no-op if prefetch is already in progress or completed.

@@ -143,6 +143,36 @@ describe("CtrlProxyManager", function () {
       });
     }
   });
+
+  describe("evict", function () {
+    test("deletes the map entry so a subsequent getInstance constructs a fresh manager", function () {
+      const evicted = accessibilityServiceClient;
+
+      AndroidCtrlProxyManager.evict(testDevice.deviceId);
+
+      const fresh = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
+      expect(fresh).not.toBe(evicted);
+    });
+
+    test("leaves other devices' instances untouched", function () {
+      const otherDevice: BootedDevice = {
+        deviceId: "other-device",
+        platform: "android",
+        isEmulator: true,
+        name: "Other Device",
+      };
+      const other = AndroidCtrlProxyManager.getInstance(otherDevice, fakeAdbFactory);
+
+      AndroidCtrlProxyManager.evict(testDevice.deviceId);
+
+      expect(AndroidCtrlProxyManager.getInstance(otherDevice, fakeAdbFactory)).toBe(other);
+    });
+
+    test("is a no-op when no instance was ever constructed for the device id", function () {
+      expect(() => AndroidCtrlProxyManager.evict("never-constructed-device")).not.toThrow();
+    });
+  });
+
   describe("isInstalled", function () {
     test("should return true when accessibility service package is installed", async function () {
       fakeAdb.setCommandResponse(

@@ -40,6 +40,7 @@ import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -7000,6 +7001,16 @@ export function registerDeviceTools() {
                 ? target.device.name
                 : (target.device.deviceId ?? args.target.stableId),
             );
+            // Evict the CtrlProxy manager instance and (iOS) its PortManager
+            // reservation for this device id regardless of whether it was
+            // booted, so a deleted device never permanently retains either
+            // (issue #6580).
+            const evictedDeviceId = target.device.deviceId ?? args.target.stableId;
+            if (target.device.platform === "ios") {
+              await IOSCtrlProxyManager.evict(evictedDeviceId);
+            } else {
+              AndroidCtrlProxyManager.evict(evictedDeviceId);
+            }
           },
           verify: async (state, stop) => {
             if (state.earlyResponse) {

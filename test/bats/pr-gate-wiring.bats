@@ -160,6 +160,23 @@ wiring_requires_yq() {
   [[ "$(job_block bats-integration-tests "$workflow")" == *"scripts/ci/run-bats.sh integration"* ]]
 }
 
+@test "macOS MCP build coverage runs after merge instead of on pull requests" {
+  wiring_requires_yq
+  local pr_mcp merge_mcp
+  pr_mcp="$(job_block mcp-build-and-test)"
+  merge_mcp="$(job_block mcp-build-and-test .github/workflows/merge.yml)"
+
+  [[ "$pr_mcp" == *"windows-latest"* ]]
+  [[ "$pr_mcp" != *"macos-latest"* ]]
+  [[ "$merge_mcp" == *"macos-latest"* ]]
+  [[ "$merge_mcp" == *"scripts/ci/install-bun-deps.sh"* ]]
+  [[ "$merge_mcp" == *"bash scripts/test-ts.sh unit"* ]]
+
+  run yq -r '.jobs.mcp-build-and-test.strategy.matrix.os[]' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "windows-latest" ]
+}
+
 @test "nightly preserves the moved macOS portable test lanes" {
   local workflow=".github/workflows/nightly.yml"
   local bats_unit bats_integration unit host

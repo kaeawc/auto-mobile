@@ -893,9 +893,9 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
-          # - macos-latest
-          # Disabled on merge cleanup: flaky timeout in Bun tests and not required for release/docs publishing.
+          # Keep the PR-required Windows lane off scarce macOS runners; this
+          # post-merge lane preserves macOS coverage without extending PR merge time.
+          - macos-latest
           # - windows-latest
           # Disabled on merge cleanup: expensive and not required for release/docs publishing.
     steps:
@@ -913,7 +913,22 @@ jobs:
             turbo-${{ matrix.os }}-${{ hashFiles('bun.lock') }}-
             turbo-${{ matrix.os }}-
 
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run complete unit lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
+        run: bash scripts/test-ts.sh unit
 
       - name: "Run Lint"
         env:

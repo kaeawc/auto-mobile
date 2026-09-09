@@ -9,9 +9,13 @@ import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeou
 function resetSimctlCaches(): void {
   const simctlClass = Simctl as unknown as {
     deviceListCache: { devices: unknown[]; timestamp: number } | null;
+    lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
+    inFlightDeviceList: Promise<unknown[]> | null;
     simulatorBoots: Map<string, unknown>;
   };
   simctlClass.deviceListCache = null;
+  simctlClass.lastGoodDeviceList = null;
+  simctlClass.inFlightDeviceList = null;
   simctlClass.simulatorBoots.clear();
 }
 
@@ -879,6 +883,93 @@ describe("Simctl", function () {
       expect(unavailable?.availabilityError).toBe("runtime missing");
       expect(unavailable?.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-17-4");
       expect(unavailable?.iosVersion).toBe("17.4");
+    });
+
+    test("coalesces concurrent calls with a cold cache onto one simctl invocation", async function () {
+      let listCalls = 0;
+      let resolveList!: (payload: string) => void;
+      const payload = simulatorListPayload([
+        { udid: "test-ios-device-id", name: "iPhone 17", state: "Booted", isAvailable: true },
+      ]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return await new Promise<ExecResult>((resolve) => {
+            resolveList = (stdout: string) => resolve(createExecResult(stdout, ""));
+          });
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      const first = simctl.listSimulatorImages();
+      const second = simctl.listSimulatorImages();
+
+      await waitForCondition(() => resolveList !== undefined, "simctl list invocation");
+      resolveList(payload);
+
+      const [firstDevices, secondDevices] = await Promise.all([first, second]);
+      expect(listCalls).toBe(1);
+      expect(firstDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+      expect(secondDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+    });
+
+    test("getBootedSimulatorsChecked reuses a fresh listSimulatorImages cache within the TTL", async function () {
+      const timer = new FakeTimer();
+      let listCalls = 0;
+      const payload = simulatorListPayload([
+        { udid: "test-ios-device-id", name: "iPhone 17", state: "Booted", isAvailable: true },
+      ]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return createExecResult(payload, "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      await simctl.listSimulatorImages();
+      expect(listCalls).toBe(1);
+
+      const booted = await simctl.getBootedSimulatorsChecked();
+      expect(listCalls).toBe(1);
+      expect(booted.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+    });
+
+    test("returns the last-good device list instead of throwing on a transient discovery failure", async function () {
+      const timer = new FakeTimer();
+      let listCalls = 0;
+      const payload = simulatorListPayload([
+        { udid: "test-ios-device-id", name: "iPhone 17", state: "Booted", isAvailable: true },
+      ]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          if (listCalls === 2) {
+            throw new Error("simctl list devices exploded");
+          }
+          return createExecResult(payload, "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      const firstDevices = await simctl.listSimulatorImages();
+      expect(firstDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+
+      // Expire the TTL cache so the next call re-invokes simctl, which fails.
+      timer.advanceTime(6_000);
+
+      const fallbackDevices = await simctl.listSimulatorImages();
+      expect(listCalls).toBe(2);
+      expect(fallbackDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
     });
   });
 

@@ -136,16 +136,19 @@ function isAndroidEmulatorSerial(deviceId: string): boolean {
 }
 
 /**
- * Parse `settings get system font_scale`. An unset value ("null"/empty) means the
+ * Parse `settings get system font_scale`. An unset value ("null") means the
  * device is at the AOSP default of 1.0; a malformed value yields `undefined` so
  * the caller does not fabricate a scale it could not read.
  */
 export function parseFontScale(raw: string): number | undefined {
   const value = raw.trim();
-  if (!value || value === "null") {
+  if (value === "null") {
     return DEFAULT_FONT_SCALE;
   }
-  const parsed = Number.parseFloat(value);
+  if (!/^[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
@@ -156,7 +159,7 @@ export function parseFontScale(raw: string): number | undefined {
  */
 export function parseFontScaleSnapshot(raw: string): FontScaleInput | undefined {
   const value = raw.trim();
-  return !value || value === "null" ? "default" : parseFontScale(value);
+  return value === "null" ? "default" : parseFontScale(value);
 }
 
 /**
@@ -175,10 +178,25 @@ export function parseWmDensity(raw: string): {
   effective?: number;
   overridden: boolean;
 } {
-  const physicalMatch = raw.match(/Physical density:\s*(\d+)/i);
-  const overrideMatch = raw.match(/Override density:\s*(\d+)/i);
-  const physical = physicalMatch ? Number.parseInt(physicalMatch[1], 10) : undefined;
-  const override = overrideMatch ? Number.parseInt(overrideMatch[1], 10) : undefined;
+  const densities = new Map<string, number>();
+  for (const match of raw.matchAll(/^[ \t]*(Physical|Override) density:[ \t]*([^\r\n]*)/gim)) {
+    const kind = match[1].toLowerCase();
+    const value = match[2].trim();
+    const parsed = Number(value);
+    // A malformed override must not fall back to physical density and invent
+    // an absent override in the restoration payload (#6333).
+    if (
+      !/^\d+$/.test(value) ||
+      !Number.isSafeInteger(parsed) ||
+      parsed <= 0 ||
+      densities.has(kind)
+    ) {
+      return { effective: undefined, overridden: false };
+    }
+    densities.set(kind, parsed);
+  }
+  const physical = densities.get("physical");
+  const override = densities.get("override");
   const overridden = override !== undefined && Number.isFinite(override);
   return {
     ...(physical !== undefined && Number.isFinite(physical) ? { physical } : {}),
@@ -759,13 +777,7 @@ export class DisplayConfig {
     const errors: string[] = [];
     const expectedFontScale = input.reset ? "default" : input.fontScale;
     const appliedFontScale = postMutation.restorableValues.fontScale;
-    if (
-      expectedFontScale !== undefined &&
-      appliedFontScale !== expectedFontScale &&
-      // Android builds may report the reset setting as either absent or the
-      // effective AOSP default. Both represent a successfully reset state.
-      !(expectedFontScale === "default" && appliedFontScale === DEFAULT_FONT_SCALE)
-    ) {
+    if (expectedFontScale !== undefined && appliedFontScale !== expectedFontScale) {
       errors.push(
         `Font scale remained ${String(appliedFontScale)} after requesting ${String(expectedFontScale)}.`,
       );

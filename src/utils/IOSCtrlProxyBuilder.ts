@@ -478,8 +478,12 @@ export class IOSCtrlProxyBuilder {
 
       const injected = injectUITestEnvironment(root as Map<string, PlistValue>, env);
       if (injected === 0) {
+        const metadata = (root as Map<string, PlistValue>).get("__xctestrun_metadata__");
+        const formatVersion = metadata instanceof Map ? metadata.get("FormatVersion") : undefined;
+        const observedFormat = formatVersion === undefined ? "unknown" : String(formatVersion);
         throw new Error(
-          "xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner environment",
+          `xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner ` +
+            `environment (observed __xctestrun_metadata__.FormatVersion: ${observedFormat})`,
         );
       }
 

@@ -598,7 +598,7 @@ describe("IOSCtrlProxyBuilder", function () {
       expect(path.basename(outputPath)).toBe("automobile-runner-00008030-001E_28C1_1E.xctestrun");
     });
 
-    test("throws an actionable error when the xctestrun has no UI-test bundle (EC4)", async function () {
+    test("throws an actionable error naming the observed FormatVersion when the xctestrun has no UI-test bundle (EC4)", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
@@ -610,6 +610,8 @@ describe("IOSCtrlProxyBuilder", function () {
           "<dict>",
           "\t<key>CtrlProxyTests</key>",
           "\t<dict><key>IsUITestBundle</key><false/></dict>",
+          "\t<key>__xctestrun_metadata__</key>",
+          "\t<dict><key>FormatVersion</key><integer>1</integer></dict>",
           "</dict>",
           "</plist>",
         ].join("\n"),
@@ -619,6 +621,61 @@ describe("IOSCtrlProxyBuilder", function () {
       await expect(
         builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM"),
       ).rejects.toThrow("no UI-test bundle");
+      await expect(
+        builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM"),
+      ).rejects.toThrow("FormatVersion: 1");
+    });
+
+    test("injects into a FormatVersion 2 (TestConfigurations[].TestTargets[]) xctestrun", async function () {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
+      const V2_XCTESTRUN = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<plist version="1.0">',
+        "<dict>",
+        "\t<key>TestConfigurations</key>",
+        "\t<array>",
+        "\t\t<dict>",
+        "\t\t\t<key>TestTargets</key>",
+        "\t\t\t<array>",
+        "\t\t\t\t<dict>",
+        "\t\t\t\t\t<key>BlueprintName</key>",
+        "\t\t\t\t\t<string>CtrlProxyUITests</string>",
+        "\t\t\t\t\t<key>IsUITestBundle</key>",
+        "\t\t\t\t\t<true/>",
+        "\t\t\t\t\t<key>EnvironmentVariables</key>",
+        "\t\t\t\t\t<dict><key>TERM</key><string>dumb</string></dict>",
+        "\t\t\t\t</dict>",
+        "\t\t\t</array>",
+        "\t\t</dict>",
+        "\t</array>",
+        "\t<key>__xctestrun_metadata__</key>",
+        "\t<dict><key>FormatVersion</key><integer>2</integer></dict>",
+        "</dict>",
+        "</plist>",
+      ].join("\n");
+      await fs.writeFile(sourcePath, V2_XCTESTRUN);
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      const outputPath = await builder.writeRunnerEnvironment(
+        sourcePath,
+        { CTRL_PROXY_IOS_PORT: "8767" },
+        "SIM-UUID",
+      );
+
+      const xml = await fs.readFile(outputPath, "utf-8");
+      const root = (await parsePlist(xml)) as Map<string, unknown>;
+      const configurations = root.get("TestConfigurations") as unknown[];
+      const configuration = configurations[0] as Map<string, unknown>;
+      const testTargets = configuration.get("TestTargets") as unknown[];
+      const uiTarget = testTargets[0] as Map<string, unknown>;
+      const env = uiTarget.get("EnvironmentVariables") as Map<string, unknown>;
+      expect(env.get("CTRL_PROXY_IOS_PORT")).toBe("8767");
+      expect(env.get("TERM")).toBe("dumb");
     });
   });
 

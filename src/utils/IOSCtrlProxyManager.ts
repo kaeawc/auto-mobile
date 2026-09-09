@@ -238,6 +238,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Setup state tracking
   private attemptedSetup: boolean = false;
+  // #6575: the legacy-app uninstall probe is a one-time cleanup for a
+  // long-renamed bundle ID; gate it to at most once per manager instance so
+  // repeat setup() calls (including the attemptedSetup fast path) don't pay
+  // for a redundant external-process round trip.
+  private legacyCheckDone: boolean = false;
 
   // XCUITest process state
   private xcTestProcessId: number | null = null;
@@ -758,6 +763,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public resetSetupState(): void {
     this.attemptedSetup = false;
+    this.legacyCheckDone = false;
     this.clearCaches();
     logger.info("[IOSCtrlProxy] Reset setup state");
   }
@@ -1308,6 +1314,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * This cleans up the old bundle ID left over from before the rename to CtrlProxy.
    */
   private async uninstallLegacyAppIfPresent(): Promise<void> {
+    if (this.legacyCheckDone) {
+      return;
+    }
+    this.legacyCheckDone = true;
     try {
       const simulator = this.isSimulator();
       const isInstalled = await this.deviceAppManager.getInstalledAppBundleHash(

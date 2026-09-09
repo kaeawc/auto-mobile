@@ -56,8 +56,8 @@ const DEVICE_TYPE_PREFIX = "com.apple.CoreSimulator.SimDeviceType.";
 const RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
 
 /** CoreSimulator device families that expose BiometricKit (Touch ID / Face ID). */
-const BIOMETRIC_DEVICE_FAMILY_PATTERN = /^(iPhone|iPad)[-.]/i;
-const IOS_RUNTIME_PATTERN = /^iOS[-.]/i;
+const BIOMETRIC_DEVICE_FAMILY_PATTERN = /^(iPhone|iPad)[\s.-]/i;
+const IOS_RUNTIME_PATTERN = /^iOS[\s.-]/i;
 
 function stripPrefix(value: string, prefix: string): string {
   return value.startsWith(prefix) ? value.slice(prefix.length) : value;

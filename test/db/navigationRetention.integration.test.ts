@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { createTestDatabase } from "./testDbHelper";
 import type { Database } from "../../src/db/types";
@@ -235,6 +235,41 @@ describe("NavigationRetention prune", () => {
     expect(node?.screenshot_path).toBeNull();
     // The light node row itself survives.
     expect(node).toBeDefined();
+  });
+
+  test("a later-tier failure does not strand a screenshot already cleared and committed (#6650)", async () => {
+    const nodeId = await seedNode("Home", 100);
+    await repo.updateNodeScreenshotById(nodeId, "/tmp/shot-a.webp");
+
+    // Fail the transaction that runs AFTER the screenshot tier commits (the TTL
+    // tier is the 2nd db.transaction() of the pass). Under the single-transaction
+    // version this could not happen — a later failure rolled back the
+    // screenshot_path=null update too. With the chunked pass the SHORT tier has
+    // already committed the null pointer, so unless its file was unlinked BEFORE
+    // the later tier ran the file would be stranded on disk with no DB pointer
+    // left to rediscover it.
+    const originalTransaction = db.transaction.bind(db);
+    let txnCalls = 0;
+    const spy = spyOn(db, "transaction").mockImplementation(() => {
+      txnCalls += 1;
+      if (txnCalls >= 2) {
+        return {
+          execute: async () => {
+            throw new Error("simulated later-tier DB failure");
+          },
+        } as unknown as ReturnType<typeof db.transaction>;
+      }
+      return originalTransaction();
+    });
+
+    try {
+      await expect(retention().prune(10_000)).rejects.toThrow("simulated later-tier DB failure");
+      // The screenshot cleared in the SHORT tier was unlinked right after its own
+      // commit, before the failing tier ran — so it is NOT stranded.
+      expect(removed).toEqual(["/tmp/shot-a.webp"]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("keeps screenshot for a node in the active (protected) build", async () => {
@@ -561,5 +596,108 @@ describe("eviction active-row exclusion is relational (bounded bind params)", ()
       .execute();
     expect(survivors.length).toBe(300);
     expect(survivors.every((r) => r.last_seen_at === 10_000)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #6650: the pass must not hold the daemon's single connection in one
+// transaction for its entire duration. Each tier/eviction batch must open its
+// own short transaction so other queries can interleave between them.
+// ---------------------------------------------------------------------------
+describe("prune releases the connection between chunks (issue #6650)", () => {
+  let db: Kysely<Database>;
+  let repo: NavigationRepository;
+
+  beforeEach(async () => {
+    db = await createTestDatabase({ foreignKeys: true });
+    repo = new NavigationRepository(db);
+  });
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  /**
+   * Seeds one app, one (protected) build key, and `count` node observations on
+   * a single node so a small `evictionChunkSize` forces many LRU-cap eviction
+   * batches. The last-seeded observation has the greatest `last_seen_at` and is
+   * therefore the active/protected row (never evicted).
+   */
+  async function seedOverflowingApp(count: number): Promise<void> {
+    await repo.getOrCreateApp(APP);
+    const node = await repo.getOrCreateNode(APP, "Home", 1);
+    const bk = await repo.getOrCreateBuildKey(APP, 1, "h");
+    for (let i = 0; i < count; i++) {
+      await repo.recordNodeObservation(node.id, bk.id, "device-1", `s${i}`, 100 + i);
+    }
+  }
+
+  test("opens more than one transaction for a multi-batch pass (was: one txn for the whole pass)", async () => {
+    // 40 rows over budget (cap 1) with chunk 2 forces ~20 eviction batches, and
+    // the TTL / orphan-sweep tiers each need their own transaction too.
+    await seedOverflowingApp(40);
+    const retention = new NavigationRetention(db, {
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 1,
+      evictionChunkSize: 2,
+    });
+
+    const transactionSpy = spyOn(db, "transaction");
+    const summary = await retention.prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(39);
+    // A single-transaction pass (the pre-#6650 shape) calls db.transaction()
+    // exactly once for the whole pass. The chunked pass opens one short
+    // transaction per tier/batch, so this count must be > 1.
+    expect(transactionSpy.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  test("an unrelated read interleaves mid-pass instead of parking for the whole pass", async () => {
+    // A large overflow with a tiny chunk size makes the pass take many
+    // sequential eviction batches -- long enough that a bounded microtask
+    // drain (no real timers/sleeps) can reliably catch it still mid-flight.
+    await seedOverflowingApp(200);
+    const retention = new NavigationRetention(db, {
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 1,
+      evictionChunkSize: 1,
+    });
+
+    let pruneSettled = false;
+    const prunePromise = retention.prune(1_000_000).then((summary) => {
+      pruneSettled = true;
+      return summary;
+    });
+
+    let readSettled = false;
+    const readPromise = db
+      .selectFrom("navigation_build_keys")
+      .selectAll()
+      .execute()
+      .then((rows) => {
+        readSettled = true;
+        return rows;
+      });
+
+    // Bounded drain: give both promise chains a fixed number of microtask
+    // turns to progress, with no real timer/sleep involved. If the whole pass
+    // held one transaction (the bug), the read would still be parked behind
+    // it after this many turns, since 200 sequential eviction batches vastly
+    // outlast a single chunk's worth of turns (empirically: the read settles
+    // by turn ~96 once chunked, while the 200-batch pass itself is nowhere
+    // close to done at turn 150, let alone 5000 -- turn count here is a
+    // deliberately generous multiple of that observed margin, not a tuned
+    // exact threshold).
+    for (let i = 0; i < 150; i++) {
+      await Promise.resolve();
+    }
+
+    expect(readSettled).toBe(true); // the connection was released mid-pass
+    expect(pruneSettled).toBe(false); // ...while the pass itself keeps working
+
+    const summary = await prunePromise;
+    await readPromise;
+    expect(summary.nodeObservationsDeleted).toBe(199);
   });
 });

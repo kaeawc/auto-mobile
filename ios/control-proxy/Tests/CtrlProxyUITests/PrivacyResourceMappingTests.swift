@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class PrivacyResourceMappingTests: XCTestCase {
     func testProtectedResourceMapsSupportedPermissionNames() {
         let mappings: [(name: String, resource: XCUIProtectedResource)] = [
@@ -49,11 +50,13 @@ final class PrivacyResourceMappingTests: XCTestCase {
         }
     }
 
-    func testResetPermissionsSurfacesUnsupportedNamesAsStructuredFailures() {
-        let commandHandler = CommandHandler.createForTesting(
-            elementLocator: PrivacyResourceMappingElementLocator(),
-            gesturePerformer: GesturePerformer(elementLocator: PrivacyResourceMappingElementLocator()),
-            perfProvider: PerfProvider.createForTesting(timeProvider: FakeTimeProvider(initialTime: 1000))
+    func testResetPermissionsSurfacesUnsupportedNamesAsStructuredFailures() async {
+        let perf = PerfProvider()
+        let locator = ElementLocator(perf: perf)
+        let commandHandler = CommandHandler(
+            elementLocator: locator,
+            gesturePerformer: GesturePerformer(elementLocator: locator),
+            perf: perf
         )
 
         for name in ["siri", "motion", "unknown-permission"] {
@@ -63,7 +66,7 @@ final class PrivacyResourceMappingTests: XCTestCase {
                 permissions: [name]
             ))
 
-            guard let response = commandHandler.handle(request) as? WebSocketResponse else {
+            guard let response = await commandHandler.handle(request) as? WebSocketResponse else {
                 XCTFail("Expected WebSocketResponse for \(name)")
                 continue
             }
@@ -76,35 +79,5 @@ final class PrivacyResourceMappingTests: XCTestCase {
                 CommandError.invalidParameter("permission", name).localizedDescription
             )
         }
-    }
-}
-
-private final class PrivacyResourceMappingElementLocator: ElementLocating {
-    var foregroundBundleId: String?
-
-    func getViewHierarchy(disableAllFiltering _: Bool) throws -> ViewHierarchy {
-        throw CommandError.executionFailed("view hierarchy is not used by privacy resource mapping tests")
-    }
-
-    func findElement(byResourceId _: String) -> Any? {
-        nil
-    }
-
-    func findElement(byText _: String) -> Any? {
-        nil
-    }
-
-    func trackObservedBundleId(_: String) {}
-
-    func switchForegroundApp(bundleId: String) {
-        foregroundBundleId = bundleId
-    }
-
-    func getAppState(bundleId _: String) -> ObservedAppState {
-        .unknown
-    }
-
-    func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool {
-        false
     }
 }

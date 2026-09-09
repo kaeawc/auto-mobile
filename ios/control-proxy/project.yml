@@ -30,8 +30,8 @@ targets:
         INFOPLIST_FILE: CtrlProxyApp/Info.plist
         CODE_SIGN_STYLE: Automatic
     dependencies:
-      - target: CtrlProxy
-        embed: true
+      # The reference `CtrlProxy` framework was retired in Phase 7E; the app is only the
+      # UI-test host and constructs nothing, so it needs no proxy framework embedded.
       - target: ObjCExceptionCatcher
         embed: true
 
@@ -50,47 +50,23 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
 
-  CtrlProxy:
-    type: framework
-    platform: iOS
-    sources:
-      - path: Sources/CtrlProxy
-    dependencies:
-      - target: ObjCExceptionCatcher
-        embed: false
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.framework
-        DEFINES_MODULE: YES
-        CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: YES
-
-  CtrlProxyTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: Tests/CtrlProxyTests
-    dependencies:
-      - target: CtrlProxy
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.tests
-        CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: YES
-
+  # The production XCUITest runner. It compiles the Swift-6 rewrite (`Sources/CtrlProxyRewrite`)
+  # directly. The target name, runner app (`CtrlProxyUITests-Runner.app`), xctest bundle, and
+  # `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier are the stable
+  # contract the TS MCP integration + scripts drive. (The reference `CtrlProxy` framework +
+  # `CtrlProxyTests` targets were retired in Phase 7E; `CtrlProxyRewrite` is the sole impl.)
   CtrlProxyUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
       - path: Tests/CtrlProxyUITests
-      # Include CtrlProxy sources directly so XCTest is available during compilation
-      - path: Sources/CtrlProxy
-        excludes:
-          - "Fakes.swift"  # Exclude test-only fakes
+      # Compile the rewrite sources directly so XCTest/XCUIApplication are available to
+      # the `@MainActor` UI domain (the `#if canImport(XCTest) && os(iOS)` bodies).
+      - path: Sources/CtrlProxyRewrite
     dependencies:
       - target: CtrlProxyApp
-        # Note: We don't depend on CtrlProxy framework - sources are compiled directly into UI tests
-        # to give XCTest access for XCUIApplication
+        # Note: We don't depend on a CtrlProxy framework - sources are compiled directly
+        # into the UI tests to give XCTest access for XCUIApplication.
       # Must embed: the xctest bundle is loaded from CtrlProxyUITests-Runner.app, a
       # different bundle from CtrlProxyApp.app, so @rpath cannot reach the copy the
       # app embeds. Without this the runner dies at dlopen with
@@ -103,21 +79,26 @@ targets:
         TEST_TARGET_NAME: CtrlProxyApp
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
+        # Match the SPM CtrlProxyRewrite target's contract exactly: Swift 6 language
+        # mode with complete strict-concurrency (the project base is Swift 5 /
+        # `targeted`), and the iOS 17 platform floor the rewrite is built against
+        # (`OSAllocatedUnfairLock` etc.) so `CLANG_WARN_UNGUARDED_AVAILABILITY`
+        # doesn't flag 16/17-only APIs the project's 15.0 default would reject.
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
 schemes:
   CtrlProxyApp:
     build:
       targets:
         CtrlProxyApp: all
-        CtrlProxy: all
         ObjCExceptionCatcher: all
-        CtrlProxyTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - CtrlProxyTests
         - CtrlProxyUITests
     profile:
       config: Release

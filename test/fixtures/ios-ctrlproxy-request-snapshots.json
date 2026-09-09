@@ -5,7 +5,7 @@
     "Guarded from BOTH sides:",
     "  - test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts captures each snapshot LIVE from the",
     "    real TS builder and asserts deep equality with this file (requestId normalized to a placeholder).",
-    "  - ios/control-proxy/Tests/CtrlProxyTests/RequestSnapshotWireParityTests.swift decodes each snapshot",
+    "  - ios/control-proxy/Tests/CtrlProxyRewriteTests/WireDecodeParityTests.swift decodes each snapshot",
     "    through the real WebSocketRequest wire path and asserts every field lands on a same-named property",
     "    of the typed Swift payload struct with the same value.",
     "Do not edit by hand. Regenerate with:",

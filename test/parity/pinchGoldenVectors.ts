@@ -24,7 +24,7 @@ export const SWIFT_TEST_PATH = join(
   "ios",
   "control-proxy",
   "Tests",
-  "CtrlProxyTests",
+  "CtrlProxyRewriteTests",
   "PinchGeometryTests.swift",
 );
 export const KOTLIN_TEST_PATH = join(

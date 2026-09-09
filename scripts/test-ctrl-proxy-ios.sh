@@ -73,7 +73,7 @@ else
 fi
 
 # Check Swift sources exist
-if [ -f "${CTRL_PROXY_IOS_DIR}/Sources/CtrlProxy/CtrlProxy.swift" ]; then
+if [ -f "${CTRL_PROXY_IOS_DIR}/Sources/CtrlProxyRewrite/CtrlProxy.swift" ]; then
     print_status 0 "CtrlProxy.swift source found"
 else
     print_status 1 "CtrlProxy.swift source not found"

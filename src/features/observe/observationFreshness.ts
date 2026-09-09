@@ -364,7 +364,7 @@ function resolveIdentityMismatch(
       category: "window_identity",
     };
   }
-  if (inputs.emptyFocusedWindow) {
+  if (inputs.emptyFocusedWindow && !inputs.missingForegroundWindow) {
     return {
       requestedAfter,
       actualTimestamp,

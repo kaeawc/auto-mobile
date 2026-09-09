@@ -223,6 +223,37 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
   return hasBounds;
 }
 
+function isEmptyFocusedWindow(result: ObserveResult): boolean {
+  if (!result.activeWindow?.appId || !result.elements) {
+    return false;
+  }
+  const focused = result.viewHierarchy?.windows?.find((window) => window.isFocused)?.bounds ?? {
+    top: 0,
+    bottom: Infinity,
+    left: -Infinity,
+    right: Infinity,
+  };
+  // Native snapshots aggregate all windows and do not label individual nodes with
+  // their package. Restrict content to the focused window and exclude system bars,
+  // so a clock/icon sibling cannot certify an empty application window (#6352).
+  const systemSurface = SYSTEM_UI_WINDOW_PACKAGES.has(result.activeWindow.appId);
+  const insets = systemSurface ? { top: 0, bottom: 0 } : result.systemInsets;
+  const top = Math.max(focused.top, insets.top);
+  const bottom = Math.min(
+    focused.bottom,
+    (result.viewHierarchy?.screenHeight ?? Infinity) - insets.bottom,
+  );
+  return Object.values(result.elements).every((elements) =>
+    elements.every(
+      ({ bounds }) =>
+        bounds.bottom <= top ||
+        bounds.top >= bottom ||
+        bounds.right <= focused.left ||
+        bounds.left >= focused.right,
+    ),
+  );
+}
+
 /**
  * Synchronous counterpart to the async, device-confirmed status-bar-only gate
  * below (issue #6220): `activeWindow.appId` is empty even after every
@@ -785,11 +816,7 @@ export class RealObserveScreen implements ObserveScreen {
         // A matching package and recent timestamp do not verify an empty first-run
         // capture (#6352). Use all content collections, not just clickable controls:
         // text-only and media-only screens remain valid. This runs before caching.
-        emptyFocusedWindow:
-          this.device.platform === "android" &&
-          Boolean(result.activeWindow?.appId) &&
-          result.elements !== undefined &&
-          Object.values(result.elements).every((elements) => elements.length === 0),
+        emptyFocusedWindow: this.device.platform === "android" && isEmptyFocusedWindow(result),
         // The SETTLED/confirmed foreground, not the initial parallel sample: during an
         // A→B transition the initial sample can still read A while the hierarchy and the
         // confirming read are already on B, and comparing against stale A would retract a

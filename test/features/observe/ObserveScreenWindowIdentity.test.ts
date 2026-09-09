@@ -96,6 +96,52 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(recovered.freshness?.isFresh).toBe(true);
   });
 
+  test("a status-bar sibling cannot verify an empty focused app (#6352)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_700_000_000_000);
+    const viewHierarchy = new FakeViewHierarchy();
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+    const bounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(timer.now()),
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      windows: [{ id: 1, type: 1, isFocused: true, bounds }],
+      hierarchy: {
+        node: [{ bounds }, { text: "12:34", bounds: { left: 0, top: 0, right: 200, bottom: 60 } }],
+      },
+    } as any);
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+    expect(result.elements?.text).toHaveLength(1);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("capture is incomplete");
+    for (const content of [
+      { text: "Welcome" },
+      { clickable: true },
+      { className: "android.widget.ImageView" },
+    ]) {
+      viewHierarchy.configureHierarchy({
+        ...calendarHierarchy(timer.now()),
+        systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+        windows: [{ id: 1, type: 1, isFocused: true, bounds }],
+        hierarchy: {
+          node: [
+            { ...content, bounds: { left: 0, top: 100, right: 100, bottom: 200 } },
+            { text: "12:34", bounds: { left: 0, top: 0, right: 200, bottom: 60 } },
+          ],
+        },
+      } as any);
+      const recovered = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+        skipScreenshot: true,
+        skipBackStack: true,
+      });
+      expect(recovered.freshness?.verified).toBe(true);
+    }
+  });
+
   afterEach(() => {
     resetObserveCacheStore();
   });

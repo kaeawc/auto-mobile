@@ -40,6 +40,23 @@ describe("ClearText Android ADB fallback", () => {
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   });
 
+  const noFocusedFieldObserve = (): ObserveResult => ({
+    timestamp: Date.now(),
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          $: {
+            class: "android.widget.TextView",
+            focused: "false",
+            text: "Home",
+          },
+        },
+      },
+    },
+  });
+
   const runClearText = (observeResult: ObserveResult) => {
     const clearText = new ClearText(device, fakeAdb as any);
     observedSpy = spyOn(
@@ -71,6 +88,16 @@ describe("ClearText Android ADB fallback", () => {
     const result = await runClearText(focusedFieldObserve("hello"));
 
     expect(result.success).toBe(true);
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("rejects an accessibility success when no editable field is focused", async () => {
+    const result = await runClearText(noFocusedFieldObserve());
+
+    expect(result).toEqual({
+      success: false,
+      error: "No focused editable node found",
+    });
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 

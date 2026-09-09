@@ -149,6 +149,16 @@ export class ClearText extends BaseVisualChange {
    * Falls back to ADB delete key events if a11y service is unavailable.
    */
   private async executeAndroidClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
+    if (
+      observeResult.viewHierarchy &&
+      !hasFocusedTextInput(observeResult.viewHierarchy, this.parser)
+    ) {
+      return {
+        success: false,
+        error: "No focused editable node found",
+      };
+    }
+
     // Use accessibility service (fastest method, ~50-80ms vs ~200-500ms for ADB deletes)
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestClearText();

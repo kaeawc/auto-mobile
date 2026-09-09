@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pruneLogFiles } from "../../src/utils/logPruner";
@@ -148,19 +148,27 @@ describe("logPruner daemon-launch inherited-fd guard (issue #6194)", () => {
   test("DOES prune daemon-launch-<dead manager pid>.log once no daemon is running", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
+      const liveLaunchLog = "daemon-launch-9999.log";
       await writeFile(path.join(dir, launchLog), "old bootstrap output");
+      await writeFile(path.join(dir, liveLaunchLog), "live manager output");
+      const deadStats = await stat(path.join(dir, launchLog));
+      const liveStats = await stat(path.join(dir, liveLaunchLog));
 
       await pruneLogFiles({
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
-        isProcessAlive: () => false, // manager exited
+        abandonedMaxAgeMs: 1000,
+        // Derive the sweep clock from recorded mtimes so both files are stale
+        // regardless of Windows filesystem and wall-clock precision differences.
+        now: Math.max(deadStats.mtimeMs, liveStats.mtimeMs) + 2000,
+        isProcessAlive: (pid) => pid === 9999, // only manager 4242 exited
         isDaemonRunning: () => false, // no daemon holds the fd anymore
       });
 
       const after = await readdir(dir);
       expect(after).not.toContain(launchLog);
+      expect(after).toContain(liveLaunchLog);
     });
   });
 

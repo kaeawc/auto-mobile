@@ -106,6 +106,8 @@ export interface FreshnessInputs {
    * pre-#6172 runners — treated as the historical `null_root` default.
    */
   incompleteCapture?: { sdkInt?: number; reason?: CtrlProxyIncompleteReason };
+  /** Android has a foreground window but captured no accessible content (#6352). */
+  emptyFocusedWindow?: boolean;
   /**
    * ADB and CtrlProxy disagree about the current activity within the same
    * application, and a forced recapture could not safely reconcile them.
@@ -359,6 +361,18 @@ function resolveIdentityMismatch(
       verified: false,
       isFresh: false,
       warning: `The accessibility service reported the capture as incomplete: ${lead}. ${incompleteCaptureGuidance(sdkInt, reason)}`,
+      category: "window_identity",
+    };
+  }
+  if (inputs.emptyFocusedWindow) {
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning:
+        "The focused Android window has no captured accessible content, so this capture is incomplete. Observe again once the window has finished loading; a recent timestamp alone does not verify its content.",
       category: "window_identity",
     };
   }

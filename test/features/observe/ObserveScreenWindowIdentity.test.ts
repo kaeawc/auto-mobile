@@ -26,14 +26,23 @@ const androidDevice: BootedDevice = {
   platform: "android",
 };
 
-function makeScreen(viewHierarchy: FakeViewHierarchy, fakeAdb: FakeAdbExecutor): RealObserveScreen {
-  return new RealObserveScreen(androidDevice, new FakeAdbClientFactory(fakeAdb), {
-    viewHierarchy,
-    cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-    performanceAuditor: { run: async () => undefined } as any,
-    accessibilityAuditor: { run: async () => undefined } as any,
-    accessibilityStateDetector: { run: async () => undefined } as any,
-  });
+function makeScreen(
+  viewHierarchy: FakeViewHierarchy,
+  fakeAdb: FakeAdbExecutor,
+  timer?: FakeTimer,
+): RealObserveScreen {
+  return new RealObserveScreen(
+    androidDevice,
+    new FakeAdbClientFactory(fakeAdb),
+    {
+      viewHierarchy,
+      cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+      performanceAuditor: { run: async () => undefined } as any,
+      accessibilityAuditor: { run: async () => undefined } as any,
+      accessibilityStateDetector: { run: async () => undefined } as any,
+    },
+    timer,
+  );
 }
 
 function calendarHierarchy(now: number): any {
@@ -55,6 +64,38 @@ function calendarHierarchy(now: number): any {
 }
 
 describe("ObserveScreen window-identity freshness (issue #5867)", () => {
+  test("empty first-run content is incomplete even when the focused package matches (#6352)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_700_000_000_000);
+    const viewHierarchy = new FakeViewHierarchy();
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+    const screen = makeScreen(viewHierarchy, fakeAdb, timer);
+
+    for (const node of [
+      undefined,
+      [],
+      { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } },
+    ]) {
+      viewHierarchy.configureHierarchy({
+        ...calendarHierarchy(timer.now()),
+        hierarchy: { node },
+      } as any);
+      const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+      expect(result.freshness?.verified).toBe(false);
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.warning).toContain("capture is incomplete");
+      expect(result.freshness?.warning).not.toContain("no root");
+      expect(result.freshness?.warning).not.toContain("isAccessibilityTool");
+    }
+
+    // Readable text is sufficient: no clickable control is required for recovery.
+    viewHierarchy.configureHierarchy(calendarHierarchy(timer.now()));
+    const recovered = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+    expect(recovered.freshness?.verified).toBe(true);
+    expect(recovered.freshness?.isFresh).toBe(true);
+  });
+
   afterEach(() => {
     resetObserveCacheStore();
   });

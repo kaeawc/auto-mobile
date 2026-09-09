@@ -782,6 +782,14 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
+        // A matching package and recent timestamp do not verify an empty first-run
+        // capture (#6352). Use all content collections, not just clickable controls:
+        // text-only and media-only screens remain valid. This runs before caching.
+        emptyFocusedWindow:
+          this.device.platform === "android" &&
+          Boolean(result.activeWindow?.appId) &&
+          result.elements !== undefined &&
+          Object.values(result.elements).every((elements) => elements.length === 0),
         // The SETTLED/confirmed foreground, not the initial parallel sample: during an
         // A→B transition the initial sample can still read A while the hierarchy and the
         // confirming read are already on B, and comparing against stale A would retract a

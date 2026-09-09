@@ -284,7 +284,9 @@ function isLegacyManifest(value: unknown): value is DeviceSnapshotManifest {
 // Structural check for the settings.json payload CaptureSnapshot.saveSettings
 // writes (src/features/action/CaptureSnapshot.ts:360-371): the raw
 // `{global?, secure?, system?}` triplet, not a full manifest.
-function isSettingsPayload(value: unknown): value is NonNullable<DeviceSnapshotManifest["settings"]> {
+function isSettingsPayload(
+  value: unknown,
+): value is NonNullable<DeviceSnapshotManifest["settings"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -292,7 +294,9 @@ function isSettingsPayload(value: unknown): value is NonNullable<DeviceSnapshotM
   const settings = value as Record<string, unknown>;
   return (["global", "secure", "system"] as const).every((key) => {
     const entry = settings[key];
-    return entry === undefined || (typeof entry === "object" && entry !== null && !Array.isArray(entry));
+    return (
+      entry === undefined || (typeof entry === "object" && entry !== null && !Array.isArray(entry))
+    );
   });
 }
 
@@ -679,7 +683,12 @@ async function importScopedLegacySnapshots(
         continue;
       }
 
-      const manifest = await discoverSnapshotManifest(snapshotName, snapshotStore, pathOptions, now);
+      const manifest = await discoverSnapshotManifest(
+        snapshotName,
+        snapshotStore,
+        pathOptions,
+        now,
+      );
       if (!manifest) {
         continue;
       }

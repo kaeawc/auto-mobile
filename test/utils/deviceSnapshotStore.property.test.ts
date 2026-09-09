@@ -154,7 +154,8 @@ describe("DeviceSnapshotStore.getSnapshotPathWithOptions (property-based, #6493)
         fc.constantFrom<"android" | "ios">("android", "ios"),
         fc.oneof(safeSegment, hostileSegment, escapingSegment),
         (snapshotName, platform, scopeSegment) => {
-          const options = platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
+          const options =
+            platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
           const result = attempt(() => store.getSnapshotPathWithOptions(snapshotName, options));
 
           if (!result.ok) {
@@ -175,7 +176,8 @@ describe("DeviceSnapshotStore.getSnapshotPathWithOptions (property-based, #6493)
         fc.constantFrom<"android" | "ios">("android", "ios"),
         escapingSegment,
         (snapshotName, platform, scopeSegment) => {
-          const options = platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
+          const options =
+            platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
           const result = attempt(() => store.getSnapshotPathWithOptions(snapshotName, options));
           return result.ok === false && result.error instanceof ActionableError;
         },
@@ -191,7 +193,8 @@ describe("DeviceSnapshotStore.getSnapshotPathWithOptions (property-based, #6493)
         fc.constantFrom<"android" | "ios">("android", "ios"),
         safeSegment,
         (snapshotName, platform, scopeSegment) => {
-          const options = platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
+          const options =
+            platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
           const result = attempt(() => store.getSnapshotPathWithOptions(snapshotName, options));
           return result.ok === true && isStrictlyInside(basePath, result.value);
         },
@@ -207,7 +210,8 @@ describe("DeviceSnapshotStore.getSnapshotPathWithOptions (property-based, #6493)
         fc.constantFrom<"android" | "ios">("android", "ios"),
         safeSegment,
         (snapshotName, platform, scopeSegment) => {
-          const options = platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
+          const options =
+            platform === "android" ? androidOptions(scopeSegment) : iosOptions(scopeSegment);
           const snapshotPath = store.getSnapshotPathWithOptions(snapshotName, options);
           const settingsPath = store.getSettingsPath(snapshotName, options);
           const metadataPath = store.getMetadataPath(snapshotName, options);

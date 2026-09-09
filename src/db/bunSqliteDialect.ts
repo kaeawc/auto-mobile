@@ -21,6 +21,10 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { defaultRandom, Random } from "../utils/Random";
 
 const MAX_CACHED_STATEMENTS = 200;
+// Direct-mode callers may point separate processes at the same SQLite file.
+// Check infrequently enough that normal cache hits stay cheap, while bounding
+// how long an out-of-band DDL change can leave the cache stale.
+const SCHEMA_VERSION_CHECK_INTERVAL = 128;
 
 /**
  * Bounded retry for `SQLITE_BUSY`/`SQLITE_LOCKED` at the dialect boundary
@@ -193,6 +197,8 @@ export class BunSqliteConnectionState {
   // only the eligible waiter(s), not every parked operation (the old herd).
   #resumeCount = 0;
   #statementCache = new Map<string, BunStatement>();
+  #observedSchemaVersion: number | null = null;
+  #cacheHitsSinceSchemaCheck = 0;
   #closed = false;
   readonly #maxRetryAttempts: number;
   readonly #retryBackoff: BackoffPolicy;
@@ -480,28 +486,32 @@ export class BunSqliteConnectionState {
   }
 
   /**
-   * Cache lookup for non-DDL statements. Does NOT re-check schema on a hit
-   * (issue #6649): every schema change this dialect can make goes through
-   * `#executeOnce`'s `#isSchemaChangingSql` branch, which already calls
-   * `#clearStatementCache()` right after executing the DDL — so a cached
-   * entry reaching this method is, by construction, never stale. Re-reading
-   * `PRAGMA schema_version` per hit was a redundant extra
-   * prepare/execute/finalize round trip on the hottest path in the module for
-   * a schema change this connection could only make itself.
+   * Cache lookup for non-DDL statements. In-process DDL clears the cache
+   * immediately; a bounded periodic schema-version check additionally catches
+   * DDL from another direct-mode process without putting a PRAGMA on every hit.
    */
   #getStatement(db: BunDatabase, sql: string): BunStatement {
     const cached = this.#statementCache.get(sql);
     if (cached) {
+      this.#invalidateCacheOnPeriodicSchemaCheck(db);
+      const current = this.#statementCache.get(sql);
+      if (!current) {
+        return this.#prepareAndCacheStatement(db, sql);
+      }
       // Refresh LRU order.
       this.#statementCache.delete(sql);
-      this.#statementCache.set(sql, cached);
-      return cached;
+      this.#statementCache.set(sql, current);
+      return current;
     }
 
     return this.#prepareAndCacheStatement(db, sql);
   }
 
   #prepareAndCacheStatement(db: BunDatabase, sql: string): BunStatement {
+    if (this.#statementCache.size === 0 && this.#observedSchemaVersion === null) {
+      this.#observedSchemaVersion = this.#readSchemaVersion(db);
+      this.#cacheHitsSinceSchemaCheck = 0;
+    }
     const statement = db.prepare(sql);
     this.#statementCache.set(sql, statement);
     if (this.#statementCache.size > MAX_CACHED_STATEMENTS) {
@@ -524,6 +534,33 @@ export class BunSqliteConnectionState {
       statement.finalize();
     }
     this.#statementCache.clear();
+    this.#observedSchemaVersion = null;
+    this.#cacheHitsSinceSchemaCheck = 0;
+  }
+
+  #invalidateCacheOnPeriodicSchemaCheck(db: BunDatabase): void {
+    // Keep the hot path free of the old per-hit PRAGMA. The interval bounds the
+    // window in which another direct-mode process can leave cached columns stale.
+    this.#cacheHitsSinceSchemaCheck += 1;
+    if (this.#cacheHitsSinceSchemaCheck < SCHEMA_VERSION_CHECK_INTERVAL) {
+      return;
+    }
+    this.#cacheHitsSinceSchemaCheck = 0;
+    const schemaVersion = this.#readSchemaVersion(db);
+    if (this.#observedSchemaVersion !== schemaVersion) {
+      this.#clearStatementCache();
+      this.#observedSchemaVersion = schemaVersion;
+    }
+  }
+
+  #readSchemaVersion(db: BunDatabase): number {
+    const statement = db.prepare("PRAGMA schema_version");
+    try {
+      const row = statement.get() as { schema_version?: number } | undefined;
+      return row?.schema_version ?? 0;
+    } finally {
+      statement.finalize();
+    }
   }
 
   #assertOpen(): void {

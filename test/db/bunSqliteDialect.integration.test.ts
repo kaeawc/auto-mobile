@@ -1,10 +1,14 @@
 import { describe, it, expect, spyOn, test } from "bun:test";
 import { CompiledQuery, Kysely, sql } from "kysely";
 import { Database } from "bun:sqlite";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BunSqliteConnectionState, BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { logger } from "../../src/utils/logger";
+import { removeTempDbDir } from "./tempDbDir";
 
 /**
  * Regression for issue #2792: destroy() racing queries queued in Kysely's
@@ -420,23 +424,43 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
   });
 
-  test("issues zero PRAGMA schema_version reads across repeated cache hits (#6649)", async () => {
+  test("takes one baseline schema-version read, then none below the cache-hit interval (#6649)", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);
     const owner = Symbol("lease");
 
-    // One miss (first call) followed by four hits on the same SQL. Before the
-    // fix, `#getStatement` re-read `PRAGMA schema_version` on every hit — an
-    // O(N) extra prepare/execute/finalize round trip per repeated query.
+    // One miss (first call) followed by four hits on the same SQL. We pay one
+    // baseline read per cache generation, but avoid the old per-hit O(N)
+    // prepare/execute/finalize round trip.
     for (let index = 0; index < 5; index += 1) {
       await state.executeQuery(rawQuery("select * from foo where id = ?", [index]), owner);
     }
 
     expect(db.preparedFor("select * from foo where id = ?")).toHaveLength(1);
-    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(0);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(1);
   });
 
-  test("still re-prepares after DDL through this connection, with no schema_version PRAGMA read", async () => {
+  test("invalidates cached statements at the scheduled schema-version check", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    const staleStatement = db.preparedFor("select * from foo")[0];
+
+    // Model DDL from another process. The 128th subsequent cache hit must
+    // observe the new version, finalize the stale statement, and re-prepare.
+    db.schemaVersion += 1;
+    for (let index = 0; index < 128; index += 1) {
+      await state.executeQuery(rawQuery("select * from foo"), owner);
+    }
+
+    expect(staleStatement.finalized).toBe(true);
+    expect(db.preparedFor("select * from foo")).toHaveLength(2);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(2);
+  });
+
+  test("still re-prepares after DDL through this connection and establishes a fresh baseline", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);
     const owner = Symbol("lease");
@@ -451,11 +475,45 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     const selectStatements = db.preparedFor("select * from foo");
     expect(selectStatements).toHaveLength(2);
     // The pre-DDL cached statement was finalized by #clearStatementCache();
-    // the post-DDL query re-prepared a fresh one — invalidation still holds
-    // via the existing DDL cache-clear, with no PRAGMA round trip involved.
+    // the post-DDL query re-prepared a fresh one and established one new
+    // schema-version baseline for the new cache generation.
     expect(selectStatements[0].finalized).toBe(true);
     expect(selectStatements[1].finalized).toBe(false);
-    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(0);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(2);
+  });
+
+  test("re-prepares a cached SELECT after another connection changes the schema", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-schema-cache-"));
+    const dbPath = join(tempDir, "shared.db");
+    const primary = new Database(dbPath);
+    const external = new Database(dbPath);
+    const state = new BunSqliteConnectionState(primary);
+    const owner = Symbol("lease");
+
+    try {
+      primary.exec("CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)");
+      primary.exec("INSERT INTO widgets (id, name) VALUES (1, 'before')");
+
+      // Prepare once, then leave one cache hit before the periodic check.
+      for (let index = 0; index < 128; index += 1) {
+        await state.executeQuery(rawQuery("select * from widgets"), owner);
+      }
+
+      // A second direct-mode process shares the same SQLite file and removes a
+      // column. The next (128th) hit must see the new schema before reusing the
+      // cached `SELECT *` statement.
+      external.exec("ALTER TABLE widgets DROP COLUMN name");
+      const result = await state.executeQuery<{ id: number }>(
+        rawQuery("select * from widgets"),
+        owner,
+      );
+
+      expect(result.rows).toEqual([{ id: 1 }]);
+    } finally {
+      state.close();
+      external.close();
+      await removeTempDbDir(tempDir);
+    }
   });
 
   test("preserves SELECT, RETURNING, and write result shapes", async () => {

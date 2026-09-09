@@ -952,9 +952,10 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     selector: AccessibilityNodeSelector,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<A11yActionResult>;
 
-  supportsNodeActionSelectors(perf?: PerformanceTracker): Promise<boolean>;
+  supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
 
   requestActivateAccessibilityLink(
     text: string,
@@ -2435,13 +2436,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     selector?: AccessibilityNodeSelector,
+    signal?: AbortSignal,
   ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
+    const combinedSignal = combineWithAmbientAbort(signal);
+    let pendingRequestId: string | undefined;
 
     this.cancelScreenshotBackoff();
 
     try {
-      const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+      const connected = await this.awaitActionWork(
+        () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
+        combinedSignal,
+      );
+      combinedSignal?.throwIfAborted();
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for action");
         return {
@@ -2453,6 +2461,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       const requestId = this.requestManager.generateId("action");
+      pendingRequestId = requestId;
       logger.debug(
         `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, ` +
           `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
@@ -2468,9 +2477,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: this.timer.now() - startTime,
           error: `Action timeout after ${timeout}ms`,
         }),
+        (error, totalTimeMs) => ({ success: false, action, totalTimeMs, error }),
       );
 
+      const cancellableAction = this.awaitCancellableRequest(
+        requestId,
+        actionPromise,
+        combinedSignal,
+        startTime,
+      );
       await perf.track("sendRequest", async () => {
+        combinedSignal?.throwIfAborted();
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
@@ -2484,7 +2501,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       });
 
-      const result = await perf.track("waitForAction", () => actionPromise);
+      const result = await perf.track("waitForAction", () => cancellableAction);
+      combinedSignal?.throwIfAborted();
       const clientDuration = this.timer.now() - startTime;
 
       if (result.success) {
@@ -2497,6 +2515,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return result;
     } catch (error) {
+      if (pendingRequestId) {
+        this.requestManager.resolveError(
+          pendingRequestId,
+          String(error),
+          this.timer.now() - startTime,
+        );
+      }
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return { success: false, action, totalTimeMs: duration, error: `${error}` };
@@ -2508,17 +2533,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     selector: AccessibilityNodeSelector,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector);
+    return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector, signal);
   }
 
   async supportsNodeActionSelectors(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<boolean> {
-    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+    const combinedSignal = combineWithAmbientAbort(signal);
+    const connected = await this.awaitActionWork(
+      () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
+      combinedSignal,
+    );
+    combinedSignal?.throwIfAborted();
     if (connected && this.supportedCommands === null) {
-      await this.waitForHandshake();
+      await this.waitForHandshake(undefined, combinedSignal);
     }
+    combinedSignal?.throwIfAborted();
     return connected && this.isCommandSupported("node_selector_actions");
   }
 
@@ -2979,6 +3012,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
     };
     signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
     try {
       return await promise;
     } finally {
@@ -4847,12 +4883,51 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.supportedCommands?.has(messageType) === true;
   }
 
+  // Cancel only this caller's wait; connection establishment is shared with other operations.
+  private async awaitActionWork<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
+    if (!signal) {
+      return work();
+    }
+    let onAbort!: () => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal.reason ?? new Error(OPERATION_CANCELLED_MESSAGE));
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([aborted, work()]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+
   private async waitForHandshake(
     timeoutMs: number = AndroidCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS,
+    signal?: AbortSignal,
   ): Promise<void> {
     const deadline = this.timer.now() + timeoutMs;
     while (this.supportedCommands === null && this.timer.now() < deadline) {
-      await this.timer.sleep(AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+      if (!signal) {
+        await this.timer.sleep(AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+        continue;
+      }
+      let timeout: ReturnType<Timer["setTimeout"]> | undefined;
+      try {
+        await this.awaitActionWork(
+          () =>
+            new Promise<void>((resolve) => {
+              timeout = this.timer.setTimeout(
+                resolve,
+                AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS,
+              );
+            }),
+          signal,
+        );
+      } finally {
+        if (timeout !== undefined) {
+          this.timer.clearTimeout(timeout);
+        }
+      }
     }
   }
 

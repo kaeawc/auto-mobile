@@ -12,12 +12,7 @@ import XCTest
 // `GesturePerformer` are main-actor-isolated), and `ElementLocator` is constructed with an
 // explicit `perf:` (the reference defaulted to the now-dropped `PerfProvider.instance` singleton).
 //
-// Fixture-availability guard: on some simulator runtimes (observed on the iOS-27 *beta* runtime
-// during Phase 7D) the host app fails to reach its fixture view controller — XCUITest logs
-// "Unable to monitor event loop" and the app stays on a launch-screen-like tree. That is a runtime
-// launch flake, unrelated to the rewrite (the rewrite's own `getViewHierarchy` faithfully extracts
-// whatever rendered). We `XCTSkipUnless` on the fixture appearing so a flaky launch skips rather
-// than red-fails; when the fixture is up, the assertions below are hard.
+// Fixture availability is required: launch failures must fail this integration gate.
 @MainActor
 final class HierarchyIntegrationTests: XCTestCase {
     override func setUpWithError() throws {
@@ -32,11 +27,10 @@ final class HierarchyIntegrationTests: XCTestCase {
         let messageTextView = app.descendants(matching: .textView)
             .matching(NSPredicate(format: "label == %@", "Message #sample"))
             .firstMatch
-        try XCTSkipUnless(
-            messageTextView.waitForExistence(timeout: 10),
-            "Host app did not present the snapshot-gap fixture (simulator launch flake, e.g. the "
-                + "iOS-27 beta runtime); skipping the on-device hierarchy assertions."
-        )
+        guard messageTextView.waitForExistence(timeout: 10) else {
+            XCTFail("Host app did not present the snapshot-gap fixture")
+            return
+        }
         XCTAssertTrue(messageTextView.isHittable)
         XCTAssertTrue(messageTextView.identifier.isEmpty)
 
@@ -44,7 +38,7 @@ final class HierarchyIntegrationTests: XCTestCase {
         locator.setApplication(app, bundleId: "dev.jasonpearson.automobile.ctrlproxy")
 
         let initialHierarchy = try locator.getViewHierarchy(disableAllFiltering: false)
-        let initialNodes = hierarchyNodes(in: try XCTUnwrap(initialHierarchy.hierarchy))
+        let initialNodes = try hierarchyNodes(in: XCTUnwrap(initialHierarchy.hierarchy))
         let messageNodes = initialNodes.filter {
             $0.className == "UITextView" && $0.text == "Message #sample"
         }
@@ -79,7 +73,7 @@ final class HierarchyIntegrationTests: XCTestCase {
         secureField.typeText("secret")
 
         let finalHierarchy = try locator.getViewHierarchy(disableAllFiltering: false)
-        let secureNode = hierarchyNodes(in: try XCTUnwrap(finalHierarchy.hierarchy)).first {
+        let secureNode = try hierarchyNodes(in: XCTUnwrap(finalHierarchy.hierarchy)).first {
             $0.className == "UISecureTextField" && $0.resourceId == "secure-field"
         }
         XCTAssertEqual(secureNode?.value, String(repeating: "\u{2022}", count: 6))

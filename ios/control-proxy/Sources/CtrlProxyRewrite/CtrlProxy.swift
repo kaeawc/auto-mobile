@@ -30,6 +30,8 @@ public final class CtrlProxy {
     private let hierarchyDebouncer: HierarchyDebouncer
     private let commandHandler: CommandHandler
     private let fpsMonitor: DisplayLinkFPSMonitor
+    private let hasClients: @Sendable () -> Bool
+    private let startServer: @Sendable () throws -> Void
     private let server: WebSocketServer
     private let coordinatorBox: WeakCoordinator
 
@@ -37,7 +39,7 @@ public final class CtrlProxy {
     /// `stop()` was holding it (blocked inside the synchronous `server.stop()`) cannot restart
     /// the samplers on a torn-down service once teardown completes (#5834 review). Cleared by
     /// `start()` so a stopped instance can be restarted.
-    private var isStopped = false
+    private var isStopped = true
 
     /// Whether the device samplers are currently active. Maintained by `startSamplers()` /
     /// `stopSamplers()`; exposed read-only so the lifecycle regression test can observe that a
@@ -70,7 +72,9 @@ public final class CtrlProxy {
     init(
         port: UInt16 = defaultPort,
         storageInspector: (any StorageInspecting)? = DefaultStorageInspecting(),
-        hierarchyPollTimer: any ProxyTimer
+        hierarchyPollTimer: any ProxyTimer,
+        hasClients: (@Sendable () -> Bool)? = nil,
+        startServer: (@Sendable () throws -> Void)? = nil
     ) {
         let perf = PerfProvider()
         let frameContext = FrameContext()
@@ -120,9 +124,9 @@ public final class CtrlProxy {
                 }
             },
             drainLogEvents: { OSLogReaderHolder.shared.drain() },
-            onClientPresenceChanged: { [coordinatorBox] hasClients in
+            onClientPresenceChanged: { [coordinatorBox] _ in
                 Task { @MainActor in
-                    coordinatorBox.coordinator?.applyClientPresence(hasClients)
+                    coordinatorBox.coordinator?.applyClientPresence()
                 }
             }
         )
@@ -137,6 +141,8 @@ public final class CtrlProxy {
         self.hierarchyDebouncer = hierarchyDebouncer
         self.commandHandler = commandHandler
         self.fpsMonitor = fpsMonitor
+        self.hasClients = hasClients ?? { server.hasConnectedClients }
+        self.startServer = startServer ?? { try server.start() }
         self.server = server
         self.coordinatorBox = coordinatorBox
 
@@ -173,12 +179,11 @@ public final class CtrlProxy {
         server.broadcastHierarchyUpdate(enriched)
     }
 
-    /// Applies a client-presence transition to the device samplers. The presence seam routes
-    /// through here (rather than calling start/stop inline) so the `isStopped` guard in
-    /// `startSamplers()` also covers a presence-`true` callback that raced `stop()`. Sampler
-    /// stop is idempotent, so the `false` path needs no guard.
-    func applyClientPresence(_ hasClients: Bool) {
-        if hasClients {
+    /// Reconcile against current server state when the actor hop executes. Queued callbacks
+    /// carry no historical Boolean, so reordering or delivery after restart cannot apply a
+    /// stale transition. A stopped or unsuccessfully started service never samples.
+    func applyClientPresence() {
+        if !isStopped, hasClients() {
             startSamplers()
         } else {
             stopSamplers()
@@ -229,14 +234,20 @@ public final class CtrlProxy {
         /// gated on client presence via the server's presence seam (wired in `init`), so an
         /// idle session with no client places no continuous load on the app under test (#5477).
         public func start(bundleId: String? = nil) throws {
-            isStopped = false
             let targetBundleId = bundleId ?? Self.defaultBundleId
             let app = XCUIApplication(bundleIdentifier: targetBundleId)
             app.activate()
             setApplication(app, bundleId: targetBundleId)
             print("[CtrlProxy] Activated app: \(targetBundleId)")
 
-            try server.start()
+            do {
+                try startServer()
+            } catch {
+                stop()
+                throw error
+            }
+            isStopped = false
+            applyClientPresence()
 
             print("[CtrlProxy] Service started")
             print("[CtrlProxy] WebSocket server listening on port \(Self.defaultPort)")
@@ -247,8 +258,14 @@ public final class CtrlProxy {
         }
     #else
         public func start(bundleId _: String? = nil) throws {
+            do {
+                try startServer()
+            } catch {
+                stop()
+                throw error
+            }
             isStopped = false
-            try server.start()
+            applyClientPresence()
             print("[CtrlProxy] Service started (non-iOS mode - limited functionality)")
         }
     #endif

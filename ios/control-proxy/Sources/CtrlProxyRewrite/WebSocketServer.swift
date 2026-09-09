@@ -144,6 +144,7 @@ final class WebSocketServer: @unchecked Sendable {
 
     private func onqueue_stop() {
         dispatchPrecondition(condition: .onQueue(queue))
+        upgradedClientIds.withLock { $0.removeAll() }
         _ = upgradedConnections.removeAll()
         connections.removeAll().forEach { $0.close() }
         listener?.cancel()
@@ -236,7 +237,9 @@ final class WebSocketServer: @unchecked Sendable {
     func handleMessage(_ data: Data, responder: any WebSocketResponding) async {
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
-            print("[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")")
+            print(
+                "[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")"
+            )
 
             let responseData = try await perf.withScope {
                 self.perf.serial("handleRequest:\(request.typeString)")
@@ -273,7 +276,9 @@ final class WebSocketServer: @unchecked Sendable {
         _ response: any WebSocketResponsePayload,
         totalTimeMs: Int64,
         perfTiming: PerfTiming?
-    ) throws -> Data {
+    )
+        throws -> Data
+    {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
 
@@ -345,7 +350,7 @@ final class WebSocketServer: @unchecked Sendable {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .sortedKeys
-            broadcast(try encoder.encode(response))
+            try broadcast(encoder.encode(response))
         } catch {
             print("[WebSocketServer] Failed to encode hierarchy update: \(error)")
         }
@@ -360,7 +365,7 @@ final class WebSocketServer: @unchecked Sendable {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .sortedKeys
-            broadcast(try encoder.encode(response))
+            try broadcast(encoder.encode(response))
         } catch {
             print("[WebSocketServer] Failed to encode performance update: \(error)")
         }

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import OSLog
 
 /// Reads logs from `OSLogStore` and serves them as `SdkLogEvent`-compatible JSON
@@ -6,7 +7,7 @@ import OSLog
 /// new entries. Ported from the reference `OSLogReader.swift`.
 ///
 /// Rewrite archetype: QUEUE-CONFINEMENT. `final class … @unchecked Sendable` owning a
-/// private serial `queue`; all mutable state (`timer`, `lastEntryDate`, `buffer`,
+/// private serial `queue`; all mutable state (`timer`, `lastEntryDate`,
 /// `store`) is confined to it and every on-queue method asserts
 /// `dispatchPrecondition(.onQueue(queue))`. The `@unchecked` is justified by that
 /// confinement. Queue-confinement (rather than the lock-confined `Sendable` archetype
@@ -15,8 +16,9 @@ import OSLog
 /// queue owns it without any per-field Sendable constraint.
 ///
 /// The timer fires its handler on `queue`, so `poll()` runs on-queue and reads/writes the
-/// confined state directly; the public `drain()` / `start()` / `stop()` funnel via
-/// `queue.sync`. The package floor is iOS 17 / macOS 15, both above `OSLogStore`'s iOS 15
+/// confined state directly; the public `start()` / `stop()` funnel via
+/// `queue.sync`. Completed entries use a separate lock, so `drain()` never waits for a poll.
+/// The package floor is iOS 17 / macOS 15, both above `OSLogStore`'s iOS 15
 /// / macOS 12 requirement, so the reference's `@available(iOS 15.0, macOS 12.0, *)`
 /// annotation is dropped — it is unconditionally available here.
 public final class OSLogReader: @unchecked Sendable {
@@ -34,12 +36,12 @@ public final class OSLogReader: @unchecked Sendable {
         public let message: String
     }
 
-    private let queue = DispatchQueue(label: "com.ctrlproxy.oslogreader")
+    private let queue: DispatchQueue
+    private let completedEntries = OSAllocatedUnfairLock<[LogEntry]>(initialState: [])
 
     // Queue-confined (accessed only on `queue`).
     private var timer: DispatchSourceTimer?
     private var lastEntryDate: Date
-    private var buffer: [LogEntry] = []
     /// The single reused `OSLogStore` (the reference allocated a fresh store per poll;
     /// #5477). Created lazily on first poll, released on `stop()`.
     private var store: OSLogStore?
@@ -47,9 +49,14 @@ public final class OSLogReader: @unchecked Sendable {
     private let maxBufferSize = 500
     private let storeFactory: @Sendable () throws -> OSLogStore
 
-    public init(storeFactory: @escaping @Sendable () throws -> OSLogStore = {
+    public convenience init(storeFactory: @escaping @Sendable () throws -> OSLogStore = {
         try OSLogStore(scope: .currentProcessIdentifier)
     }) {
+        self.init(queue: DispatchQueue(label: "com.ctrlproxy.oslogreader"), storeFactory: storeFactory)
+    }
+
+    init(queue: DispatchQueue, storeFactory: @escaping @Sendable () throws -> OSLogStore) {
+        self.queue = queue
         self.storeFactory = storeFactory
         lastEntryDate = Date()
     }
@@ -93,9 +100,9 @@ public final class OSLogReader: @unchecked Sendable {
     /// Each blob is a single batch: `{"bundleId":null,"events":[{"eventType":"log","payload":"<base64>"},...]}`.
     /// This matches the format expected by the TypeScript CtrlProxyClient parser.
     public func drain() -> [Data] {
-        let entries: [LogEntry] = queue.sync {
+        let entries = completedEntries.withLock { buffer in
             let entries = buffer
-            buffer.removeAll()
+            buffer.removeAll(keepingCapacity: true)
             return entries
         }
 
@@ -115,6 +122,13 @@ public final class OSLogReader: @unchecked Sendable {
 
         guard let batchData = try? JSONSerialization.data(withJSONObject: batch) else { return [] }
         return [batchData]
+    }
+
+    /// Publish only completed traversal results; drains never wait for the polling queue.
+    func appendCompletedEntries(_ entries: [LogEntry]) {
+        completedEntries.withLock {
+            $0.append(contentsOf: entries, enforcingMaximumSize: maxBufferSize)
+        }
     }
 
     // MARK: - Private
@@ -181,10 +195,7 @@ public final class OSLogReader: @unchecked Sendable {
 
             lastEntryDate = latestDate
             if !newEntries.isEmpty {
-                buffer.append(contentsOf: newEntries)
-                if buffer.count > maxBufferSize {
-                    buffer.removeFirst(buffer.count - maxBufferSize)
-                }
+                appendCompletedEntries(newEntries)
             }
         } catch {
             // OSLogStore may not be available in all contexts; silently skip

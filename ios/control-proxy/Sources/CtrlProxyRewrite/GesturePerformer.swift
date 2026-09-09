@@ -87,7 +87,9 @@ public final class GesturePerformer: GesturePerforming {
         owner: Element,
         ownerIsLink: Bool,
         descendants: [Element]
-    ) -> [Element] {
+    )
+        -> [Element]
+    {
         ownerIsLink ? [owner] + descendants : descendants
     }
 
@@ -804,7 +806,10 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before performing an IME action")
+            try requireKeyboardFocus(
+                app: app,
+                context: "ensure a text field is focused before performing an IME action"
+            )
 
             switch action.lowercased() {
             case "done", "go", "search", "send", "next":
@@ -934,7 +939,7 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Actions
 
         public func performAction(_ action: String, resourceId: String? = nil, label: String? = nil) throws {
-            var element: XCUIElement? = nil
+            var element: XCUIElement?
             if let resourceId = resourceId {
                 element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement
             }
@@ -971,7 +976,9 @@ public final class GesturePerformer: GesturePerforming {
             text: String,
             occurrence: Int,
             ownerResourceId: String?
-        ) throws {
+        )
+            throws
+        {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, occurrence >= 0 else {
                 throw GestureError.gestureFailed("Semantic link text must be non-blank and occurrence non-negative")
             }

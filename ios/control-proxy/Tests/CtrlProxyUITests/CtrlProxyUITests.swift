@@ -6,17 +6,11 @@ import XCTest
 // (`#if canImport(XCTest) && os(iOS)`) compile. The target name, runner app, xctest bundle,
 // and the `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier are kept
 // unchanged so the TS MCP integration + scripts drive it exactly as before, now running the
-// rewrite. The reference impl remains the differential-parity oracle via the SwiftPM
-// `CtrlProxy` library + `CtrlProxyRewriteTests`.
+// rewrite. The reference implementation has been retired.
 //
-// This is a minimal, faithful runner restricted to the public `CtrlProxy` surface the
-// production runner actually uses (`CtrlProxy(port:)`, `start`, `start(bundleId:)`, `stop`,
-// `defaultPort`). The reference's richer integration tests (`testHierarchyIncludes…`,
-// `PrivacyResourceMappingTests`) are not carried over: they leaned on the dropped
-// `PerfProvider` singleton default and on test-only factories/fakes (`createForTesting`,
-// `FakeTimeProvider`) that live in `CtrlProxyTestSupport`, out of the shipped product. Porting
-// them against the rewrite's injected seams is a follow-up (real observe→gesture→hierarchy UI
-// tests, now runnable on a simulator).
+// This service runner keeps the production entry points stable. HierarchyIntegrationTests,
+// PrivacyResourceMappingTests, and RotationOrientationTests exercise the rewrite through
+// its injected collaborators and run in the same simulator test bundle.
 
 /// XCUITest runner that starts the CtrlProxy iOS WebSocket server (Swift-6 rewrite).
 ///

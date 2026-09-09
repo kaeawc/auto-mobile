@@ -58,7 +58,10 @@ final class WebSocketServerBehaviorTests: XCTestCase {
             flush: [PerfTiming(name: "handleRequest", durationMs: 12)]
         )
 
-        server.dispatchCommand(Data(#"{"type":"request_tap_coordinates","requestId":"r3","x":1,"y":2}"#.utf8), responder: responder)
+        server.dispatchCommand(
+            Data(#"{"type":"request_tap_coordinates","requestId":"r3","x":1,"y":2}"#.utf8),
+            responder: responder
+        )
         wait(for: [exp], timeout: 2)
 
         let object = decodeObject(responder.captured[0])
@@ -81,6 +84,18 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         XCTAssertFalse(server.hasConnectedClients)
 
         XCTAssertEqual(transitions.values, [true, false], "presence toggles only on 0↔N transitions")
+    }
+
+    func testStopClearsPresenceBeforeNextConnection() {
+        let transitions = ValueBox<Bool>()
+        let server = makeTestServer(onPresence: { transitions.append($0) })
+        server.clientDidUpgrade(1)
+        server.stop()
+        XCTAssertFalse(server.hasConnectedClients)
+        server.clientDidUpgrade(2)
+        XCTAssertTrue(server.hasConnectedClients)
+        XCTAssertEqual(transitions.values, [true, true])
+        server.stop()
     }
 
     func testHttpOnlyDisconnectNeverTogglesPresence() {

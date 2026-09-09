@@ -948,6 +948,108 @@ describe("IOSCtrlProxyManager", function () {
     });
   });
 
+  // #6575: the legacy-app uninstall probe used to run on every setup() call,
+  // including the attemptedSetup fast path that exists to make repeat calls
+  // cheap. It should fire at most once per manager instance.
+  describe("legacy-app uninstall probe runs at most once per manager (#6575)", function () {
+    test("does not re-probe on a setup() call that hits the attemptedSetup fast path", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      let legacyProbeCount = 0;
+      const fakeDeviceAppManager = {
+        getInstalledAppBundleHash: async () => {
+          legacyProbeCount++;
+          return null;
+        },
+      } as unknown as DeviceAppManager;
+      const xcodebuild: Xcodebuild = {
+        executeCommand: async () => createExecResult("", ""),
+        isAvailable: async () => true,
+        startStreaming: async () => {
+          healthy = true;
+          return new FakeChildProcess() as unknown as ChildProcess;
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        fakeDeviceAppManager,
+        undefined,
+        undefined,
+        xcodebuild,
+      );
+      fakeTimer.enableAutoAdvance();
+
+      const first = await manager.setup();
+      expect(first.success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+
+      // Second call hits the `attemptedSetup && !force` fast path.
+      const second = await manager.setup();
+      expect(second.success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+    });
+
+    test("re-arms after resetSetupState so a fresh device/session probes again", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      fakeExecutor.setCommandHandler("kill -0", () => {
+        throw new Error("runner is no longer running");
+      });
+      let legacyProbeCount = 0;
+      const fakeDeviceAppManager = {
+        getInstalledAppBundleHash: async () => {
+          legacyProbeCount++;
+          return null;
+        },
+      } as unknown as DeviceAppManager;
+      const xcodebuild: Xcodebuild = {
+        executeCommand: async () => createExecResult("", ""),
+        isAvailable: async () => true,
+        startStreaming: async () => {
+          healthy = true;
+          return new FakeChildProcess() as unknown as ChildProcess;
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        fakeDeviceAppManager,
+        undefined,
+        undefined,
+        xcodebuild,
+      );
+      fakeTimer.enableAutoAdvance();
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+
+      healthy = false;
+      manager.resetSetupState();
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(legacyProbeCount).toBe(2);
+    });
+  });
+
   // #6416: `isAvailable()` used to serve a positive answer from a 1-hour
   // `cachedAvailability` layer that `setup()`'s already-attempted gate
   // consults. A runner that dies without a local child-exit event (killed

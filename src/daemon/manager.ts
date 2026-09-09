@@ -30,6 +30,9 @@ import {
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_FORCED_STOP_TIMEOUT_MS,
+  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+  DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
@@ -138,15 +141,6 @@ export interface DaemonProcessFinder {
 }
 
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
-
-/**
- * Bound on the synchronous `ps`/PowerShell/CIM process-table scan (issue #6140,
- * folded from PR #6109 review). `execSync` has no timeout by default, so a slow
- * `ps` or Windows CIM query on a loaded machine can block the event loop for far
- * longer than the caller's remaining rejoin budget — this caps that single call so
- * it can never itself consume the whole budget.
- */
-export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5000;
 
 /**
  * Floor the process-table scan timeout is clamped to (issue #6140 review). Node's
@@ -384,8 +378,6 @@ export interface DaemonPortAvailabilityChecker {
   isPortFree(port: number, host: string): Promise<boolean>;
 }
 
-const PORT_AVAILABILITY_PROBE_TIMEOUT_MS = 1000;
-
 class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
   isPortFree(port: number, host: string): Promise<boolean> {
     return new Promise((resolvePromise) => {
@@ -401,7 +393,7 @@ class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker 
       };
       const timeoutHandle = defaultTimer.setTimeout(
         () => finish(false),
-        PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
+        DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
       );
       probeServer.once("error", () => finish(false));
       probeServer.listen(port, host, () => finish(true));
@@ -1563,7 +1555,7 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
         process.kill(pid, "SIGKILL");
 
-        if (!(await this.waitForStop(pid, 1000))) {
+        if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
         }
       }
@@ -1915,7 +1907,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if (!(await this.waitForStop(pid, 1000))) {
+    if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
       throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
     }
   }

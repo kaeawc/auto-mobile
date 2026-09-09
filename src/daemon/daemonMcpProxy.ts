@@ -1151,7 +1151,8 @@ export class DaemonMcpProxy {
 
   private async waitForDaemonShutdownRestartWindow(): Promise<void> {
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
-    const deadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    let deadline =
+      this.timer.now() + Math.max(DAEMON_STARTUP_TIMEOUT_MS, DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
     let emptyHandoffDeadline: number | undefined;
     while (!this.closing && this.timer.now() < deadline) {
       if (await DaemonClient.isAvailable(socketPath)) {
@@ -1174,6 +1175,9 @@ export class DaemonMcpProxy {
         // racing to start a daemon with this proxy's potentially different
         // options.
         emptyHandoffDeadline ??= this.timer.now() + DAEMON_RESTART_HANDOFF_TIMEOUT_MS;
+        // A short startup-timeout override must not truncate the complete
+        // bounded restart preflight after the empty handoff is first observed.
+        deadline = Math.max(deadline, emptyHandoffDeadline);
         if (this.timer.now() >= emptyHandoffDeadline) {
           return;
         }
@@ -1644,8 +1648,12 @@ export class DaemonMcpProxy {
     this.connectionClosedUnsubscribe?.();
     this.connectionClosedUnsubscribe = client.onConnectionClosed(() => {
       if (this.client === client) {
-        void this.resetConnection();
+        // EOF is the only connection-wide shutdown signal an idle proxy receives,
+        // and a subscribed release notification can be lost while the old socket
+        // drains. Arm the same successor barrier before reset detaches this client.
+        this.waitForDaemonShutdownDisconnect();
         this.completeDaemonShutdownDisconnect();
+        void this.resetConnection();
       }
     });
   }

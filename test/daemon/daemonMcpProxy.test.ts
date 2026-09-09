@@ -18,6 +18,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
 } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
@@ -2031,6 +2032,59 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("arms the restart handoff when an idle peer closes without a shutdown notification (#6336)", async () => {
+      const recoveredResult = { content: [{ type: "text", text: "joined EOF successor" }] };
+      const idleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const freshClient = new FakeDaemonClient({
+        toolResult: recoveredResult,
+      });
+      const clients: DaemonClientLike[] = [idleClient, freshClient];
+      const manager = matchingDaemonManager();
+      const timer = new FakeTimer();
+      let availabilityChecks = 0;
+      let successorAvailable = false;
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
+        availabilityChecks += 1;
+        return availabilityChecks === 1 || successorAvailable;
+      });
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: manager,
+        autoStartDaemon: true,
+        timer,
+      });
+
+      try {
+        await proxy.listTools();
+        manager.statusResult = { running: false };
+        idleClient.emitConnectionClosed();
+
+        const recovery = proxy.callTool("tapOn", { text: "Button" });
+        for (let i = 0; i < 20 && timer.getPendingSleepCount() === 0; i++) {
+          await Promise.resolve();
+        }
+
+        expect(timer.getPendingSleeps()).toEqual([100]);
+        expect(manager.startCalled).toBe(false);
+        expect(freshClient.isConnected()).toBe(false);
+
+        successorAvailable = true;
+        await timer.advanceTimeAsync(100);
+
+        await expect(recovery).resolves.toEqual(recoveredResult);
+        expect(manager.startCalled).toBe(false);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { text: "Button" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("bounds an empty restart handoff before auto-starting a replacement (#6336)", async () => {
       const recoveredResult = { content: [{ type: "text", text: "self-started replacement" }] };
       const quiescedClient = new ScriptedDaemonClient({
@@ -2065,7 +2119,11 @@ describe("DaemonMcpProxy", () => {
         await timer.advanceTimeAsync(100);
         expect(manager.startCalled).toBe(false);
 
-        await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
+        const oldDelayOnlyBudget = DAEMON_RESTART_HANDOFF_DELAY_MS + 500;
+        await timer.advanceTimeAsync(oldDelayOnlyBudget);
+        expect(manager.startCalled).toBe(false);
+
+        await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS - oldDelayOnlyBudget);
 
         await expect(recovery).resolves.toEqual(recoveredResult);
         expect(manager.startCallCount).toBe(1);

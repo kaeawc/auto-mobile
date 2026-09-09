@@ -226,15 +226,34 @@ export const DAEMON_SHUTDOWN_TIMEOUT_MS = 10000;
 /** Stable control-socket error used to signal a retryable shutdown transition. */
 export const DAEMON_SHUTTING_DOWN_ERROR_MESSAGE = "Daemon is shutting down";
 
+/** Bound on the post-SIGKILL process-exit confirmation. */
+export const DAEMON_FORCED_STOP_TIMEOUT_MS = 1_000;
+
+/**
+ * Bound on one synchronous `ps`/PowerShell/CIM process-table scan. `execSync`
+ * otherwise has no timeout, so this also makes the restart handoff calculable.
+ */
+export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5_000;
+
+/** Bound on the explicit-restart canonical-port availability probe. */
+export const DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS = 1_000;
+
 /** Deliberate no-process/no-lock pause between explicit restart stop and start. */
 export const DAEMON_RESTART_HANDOFF_DELAY_MS = 1_000;
 
 /**
  * How long a recovering proxy preserves an explicit restart's empty handoff
- * before it may auto-start a replacement itself. Keep headroom beyond the
- * manager's deliberate delay for scheduling and readiness polling.
+ * before it may auto-start a replacement itself. This covers the complete
+ * bounded lock-free interval after peer EOF: concurrent graceful/forced
+ * cleanup, the final process-table and port preflight, and the deliberate
+ * stop/start delay.
  */
-export const DAEMON_RESTART_HANDOFF_TIMEOUT_MS = DAEMON_RESTART_HANDOFF_DELAY_MS + 500;
+export const DAEMON_RESTART_HANDOFF_TIMEOUT_MS =
+  DAEMON_SHUTDOWN_TIMEOUT_MS +
+  DAEMON_FORCED_STOP_TIMEOUT_MS +
+  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS +
+  DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS +
+  DAEMON_RESTART_HANDOFF_DELAY_MS;
 
 /**
  * Minimum age (ms since startedAt) before the proxy will restart a daemon on

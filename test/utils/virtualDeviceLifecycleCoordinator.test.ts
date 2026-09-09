@@ -112,12 +112,12 @@ describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
     );
 
     expect(provisioning.signal.aborted).toBe(true);
+    timer.advanceTime(1_000);
+    await expect(competingTeardown).rejects.toThrow("Timed out waiting to teardown");
     provisioning.transitionToTeardown();
     expect(provisioning.signal.aborted).toBe(false);
 
     provisioning.release();
-    const teardown = await competingTeardown;
-    teardown.release();
   });
 
   test("different stable identities remain concurrent", async () => {

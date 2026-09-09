@@ -4145,7 +4145,10 @@ export function registerDeviceTools() {
       return result;
     } catch (error) {
       const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, provisionError.code, provisionError.message);
+      await store.fail(args.operationId, provisionError.code, provisionError.message, {
+        clearCreationStarted:
+          error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
+      });
       throw provisionError;
     }
   }

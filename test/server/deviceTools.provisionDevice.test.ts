@@ -110,8 +110,20 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     return this.results.get(operationId)?.result;
   }
 
-  async fail(): Promise<void> {
+  async fail(
+    operationId: string,
+    _errorCode: string,
+    _message: string,
+    options?: { clearCreationStarted?: boolean },
+  ): Promise<void> {
     this.failCalls++;
+    if (options?.clearCreationStarted) {
+      const operation = this.results.get(operationId);
+      if (!operation) {
+        throw new Error(`missing operation ${operationId}`);
+      }
+      operation.creationStarted = false;
+    }
   }
 }
 
@@ -869,6 +881,53 @@ describe("provisionDevice handler", () => {
       cleanup: { status: "succeeded", operationId: "cleanup-partial-retry-android" },
     });
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("does not retain creation ownership after verified rollback", async () => {
+    const created = provisionedTestDevice("android", true);
+    const replacement = provisionedTestDevice("android", false);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    let provisionCalls = 0;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls++;
+          if (provisionCalls === 1) {
+            await request.onBeforeCreate?.();
+            deviceManager.setDeviceImages("android", [created.device]);
+            throw new Error("writing AVD memory configuration failed");
+          }
+          return replacement;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("replacement readiness failed");
+      },
+      idGenerator: new FakeIdGenerator(["cleanup-original-android"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs("android", "operation-cleaned-up-retry-android");
+
+    const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    deviceManager.setDeviceImages("android", [replacement.device]);
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(initial).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", operationId: "cleanup-original-android" },
+    });
+    expect(retried).toMatchObject({ success: false });
+    expect(retried.cleanup).toBeUndefined();
+    expect(await deviceManager.listDeviceImages("android")).toEqual([replacement.device]);
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toHaveLength(1);
   });
 
   test("adopts a running Android AVD by resolving its transport ID before boot", async () => {
@@ -1668,7 +1727,7 @@ describe("provisionDevice handler", () => {
     expect(second).toMatchObject({ created: true, adopted: false });
   });
 
-  test("retains creation ownership after a failed lifecycle retry", async () => {
+  test("clears creation ownership after a successful lifecycle rollback", async () => {
     let calls = 0;
     const retryingProvisioner: ExactDeviceProvisioner = {
       provision: async (request) => {
@@ -1730,7 +1789,7 @@ describe("provisionDevice handler", () => {
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(failed).toMatchObject({ success: false });
-    expect(retried).toMatchObject({ created: true, adopted: false });
+    expect(retried).toMatchObject({ created: false, adopted: true });
     expect(calls).toBe(2);
   });
 

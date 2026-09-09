@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { configureToolSelectionCliDefaults } from "../../src/features/toolSelection/SessionToolSelectionService";
-import { createMcpServer, registerMcpTools } from "../../src/server";
+import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("tool selection default declarations", () => {
@@ -11,7 +11,7 @@ describe("tool selection default declarations", () => {
 
   test("every production tool declares its built-in selection default", () => {
     ToolRegistry.clearTools();
-    createMcpServer();
+    registerMcpTools(false);
     expect(ToolRegistry.getToolsMissingDeclaredDefault()).toEqual([]);
   });
 

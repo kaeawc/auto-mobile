@@ -120,6 +120,44 @@ describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
     provisioning.release();
   });
 
+  test("does not carry a cancelled provision caller signal into teardown binding", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const caller = new AbortController();
+    const provisioning = await coordinator.reserve(
+      { kind: "selector", platform: "ios", selector: "iPhone 17" },
+      { operation: "provision", deadlineMs: 1_000, signal: caller.signal },
+    );
+    const stableTeardown = await coordinator.reserve(
+      {
+        kind: "stable",
+        platform: "ios",
+        stableId: "11111111-2222-3333-4444-555555555555",
+      },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    caller.abort(new Error("provision caller disconnected"));
+    provisioning.transitionToTeardown();
+    let bindingSettled = false;
+    const binding = provisioning
+      .bindCanonicalIdentity({
+        platform: "ios",
+        stableId: "11111111-2222-3333-4444-555555555555",
+      })
+      .finally(() => {
+        bindingSettled = true;
+      });
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    expect(bindingSettled).toBe(false);
+
+    stableTeardown.release();
+    await binding;
+    provisioning.release();
+  });
+
   test("different stable identities remain concurrent", async () => {
     const timer = new FakeTimer();
     const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

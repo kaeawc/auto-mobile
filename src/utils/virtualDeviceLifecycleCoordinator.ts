@@ -108,6 +108,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     await this.acquire(identity, options, controller, ownerByKey);
     let currentIdentity = identity;
     let currentOperation = options.operation;
+    let reservationSignal = options.signal;
     let released = false;
 
     return {
@@ -125,7 +126,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
         const previousKeys = [...ownerByKey.keys()];
         await this.acquire(
           nextIdentity,
-          { ...options, operation: currentOperation },
+          { ...options, operation: currentOperation, signal: reservationSignal },
           controller,
           ownerByKey,
         );
@@ -143,6 +144,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           throw new ActionableError("Cannot transition a released device lifecycle reservation");
         }
         currentOperation = "teardown";
+        reservationSignal = undefined;
         // A queued teardown may already have preempted the failed provision.
         // Its signal must not cancel the cleanup that now owns this reservation.
         if (controller.signal.aborted) {

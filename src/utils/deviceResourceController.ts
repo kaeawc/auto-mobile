@@ -101,7 +101,9 @@ export class DefaultDeviceResourceController implements DeviceResourceController
       try {
         this.remaining(request);
         observed = await this.setResource(run, resource, desired);
+        request.signal?.throwIfAborted();
       } catch (error) {
+        request.signal?.throwIfAborted();
         observed = this.failure(error);
       }
       result.resources[resource] = observed;
@@ -152,6 +154,7 @@ export class DefaultDeviceResourceController implements DeviceResourceController
       try {
         evidence[definition.label] = await this.setService(run, resource, definition, desired);
       } catch (error) {
+        run.request.signal?.throwIfAborted();
         evidence[definition.label] = this.failure(error);
       }
     }

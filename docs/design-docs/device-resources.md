@@ -66,6 +66,12 @@ reduction succeeded.
 
 ## Configuring resources
 
+`setDeviceResources` is disabled by default. Enable it for the MCP session with
+`setToolEnabled` using `{"toolName":"setDeviceResources","enabled":true}`, or
+start AutoMobile with `--enable-tool setDeviceResources`. Tool names are
+case-sensitive. The optional `provisionDevice.resources` field does not require
+enabling the standalone tool.
+
 Both tools accept the same partial map of resource names to `enabled` or
 `disabled`. Omitted entries remain untouched; an empty map, raw service names,
 unknown keys, and profile names are rejected. Ordinary provisioning without

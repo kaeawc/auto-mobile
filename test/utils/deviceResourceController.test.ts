@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatalog";
 import { deviceResourceDescriptions } from "../../src/models/deviceResourceDescriptions";
 import { basename, join } from "node:path";
+import { DeviceLifecyclePreemptedError } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 const udid = "12345678-1234-1234-1234-123456789ABC";
 const label = "com.apple.PosterBoard";
@@ -336,8 +337,27 @@ describe("device resource control", () => {
 
   test("cancellation prevents native commands", async () => {
     request.signal = AbortSignal.abort(new Error("cancelled"));
-    expect((await controller.setResources(request)).success).toBe(false);
+    await expect(controller.setResources(request)).rejects.toThrow("cancelled");
     expect(simctl.calls).toEqual([]);
+  });
+
+  test("teardown preemption propagates immediately after a native resource write", async () => {
+    const abort = new AbortController();
+    const reason = new DeviceLifecyclePreemptedError({
+      kind: "stable",
+      platform: "ios",
+      stableId: udid,
+    });
+    request.signal = abort.signal;
+    request.resources.widgets = "disabled";
+    simctl.onCommand = (args) => {
+      if (args[3] === "disable") {
+        abort.abort(reason);
+        throw reason;
+      }
+    };
+    await expect(controller.setResources(request)).rejects.toBe(reason);
+    expect(simctl.mutations().map((args) => args[3])).toEqual(["disable"]);
   });
 
   test("wallpaper, widgets, and Live Activities have independent state and mutations", async () => {

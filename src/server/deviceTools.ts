@@ -74,7 +74,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { executionTracker } from "./executionTracker";
 import {
@@ -4977,6 +4977,7 @@ export function registerDeviceTools() {
     resources?: DeviceResourceConfigurationResult;
   }> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
+    const operationSignal = combineAbortSignals(signal, lifecycleLease.signal)!;
     const bootService = new DeviceBootService({
       deviceManager,
       deviceMatcher: deps.deviceMatcherFactory(),
@@ -4995,7 +4996,7 @@ export function registerDeviceTools() {
       const alreadyBooted = await runProvisionDeviceWithinDeadline(
         deps.timer,
         totalDeadlineMs,
-        signal,
+        operationSignal,
         "discovering an already-running exact device",
         async () => await deviceManager.getBootedDevices(args.device.platform),
       );
@@ -5020,7 +5021,7 @@ export function registerDeviceTools() {
           exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
         timeoutMs: Math.max(1, totalDeadlineMs - deps.timer.now()),
         totalDeadlineMs,
-        signal,
+        signal: operationSignal,
       });
       perf.endOperation("bootDevice");
       if (args.device.platform === "ios" && boot.device.deviceId !== provisioned.device.deviceId) {
@@ -5035,13 +5036,15 @@ export function registerDeviceTools() {
       const sessionId = await trackDeviceAcquisitionReadiness(
         deviceReadinessLockKey(boot.device.platform, boot.device.deviceId),
         async () => {
+          operationSignal.throwIfAborted();
           resources = await applyProvisionDeviceResources(
             args,
             deps,
             boot!.device,
             totalDeadlineMs,
-            lifecycleLease.signal,
+            operationSignal,
           );
+          operationSignal.throwIfAborted();
           await ensureProvisionDeviceReadiness(
             args,
             deps,
@@ -5049,8 +5052,9 @@ export function registerDeviceTools() {
             requestedIdentity,
             totalDeadlineMs,
             perf,
-            signal,
+            operationSignal,
           );
+          operationSignal.throwIfAborted();
           validatePooledDeviceMapping(boot!.device, requestedIdentity);
           publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
           return await bindBootedDeviceSession(
@@ -5118,14 +5122,12 @@ export function registerDeviceTools() {
         ? serverConfig.getRunnerReadinessTimeoutMs()
         : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
-    return deps
-      .deviceResourceControllerFactory()
-      .setResources({
-        device,
-        resources: args.resources,
-        deadlineMs: deadlineMs - completionBudgetMs,
-        signal,
-      });
+    return deps.deviceResourceControllerFactory().setResources({
+      device,
+      resources: args.resources,
+      deadlineMs: deadlineMs - completionBudgetMs,
+      signal,
+    });
   }
 
   async function reserveProvisionDeviceReadiness(

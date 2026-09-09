@@ -353,6 +353,43 @@ describe("provisionDevice handler", () => {
     expect(operationStore.failCalls).toBe(0);
   });
 
+  test("teardown preemption after resource configuration prevents readiness and session binding", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const resources = new FakeDeviceResourceController();
+    let teardown: ReturnType<typeof coordinator.reserve> | undefined;
+    let readinessCalls = 0;
+    resources.onRequest = async (request) => {
+      teardown = coordinator.reserve(
+        { kind: "stable", platform: "android", stableId: "phone-api-36-a" },
+        { operation: "teardown", deadlineMs: 60_000 },
+      );
+      expect(request.signal?.aborted).toBe(true);
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: coordinator,
+      deviceResourceControllerFactory: () => resources,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+    });
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "resource-preemption"),
+      timeoutMs: 60_000,
+      resources: { wallpaperRendering: "disabled" },
+    });
+    const lease = await teardown;
+    lease?.release();
+    expect(readinessCalls).toBe(0);
+    expect((response as any).isError).toBe(true);
+    expect(JSON.parse((response as any).content[0].text).sessionId).toBeUndefined();
+  });
+
   test("a changed resource request conflicts with a reused operation ID", async () => {
     const resources = new FakeDeviceResourceController();
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);

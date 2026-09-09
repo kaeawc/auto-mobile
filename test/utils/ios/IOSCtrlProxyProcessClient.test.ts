@@ -93,6 +93,50 @@ describe("IOSCtrlProxyProcessClient", () => {
     );
   });
 
+  test("SIGKILLs the tracked root/group before descendant enumeration completes on skipGraceful (#6578)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const commandOrder: string[] = [];
+    let releaseEnumeration: (() => void) | undefined;
+    let psCalled: ((commandsBeforePs: string[]) => void) | undefined;
+    const psCalledPromise = new Promise<string[]>((resolve) => {
+      psCalled = resolve;
+    });
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        const command = `${file} ${args.join(" ")}`;
+        if (file === "ps") {
+          // Simulate slow descendant enumeration that would otherwise eat a
+          // tight force-stop deadline if it were awaited before signaling.
+          psCalled?.([...commandOrder]);
+          commandOrder.push(command);
+          await new Promise<void>((resolve) => {
+            releaseEnumeration = resolve;
+          });
+          return result("42 1\n43 42\n");
+        }
+        commandOrder.push(command);
+        if (file === "kill" && args[0] === "-0") {
+          throw new Error("not running");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer, {
+      releaseAttempts: 1,
+      releaseGraceMs: 1,
+    });
+
+    const pending = client.terminateProcessTree(42, undefined, { skipGraceful: true });
+    const commandsBeforePs = await psCalledPromise;
+
+    expect(commandsBeforePs).toEqual(["kill -KILL -- -42", "kill -KILL 42"]);
+
+    releaseEnumeration?.();
+    await expect(pending).resolves.toBeUndefined();
+    expect(commandOrder).toContain("kill -KILL 43");
+  });
+
   test("resolves process-tree termination once SIGKILL removes every target", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

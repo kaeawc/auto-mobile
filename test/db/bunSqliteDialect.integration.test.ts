@@ -650,3 +650,96 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
     expect(opened).toBe(false);
   });
 });
+
+describe("BunSqliteConnectionState — FIFO admission fairness + no thundering herd (#6699)", () => {
+  test("one completion resumes only the eligible waiters and preserves FIFO across queries and transactions", async () => {
+    const state = makeState(new FakeDatabase());
+
+    // Hold a transaction open so every later operation must queue behind it.
+    const holder = Symbol("holder");
+    await state.beginTransaction(holder);
+
+    const order: string[] = [];
+    const q1 = state.executeQuery(rawQuery("select 1"), Symbol("q1")).then(() => {
+      order.push("q1");
+    });
+    const t2 = Symbol("t2");
+    const txn2 = state.beginTransaction(t2).then(async () => {
+      order.push("t2");
+      await state.commitTransaction(t2);
+    });
+    const q3 = state.executeQuery(rawQuery("select 1"), Symbol("q3")).then(() => {
+      order.push("q3");
+    });
+
+    await Promise.resolve();
+    expect(state.queuedWaiterCount).toBe(3); // all three parked behind the held txn
+
+    const resumesBefore = state.resumeCount;
+    // Releasing the holder runs exactly one #pump. It admits only q1 (the head
+    // query); t2 (a transaction) is then blocked by q1's now-active query, and q3
+    // is behind t2 in FIFO — so neither is woken. The old broadcast #notifyWaiters
+    // resolved all three every time, forcing t2 and q3 to re-park.
+    await state.commitTransaction(holder);
+    await Promise.resolve();
+    expect(state.resumeCount - resumesBefore).toBe(1);
+    expect(state.queuedWaiterCount).toBe(2);
+
+    await withTimeout(Promise.all([q1, txn2, q3]), 1000);
+    // FIFO: q1 (queued before t2) beats the transaction; q3 (queued after t2) runs
+    // after it — an earlier query is not starved by a later transaction, and a
+    // transaction is not starved by a later query.
+    expect(order).toEqual(["q1", "t2", "q3"]);
+  });
+
+  test("an earlier-queued query is not starved by a sustained later transaction stream", async () => {
+    const state = makeState(new FakeDatabase());
+
+    const holder = Symbol("holder");
+    await state.beginTransaction(holder);
+
+    const order: string[] = [];
+    const qEarly = state.executeQuery(rawQuery("select 1"), Symbol("qEarly")).then(() => {
+      order.push("qEarly");
+    });
+    // Three transactions queued AFTER qEarly — a sustained transaction stream.
+    const txns = [Symbol("tA"), Symbol("tB"), Symbol("tC")].map((owner, index) =>
+      state.beginTransaction(owner).then(async () => {
+        order.push(`t${index}`);
+        await state.commitTransaction(owner);
+      }),
+    );
+
+    await Promise.resolve();
+    await state.commitTransaction(holder);
+
+    await withTimeout(Promise.all([qEarly, ...txns]), 2000);
+    // qEarly was queued first, so despite three later transactions it admits
+    // before any of them — the transaction preference is bounded by FIFO order,
+    // not unbounded as it was when a query yielded to every pending transaction.
+    expect(order[0]).toBe("qEarly");
+  });
+
+  test("a transaction queued before a query still runs first (bounded transaction preference preserved)", async () => {
+    const state = makeState(new FakeDatabase());
+
+    const holder = Symbol("holder");
+    await state.beginTransaction(holder);
+
+    const order: string[] = [];
+    const tEarly = Symbol("tEarly");
+    const txnEarly = state.beginTransaction(tEarly).then(async () => {
+      order.push("tEarly");
+      await state.commitTransaction(tEarly);
+    });
+    const qLate = state.executeQuery(rawQuery("select 1"), Symbol("qLate")).then(() => {
+      order.push("qLate");
+    });
+
+    await Promise.resolve();
+    await state.commitTransaction(holder);
+
+    await withTimeout(Promise.all([txnEarly, qLate]), 1000);
+    expect(order).toEqual(["tEarly", "qLate"]);
+  });
+});

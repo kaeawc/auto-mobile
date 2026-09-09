@@ -1,6 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { shellQuote } from "../utils/shellQuote";
 import {
+  DaemonBoundSessionLostError,
   DaemonClient,
   DaemonShuttingDownError,
   DaemonUnavailableError,
@@ -1550,6 +1551,21 @@ export class DaemonMcpProxy {
         throw error;
       }
       this.throwIfBoundSessionFenced(allowReleasedSession);
+      if (error instanceof DaemonBoundSessionLostError) {
+        if (error.failure.sessionUuid !== this.boundSessionUuid) {
+          throw new DaemonBoundSessionExpiredError(
+            error.failure.sessionUuid,
+            error.failure.reason,
+            error.failure.release,
+          );
+        }
+        this.fenceBoundSessionUuid(
+          error.failure.sessionUuid,
+          error.failure.reason,
+          error.failure.release,
+        );
+        throw this.boundSessionExpiredError();
+      }
       if (!this.isRecoverableDaemonSessionError(error)) {
         throw error;
       }
@@ -1822,6 +1838,12 @@ export class DaemonMcpProxy {
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
   ): Promise<any> {
+    // These are daemon-internal routing markers. Never accept caller-controlled
+    // values: only this proxy may add them after selecting its active binding.
+    const callerArgs = { ...args };
+    delete callerArgs[DAEMON_BOUND_SESSION_PARAM];
+    delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
+    delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     // Device-session acquisition (getAndroid/getApple/startDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
@@ -1833,8 +1855,8 @@ export class DaemonMcpProxy {
     // after a device has been bound.
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
-        ? args
-        : this.withBoundSessionUuid(args);
+        ? callerArgs
+        : this.withBoundSessionUuid(callerArgs);
     const forwardedArgs = this.withToolSelectionProfile(routingArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -1864,7 +1886,7 @@ export class DaemonMcpProxy {
         this.refreshReplayLeaseForBoundSessionResult(forwardedArgs, callReleaseEpoch);
         return result;
       }
-      this.rememberToolSelectionProfile(name, args, result);
+      this.rememberToolSelectionProfile(name, callerArgs, result);
       if (isSessionAcquisition) {
         await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
         return result;
@@ -2511,6 +2533,8 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
+      error instanceof DaemonBoundSessionExpiredError ||
+      error instanceof DaemonBoundSessionLostError ||
       this.isRecoverableDaemonSessionError(error) ||
       this.isUnadmittedDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)

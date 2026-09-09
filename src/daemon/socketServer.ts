@@ -14,11 +14,13 @@ import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
+  BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
   DaemonResponse,
   PROGRESS_NOTIFICATION_METHOD,
   SessionContext,
+  type BoundSessionLoss,
 } from "./types";
 import {
   SOCKET_PATH,
@@ -135,6 +137,16 @@ const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
+
+class ReleasedBoundSessionError extends Error {
+  constructor(readonly failure: BoundSessionLoss) {
+    super(
+      `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). ` +
+        "Acquire a new device session before continuing.",
+    );
+    this.name = "ReleasedBoundSessionError";
+  }
+}
 
 /**
  * Bound on the observation-only liveness probe a LOCK-LESS bind runs against an
@@ -1104,6 +1116,9 @@ export class UnixSocketServer {
           ...(error instanceof DeviceControlTransportError
             ? { transportFailure: error.failure }
             : {}),
+          ...(error instanceof ReleasedBoundSessionError
+            ? { boundSessionLoss: error.failure }
+            : {}),
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
@@ -1708,6 +1723,9 @@ export class UnixSocketServer {
         context.totalTimeoutMs,
       );
     } catch (error) {
+      if (error instanceof ReleasedBoundSessionError) {
+        throw error;
+      }
       const message = errorMessage(error);
       if (message.includes("Session not found")) {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
@@ -2490,7 +2508,17 @@ export class UnixSocketServer {
     if (!this.isReleasedBoundSession(args)) {
       return;
     }
-    throw new Error(`Session not found: ${this.getSessionUuid(args)}`);
+    const sessionUuid = this.getSessionUuid(args);
+    if (!sessionUuid) {
+      throw new Error("Released bound session is missing its session UUID.");
+    }
+    const release = this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid);
+    throw new ReleasedBoundSessionError({
+      code: BOUND_SESSION_LOSS_CODE,
+      sessionUuid,
+      reason: release?.releaseReason ?? "session-not-found",
+      ...(release ? { release } : {}),
+    });
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {

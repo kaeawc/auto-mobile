@@ -67,6 +67,7 @@ import {
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
+import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
@@ -116,6 +117,7 @@ import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
 import {
   ProvisionDeviceOperationRepository,
   ProvisionDeviceOperationConflictError,
+  ProvisionDeviceOperationInProgressError,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -479,6 +481,13 @@ const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
 const DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES = 2;
 const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
+// A live provisionDevice attempt can legitimately hold its operation row for as
+// long as its own timeoutMs budget allows, capped at MAX_DEVICE_READY_TIMEOUT_MS
+// (~14m50s). Give the stored row headroom beyond that ceiling so a still-live
+// attempt is never mistaken for abandoned while genuinely within its own
+// deadline, plus room afterward for idempotent replay before the row is pruned
+// (#6652).
+const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
 
 function getShutdownInitiatingExecutionId(): string | undefined {
   return getToolSelectionContext()?.execution?.executionId;
@@ -3406,6 +3415,7 @@ async function rebootAndroidAfterSystemUiAnr(
   releaseReadinessReservation?: DeviceReadinessReservation;
   retireReplacement?: () => Promise<void>;
   validatePreservedSession?: () => Promise<void>;
+  releaseRecoveryRouteLease?: () => void;
 }> {
   const sourceImage = await resolveSystemUiRecoveryImage(
     boot,
@@ -3466,6 +3476,7 @@ async function rebootAndroidAfterSystemUiAnr(
           adoptedReplacementBoot,
         ),
       validatePreservedSession: handoff?.validatePreservedSession,
+      releaseRecoveryRouteLease: shutdownReservation?.releaseRecoveryRouteLease,
     };
   } catch (error) {
     // The pool rolls an adopted replacement back before rejecting its handoff,
@@ -3489,6 +3500,9 @@ async function rebootAndroidAfterSystemUiAnr(
     throw error;
   } finally {
     await shutdownReservation?.release();
+    if (!keepReadinessReservation) {
+      shutdownReservation?.releaseRecoveryRouteLease();
+    }
     if (!keepReadinessReservation) {
       await releaseReadinessReservation?.();
     }
@@ -3680,6 +3694,7 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
           releaseError,
         );
       }
+      recovery.releaseRecoveryRouteLease?.();
       throw readinessError;
     }
     return { ...recovery, recovered: true };
@@ -3781,6 +3796,7 @@ async function prepareStartDeviceRunnerReadiness(
     try {
       await prepareRecoveredDeviceForRunnerReadiness(input, devicePool, readinessResult);
     } catch (error) {
+      readinessResult.releaseRecoveryRouteLease?.();
       try {
         await readinessResult.retireReplacement?.();
       } catch (cleanupError) {
@@ -4150,7 +4166,21 @@ export function registerDeviceTools() {
   ): Promise<Record<string, unknown>> {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
-    const operation = await store.begin(args.operationId, fingerprint);
+    const nowMs = deps.timer.now();
+    const operation = await store.begin(
+      args.operationId,
+      fingerprint,
+      nowMs,
+      nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
+    );
+    if ("inProgress" in operation) {
+      // A live (non-expired) "running" row for this operationId/fingerprint --
+      // report in-progress instead of silently re-running the provisioning
+      // lifecycle (#6652 defect 1). Thrown before the try/catch below so this
+      // never reaches store.fail(), which would incorrectly overwrite the
+      // still-running attempt's row.
+      throw new ProvisionDeviceOperationInProgressError(args.operationId);
+    }
     try {
       if (
         !operation.started &&
@@ -4190,6 +4220,9 @@ export function registerDeviceTools() {
       await completeProvisionDeviceOperation(store, args.operationId, result);
       return result;
     } catch (error) {
+      if (error instanceof McpSessionRecoveryInProgressError) {
+        throw error;
+      }
       const provisionError = toProvisionDeviceError(args, error);
       await store.fail(args.operationId, provisionError.code, provisionError.message, {
         clearCreationStarted:
@@ -4377,6 +4410,10 @@ export function registerDeviceTools() {
     try {
       return await revalidateLiveProvisionDeviceSession(args, deps, result, signal);
     } catch (error) {
+      // A transport routing conflict does not invalidate the healthy device session.
+      if (error instanceof McpSessionRecoveryInProgressError) {
+        throw error;
+      }
       await releaseProvisionDeviceSession(result, "provision-device-replay-validation-failed");
       throw error;
     }
@@ -5155,6 +5192,9 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceOperationConflictError) {
       return createToolErrorResponse("operation_conflict", error.message);
     }
+    if (error instanceof ProvisionDeviceOperationInProgressError) {
+      return createToolErrorResponse("operation_in_progress", error.message);
+    }
     return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }
 
@@ -5435,65 +5475,69 @@ export function registerDeviceTools() {
             deviceReadinessLockKey(replacement.platform, replacement.deviceId),
           ),
       });
-      state.boot = readinessResult.boot;
-      moveDeviceAcquisitionReadiness(
-        acquisitionReadinessKey,
-        deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
-      );
-      sourceImage = state.boot.sourceImage ?? sourceImage;
-      // Re-check under the later binding lock because pool identity can change
-      // while runner setup is in flight.
-      validatePooledDeviceMapping(state.boot.device, requestedIdentity);
-
-      // Publish only after runner health passes. Readiness remains per-device,
-      // so 20-40 concurrent emulators do not serialize on a host-wide gate.
-      publishWarmDeviceReady(state.boot.source, state.boot.device.deviceId);
-      await validatePreservedSystemUiAnrRecoverySession(
-        readinessResult.preservedSessionId,
-        readinessResult.validatePreservedSession,
-        readinessResult.retireReplacement,
-      );
-      const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
-        state.boot,
-        sourceImage,
-      );
-      // Recovery must revalidate the caller through the same autolock path;
-      // a preserved UUID alone is not proof that this client owns the session.
-      const boundSessionId =
-        readinessResult.preservedSessionId && !isDevicePoolAutolockEnabled()
-          ? readinessResult.preservedSessionId
-          : await bindBootedDeviceSession(
-              state.boot.device,
-              args,
-              state.boot.source === "cold-boot" && !readinessResult.preservedSessionId
-                ? sourceImage
-                : undefined,
-              // Recovery already registered this process and its output tail.
-              readinessResult.preservedSessionId ? undefined : state.boot.processHandle,
-              new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-              verifiedWarmAndroidAvdIdentity,
-            );
-      if (readinessResult.preservedSessionId) {
-        // #6227 round 7: without autolock, System UI ANR recovery bypasses
-        // `bindBootedDeviceSession` (and therefore its own
-        // `recordAcquiredSessionReadiness` call) entirely when a preserved
-        // session is being reused. But by this point
-        // `prepareStartDeviceRunnerReadiness` has already run the *same*
-        // `ensureCtrlProxyReady` setup this function always awaits for a
-        // freshly-bound session — recovery re-verified runner readiness on the
-        // replacement device before handing back `preservedSessionId` (see
-        // `ensureRunnerReadyWithSystemUiAnrRecovery`) — so the achieved level
-        // here is unconditionally `automationReady`, exactly like the
-        // freshly-bound branch. Recording it here closes the gap where a
-        // recovered session's readiness cache stayed `undefined` and the first
-        // `automationReady` tool after recovery redundantly re-ran setup.
-        recordAcquiredSessionReadiness(
-          daemonState,
-          readinessResult.preservedSessionId,
-          "automationReady",
+      try {
+        state.boot = readinessResult.boot;
+        moveDeviceAcquisitionReadiness(
+          acquisitionReadinessKey,
+          deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
         );
+        sourceImage = state.boot.sourceImage ?? sourceImage;
+        // Re-check under the later binding lock because pool identity can change
+        // while runner setup is in flight.
+        validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+
+        // Publish only after runner health passes. Readiness remains per-device,
+        // so 20-40 concurrent emulators do not serialize on a host-wide gate.
+        publishWarmDeviceReady(state.boot.source, state.boot.device.deviceId);
+        await validatePreservedSystemUiAnrRecoverySession(
+          readinessResult.preservedSessionId,
+          readinessResult.validatePreservedSession,
+          readinessResult.retireReplacement,
+        );
+        const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
+          state.boot,
+          sourceImage,
+        );
+        // Recovery must revalidate the caller through the same autolock path;
+        // a preserved UUID alone is not proof that this client owns the session.
+        const boundSessionId =
+          readinessResult.preservedSessionId && !isDevicePoolAutolockEnabled()
+            ? readinessResult.preservedSessionId
+            : await bindBootedDeviceSession(
+                state.boot.device,
+                args,
+                state.boot.source === "cold-boot" && !readinessResult.preservedSessionId
+                  ? sourceImage
+                  : undefined,
+                // Recovery already registered this process and its output tail.
+                readinessResult.preservedSessionId ? undefined : state.boot.processHandle,
+                new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+                verifiedWarmAndroidAvdIdentity,
+              );
+        if (readinessResult.preservedSessionId) {
+          // #6227 round 7: without autolock, System UI ANR recovery bypasses
+          // `bindBootedDeviceSession` (and therefore its own
+          // `recordAcquiredSessionReadiness` call) entirely when a preserved
+          // session is being reused. But by this point
+          // `prepareStartDeviceRunnerReadiness` has already run the *same*
+          // `ensureCtrlProxyReady` setup this function always awaits for a
+          // freshly-bound session — recovery re-verified runner readiness on the
+          // replacement device before handing back `preservedSessionId` (see
+          // `ensureRunnerReadyWithSystemUiAnrRecovery`) — so the achieved level
+          // here is unconditionally `automationReady`, exactly like the
+          // freshly-bound branch. Recording it here closes the gap where a
+          // recovered session's readiness cache stayed `undefined` and the first
+          // `automationReady` tool after recovery redundantly re-ran setup.
+          recordAcquiredSessionReadiness(
+            daemonState,
+            readinessResult.preservedSessionId,
+            "automationReady",
+          );
+        }
+        return boundSessionId;
+      } finally {
+        readinessResult.releaseRecoveryRouteLease?.();
       }
-      return boundSessionId;
     });
     state.ownershipTransferred = true;
 

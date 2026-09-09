@@ -182,23 +182,31 @@ export class DefaultRetryExecutor implements RetryExecutor {
     // either way; { once: true } alone only cleans up on abort, which leaked
     // one listener per retry on a long-lived signal (#6138).
     let onAbort: (() => void) | undefined;
+    // The scheduled timeout has no cancellation handle of its own once the
+    // race settles via abort; without clearing it here it stays scheduled for
+    // its full delay, leaking one timer per aborted retry (#6707). Mirrors the
+    // cancellable pattern in DaemonManager.sleepUnlessAborted (manager.ts).
+    let handle: NodeJS.Timeout | undefined;
     try {
       // The `await` is load-bearing: it keeps `finally` from running until the
-      // race settles, so the listener is removed after (not before) it can fire.
-      return await Promise.race([
-        this.timer.sleep(delay).then(() => false),
-        new Promise<boolean>((resolve) => {
-          // Recheck: timer.sleep() above runs first and may abort synchronously,
-          // after which the event has already fired and a listener would hang.
-          if (signal.aborted) {
-            resolve(true);
-            return;
-          }
-          onAbort = () => resolve(true);
-          signal.addEventListener("abort", onAbort, { once: true });
-        }),
-      ]);
+      // race settles, so the listener/timeout are cleaned up after (not
+      // before) the race can settle.
+      return await new Promise<boolean>((resolve) => {
+        handle = this.timer.setTimeout(() => resolve(false), delay);
+        // Recheck: timer.setTimeout() above may abort the signal
+        // synchronously as a side effect (e.g. a Timer stub), after which the
+        // event has already fired and a listener registered below would hang.
+        if (signal.aborted) {
+          resolve(true);
+          return;
+        }
+        onAbort = () => resolve(true);
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
     } finally {
+      if (handle !== undefined) {
+        this.timer.clearTimeout(handle);
+      }
       if (onAbort) {
         signal.removeEventListener("abort", onAbort);
       }

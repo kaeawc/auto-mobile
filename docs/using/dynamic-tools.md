@@ -35,3 +35,9 @@ or `--mcp-recording`. Plan-only tools are never shown in public discovery.
 
 If a tool is missing, check its exact name and required process options, then
 refresh discovery after the `notifications/tools/list_changed` notification.
+
+## Device-session recovery after a daemon restart
+
+A shared-daemon restart ends every device session bound to its prior daemon
+instance. Do not retry or retarget the former session UUID: acquire a fresh
+session with `getAndroid`, `getApple`, or `startDevice` before continuing.

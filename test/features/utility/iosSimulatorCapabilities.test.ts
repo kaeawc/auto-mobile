@@ -100,4 +100,16 @@ describe("iOS Simulator capabilities", () => {
 
     expect(report.selection.valid).toBe(true);
   });
+
+  test("accepts human-readable device type and runtime names emitted by device discovery", () => {
+    const report = computeIosSimulatorCapabilities({
+      deviceType: "iPhone 17 Pro Max",
+      runtime: "iOS 26.2",
+    });
+
+    expect(report.selection).toEqual({ valid: true });
+    expect(findIosSimulatorCapability(report, "biometrics.enrollment")).toMatchObject({
+      state: "supported",
+    });
+  });
 });

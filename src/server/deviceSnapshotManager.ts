@@ -91,24 +91,55 @@ const LEGACY_MANIFEST_FILENAME = "manifest.json";
 // sufficient — cross-process coordination is out of scope.
 const captureLocks = new Map<string, Promise<unknown>>();
 
-function withCaptureLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
-  const prior = captureLocks.get(snapshotName) ?? Promise.resolve();
+// Serializes the archive byte-budget eviction pass across ALL names and devices.
+// Captures on different names/devices take different (per-name) capture locks, so
+// their eviction passes would otherwise interleave against the same table and the
+// same budget: each reads the same up-front list and running total, then both
+// delete least-recently-accessed rows, and a pass that gets `deleted === false`
+// for rows another pass already removed credits itself nothing and keeps walking
+// — over-evicting well past the budget and emptying the archive (issue #6491).
+// Running the whole pass under one lock keyed on a CONSTANT makes passes QUEUE,
+// so each pass's up-front list/total read is accurate for its own duration. This
+// narrows rather than widens what is held: capture work stays parallel; only the
+// budget arithmetic is one-at-a-time. A separate map (not captureLocks) is used so
+// a snapshot whose name happens to equal the key can't serialize against it.
+const archiveBudgetLocks = new Map<string, Promise<unknown>>();
+const ARCHIVE_BUDGET_LOCK_KEY = "archive-budget";
+
+// Shared serialization primitive: run `task` after any prior holder of `key`
+// settles, keeping a promise-chain tail in `locks` and dropping the entry once
+// this is the last holder so the map doesn't grow unbounded.
+function withSerializedLock<T>(
+  locks: Map<string, Promise<unknown>>,
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const prior = locks.get(key) ?? Promise.resolve();
   // Run after the prior holder settles, regardless of whether it resolved or
-  // rejected, so one failed capture doesn't wedge every later same-name capture.
+  // rejected, so one failed holder doesn't wedge every later one for this key.
   const run = prior.then(task, task);
   const tail = run.then(
     () => undefined,
     () => undefined,
   );
-  captureLocks.set(snapshotName, tail);
+  locks.set(key, tail);
   void tail.finally(() => {
-    // Drop the entry once this is the last holder, so the map doesn't grow
-    // unbounded across distinct snapshot names.
-    if (captureLocks.get(snapshotName) === tail) {
-      captureLocks.delete(snapshotName);
+    if (locks.get(key) === tail) {
+      locks.delete(key);
     }
   });
   return run;
+}
+
+function withCaptureLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
+  return withSerializedLock(captureLocks, snapshotName, task);
+}
+
+// A capture holds its per-NAME capture lock while awaiting this DISTINCT
+// constant-keyed lock; the budget lock is a leaf (nothing acquired here awaits a
+// capture lock), so there is no re-entrancy and no deadlock.
+function withArchiveBudgetLock<T>(task: () => Promise<T>): Promise<T> {
+  return withSerializedLock(archiveBudgetLocks, ARCHIVE_BUDGET_LOCK_KEY, task);
 }
 
 function getSnapshotPathOptions(context: {
@@ -170,6 +201,7 @@ export async function setDeviceSnapshotManagerDependencies(
 export function resetDeviceSnapshotManagerDependencies(): void {
   moduleDependencies = null;
   captureLocks.clear();
+  archiveBudgetLocks.clear();
 }
 
 function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput {
@@ -224,6 +256,10 @@ function buildArchiveEntry(record: DeviceSnapshotRecord): Record<string, unknown
   };
 }
 
+// Validates the shape of a manifest read back from disk. Shared by every
+// on-disk manifest source this module reads: the modern per-platform
+// metadata.json (issue #6492) and the legacy flat manifest.json it falls back
+// to for pre-#5707 snapshots.
 function isLegacyManifest(value: unknown): value is DeviceSnapshotManifest {
   if (!value || typeof value !== "object") {
     return false;
@@ -245,6 +281,25 @@ function isLegacyManifest(value: unknown): value is DeviceSnapshotManifest {
   );
 }
 
+// Structural check for the settings.json payload CaptureSnapshot.saveSettings
+// writes (src/features/action/CaptureSnapshot.ts:360-371): the raw
+// `{global?, secure?, system?}` triplet, not a full manifest.
+function isSettingsPayload(
+  value: unknown,
+): value is NonNullable<DeviceSnapshotManifest["settings"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const settings = value as Record<string, unknown>;
+  return (["global", "secure", "system"] as const).every((key) => {
+    const entry = settings[key];
+    return (
+      entry === undefined || (typeof entry === "object" && entry !== null && !Array.isArray(entry))
+    );
+  });
+}
+
 function normalizeLegacyManifest(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
@@ -263,33 +318,137 @@ function resolveLegacyTimestamp(timestamp: string, fallback: string): string {
   return Number.isNaN(Date.parse(timestamp)) ? fallback : timestamp;
 }
 
-async function readLegacyManifest(
-  snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
-): Promise<DeviceSnapshotManifest | null> {
-  const manifestPath = path.join(
-    snapshotStore.getSnapshotPath(snapshotName),
-    LEGACY_MANIFEST_FILENAME,
-  );
-
+async function readManifestFile(manifestPath: string): Promise<DeviceSnapshotManifest | null> {
   try {
     const manifestJson = await fs.readFile(manifestPath, "utf-8");
     const parsed = JSON.parse(manifestJson) as unknown;
     if (!isLegacyManifest(parsed)) {
-      logger.warn(`[DeviceSnapshot] Legacy manifest for '${snapshotName}' is invalid`);
+      logger.warn(`[DeviceSnapshot] Manifest at '${manifestPath}' has an unexpected shape`);
       return null;
     }
-
-    return normalizeLegacyManifest(snapshotName, parsed);
+    return parsed;
   } catch (error) {
+    // ENOENT (this manifest filename doesn't exist here) is an expected miss —
+    // the caller tries the next filename/source. Anything else (malformed
+    // JSON, permission error) is unexpected and worth a trace, but still just
+    // degrades to "no manifest found here" rather than throwing (best-effort
+    // recovery path).
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
-      logger.warn(
-        `[DeviceSnapshot] Failed to read legacy manifest for '${snapshotName}': ${error}`,
-      );
+      logger.warn(`[DeviceSnapshot] Failed to read manifest at '${manifestPath}': ${error}`);
     }
     return null;
   }
+}
+
+/**
+ * Read the full manifest for `snapshotName`, preferring the modern
+ * `metadata.json` that every current capture path writes at the (possibly
+ * scoped) snapshot directory — this is the same artifact iOS capture writes
+ * via `CaptureSnapshot.saveIosMetadata` (`getMetadataPath`) — and falling back
+ * to the legacy flat `manifest.json` for pre-#5707 snapshots that predate both
+ * `metadata.json` and directory scoping (issue #6492).
+ */
+async function readSnapshotManifest(
+  snapshotName: string,
+  snapshotStore: DeviceSnapshotStore,
+  pathOptions: SnapshotPathOptions | undefined,
+): Promise<DeviceSnapshotManifest | null> {
+  const modern = await readManifestFile(snapshotStore.getMetadataPath(snapshotName, pathOptions));
+  if (modern) {
+    return normalizeLegacyManifest(snapshotName, modern);
+  }
+
+  const legacyPath = path.join(
+    snapshotStore.getSnapshotPathWithOptions(snapshotName, pathOptions),
+    LEGACY_MANIFEST_FILENAME,
+  );
+  const legacy = await readManifestFile(legacyPath);
+  if (legacy) {
+    return normalizeLegacyManifest(snapshotName, legacy);
+  }
+
+  return null;
+}
+
+/**
+ * Reconstruct a manifest from settings.json alone for a settings-only Android
+ * capture (`CaptureSnapshot.saveSettings`, `getSettingsPath`) that has no
+ * metadata.json/manifest.json anywhere — the case where settings were
+ * "write-only" (issue #6492). settings.json carries none of the manifest's
+ * other fields, so anything not derivable from the scan context (the
+ * AVD-scoped directory name, if any) is left at a safe, honestly-unknown
+ * default rather than guessed — deviceId in particular cannot be recovered.
+ */
+async function readSettingsOnlyManifest(
+  snapshotName: string,
+  snapshotStore: DeviceSnapshotStore,
+  pathOptions: SnapshotPathOptions | undefined,
+  now: () => Date,
+): Promise<DeviceSnapshotManifest | null> {
+  const settingsPath = snapshotStore.getSettingsPath(snapshotName, pathOptions);
+
+  let settingsJson: string;
+  try {
+    settingsJson = await fs.readFile(settingsPath, "utf-8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      logger.warn(`[DeviceSnapshot] Failed to read settings for '${snapshotName}': ${error}`);
+    }
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(settingsJson);
+  } catch (error) {
+    logger.warn(`[DeviceSnapshot] Settings file for '${snapshotName}' is not valid JSON: ${error}`);
+    return null;
+  }
+
+  if (!isSettingsPayload(parsed)) {
+    logger.warn(`[DeviceSnapshot] Settings file for '${snapshotName}' has an unexpected shape`);
+    return null;
+  }
+
+  return {
+    snapshotName,
+    timestamp: now().toISOString(),
+    deviceId: "",
+    deviceName: pathOptions?.avdName ?? "",
+    platform: "android",
+    snapshotType: "adb",
+    includeAppData: false,
+    includeSettings: true,
+    settings: parsed,
+  };
+}
+
+/**
+ * Discover a snapshot's manifest from whatever it actually wrote to disk:
+ * the full manifest first (metadata.json, then legacy manifest.json), and —
+ * only for a non-iOS path, since settings.json is never written for iOS —
+ * the settings-only fallback second. Returns null if neither source exists
+ * or parses, so the caller treats the directory as not a recoverable
+ * snapshot rather than throwing (issue #6492).
+ */
+async function discoverSnapshotManifest(
+  snapshotName: string,
+  snapshotStore: DeviceSnapshotStore,
+  pathOptions: SnapshotPathOptions | undefined,
+  now: () => Date,
+): Promise<DeviceSnapshotManifest | null> {
+  const manifest = await readSnapshotManifest(snapshotName, snapshotStore, pathOptions);
+  if (manifest) {
+    return manifest;
+  }
+
+  if (pathOptions?.platform === "ios") {
+    return null;
+  }
+
+  return readSettingsOnlyManifest(snapshotName, snapshotStore, pathOptions, now);
 }
 
 async function importLegacySnapshot(
@@ -298,8 +457,9 @@ async function importLegacySnapshot(
   snapshotStore: DeviceSnapshotStore,
   snapshotRepository: DeviceSnapshotRepository,
   now: () => Date,
+  pathOptions?: SnapshotPathOptions,
 ): Promise<DeviceSnapshotRecord | null> {
-  const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName);
+  const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
   const fallbackTimestamp = now().toISOString();
   const createdAt = resolveLegacyTimestamp(manifest.timestamp, fallbackTimestamp);
 
@@ -332,15 +492,93 @@ async function hydrateLegacySnapshot(
   snapshotRepository: DeviceSnapshotRepository,
   now: () => Date,
 ): Promise<DeviceSnapshotRecord | null> {
-  const manifest = await readLegacyManifest(snapshotName, snapshotStore);
-  if (!manifest) {
+  const flatManifest = await discoverSnapshotManifest(snapshotName, snapshotStore, undefined, now);
+  if (flatManifest) {
+    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, snapshotRepository, now);
+  }
+
+  // Not at the flat/unscoped path — a restore-by-name doesn't know which
+  // AVD/device scope (if any) holds this snapshot, so probe every scoped
+  // directory the same way importScopedLegacySnapshots does (#5707, #6492).
+  const scoped = await findScopedSnapshotManifest(snapshotName, snapshotStore, now);
+  if (!scoped) {
     return null;
   }
 
-  return importLegacySnapshot(snapshotName, manifest, snapshotStore, snapshotRepository, now);
+  return importLegacySnapshot(
+    snapshotName,
+    scoped.manifest,
+    snapshotStore,
+    snapshotRepository,
+    now,
+    scoped.pathOptions,
+  );
 }
 
-async function importLegacySnapshotArchive(
+/**
+ * Enumerate the AVD/device-scoped directories under `android/` and `ios/`
+ * (the layout every current capture path writes to since #5707), yielding
+ * one `SnapshotPathOptions` per scope directory found. Isolated so both the
+ * single-name lookup (`findScopedSnapshotManifest`) and the full-archive scan
+ * (`importScopedLegacySnapshots`) derive the same path shape the writers use
+ * rather than re-deriving path structure at each call site (issue #6492).
+ */
+async function* iterateScopedSnapshotDirs(
+  snapshotStore: DeviceSnapshotStore,
+): AsyncGenerator<{ pathOptions: SnapshotPathOptions; scopedDirPath: string }> {
+  for (const platform of ["android", "ios"] as const) {
+    const scopeRootPath = path.join(snapshotStore.getBasePath(), platform);
+    let deviceDirs: Dirent[];
+    try {
+      deviceDirs = await fs.readdir(scopeRootPath, { withFileTypes: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        logger.warn(`[DeviceSnapshot] Failed to scan ${platform} snapshot scope: ${error}`);
+      }
+      continue;
+    }
+
+    for (const deviceDir of deviceDirs) {
+      if (!deviceDir.isDirectory()) {
+        continue;
+      }
+
+      const pathOptions: SnapshotPathOptions =
+        platform === "ios"
+          ? { platform: "ios", deviceId: deviceDir.name }
+          : { platform: "android", avdName: deviceDir.name };
+
+      yield { pathOptions, scopedDirPath: path.join(scopeRootPath, deviceDir.name) };
+    }
+  }
+}
+
+async function findScopedSnapshotManifest(
+  snapshotName: string,
+  snapshotStore: DeviceSnapshotStore,
+  now: () => Date,
+): Promise<{ manifest: DeviceSnapshotManifest; pathOptions: SnapshotPathOptions } | null> {
+  for await (const { pathOptions } of iterateScopedSnapshotDirs(snapshotStore)) {
+    const exists = await snapshotStore.snapshotDirectoryExists(snapshotName, pathOptions);
+    if (!exists) {
+      continue;
+    }
+
+    const manifest = await discoverSnapshotManifest(snapshotName, snapshotStore, pathOptions, now);
+    if (manifest) {
+      return { manifest, pathOptions };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Import every legacy-recoverable snapshot at the flat/unscoped base path
+ * (pre-#5707 layout, and physical-device captures that never scope by AVD).
+ */
+async function importFlatLegacySnapshots(
   snapshotRepository: DeviceSnapshotRepository,
   snapshotStore: DeviceSnapshotStore,
   now: () => Date,
@@ -366,18 +604,23 @@ async function importLegacySnapshotArchive(
 
     const snapshotName = entry.name;
     // A `<name>${SNAPSHOT_REPLACING_SUFFIX}` directory is an interrupted-overwrite
-    // set-aside copy (holding the prior snapshot's manifest.json), never a real
+    // set-aside copy (holding the prior snapshot's manifest), never a real
     // snapshot — importing it would resurrect stale data as a phantom snapshot
     // that consumes archive budget and is "restorable" against dead contents
     // (#5713). Skip it; the next overwrite of the base name clears it.
     if (snapshotName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
       continue;
     }
+    // "android"/"ios" are scope roots (#5707), not snapshot directories
+    // themselves — importScopedLegacySnapshots walks their contents.
+    if (isReservedScopeSegment(snapshotName)) {
+      continue;
+    }
     if (existingSnapshots.has(snapshotName)) {
       continue;
     }
 
-    const manifest = await readLegacyManifest(snapshotName, snapshotStore);
+    const manifest = await discoverSnapshotManifest(snapshotName, snapshotStore, undefined, now);
     if (!manifest) {
       continue;
     }
@@ -396,6 +639,102 @@ async function importLegacySnapshotArchive(
   }
 
   return imported;
+}
+
+/**
+ * Import every legacy-recoverable snapshot nested under the `android/<avd>/`
+ * and `ios/<udid>/` scope directories (#5707 layout) that has no DB row yet.
+ * Orphaned scoped directories were previously invisible to this scan — the
+ * top-level `readdir` in importFlatLegacySnapshots never descends into them
+ * (issue #6492).
+ */
+async function importScopedLegacySnapshots(
+  snapshotRepository: DeviceSnapshotRepository,
+  snapshotStore: DeviceSnapshotStore,
+  now: () => Date,
+  existingSnapshots: Set<string>,
+): Promise<boolean> {
+  let imported = false;
+
+  for await (const { pathOptions, scopedDirPath } of iterateScopedSnapshotDirs(snapshotStore)) {
+    let snapshotDirs: Dirent[];
+    try {
+      snapshotDirs = await fs.readdir(scopedDirPath, { withFileTypes: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        logger.warn(`[DeviceSnapshot] Failed to scan snapshots under ${scopedDirPath}: ${error}`);
+      }
+      continue;
+    }
+
+    for (const snapshotDir of snapshotDirs) {
+      if (!snapshotDir.isDirectory()) {
+        continue;
+      }
+
+      const snapshotName = snapshotDir.name;
+      // Same interrupted-overwrite set-aside case as the flat scan, but
+      // nested one level deeper under the AVD/device scope (#5713, #6492).
+      if (snapshotName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
+        continue;
+      }
+      if (existingSnapshots.has(snapshotName)) {
+        continue;
+      }
+
+      const manifest = await discoverSnapshotManifest(
+        snapshotName,
+        snapshotStore,
+        pathOptions,
+        now,
+      );
+      if (!manifest) {
+        continue;
+      }
+
+      const record = await importLegacySnapshot(
+        snapshotName,
+        manifest,
+        snapshotStore,
+        snapshotRepository,
+        now,
+        pathOptions,
+      );
+      if (record) {
+        existingSnapshots.add(snapshotName);
+        imported = true;
+      }
+    }
+  }
+
+  return imported;
+}
+
+async function importLegacySnapshotArchive(
+  snapshotRepository: DeviceSnapshotRepository,
+  snapshotStore: DeviceSnapshotStore,
+  now: () => Date,
+  existingSnapshots: Set<string>,
+): Promise<boolean> {
+  // Order matters only for existingSnapshots de-duplication: a flat-path
+  // snapshot is checked first, so a scoped orphan sharing its name is skipped
+  // rather than double-imported (the name-keyed record table cannot tell
+  // them apart — a pre-existing limitation, see #5741 item 4).
+  const importedFlat = await importFlatLegacySnapshots(
+    snapshotRepository,
+    snapshotStore,
+    now,
+    existingSnapshots,
+  );
+  const importedScoped = await importScopedLegacySnapshots(
+    snapshotRepository,
+    snapshotStore,
+    now,
+    existingSnapshots,
+  );
+
+  return importedFlat || importedScoped;
 }
 
 async function notifySnapshotResources(): Promise<void> {
@@ -469,55 +808,62 @@ function isReservedScopeSegment(snapshotName: string): boolean {
 async function enforceDeviceSnapshotArchiveLimit(
   maxArchiveSizeMb: number,
 ): Promise<SnapshotArchiveEvictionResult> {
-  const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
-  const { snapshotRepository } = await getDeviceSnapshotDependencies();
-  const snapshots = await snapshotRepository.listSnapshots({
-    orderByLastAccessed: "asc",
-  });
+  // The entire pass — list read, running total, and delete loop — runs under one
+  // constant-keyed lock so concurrent passes queue instead of interleaving. A
+  // later pass therefore re-reads a fresh, accurate list AFTER the prior pass
+  // finished deleting, and only ever credits/reports rows it actually removed
+  // (issue #6491).
+  return withArchiveBudgetLock(async () => {
+    const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
+    const { snapshotRepository } = await getDeviceSnapshotDependencies();
+    const snapshots = await snapshotRepository.listSnapshots({
+      orderByLastAccessed: "asc",
+    });
 
-  let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
+    let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
 
-  if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
+    if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
+      return {
+        evictedSnapshotNames: [],
+        currentSizeBytes,
+        maxSizeBytes,
+      };
+    }
+
+    const evictedSnapshotNames: string[] = [];
+
+    for (const snapshot of snapshots) {
+      if (currentSizeBytes <= maxSizeBytes) {
+        break;
+      }
+
+      try {
+        const deleted = await deleteDeviceSnapshotRecord(snapshot);
+        if (deleted) {
+          evictedSnapshotNames.push(snapshot.snapshotName);
+          currentSizeBytes -= snapshot.sizeBytes;
+        }
+      } catch (error) {
+        logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`);
+      }
+    }
+
+    if (currentSizeBytes > maxSizeBytes) {
+      logger.warn(
+        `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
+      );
+    }
+
+    if (evictedSnapshotNames.length > 0) {
+      await notifySnapshotResources();
+    }
+
     return {
-      evictedSnapshotNames: [],
+      evictedSnapshotNames,
       currentSizeBytes,
       maxSizeBytes,
     };
-  }
-
-  const evictedSnapshotNames: string[] = [];
-
-  for (const snapshot of snapshots) {
-    if (currentSizeBytes <= maxSizeBytes) {
-      break;
-    }
-
-    try {
-      const deleted = await deleteDeviceSnapshotRecord(snapshot);
-      if (deleted) {
-        evictedSnapshotNames.push(snapshot.snapshotName);
-        currentSizeBytes -= snapshot.sizeBytes;
-      }
-    } catch (error) {
-      logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`);
-    }
-  }
-
-  if (currentSizeBytes > maxSizeBytes) {
-    logger.warn(
-      `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
-    );
-  }
-
-  if (evictedSnapshotNames.length > 0) {
-    await notifySnapshotResources();
-  }
-
-  return {
-    evictedSnapshotNames,
-    currentSizeBytes,
-    maxSizeBytes,
-  };
+  });
 }
 
 export async function getDeviceSnapshotConfig(): Promise<DeviceSnapshotConfig> {

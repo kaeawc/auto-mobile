@@ -7,6 +7,7 @@ import { defaultTimer, Timer } from "../SystemTimer";
 import { getAbortSignal } from "../AbortContext";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
 import { waitForSpawn } from "../ChildProcessTracker";
+import type { HostProcessExecutor } from "../HostCommandExecutor";
 
 export interface XcodebuildCommandOptions {
   timeoutMs?: number;
@@ -79,6 +80,27 @@ export class XcodebuildClient implements Xcodebuild {
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
+  }
+
+  /**
+   * Wire a XcodebuildClient to run through an injected HostProcessExecutor
+   * (used for DI in tests). Keeping this factory — and the execAsync/spawn
+   * closures it builds — inside this owner file, rather than at each call
+   * site, keeps the execution-boundary check's exemption for this file
+   * (`scripts/check-no-new-direct-xcodebuild.ts`'s `owner` file) meaningful:
+   * a closure that forwards an arbitrary command/args pair to
+   * `processExecutor.spawn` is indistinguishable, to that static analysis,
+   * from a direct unguarded xcodebuild invocation.
+   */
+  static fromHostProcessExecutor(
+    processExecutor: HostProcessExecutor,
+    timer: Timer = defaultTimer,
+  ): XcodebuildClient {
+    return new XcodebuildClient(
+      async (file, args) => processExecutor.executeCommand(file, args),
+      timer,
+      (command, args, options) => processExecutor.spawn(command, args, options),
+    );
   }
 
   async isAvailable(): Promise<boolean> {

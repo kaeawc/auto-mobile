@@ -155,7 +155,15 @@ class FakeIosManager implements ReadinessIosManager {
     await this.onForceRestart?.(options);
   }
 
-  resetSetupState(): void {}
+  resetSetupStateCalls = 0;
+  resetSetupStateCallOrder: number[] = [];
+  setupCallOrder: number[] = [];
+  private callSeq = 0;
+
+  resetSetupState(): void {
+    this.resetSetupStateCalls++;
+    this.resetSetupStateCallOrder.push(++this.callSeq);
+  }
 
   async setup(
     _force?: boolean,
@@ -164,6 +172,7 @@ class FakeIosManager implements ReadinessIosManager {
     minimumHealthPollDurationMs?: number,
   ) {
     this.setupCalls++;
+    this.setupCallOrder.push(++this.callSeq);
     this.setupSignal = signal;
     this.setupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
     if (this.onSetup) {
@@ -756,6 +765,32 @@ describe("RunnerReadinessService", () => {
     timer.advanceTime(1_000);
     await expect(ready).rejects.toThrow(/phase=runner-setup/);
     expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
+  });
+
+  // #6416: the disconnected branch of ensureIosReady called manager.setup()
+  // without first resetting the setup gate, unlike the connected branch
+  // (line ~613) and the Android path (RunnerReadinessService.ts:265). A prior
+  // readiness attempt can leave attemptedSetup latched with a stale positive
+  // cachedAvailability (or, post-#6416 fix, an isRunning() cache) so setup()
+  // reports "already running" against a runner that is actually gone.
+  test("resets the iOS setup gate before calling setup() on the disconnected branch", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.resetSetupStateCalls).toBe(1);
+    expect(iosManager.setupCalls).toBe(1);
+    expect(Math.min(...iosManager.resetSetupStateCallOrder)).toBeLessThan(
+      Math.min(...iosManager.setupCallOrder),
+    );
   });
 
   test("starts only the cached iOS runner when downloads are disabled", async () => {

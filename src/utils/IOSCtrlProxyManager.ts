@@ -217,10 +217,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static startupOrphanRunnerReap: Promise<void> | null = null;
 
   // Cache for status checks
-  private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
   private cachedInstalled: { isInstalled: boolean; timestamp: number } | null = null;
   private cachedRunning: { isRunning: boolean; timestamp: number } | null = null;
-  private static readonly AVAILABILITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
   private static readonly STATUS_CACHE_TTL = 30 * 1000; // 30 seconds
   private static readonly IMPORTANT_OUTPUT_MARKERS = [
     "error",
@@ -426,12 +424,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       deviceAppManager,
       remoteRunner,
       hostPortAvailabilityChecker,
-      xcodebuild ??
-        new XcodebuildClient(
-          async (file, args) => processExecutor.executeCommand(file, args),
-          timer,
-          (command, args, options) => processExecutor.spawn(command, args, options),
-        ),
+      xcodebuild ?? XcodebuildClient.fromHostProcessExecutor(processExecutor, timer),
       processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer),
     );
   }
@@ -741,7 +734,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Clear all caches
    */
   public clearCaches(): void {
-    this.cachedAvailability = null;
     this.cachedInstalled = null;
     this.cachedRunning = null;
     logger.info("[IOSCtrlProxy] Cleared all caches");
@@ -845,27 +837,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * Check if the service is available (installed and running)
+   * Check if the service is available (installed and running).
+   *
+   * Delegates directly to isInstalled()/isRunning() rather than layering its
+   * own cache on top: isRunning() already carries the 30s STATUS_CACHE_TTL,
+   * which is the only freshness the setup() gate's comment above assumes. A
+   * separate hour-long positive cache here let a runner that died without a
+   * local child-exit event (killed externally, simulator erased, wedged but
+   * still answering /health) report "already running" for up to an hour
+   * (#6416).
    */
   public async isAvailable(): Promise<boolean> {
-    // Check cache first
-    if (this.cachedAvailability && this.cachedAvailability.isAvailable) {
-      const cacheAge = this.timer.now() - this.cachedAvailability.timestamp;
-      if (cacheAge < IOSCtrlProxyManager.AVAILABILITY_CACHE_TTL) {
-        return this.cachedAvailability.isAvailable;
-      }
-    }
-
     const [installed, running] = await Promise.all([this.isInstalled(), this.isRunning()]);
-
-    const available = installed && running;
-
-    this.cachedAvailability = {
-      isAvailable: available,
-      timestamp: this.timer.now(),
-    };
-
-    return available;
+    return installed && running;
   }
 
   // MARK: - Service Control
@@ -1199,8 +1183,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.xcTestProcess = null;
         // Host-control mode has no local child-exit event to clear these as a side
         // effect (handleProcessExit), so clear explicitly for both modes — otherwise
-        // cachedRunning/cachedAvailability can serve a stale positive to the next
-        // setup() for up to STATUS_CACHE_TTL (#2834 review).
+        // cachedRunning can serve a stale positive to the next setup() for up to
+        // STATUS_CACHE_TTL (#2834 review).
         this.clearCaches();
         this.processSupervisor.stop();
         await this.processSupervisor.start();

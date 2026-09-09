@@ -4,18 +4,22 @@ import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
 
+export type ProvisionDeviceOperationBeginResult =
+  | { started: true; reconcileExistingConfiguration: boolean }
+  | {
+      started: false;
+      result: Record<string, unknown>;
+      reconcileExistingConfiguration: boolean;
+    }
+  | { started: false; inProgress: true };
+
 export interface ProvisionDeviceOperationStore {
   begin(
     operationId: string,
     requestFingerprint: string,
-  ): Promise<
-    | { started: true; reconcileExistingConfiguration: boolean }
-    | {
-        started: false;
-        result: Record<string, unknown>;
-        reconcileExistingConfiguration: boolean;
-      }
-  >;
+    nowMs: number,
+    expiresAtMs: number,
+  ): Promise<ProvisionDeviceOperationBeginResult>;
   markDeviceCreationStarted(operationId: string): Promise<void>;
   complete(operationId: string, result: Record<string, unknown>): Promise<void>;
   fail(
@@ -30,6 +34,16 @@ export class ProvisionDeviceOperationConflictError extends Error {
   constructor(operationId: string) {
     super(`operationId '${operationId}' was already used for a different provisionDevice request`);
     this.name = "ProvisionDeviceOperationConflictError";
+  }
+}
+
+export class ProvisionDeviceOperationInProgressError extends Error {
+  constructor(operationId: string) {
+    super(
+      `operationId '${operationId}' is still being provisioned by an earlier attempt with no ` +
+        "terminal result yet; wait for it to finish or retry with a new operationId",
+    );
+    this.name = "ProvisionDeviceOperationInProgressError";
   }
 }
 
@@ -62,15 +76,19 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
   async begin(
     operationId: string,
     requestFingerprint: string,
-  ): Promise<
-    | { started: true; reconcileExistingConfiguration: boolean }
-    | {
-        started: false;
-        result: Record<string, unknown>;
-        reconcileExistingConfiguration: boolean;
-      }
-  > {
+    nowMs: number,
+    expiresAtMs: number,
+  ): Promise<ProvisionDeviceOperationBeginResult> {
     const db = this.getDb();
+    // Prune expired rows before the lookup (mirrors
+    // DeviceTeardownOperationRepository.begin(), deviceTeardownOperationRepository.ts:59):
+    // this both bounds table growth (#6652) and is how a genuinely abandoned
+    // "running" row (its owning process crashed before complete()/fail() ran)
+    // ages out into a fresh start, distinct from a still-live running row.
+    await db
+      .deleteFrom("provision_device_operations")
+      .where("expires_at_ms", "<=", nowMs)
+      .execute();
     const existing = await db
       .selectFrom("provision_device_operations")
       .selectAll()
@@ -92,6 +110,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
           error_code: null,
           error_message: null,
           creation_started: 0,
+          expires_at_ms: expiresAtMs,
         })
         .execute();
       return { started: true, reconcileExistingConfiguration: false };
@@ -170,13 +189,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       error_message: string | null;
       creation_started: number;
     },
-  ):
-    | { started: true; reconcileExistingConfiguration: boolean }
-    | {
-        started: false;
-        result: Record<string, unknown>;
-        reconcileExistingConfiguration: boolean;
-      } {
+  ): ProvisionDeviceOperationBeginResult {
     if (existing.request_fingerprint !== requestFingerprint) {
       throw new ProvisionDeviceOperationConflictError(operationId);
     }
@@ -189,6 +202,14 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
           reconcileExistingConfiguration: existing.creation_started === 1,
         };
       }
+    }
+    // A "running" row that survived the expiry sweep above is still within its
+    // TTL, so a prior attempt (this process or another) may genuinely be
+    // executing it right now. Report in-progress rather than silently
+    // re-entering the provisioning lifecycle (#6652 defect 1) -- unlike
+    // "failed", which stays retryable immediately.
+    if (existing.status === "running") {
+      return { started: false, inProgress: true };
     }
     return {
       started: true,

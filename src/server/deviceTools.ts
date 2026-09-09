@@ -107,6 +107,7 @@ import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
 import {
   ProvisionDeviceOperationRepository,
   ProvisionDeviceOperationConflictError,
+  ProvisionDeviceOperationInProgressError,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -461,6 +462,13 @@ const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
 const DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES = 2;
 const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
+// A live provisionDevice attempt can legitimately hold its operation row for as
+// long as its own timeoutMs budget allows, capped at MAX_DEVICE_READY_TIMEOUT_MS
+// (~14m50s). Give the stored row headroom beyond that ceiling so a still-live
+// attempt is never mistaken for abandoned while genuinely within its own
+// deadline, plus room afterward for idempotent replay before the row is pruned
+// (#6652).
+const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
 
 function getShutdownInitiatingExecutionId(): string | undefined {
   return getToolSelectionContext()?.execution?.executionId;
@@ -4127,7 +4135,21 @@ export function registerDeviceTools() {
   ): Promise<Record<string, unknown>> {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
-    const operation = await store.begin(args.operationId, fingerprint);
+    const nowMs = deps.timer.now();
+    const operation = await store.begin(
+      args.operationId,
+      fingerprint,
+      nowMs,
+      nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
+    );
+    if ("inProgress" in operation) {
+      // A live (non-expired) "running" row for this operationId/fingerprint --
+      // report in-progress instead of silently re-running the provisioning
+      // lifecycle (#6652 defect 1). Thrown before the try/catch below so this
+      // never reaches store.fail(), which would incorrectly overwrite the
+      // still-running attempt's row.
+      throw new ProvisionDeviceOperationInProgressError(args.operationId);
+    }
     try {
       if (
         !operation.started &&
@@ -5093,6 +5115,9 @@ export function registerDeviceTools() {
     }
     if (error instanceof ProvisionDeviceOperationConflictError) {
       return createToolErrorResponse("operation_conflict", error.message);
+    }
+    if (error instanceof ProvisionDeviceOperationInProgressError) {
+      return createToolErrorResponse("operation_in_progress", error.message);
     }
     return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }

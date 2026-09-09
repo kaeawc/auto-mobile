@@ -2,6 +2,11 @@ import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, NewToolCall } from "./types";
 import { logger } from "../utils/logger";
+import {
+  createRowCapRetentionState,
+  pruneTableByRowCap,
+  runAmortizedRetention,
+} from "./rowCapRetention";
 
 interface ToolCallRecord {
   toolName: string;
@@ -9,6 +14,12 @@ interface ToolCallRecord {
   sessionUuid?: string | null;
   durationMs?: number | null;
 }
+
+// `tool_calls` receives one insert per MCP tool call for the life of the
+// process with no prior cap (#6464). Mirrors the row-cap constants already
+// used for the other single-row-insert RowCapTable repositories.
+const TOOL_CALL_RETENTION_MAX_ROWS = 10_000;
+const retentionState = createRowCapRetentionState();
 
 export class ToolCallRepository {
   private db: Kysely<Database> | null;
@@ -38,8 +49,26 @@ export class ToolCallRepository {
       };
 
       await db.insertInto("tool_calls").values(entry).execute();
+      await this.cleanupRetention();
     } catch (error) {
       logger.warn(`[ToolCallRepository] Failed to record tool call: ${error}`);
+    }
+  }
+
+  // Amortize the offset-probe: fire at most once per CLEANUP_CHECK_INTERVAL
+  // inserts (#6464), mirroring the other RowCapTable repositories so retention
+  // does not add a scan to the hot insert path.
+  private async cleanupRetention(): Promise<void> {
+    await runAmortizedRetention(retentionState, () => this.pruneToRowCap());
+  }
+
+  // `maxRows` is injectable so tests can exercise trimming at a small cap
+  // without inserting 10k rows.
+  private async pruneToRowCap(maxRows: number = TOOL_CALL_RETENTION_MAX_ROWS): Promise<void> {
+    try {
+      await pruneTableByRowCap(this.getDb(), "tool_calls", maxRows);
+    } catch (error) {
+      logger.warn(`[ToolCallRepository] Row-cap retention cleanup failed: ${error}`);
     }
   }
 

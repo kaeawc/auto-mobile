@@ -1039,7 +1039,14 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    # The macOS installer path remains per-PR coverage. For kaeawc-authored PRs,
+    # send just that matrix leg to the idle Apple Silicon runner to avoid the
+    # GitHub-hosted macOS queue; Ubuntu and every other author stay hosted. This
+    # is a required check, so automobile-mac must remain online and awake: GitHub
+    # cannot fall back to a hosted runner after a self-hosted job has queued. The
+    # author guard is a default, not a security boundary; all_external_contributors
+    # fork-PR approval policy is the gate for untrusted workflow changes.
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc') && fromJSON('["self-hosted", "automobile-mac"]') || matrix.os }}
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}

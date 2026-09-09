@@ -2,11 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { loadJobSteps, loadJobs, stepNamed } from "../helpers/workflowSteps";
 
 describe("root SPM toolchain floor workflow", () => {
-  // swiftlint is a deliberate, documented exception to the "PR jobs stay hosted"
-  // rule: it is the cheapest PR job to self-host (checkout + lint script only, no
-  // secrets, no Xcode toolchain, no simulator), so kaeawc-authored PRs route it to
-  // the self-hosted runner. Every other PR job must stay on a GitHub-hosted runner.
-  const SELF_HOSTED_PR_EXCEPTIONS = new Set(["swiftlint"]);
+  // The documented SwiftLint exception and the macOS-only installer-minimal matrix
+  // leg route kaeawc-authored PRs to the self-hosted runner. Every other PR job
+  // stays on a GitHub-hosted runner.
+  const SELF_HOSTED_PR_EXCEPTIONS = new Set(["swiftlint", "installer-minimal"]);
 
   test("keeps every non-excepted pull-request job off the self-hosted runner", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
@@ -30,6 +29,16 @@ describe("root SPM toolchain floor workflow", () => {
     expect(runsOn).toContain("github.event.pull_request.user.login == 'kaeawc'");
     // Fallback to a GitHub-hosted runner for every other author.
     expect(runsOn).toContain("macos-26");
+  });
+
+  test("routes only kaeawc's macOS installer-minimal leg to the self-hosted runner", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const runsOn = JSON.stringify(jobs["installer-minimal"]?.["runs-on"] ?? "");
+
+    expect(runsOn).toContain("matrix.os == 'macos-latest'");
+    expect(runsOn).toContain("github.event.pull_request.user.login == 'kaeawc'");
+    expect(runsOn).toContain("automobile-mac");
+    expect(runsOn).toContain("|| matrix.os");
   });
 
   test("pins the Swift package matrix to its configured Xcode floor", () => {

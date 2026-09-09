@@ -94,7 +94,7 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         XCTAssertFalse(server.hasConnectedClients)
         server.clientDidUpgrade(2)
         XCTAssertTrue(server.hasConnectedClients)
-        XCTAssertEqual(transitions.values, [true, true])
+        XCTAssertEqual(transitions.values, [true, false, true])
         server.stop()
     }
 

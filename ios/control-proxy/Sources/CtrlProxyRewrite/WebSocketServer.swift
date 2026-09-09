@@ -28,6 +28,7 @@ final class WebSocketServer: @unchecked Sendable {
         case encodingError
     }
 
+    private let listenerFactory: @Sendable (UInt16) throws -> any ServerListening
     private let port: UInt16
     private let commandHandler: any CommandHandling
     private let perf: any PerfTracking
@@ -54,7 +55,7 @@ final class WebSocketServer: @unchecked Sendable {
     private let commandTail = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
 
     // Queue-confined (accessed only on `queue`).
-    private var listener: NWListener?
+    private var listener: (any ServerListening)?
     private var nextConnectionId = 1
 
     // Lock-confined synchronized collections (read from broadcast/presence off `queue`).
@@ -74,8 +75,14 @@ final class WebSocketServer: @unchecked Sendable {
         onSdkEventBatch: (@Sendable (Data) -> Void)? = nil,
         drainLogEvents: (@Sendable () -> [Data])? = nil,
         onClientPresenceChanged: (@Sendable (Bool) -> Void)? = nil,
-        broadcastSink: (@Sendable (Data) -> Void)? = nil
+        broadcastSink: (@Sendable (Data) -> Void)? = nil,
+        listenerFactory: @escaping @Sendable (UInt16) throws -> any ServerListening = { port in
+            let parameters = NWParameters.tcp
+            parameters.allowLocalEndpointReuse = true
+            return try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
+        }
     ) {
+        self.listenerFactory = listenerFactory
         self.port = port
         self.commandHandler = commandHandler
         self.perf = perf
@@ -108,22 +115,20 @@ final class WebSocketServer: @unchecked Sendable {
             throw ServerError.alreadyRunning
         }
 
-        let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-
-        let newListener: NWListener
+        let newListener: any ServerListening
         do {
-            newListener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
+            newListener = try listenerFactory(port)
         } catch {
             throw ServerError.failedToStart(error)
         }
 
-        newListener.stateUpdateHandler = { [weak self] state in
+        newListener.stateUpdateHandler = { [weak self, weak newListener] state in
+            guard let self, let newListener, self.listener === newListener else { return }
             // Delivered on `queue` (listener.start(queue:)), so the self-stop runs on-queue.
             switch state {
             case let .failed(error):
                 print("[WebSocketServer] Server failed: \(error)")
-                self?.onqueue_stop()
+                self.onqueue_stop()
             case .ready, .cancelled:
                 break
             default:
@@ -144,11 +149,18 @@ final class WebSocketServer: @unchecked Sendable {
 
     private func onqueue_stop() {
         dispatchPrecondition(condition: .onQueue(queue))
-        upgradedClientIds.withLock { $0.removeAll() }
+        let hadClients = upgradedClientIds.withLock { ids in
+            let hadClients = !ids.isEmpty
+            ids.removeAll()
+            return hadClients
+        }
         _ = upgradedConnections.removeAll()
         connections.removeAll().forEach { $0.close() }
         listener?.cancel()
         listener = nil
+        if hadClients {
+            onClientPresenceChanged?(false)
+        }
     }
 
     // MARK: - Connection handling

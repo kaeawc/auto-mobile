@@ -41,6 +41,13 @@ public struct SimulatorWindowListResponse: Codable, Equatable {
 /// Bundle identifier of the iOS Simulator host application on macOS.
 public let simulatorBundleIdentifier = "com.apple.iphonesimulator"
 
+public func simulatorWindowTitle(_ title: String?, namesDevice name: String) -> Bool {
+    let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !name.isEmpty, let title else { return false }
+    let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return normalizedTitle == name || [" – ", " — ", " - "].contains { normalizedTitle.hasPrefix(name + $0) }
+}
+
 /// Returns true when a window's owning-application bundle identifier belongs to
 /// the iOS Simulator host. Used to re-verify a resolved `CGWindowID` at capture
 /// time: macOS recycles window IDs, so a stale `--simulator-window <id>` can

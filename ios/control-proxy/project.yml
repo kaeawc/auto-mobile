@@ -14,20 +14,20 @@ settings:
     SWIFT_VERSION: "5.0"
 
 targets:
-  CtrlProxyApp:
+  AutoMobileTest:
     type: application
     platform: iOS
     sources:
-      - path: CtrlProxyApp
+      - path: AutoMobileTest
         excludes:
           - "*.xcassets"
-      - path: CtrlProxyApp/Assets.xcassets
+      - path: AutoMobileTest/Assets.xcassets
         type: folder
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy
-        INFOPLIST_FILE: CtrlProxyApp/Info.plist
+        INFOPLIST_FILE: AutoMobileTest/Info.plist
         CODE_SIGN_STYLE: Automatic
     dependencies:
       # The reference `CtrlProxy` framework was retired in Phase 7E; the app is only the
@@ -64,11 +64,11 @@ targets:
       # the `@MainActor` UI domain (the `#if canImport(XCTest) && os(iOS)` bodies).
       - path: Sources/CtrlProxyRewrite
     dependencies:
-      - target: CtrlProxyApp
+      - target: AutoMobileTest
         # Note: We don't depend on a CtrlProxy framework - sources are compiled directly
         # into the UI tests to give XCTest access for XCUIApplication.
       # Must embed: the xctest bundle is loaded from CtrlProxyUITests-Runner.app, a
-      # different bundle from CtrlProxyApp.app, so @rpath cannot reach the copy the
+      # different bundle from AutoMobileTest.app, so @rpath cannot reach the copy the
       # app embeds. Without this the runner dies at dlopen with
       # "Library not loaded: @rpath/ObjCExceptionCatcher.framework".
       - target: ObjCExceptionCatcher
@@ -76,7 +76,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.uitests
-        TEST_TARGET_NAME: CtrlProxyApp
+        TEST_TARGET_NAME: AutoMobileTest
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         # Match the SPM CtrlProxyRewrite target's contract exactly: Swift 6 language
@@ -89,10 +89,10 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
 schemes:
-  CtrlProxyApp:
+  AutoMobileTest:
     build:
       targets:
-        CtrlProxyApp: all
+        AutoMobileTest: all
         ObjCExceptionCatcher: all
     run:
       config: Debug

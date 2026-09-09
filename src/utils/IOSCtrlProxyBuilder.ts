@@ -177,7 +177,7 @@ export class IOSCtrlProxyBuilder {
    * load is honored.
    */
   private static readonly DEFAULT_DERIVED_DATA_SUBDIR = "derived-data";
-  private static readonly DEFAULT_SCHEME = "CtrlProxyApp";
+  private static readonly DEFAULT_SCHEME = "AutoMobileTest";
   private static readonly DEFAULT_DESTINATION = "generic/platform=iOS Simulator";
   private static readonly DEFAULT_BUNDLE_CACHE_DIR = path.join(
     os.homedir(),
@@ -815,16 +815,17 @@ export class IOSCtrlProxyBuilder {
     if (!buildPath) {
       return null;
     }
-    const appPath = path.join(buildPath, "CtrlProxyApp.app");
-    try {
-      await fs.access(appPath);
-      return appPath;
-    } catch (error) {
-      // App bundle isn't present in the build products dir; null signals "not built"
-      // so callers can decide to (re)build instead of treating this as fatal.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
-      return null;
+    // Older published archives retain the fixture app's previous product name.
+    for (const appName of ["AutoMobileTest.app", "CtrlProxyApp.app"]) {
+      const appPath = path.join(buildPath, appName);
+      try {
+        await fs.access(appPath);
+        return appPath;
+      } catch (error) {
+        logger.debug(`[IOSCtrlProxyBuilder] Fixture app not found at ${appPath}: ${error}`, error);
+      }
     }
+    return null;
   }
 
   public async getAppBundleHash(
@@ -1198,7 +1199,7 @@ export class IOSCtrlProxyBuilder {
     }
 
     const requiredPaths = [
-      path.join(buildDir, "CtrlProxyApp.app"),
+      (await this.getAppBundlePath(platform)) ?? path.join(buildDir, "AutoMobileTest.app"),
       path.join(buildDir, "CtrlProxyUITests-Runner.app"),
       // The reference `CtrlProxyTests` unit-test target was retired in Phase 7E, so the
       // re-cut archive no longer carries a top-level CtrlProxyTests.xctest. The sole test

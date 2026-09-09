@@ -811,7 +811,7 @@ export const APK_SHA256_CHECKSUM: string = resolveApkChecksum({});
 export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
 export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl({});
 export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum({});
-export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
+export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of AutoMobileTest.app (device build), empty = skip verification
 // SHA256 of the simulator runner executable, empty = skip verification. The
 // per-release target records whether that is the legacy XCTRunner stub or the
 // CtrlProxy xctest executable.

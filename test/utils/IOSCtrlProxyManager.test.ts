@@ -2655,7 +2655,7 @@ describe("IOSCtrlProxyManager", function () {
       const productsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-boundary-"));
       const sourceXctestrun = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourceXctestrun, BOUNDARY_XCTESTRUN);
 

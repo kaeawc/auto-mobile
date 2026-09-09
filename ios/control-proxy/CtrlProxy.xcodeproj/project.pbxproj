@@ -23,7 +23,6 @@
 		187D0B93D5EFA3A85EA3F8DD /* MutablePerfEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13EF0BF4C39764DC43A487B /* MutablePerfEntry.swift */; };
 		19A4629ED3587AE65B59C3AB /* RunnerFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE328D52B98CBC997DFC84A /* RunnerFeature.swift */; };
 		1ADA688FB2AA722A8F3D4691 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87B4E19BA37655980362B1ED /* SdkDatabaseClient.swift */; };
-		1BF8D64D9A034BEC375AEE8B /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1EFA58D41D7D318CED6BEDC6 /* RequestAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB47E18423E1A008B101D2C /* RequestAction.swift */; };
 		1F00735008363BE2F7E28276 /* KeyboardResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD0B4C045DCDDB5F126F0FB /* KeyboardResponse.swift */; };
 		1F97838AD4DF6F7C565F4B47 /* RequestClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3773883F9E4A7E4687D9CC38 /* RequestClipboard.swift */; };
@@ -31,6 +30,7 @@
 		21D5DA942BB1E6A17F547372 /* PinchFallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = D255CDBF98698FAA7A8CDCF3 /* PinchFallback.swift */; };
 		22D17AADC9A8AC3CE96D19A5 /* PrivacyResourceMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0C8F550D3A30C87BF84E67 /* PrivacyResourceMappingTests.swift */; };
 		22DAF2E1E5883C0B6ADEED8D /* VoiceOverStateProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2E262C2217BCFDEDBD29BE4 /* VoiceOverStateProviding.swift */; };
+		2803B9FE4B7B5CCAE86B5D63 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23E3D324A94955921D65F0F3 /* AppDelegate.swift */; };
 		280AE2C224CEC5F44C34B11C /* RequestSetHierarchyPollInterval.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D98F26E693E579BDEA4A7FB /* RequestSetHierarchyPollInterval.swift */; };
 		2A84B11D7E830D6A32E4CB92 /* RequestTapCoordinates.swift in Sources */ = {isa = PBXBuildFile; fileRef = F928017EF29137F6C74A5CB1 /* RequestTapCoordinates.swift */; };
 		2C778CBD38DDCB88BD1FBC9B /* RequestType.swift in Sources */ = {isa = PBXBuildFile; fileRef = A430B008E2F1FAF25CFB7667 /* RequestType.swift */; };
@@ -59,7 +59,6 @@
 		4A99C099F2E5C6589CC24FB8 /* RequestClearText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */; };
 		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */; };
-		5278294A4F04317461A1FBE4 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		543CE5608AD59EF3C64CE382 /* RequestGetPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5F8F7BAAAAC5FEA95C9792 /* RequestGetPreference.swift */; };
 		5692771B573105C9FBDE383C /* SdkDatabaseError.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACA8A585999962DCE24C448D /* SdkDatabaseError.swift */; };
 		579AF3D84686D37CF9479097 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17455E7D73C8111F059D3318 /* OSLogReader.swift */; };
@@ -69,7 +68,6 @@
 		5AB632C7B0EADA658817B7F7 /* HierarchyUpdateResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0CE359175AEC9A446E5E1F /* HierarchyUpdateResponse.swift */; };
 		5C0E02617246D6185D53DCD5 /* RequestSetNetworkErrorSimulation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671FD4BBCBE70EB8D9293AAD /* RequestSetNetworkErrorSimulation.swift */; };
 		5DD547806EC69DBD73337837 /* TimeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD7279227112665E843CF54D /* TimeProvider.swift */; };
-		5DF6CF60A8796BBB8C80341C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0CDD96577EB9823B5FCF2585 /* Assets.xcassets */; };
 		5E92E7A0DD1F3D051FF4B968 /* MainThreadRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE91327E1CDF30FE2822A6C /* MainThreadRunner.swift */; };
 		5EA986000A83C4BAC2E1B18D /* RequestDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00D6D411DF029EF56B4B66D /* RequestDrag.swift */; };
 		5ED1131AD64B510B6A1896F7 /* HierarchyResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8231D36A91EF815130B3C965 /* HierarchyResult.swift */; };
@@ -77,6 +75,7 @@
 		609499C757945D63D4011AC5 /* ObservedAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9DF4A4DBB37DC5084A1E80 /* ObservedAppState.swift */; };
 		60DE7AD55CC8391B01371ACC /* RequestRemovePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D080A36B99C83DCA108ABE3 /* RequestRemovePreference.swift */; };
 		61CAF0D2C5ED2794968FEB50 /* ServerListening.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E3B4AB77576629153CC8D2E /* ServerListening.swift */; };
+		6245459246F0CB3FE08D6BDA /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6248CB79A874598B50760139 /* StorageFilesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B475196DA4F97669F3560ED /* StorageFilesResponse.swift */; };
 		6268242FFD0406E9D213158A /* SdkSystemChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BC9D72D4D6BB1A6BFD8F83 /* SdkSystemChrome.swift */; };
 		6C7997E79ECC85116ED16A96 /* TraversalOrderResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65220C877E9C454E5EF23A29 /* TraversalOrderResponse.swift */; };
@@ -139,6 +138,7 @@
 		B1DA303C1E3F303539C17A25 /* ElementLocating.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A1CE333BCB168F784CAB21 /* ElementLocating.swift */; };
 		B2639C0F678E5916A4EB1FAA /* RequestSetNetworkMockRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41C220C155D0C4EB562356EB /* RequestSetNetworkMockRules.swift */; };
 		B4796FE77239E8BCD99C06D6 /* FrameContextRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC5EA945DA4BBD9F94DE5C4 /* FrameContextRecording.swift */; };
+		B6C6059A7B581CF17123BBDE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0CDD96577EB9823B5FCF2585 /* Assets.xcassets */; };
 		B92D746CA1CF6AE9E0E3627F /* SdkBounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0F5F936ED8064C8FE987F0 /* SdkBounds.swift */; };
 		B93612A6DB1A13DC93E9C4E7 /* ByteChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7AF3DFF9E964313765FFF7 /* ByteChannel.swift */; };
 		B9D0FF5EAF0305D305032599 /* SdkDatabaseInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56C6FA94588951DADEB84C2 /* SdkDatabaseInfo.swift */; };
@@ -162,10 +162,10 @@
 		D6995CAAA55D6B0E05D6A89F /* SdkHierarchyServerInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B34989E4CACB49594D44192 /* SdkHierarchyServerInfo.swift */; };
 		D7F5D3AA3E55DCB9FBEA7300 /* ProxyTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B661E440E6E947D57E698A /* ProxyTimer.swift */; };
 		D847B2F9A22C5FF67696252F /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64BB7DB0036B1C9E9A425225 /* WebSocketServer.swift */; };
+		D8943948CAA0358CCD814D8B /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		D895DC45A618CEA47E4E073C /* SdkViewHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87A5CE5AE6DC6AFD89DE1819 /* SdkViewHierarchy.swift */; };
 		DC93BE53E25D0A26FED732E8 /* RotationChangeGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4077C07753B2627ACB9A9B2E /* RotationChangeGeneration.swift */; };
 		DDED3791C6C44B16E2B018D8 /* ConnectionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70078B2ADB6C85E6C05F0DE4 /* ConnectionRegistry.swift */; };
-		DFEE186C8B4CD32EF76D995A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */; };
 		E0989A2F71DC6B3F6F81997E /* Data+SHA1.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEBC55A3713496CF7629433A /* Data+SHA1.swift */; };
 		E0ED354FBD5A588F2D68CA07 /* HTTPRequesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0FF21979A287EB6DCB27FF /* HTTPRequesting.swift */; };
 		E1EBEA80F4999ACC85FDBBA1 /* UIElementInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB495028AAEEF0B73F1985D /* UIElementInfo.swift */; };
@@ -199,12 +199,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		195113DD92332B613D6F1FB7 /* PBXContainerItemProxy */ = {
+		23086687A6BF27434506DBC4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 47C2E526C953A554EECC01E3 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 829FFB06AC273BEE7049A7F2;
-			remoteInfo = CtrlProxyApp;
+			remoteGlobalIDString = E35F925D729B7056D4E4B501;
+			remoteInfo = ObjCExceptionCatcher;
 		};
 		3B1FEDBB84DB25101CE0F519 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -213,12 +213,12 @@
 			remoteGlobalIDString = E35F925D729B7056D4E4B501;
 			remoteInfo = ObjCExceptionCatcher;
 		};
-		7EB55A13A30F9049B9BAAEA0 /* PBXContainerItemProxy */ = {
+		D4411E5EBECBB0EBCD51C628 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 47C2E526C953A554EECC01E3 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = E35F925D729B7056D4E4B501;
-			remoteInfo = ObjCExceptionCatcher;
+			remoteGlobalIDString = 5D66E2BAEFA539346A9AFF24;
+			remoteInfo = AutoMobileTest;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -234,13 +234,13 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		882047DB62E7BA5C6856C006 /* Embed Frameworks */ = {
+		EEBE6E4BDF0F695AF678901E /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				1BF8D64D9A034BEC375AEE8B /* ObjCExceptionCatcher.framework in Embed Frameworks */,
+				6245459246F0CB3FE08D6BDA /* ObjCExceptionCatcher.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -259,7 +259,7 @@
 		0A992C21EBABF539A2F7C333 /* StorageError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageError.swift; sourceTree = "<group>"; };
 		0B4AF05BB8592BAC9A569E2F /* ViewHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewHierarchy.swift; sourceTree = "<group>"; };
 		0B7202FD30E71BA78B33FAFF /* ByteChannelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByteChannelState.swift; sourceTree = "<group>"; };
-		0CDD96577EB9823B5FCF2585 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = CtrlProxyApp/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		0CDD96577EB9823B5FCF2585 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = AutoMobileTest/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		0D5271665E4DA850CE98A15F /* HierarchyMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyMerger.swift; sourceTree = "<group>"; };
 		1183EB3E0EBDE3DC23A9500C /* DefaultStorageInspecting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultStorageInspecting.swift; sourceTree = "<group>"; };
 		12E454CC966BAEEBCD73CA66 /* WebSocketRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketRequest.swift; sourceTree = "<group>"; };
@@ -273,8 +273,8 @@
 		20284DBE10DF03299796897E /* PerformanceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceSnapshot.swift; sourceTree = "<group>"; };
 		21E0CD6E724FD9606E4C01CA /* RequestLaunchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLaunchApp.swift; sourceTree = "<group>"; };
 		21F2375B58B11A865291F03A /* CommandError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandError.swift; sourceTree = "<group>"; };
-		22671C94D317E15EED752E59 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		22D3D6DA7D1F2F9F1299000D /* ErrorResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorResponse.swift; sourceTree = "<group>"; };
+		23E3D324A94955921D65F0F3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		25155DA16B0B4FAA517B15FF /* NWByteChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NWByteChannel.swift; sourceTree = "<group>"; };
 		259652401D400F3259B0DF5C /* RequestListDatabases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestListDatabases.swift; sourceTree = "<group>"; };
 		265B28E26CC26E14AFAF3099 /* PerfProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProvider.swift; sourceTree = "<group>"; };
@@ -344,7 +344,6 @@
 		83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestClearText.swift; sourceTree = "<group>"; };
 		84ADB05144552602BFFBCBE9 /* ElementLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocator.swift; sourceTree = "<group>"; };
 		84C1B94B13CDEB3DE3915785 /* SystemTimeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemTimeProvider.swift; sourceTree = "<group>"; };
-		878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		87A5CE5AE6DC6AFD89DE1819 /* SdkViewHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkViewHierarchy.swift; sourceTree = "<group>"; };
 		87B4E19BA37655980362B1ED /* SdkDatabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkDatabaseClient.swift; sourceTree = "<group>"; };
 		87E74C67A2B4938D37B28965 /* StorageEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageEntry.swift; sourceTree = "<group>"; };
@@ -360,7 +359,6 @@
 		99EFC8B8B00E931A14BC129D /* VoiceOverDefaultsReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverDefaultsReading.swift; sourceTree = "<group>"; };
 		9B34989E4CACB49594D44192 /* SdkHierarchyServerInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyServerInfo.swift; sourceTree = "<group>"; };
 		9B475196DA4F97669F3560ED /* StorageFilesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageFilesResponse.swift; sourceTree = "<group>"; };
-		9BD704E3A2708D91D4FABE3E /* CtrlProxyApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CtrlProxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9DB5E60ADDA2560E3A5AB82E /* RequestListTables.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestListTables.swift; sourceTree = "<group>"; };
 		A0BC9D72D4D6BB1A6BFD8F83 /* SdkSystemChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkSystemChrome.swift; sourceTree = "<group>"; };
 		A2D70D969B6D24B96C372F22 /* HierarchyDebouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncer.swift; sourceTree = "<group>"; };
@@ -399,6 +397,7 @@
 		D08781690EC8B9310B23011D /* SetNetworkMockRulesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetNetworkMockRulesResponse.swift; sourceTree = "<group>"; };
 		D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ObjCExceptionCatcher.h; sourceTree = "<group>"; };
 		D255CDBF98698FAA7A8CDCF3 /* PinchFallback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinchFallback.swift; sourceTree = "<group>"; };
+		D3DDB72652F5D4D46C41EC68 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D40FE00992971DF4071339CB /* RequestGetTableData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestGetTableData.swift; sourceTree = "<group>"; };
 		D6B661E440E6E947D57E698A /* ProxyTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyTimer.swift; sourceTree = "<group>"; };
 		D9FEE0FBD66980F119AAC3BF /* SdkTableDataResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkTableDataResult.swift; sourceTree = "<group>"; };
@@ -423,6 +422,7 @@
 		E6AD91C0BCCF3D0D16F4B08A /* RequestGetPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestGetPreferences.swift; sourceTree = "<group>"; };
 		E6FD8C9F70015AC5ACF586CF /* RequestPinch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestPinch.swift; sourceTree = "<group>"; };
 		E75FD4F7E1A317B6151CDD1C /* RequestStorageCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestStorageCapabilities.swift; sourceTree = "<group>"; };
+		E77DD315BDF244F460CB1DD2 /* AutoMobileTest.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AutoMobileTest.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E921F73A002B5C4CD43C7E95 /* SdkSemanticLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkSemanticLink.swift; sourceTree = "<group>"; };
 		E9780A20937F392C5E3A0692 /* SdkEventBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkEventBuffer.swift; sourceTree = "<group>"; };
 		EA98848C4480C07CE40FC8CC /* SdkColumnInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkColumnInfo.swift; sourceTree = "<group>"; };
@@ -442,19 +442,19 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		7B73985BC6AE32DF61C58D50 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				5278294A4F04317461A1FBE4 /* ObjCExceptionCatcher.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		DAD3A99273A4DAD849C7E1B0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				8AC18133C075D1909F9D04E6 /* ObjCExceptionCatcher.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0D0C68A2C5D662B1FED2931 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D8943948CAA0358CCD814D8B /* ObjCExceptionCatcher.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -659,27 +659,27 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
+		8567FE617B1D3E23C2822A16 /* AutoMobileTest */ = {
+			isa = PBXGroup;
+			children = (
+				23E3D324A94955921D65F0F3 /* AppDelegate.swift */,
+				D3DDB72652F5D4D46C41EC68 /* Info.plist */,
+			);
+			path = AutoMobileTest;
+			sourceTree = "<group>";
+		};
 		893219E941F14547E673AD18 = {
 			isa = PBXGroup;
 			children = (
 				0CDD96577EB9823B5FCF2585 /* Assets.xcassets */,
+				8567FE617B1D3E23C2822A16 /* AutoMobileTest */,
 				1CDEF48286EEE403E65B2062 /* Configurations */,
-				8F975B4ACF30326B292C01BE /* CtrlProxyApp */,
 				12F2825A0330711946388EC8 /* CtrlProxyRewrite */,
 				7570CCD895BDD26847716F63 /* CtrlProxyUITests */,
 				C45CCD2AAA0E6F7D596C0A82 /* include */,
 				9D1EF7437AFF55F9346E7A05 /* ObjCExceptionCatcher */,
 				ECABFBABEC912FAB47B50B74 /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		8F975B4ACF30326B292C01BE /* CtrlProxyApp */ = {
-			isa = PBXGroup;
-			children = (
-				878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */,
-				22671C94D317E15EED752E59 /* Info.plist */,
-			);
-			path = CtrlProxyApp;
 			sourceTree = "<group>";
 		};
 		9BB5FD43533EC791D9F55728 /* Sdk */ = {
@@ -727,7 +727,7 @@
 		ECABFBABEC912FAB47B50B74 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9BD704E3A2708D91D4FABE3E /* CtrlProxyApp.app */,
+				E77DD315BDF244F460CB1DD2 /* AutoMobileTest.app */,
 				009A6B01284035997298367F /* CtrlProxyUITests.xctest */,
 				FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */,
 			);
@@ -759,7 +759,7 @@
 			buildRules = (
 			);
 			dependencies = (
-				E20E35C9CD5E3D45AB8ED161 /* PBXTargetDependency */,
+				D9B2061176B50773C611DD0F /* PBXTargetDependency */,
 				178622E36D486FB3DEDAE985 /* PBXTargetDependency */,
 			);
 			name = CtrlProxyUITests;
@@ -769,25 +769,25 @@
 			productReference = 009A6B01284035997298367F /* CtrlProxyUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
-		829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */ = {
+		5D66E2BAEFA539346A9AFF24 /* AutoMobileTest */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B6CD7711D6D7267F8AC88EB7 /* Build configuration list for PBXNativeTarget "CtrlProxyApp" */;
+			buildConfigurationList = 6D2F6D4820BE1879AF446B13 /* Build configuration list for PBXNativeTarget "AutoMobileTest" */;
 			buildPhases = (
-				95AF442534FB883338D9AB7A /* Sources */,
-				BB24353236FA18281C53852F /* Resources */,
-				7B73985BC6AE32DF61C58D50 /* Frameworks */,
-				882047DB62E7BA5C6856C006 /* Embed Frameworks */,
+				4A53A74863167E093D849726 /* Sources */,
+				72B38E0868C7335219D533CC /* Resources */,
+				F0D0C68A2C5D662B1FED2931 /* Frameworks */,
+				EEBE6E4BDF0F695AF678901E /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				11EA9F56C65EBABFFEAF6D81 /* PBXTargetDependency */,
+				0F39CE35996FEF51B0C4854E /* PBXTargetDependency */,
 			);
-			name = CtrlProxyApp;
+			name = AutoMobileTest;
 			packageProductDependencies = (
 			);
-			productName = CtrlProxyApp;
-			productReference = 9BD704E3A2708D91D4FABE3E /* CtrlProxyApp.app */;
+			productName = AutoMobileTest;
+			productReference = E77DD315BDF244F460CB1DD2 /* AutoMobileTest.app */;
 			productType = "com.apple.product-type.application";
 		};
 		E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */ = {
@@ -819,9 +819,9 @@
 				TargetAttributes = {
 					2B5458099134F47AA1A7C4DA = {
 						ProvisioningStyle = Automatic;
-						TestTargetID = 829FFB06AC273BEE7049A7F2;
+						TestTargetID = 5D66E2BAEFA539346A9AFF24;
 					};
-					829FFB06AC273BEE7049A7F2 = {
+					5D66E2BAEFA539346A9AFF24 = {
 						ProvisioningStyle = Automatic;
 					};
 					E35F925D729B7056D4E4B501 = {
@@ -843,7 +843,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+				5D66E2BAEFA539346A9AFF24 /* AutoMobileTest */,
 				E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
 				2B5458099134F47AA1A7C4DA /* CtrlProxyUITests */,
 			);
@@ -851,11 +851,11 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		BB24353236FA18281C53852F /* Resources */ = {
+		72B38E0868C7335219D533CC /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5DF6CF60A8796BBB8C80341C /* Assets.xcassets in Resources */,
+				B6C6059A7B581CF17123BBDE /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -867,6 +867,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				818C27D4C9349EE5D7B46AC4 /* ObjCExceptionCatcher.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4A53A74863167E093D849726 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2803B9FE4B7B5CCAE86B5D63 /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1058,31 +1066,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		95AF442534FB883338D9AB7A /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				DFEE186C8B4CD32EF76D995A /* AppDelegate.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		11EA9F56C65EBABFFEAF6D81 /* PBXTargetDependency */ = {
+		0F39CE35996FEF51B0C4854E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */;
-			targetProxy = 7EB55A13A30F9049B9BAAEA0 /* PBXContainerItemProxy */;
+			targetProxy = 23086687A6BF27434506DBC4 /* PBXContainerItemProxy */;
 		};
 		178622E36D486FB3DEDAE985 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */;
 			targetProxy = 3B1FEDBB84DB25101CE0F519 /* PBXContainerItemProxy */;
 		};
-		E20E35C9CD5E3D45AB8ED161 /* PBXTargetDependency */ = {
+		D9B2061176B50773C611DD0F /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */;
-			targetProxy = 195113DD92332B613D6F1FB7 /* PBXContainerItemProxy */;
+			target = 5D66E2BAEFA539346A9AFF24 /* AutoMobileTest */;
+			targetProxy = D4411E5EBECBB0EBCD51C628 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1104,7 +1104,7 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = CtrlProxyApp;
+				TEST_TARGET_NAME = AutoMobileTest;
 			};
 			name = Release;
 		};
@@ -1138,6 +1138,23 @@
 			};
 			name = Release;
 		};
+		53F12E7631AFE922F2F9CCE5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = AutoMobileTest/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		5B291F947811E13431272BED /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1160,40 +1177,6 @@
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VERSIONING_SYSTEM = "apple-generic";
-			};
-			name = Debug;
-		};
-		5FB327F8E51267F6C09AF654 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
-				INFOPLIST_FILE = CtrlProxyApp/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy;
-				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		93CBFA3F37A7BCA6FF9BC1B3 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
-				INFOPLIST_FILE = CtrlProxyApp/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy;
-				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1226,6 +1209,23 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C7813D26CF81F99D5C2A1BC9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = AutoMobileTest/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1271,18 +1271,18 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = CtrlProxyApp;
+				TEST_TARGET_NAME = AutoMobileTest;
 			};
 			name = Debug;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B6CD7711D6D7267F8AC88EB7 /* Build configuration list for PBXNativeTarget "CtrlProxyApp" */ = {
+		6D2F6D4820BE1879AF446B13 /* Build configuration list for PBXNativeTarget "AutoMobileTest" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				93CBFA3F37A7BCA6FF9BC1B3 /* Debug */,
-				5FB327F8E51267F6C09AF654 /* Release */,
+				C7813D26CF81F99D5C2A1BC9 /* Debug */,
+				53F12E7631AFE922F2F9CCE5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

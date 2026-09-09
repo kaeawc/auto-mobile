@@ -318,7 +318,7 @@ list_ios_watch_files() {
   local watch_dirs=(
     "${CTRL_PROXY_IOS_DIR}/Sources"
     "${CTRL_PROXY_IOS_DIR}/Tests"
-    "${CTRL_PROXY_IOS_DIR}/CtrlProxyApp"
+    "${CTRL_PROXY_IOS_DIR}/AutoMobileTest"
   )
   local extra_files=(
     "${CTRL_PROXY_IOS_DIR}/project.yml"

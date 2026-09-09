@@ -8,6 +8,7 @@ public enum CaptureCapability: String, CaseIterable {
     /// itself lands in the follow-up (#4788); this build only advertises the
     /// vocabulary so the pairing can be validated ahead of time.
     case encodedVideoH264 = "encoded-video-h264"
+    case simulatorHighlights = "simulator-highlights"
 }
 
 /// Formats a {@link CaptureCapability} into a stable, greppable stderr line the

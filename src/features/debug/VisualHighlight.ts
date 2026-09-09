@@ -8,13 +8,14 @@ import { DeviceSessionManager } from "../../utils/DeviceSessionManager";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { SimulatorHighlights } from "./SimulatorHighlights";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   ActionableError,
   BootedDevice,
   HighlightBounds,
   HighlightOperationResult,
   HighlightShape,
-  HighlightStyle,
   Platform,
 } from "../../models";
 
@@ -32,9 +33,6 @@ export interface HighlightDeviceClient {
 const normalizeNullableNumber = (value: number | null | undefined): number | undefined =>
   value === null ? undefined : value;
 
-const normalizeNullableString = (value: string | null | undefined): string | undefined =>
-  value === null ? undefined : value;
-
 const highlightBoundsSchema: z.ZodType<HighlightBounds> = z
   .object({
     x: z.number().int(),
@@ -44,6 +42,7 @@ const highlightBoundsSchema: z.ZodType<HighlightBounds> = z
     sourceWidth: z.number().int().positive().nullable().optional(),
     sourceHeight: z.number().int().positive().nullable().optional(),
   })
+  .strict()
   .superRefine((value, ctx) => {
     const sourceWidth = normalizeNullableNumber(value.sourceWidth);
     const sourceHeight = normalizeNullableNumber(value.sourceHeight);
@@ -58,71 +57,12 @@ const highlightBoundsSchema: z.ZodType<HighlightBounds> = z
     }
   });
 
-const highlightStyleSchema: z.ZodType<HighlightStyle> = z
+export const highlightShapeSchema: z.ZodType<HighlightShape> = z
   .object({
-    strokeColor: z.string().min(1).nullable().optional(),
-    strokeWidth: z.number().positive().nullable().optional(),
-    dashPattern: z.array(z.number().positive()).nonempty().nullable().optional(),
-    smoothing: z.enum(["none", "catmull-rom", "bezier", "douglas-peucker"]).nullable().optional(),
-    tension: z.number().min(0).max(1).nullable().optional(),
-    capStyle: z.enum(["butt", "round", "square"]).nullable().optional(),
-    joinStyle: z.enum(["miter", "round", "bevel"]).nullable().optional(),
+    type: z.literal("circle"),
+    bounds: highlightBoundsSchema,
   })
-  .superRefine((value, ctx) => {
-    const strokeColor = normalizeNullableString(value.strokeColor);
-    const strokeWidth = normalizeNullableNumber(value.strokeWidth);
-    const dashPattern = value.dashPattern ?? undefined;
-    const smoothing = value.smoothing ?? undefined;
-    const tension = normalizeNullableNumber(value.tension);
-    const capStyle = value.capStyle ?? undefined;
-    const joinStyle = value.joinStyle ?? undefined;
-
-    const hasStroke =
-      strokeColor !== undefined ||
-      strokeWidth !== undefined ||
-      dashPattern !== undefined ||
-      smoothing !== undefined ||
-      tension !== undefined ||
-      capStyle !== undefined ||
-      joinStyle !== undefined;
-
-    if (!hasStroke) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Highlight style must include stroke settings",
-      });
-    }
-  });
-
-const highlightPointSchema = z.object({
-  x: z.number(),
-  y: z.number(),
-});
-
-const highlightBoxShapeSchema = z.object({
-  type: z.literal("box"),
-  bounds: highlightBoundsSchema,
-  style: highlightStyleSchema.nullable().optional(),
-});
-
-const highlightCircleShapeSchema = z.object({
-  type: z.literal("circle"),
-  bounds: highlightBoundsSchema,
-  style: highlightStyleSchema.nullable().optional(),
-});
-
-const highlightPathShapeSchema = z.object({
-  type: z.literal("path"),
-  points: z.array(highlightPointSchema).min(2),
-  bounds: highlightBoundsSchema.nullable().optional(),
-  style: highlightStyleSchema.nullable().optional(),
-});
-
-export const highlightShapeSchema: z.ZodType<HighlightShape> = z.discriminatedUnion("type", [
-  highlightBoxShapeSchema,
-  highlightCircleShapeSchema,
-  highlightPathShapeSchema,
-]);
+  .strict();
 
 const highlightResponseSchema: z.ZodType<HighlightOperationResult> = z
   .object({
@@ -222,6 +162,9 @@ export class VisualHighlight {
       return AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     }
     if (device.platform === "ios") {
+      if (isIosSimulatorUdid(device.deviceId)) {
+        return new SimulatorHighlights(device);
+      }
       return IOSCtrlProxyClient.getInstance(device);
     }
     throw new ActionableError(`Visual highlights are not supported on ${device.platform} devices.`);

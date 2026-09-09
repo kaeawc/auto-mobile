@@ -1,10 +1,10 @@
 import CoreMedia
 import CoreVideo
 import Foundation
-import ScreenCaptureKit
-import XCTest
 @testable import ScreenCaptureCore
 @testable import ScreenCaptureHelper
+import ScreenCaptureKit
+import XCTest
 
 /// Deterministic coverage for `SimulatorCaptureSession`'s lifecycle paths.
 ///
@@ -14,19 +14,22 @@ import XCTest
 /// four behaviors called out on the issue: start/stop wiring, fatal-error
 /// handling, reconfigure success/failure, and once-only first-frame signalling.
 final class SimulatorCaptureSessionTests: XCTestCase {
-
     // MARK: - Test doubles
 
     /// In-memory `FrameSink` so a real `FrameWriter` can back the session.
     private final class MemorySink: FrameSink {
         private(set) var writes: [Data] = []
-        func write(_ data: Data) { writes.append(data) }
+        func write(_ data: Data) {
+            writes.append(data)
+        }
     }
 
     /// Records diagnostic lines the session would otherwise send to stderr.
     private final class DiagnosticRecorder {
         private(set) var lines: [String] = []
-        func record(_ line: String) { lines.append(line) }
+        func record(_ line: String) {
+            lines.append(line)
+        }
     }
 
     /// Fake `CaptureStream` that records calls and can be told to fail specific
@@ -34,6 +37,7 @@ final class SimulatorCaptureSessionTests: XCTestCase {
     /// `Sendable` `CaptureStream` seam requires): the test drives it single-threaded,
     /// awaiting each session call before inspecting its recorded state.
     private final class FakeCaptureStream: CaptureStream, @unchecked Sendable {
+        func updateContentFilter(_: SCContentFilter) async throws {}
         private(set) var addedScreenOutput = false
         private(set) var addedAudioOutput = false
         private(set) var startCaptureCallCount = 0
@@ -57,16 +61,24 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         var updateConfigurationTransientFailures = 0
 
         func addStreamOutput(
-            _ output: SCStreamOutput,
+            _: SCStreamOutput,
             type: SCStreamOutputType,
-            sampleHandlerQueue: DispatchQueue?
-        ) throws {
-            if type == .screen { addedScreenOutput = true }
-            if type == .audio { addedAudioOutput = true }
+            sampleHandlerQueue _: DispatchQueue?
+        )
+            throws
+        {
+            if type == .screen {
+                addedScreenOutput = true
+            }
+            if type == .audio {
+                addedAudioOutput = true
+            }
         }
 
-        func removeStreamOutput(_ output: SCStreamOutput, type: SCStreamOutputType) throws {
-            if type == .screen { removedScreenOutput = true }
+        func removeStreamOutput(_: SCStreamOutput, type: SCStreamOutputType) throws {
+            if type == .screen {
+                removedScreenOutput = true
+            }
         }
 
         func startCapture() async throws {
@@ -78,7 +90,9 @@ final class SimulatorCaptureSessionTests: XCTestCase {
                 // regresses, turning a hang into a fast assertion failure.
                 try await Task.sleep(nanoseconds: 5_000_000_000)
             }
-            if let error = startCaptureError { throw error }
+            if let error = startCaptureError {
+                throw error
+            }
         }
 
         func stopCapture() async throws {
@@ -91,7 +105,9 @@ final class SimulatorCaptureSessionTests: XCTestCase {
                 updateConfigurationTransientFailures -= 1
                 throw StubError(id: -1)
             }
-            if let error = updateConfigurationError { throw error }
+            if let error = updateConfigurationError {
+                throw error
+            }
         }
     }
 
@@ -102,7 +118,9 @@ final class SimulatorCaptureSessionTests: XCTestCase {
     private func makeSession(
         diagnostics: DiagnosticRecorder,
         onFatalError: @escaping (Error) -> Void = { _ in }
-    ) -> SimulatorCaptureSession {
+    )
+        -> SimulatorCaptureSession
+    {
         let writer = FrameWriter(sink: MemorySink())
         return SimulatorCaptureSession(
             writer: writer,
@@ -208,6 +226,30 @@ final class SimulatorCaptureSessionTests: XCTestCase {
     }
 
     // MARK: - Reconfigure success / failure
+
+    func testOverlayConfigurationPreservesRetinaPixels() async throws {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        session.configuredPixelWidth = 920
+        session.configuredPixelHeight = 1970
+        try await session.applyOverlayConfiguration(stream: fake)
+        XCTAssertEqual(fake.updatedConfigurations.last?.width, 920)
+        XCTAssertEqual(fake.updatedConfigurations.last?.height, 1970)
+        XCTAssertEqual(session.configuredPixelWidth, 920)
+        XCTAssertEqual(session.configuredPixelHeight, 1970)
+    }
+
+    func testOverlayConfigurationFailurePropagatesAfterRetry() async {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        fake.updateConfigurationError = StubError(id: 1)
+        do {
+            try await session.applyOverlayConfiguration(stream: fake)
+            XCTFail("A failed crop transition must not be accepted")
+        } catch {
+            XCTAssertEqual(fake.updatedConfigurations.count, 2)
+        }
+    }
 
     func testReconfigureSuccessUpdatesDimensionsAndPushesConfig() async {
         let diagnostics = DiagnosticRecorder()

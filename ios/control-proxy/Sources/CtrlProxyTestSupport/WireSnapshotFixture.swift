@@ -34,7 +34,7 @@ public enum WireSnapshotFixture {
     /// fails loudly (never skips) — silently skipping would defeat the tripwire.
     public static func fixtureURL(fromTestFilePath path: String, climb levels: Int = 5) -> URL {
         var url = URL(fileURLWithPath: path)
-        for _ in 0..<levels {
+        for _ in 0 ..< levels {
             url.deleteLastPathComponent()
         }
         return url
@@ -84,6 +84,9 @@ public func jsonNormalized(_ value: Any) -> Any {
             return NSNull()
         }
         return jsonNormalized(child.value)
+    }
+    if let rawValue = value as? any RawRepresentable {
+        return jsonNormalized(rawValue.rawValue)
     }
     // Int/Int64/Double/Float/Bool all bridge to NSNumber; String stays String.
     if let number = value as? NSNumber {

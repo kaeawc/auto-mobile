@@ -317,7 +317,7 @@ export class XcodeSigningManager {
       }
 
       const result = await this.dependencies.xcodebuild.executeCommand(
-        ["-showBuildSettings", "-project", projectPath, "-scheme", "CtrlProxyApp"],
+        ["-showBuildSettings", "-project", projectPath, "-scheme", "AutoMobileTest"],
         { timeoutMs: 30000, maxBuffer: 10 * 1024 * 1024 },
       );
       const teams = new Set<string>();

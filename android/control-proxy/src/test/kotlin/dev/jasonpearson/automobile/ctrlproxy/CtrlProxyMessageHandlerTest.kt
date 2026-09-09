@@ -661,13 +661,13 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches add_highlight converting the protocol shape to the render model`() = runTest {
     dispatch(
-      """{"type":"add_highlight","requestId":"hl1","id":"highlight-1","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":50}}}"""
+      """{"type":"add_highlight","requestId":"hl1","id":"highlight-1","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":100,"height":50}}}"""
     )
     assertEquals("addHighlight", lastCall.first)
     assertEquals("hl1", lastCall.second[0])
     assertEquals("highlight-1", lastCall.second[1])
     val shape = lastCall.second[2] as HighlightShape
-    assertEquals("box", shape.type)
+    assertEquals("circle", shape.type)
     assertEquals(100, shape.bounds?.width)
     assertEquals(50, shape.bounds?.height)
   }
@@ -945,7 +945,7 @@ class CtrlProxyMessageHandlerTest {
       listOf(
         """{"type":"request_screenshot","requestId":"s1"}""",
         """{"type":"request_tap_coordinates","requestId":"t1","x":1,"y":2}""",
-        """{"type":"add_highlight","requestId":"h1","id":"x","shape":{"type":"box","bounds":{"x":0,"y":0,"width":1,"height":1}}}""",
+        """{"type":"add_highlight","requestId":"h1","id":"x","shape":{"type":"circle","bounds":{"x":0,"y":0,"width":1,"height":1}}}""",
         """{"type":"set_network_mock_rules","rules":[]}""",
         """{"type":"request_hit_test","requestId":"ht","x":1,"y":2}""",
         """{"type":"start_recording"}""",
@@ -966,7 +966,7 @@ class CtrlProxyMessageHandlerTest {
       listOf(
         """{"type":"request_screenshot","requestId":"s1"}""",
         """{"type":"request_swipe","requestId":"sw1","x1":0,"y1":0,"x2":1,"y2":1}""",
-        """{"type":"add_highlight","requestId":"h1","id":"x","shape":{"type":"box","bounds":{"x":0,"y":0,"width":1,"height":1}}}""",
+        """{"type":"add_highlight","requestId":"h1","id":"x","shape":{"type":"circle","bounds":{"x":0,"y":0,"width":1,"height":1}}}""",
         """{"type":"set_network_mock_rules","rules":[]}""",
         """{"type":"start_recording"}""",
       )

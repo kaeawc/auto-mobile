@@ -479,7 +479,7 @@ Suggested order:
    - **Then remove the reference**: drop `Sources/CtrlProxy` + `Tests/CtrlProxyTests`; the SwiftPM
      `CtrlProxy` target/product + `CtrlProxyTests`; `CtrlProxyRewriteTests`' `CtrlProxy` dependency +
      the per-target `.v5` modes; the Xcode `CtrlProxy` framework + `CtrlProxyTests` targets +
-     `CtrlProxyApp`'s `CtrlProxy` embed + the scheme's `CtrlProxyTests`; and the `CtrlProxyTests.xctest`
+     `AutoMobileTest`'s `CtrlProxy` embed + the scheme's `CtrlProxyTests`; and the `CtrlProxyTests.xctest`
      artifact checks in `scripts/ios/ctrl-proxy-{build-for-testing,verify-artifacts,create-ipa}.sh`.
    - **Validate**: SPM `-warnings-as-errors` (surviving rewrite-only + golden tests green) + a
      `build-for-testing` on the sim. Then fold in the deferred Phase-2 loopback/connection scenarios.

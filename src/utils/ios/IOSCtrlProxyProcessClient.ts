@@ -193,13 +193,26 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  async terminateProcessTree(pid: number, deadline?: number): Promise<void> {
+  /**
+   * @param options.skipGraceful Skip the SIGTERM ladder entirely and signal
+   * SIGKILL immediately. For callers (e.g. a shutdown-time force-stop) that
+   * only run after a prior graceful attempt has already timed out -- a fresh
+   * TERM grace period there would just spend an already-exhausted deadline
+   * without ever reaching SIGKILL (issue #6578).
+   */
+  async terminateProcessTree(
+    pid: number,
+    deadline?: number,
+    options?: { skipGraceful?: boolean },
+  ): Promise<void> {
     const descendants = await this.findDescendantProcessIds(pid, deadline);
     const targets = [...descendants].reverse().concat(pid);
-    await this.signalGroup(pid, "TERM", deadline);
-    await this.signalPids(targets, "TERM", deadline);
-    if (await this.waitForExit([pid, ...descendants], deadline)) {
-      return;
+    if (!options?.skipGraceful) {
+      await this.signalGroup(pid, "TERM", deadline);
+      await this.signalPids(targets, "TERM", deadline);
+      if (await this.waitForExit([pid, ...descendants], deadline)) {
+        return;
+      }
     }
     await this.signalGroup(pid, "KILL", deadline);
     await this.signalPids(targets, "KILL", deadline);

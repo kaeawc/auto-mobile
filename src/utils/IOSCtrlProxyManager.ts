@@ -459,7 +459,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   ): Promise<unknown | null> {
     let timeout: NodeJS.Timeout | undefined;
     let forceStopStarted = false;
-    const settled = instance.stop().then(
+    // Threaded into stop()'s own terminateProcessTree call so its sleeps/execs
+    // degrade predictably against this stage's budget instead of running
+    // unbounded (#6578).
+    const stopDeadline = timer.now() + SHUTDOWN_STOP_TIMEOUT_MS;
+    const settled = instance.stop(stopDeadline).then(
       () => null,
       (error) => error,
     );
@@ -491,11 +495,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
   ): Promise<void> {
     let timeout: NodeJS.Timeout | undefined;
+    // Computed here (not at the start of the overall shutdown stage) since
+    // this stage's budget only starts once stop()'s own attempt has timed out.
+    const forceStopDeadline = timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS;
     const deadline = new Promise<void>((resolve) => {
       timeout = timer.setTimeout(resolve, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
     });
     try {
-      await Promise.race([instance.forceStopForShutdown(), deadline]);
+      await Promise.race([instance.forceStopForShutdown(forceStopDeadline), deadline]);
     } finally {
       if (timeout) {
         timer.clearTimeout(timeout);
@@ -503,7 +510,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private async forceStopForShutdown(): Promise<void> {
+  private async forceStopForShutdown(deadline?: number): Promise<void> {
     this.isStopping = true;
     this.processSupervisor.stop();
     this.iproxySupervisor.stop();
@@ -540,9 +547,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
     }
     if (runnerPid) {
-      await this.processClient.terminateProcessTree(runnerPid).catch((error) => {
-        logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
-      });
+      // This only runs after stop()'s own graceful attempt has already timed
+      // out, so replaying a fresh SIGTERM grace ladder here would just burn
+      // the (much smaller) force-stop budget without ever reaching SIGKILL --
+      // go straight to it (#6578).
+      await this.processClient
+        .terminateProcessTree(runnerPid, deadline, { skipGraceful: true })
+        .catch((error) => {
+          logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
+        });
     }
   }
 
@@ -1215,7 +1228,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   /**
    * Stop CtrlProxy
    */
-  public async stop(): Promise<void> {
+  /**
+   * @param deadline Absolute timer.now() bound past which the runner-tree
+   * termination's own sleeps/execs must clamp rather than run unbounded.
+   * Threaded through by shutdownAll's stopWithinShutdownDeadline (#6578);
+   * omitted by every other caller.
+   */
+  public async stop(deadline?: number): Promise<void> {
     logger.info("[IOSCtrlProxy] Stopping CtrlProxy");
     this.isStopping = true;
 
@@ -1253,7 +1272,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (this.xcTestProcessId) {
       try {
         if (await this.isOwnRunnerProcessAlive()) {
-          await this.processClient.terminateProcessTree(this.xcTestProcessId);
+          await this.processClient.terminateProcessTree(this.xcTestProcessId, deadline);
         } else {
           logger.debug(
             `[IOSCtrlProxy] Tracked runner PID ${this.xcTestProcessId} is not an owned CtrlProxy runner; ` +

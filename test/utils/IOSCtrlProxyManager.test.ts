@@ -331,6 +331,88 @@ describe("IOSCtrlProxyManager", function () {
       expect(secondStop).toHaveBeenCalledTimes(1);
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
     });
+
+    // Models the runner command shape that isOwnRunnerProcessAlive/
+    // isCtrlProxyRunnerCommand recognize as this daemon's own launch, mirroring
+    // the "restart prevention" describe block's helper of the same name.
+    function ownRunnerProcess(pid: number): FakeListeningProcess {
+      return {
+        pid,
+        port: 8765,
+        command:
+          `xcodebuild test-without-building ` +
+          `-xctestrun /tmp/automobile-ctrl-proxy/automobile-runner-${testDevice.deviceId}.xctestrun ` +
+          `-destination "platform=iOS Simulator,id=${testDevice.deviceId}" ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+      };
+    }
+
+    function registerAsShutdownInstance(manager: IOSCtrlProxyManager): void {
+      (
+        IOSCtrlProxyManager as unknown as {
+          instances: Map<string, IOSCtrlProxyManager>;
+        }
+      ).instances.set(testDevice.deviceId, manager);
+    }
+
+    // Pins #6578: forceStopForShutdown only ever runs after stop()'s own
+    // TERM+KILL ladder has already timed out, so replaying a fresh TERM grace
+    // period there just burns the tiny 250ms force-stop budget without ever
+    // reaching SIGKILL. The fix must escalate straight to SIGKILL.
+    test("escalates straight to SIGKILL within the shutdown stage when the runner ignores SIGTERM (#6578)", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912345;
+      const wedgedRunner: FakeListeningProcess = {
+        ...ownRunnerProcess(912345),
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [wedgedRunner]);
+      registerAsShutdownInstance(manager);
+      // stop() itself never settles -- the wedged runner ignores both signals
+      // in its own ladder too, so only the force-stop stage is exercised here.
+      spyOn(manager, "stop").mockImplementation(async () => {
+        await new Promise<void>(() => {});
+      });
+
+      fakeTimer.enableAutoAdvance();
+      await IOSCtrlProxyManager.shutdownAll(fakeTimer);
+
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912345")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 912345")).toBe(true);
+    });
+
+    // Companion case from the issue: a tree that exits promptly on SIGTERM
+    // must still resolve without ever reaching forceStopForShutdown/SIGKILL --
+    // the fix must not turn every shutdown into a hard kill.
+    test("resolves via a plain SIGTERM without forcing SIGKILL when the runner exits promptly", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(912345)]);
+      registerAsShutdownInstance(manager);
+      const forceStop = spyOn(manager as any, "forceStopForShutdown");
+
+      fakeTimer.enableAutoAdvance();
+      await IOSCtrlProxyManager.shutdownAll(fakeTimer);
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912345")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912345")).toBe(false);
+      expect(forceStop).not.toHaveBeenCalled();
+    });
   });
 
   describe("getServicePort", function () {

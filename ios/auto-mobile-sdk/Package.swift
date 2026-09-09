@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AutoMobileSDK",
     platforms: [
-        .iOS(.v15),
+        .iOS(.v17),
         .macOS(.v13),
     ],
     products: [

@@ -64,7 +64,7 @@ trap 'rm -rf "${PATCH_DIRECTORY}"' EXIT
 xcrun actool \
     --compile "${PATCH_DIRECTORY}" \
     --platform iphonesimulator \
-    --minimum-deployment-target 15.0 \
+    --minimum-deployment-target 17.0 \
     --app-icon AppIcon \
     --output-partial-info-plist "${PATCH_DIRECTORY}/icon-info.plist" \
     "${ASSET_CATALOG}" >/dev/null

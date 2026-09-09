@@ -142,6 +142,43 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     }
   });
 
+  test("keyboard and side-system-bar siblings cannot verify an empty app (#6352)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_700_000_000_000);
+    const viewHierarchy = new FakeViewHierarchy();
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+    const appBounds = { left: 0, top: 0, right: 1080, bottom: 1200 };
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(timer.now()),
+      systemInsets: { top: 63, right: 100, bottom: 0, left: 0 },
+      windows: [
+        { id: 1, type: 1, isActive: true, isFocused: false, bounds: appBounds },
+        {
+          id: 2,
+          type: 2,
+          isActive: true,
+          isFocused: true,
+          bounds: { left: 0, top: 1200, right: 1080, bottom: 2400 },
+        },
+      ],
+      hierarchy: {
+        node: [
+          { bounds: appBounds },
+          { text: "Keyboard", bounds: { left: 0, top: 1600, right: 300, bottom: 1700 } },
+          { text: "Back", bounds: { left: 1000, top: 100, right: 1080, bottom: 200 } },
+        ],
+      },
+    } as any);
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+    expect(result.elements?.text).toHaveLength(2);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("capture is incomplete");
+  });
+
   afterEach(() => {
     resetObserveCacheStore();
   });

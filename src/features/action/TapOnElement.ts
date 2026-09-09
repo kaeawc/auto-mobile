@@ -2241,11 +2241,18 @@ export class TapOnElement extends BaseVisualChange {
       return false;
     }
     try {
-      if (!(await this.accessibilityService.supportsNodeActionSelectors())) {
+      if (!(await this.accessibilityService.supportsNodeActionSelectors(undefined, signal))) {
         return false;
       }
       throwIfAborted(signal);
-      const result = await this.accessibilityService.requestNodeAction("click", selector);
+      const result = await this.accessibilityService.requestNodeAction(
+        "click",
+        selector,
+        undefined,
+        undefined,
+        signal,
+      );
+      throwIfAborted(signal);
       return result.success;
     } catch (error) {
       throwIfAborted(signal);

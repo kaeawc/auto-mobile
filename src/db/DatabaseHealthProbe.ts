@@ -70,7 +70,6 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
   private pendingRequest: {
     resolve: () => void;
     reject: (error: Error) => void;
-    timeoutHandle: NodeJS.Timeout;
   } | null = null;
 
   constructor(dependencies: DatabaseHealthProbeDependencies = {}) {
@@ -93,12 +92,21 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       throw migrationsError;
     }
 
+    // check() owns the SINGLE authoritative timeout for the whole probe.
+    // executeSelectOneInWorker() no longer arms an independent timer of its
+    // own (issue #6655): racing two equal-duration timeouts made the
+    // observed outcome depend on which one a given Timer/runtime happened to
+    // fire first, rather than on explicit code. If this timeout wins the
+    // race, abandon any in-flight worker round-trip so pendingRequest never
+    // outlives check() and a subsequent check() always attempts a fresh
+    // probe instead of short-circuiting on "already running".
     let timeoutHandle: NodeJS.Timeout | null = null;
     try {
       await Promise.race([
         this.executeSelectOne(),
         new Promise<never>((_, reject) => {
           timeoutHandle = this.timer.setTimeout(() => {
+            this.abandonPendingWorkerRequest();
             reject(new Error(`Database health probe timed out after ${this.timeoutMs}ms`));
           }, this.timeoutMs);
           if (typeof (timeoutHandle as { unref?: () => void }).unref === "function") {
@@ -119,11 +127,26 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
     if (this.pendingRequest) {
       const pending = this.pendingRequest;
       this.pendingRequest = null;
-      this.timer.clearTimeout(pending.timeoutHandle);
       pending.reject(new Error("Database health probe disposed"));
     }
     if (worker) {
       await worker.terminate();
+    }
+  }
+
+  /**
+   * Clear any in-flight worker request and null out the worker so a fresh
+   * one is created on the next check(). Used when check()'s own timeout
+   * fires while a worker round-trip is still pending — the worker is
+   * abandoned (terminated fire-and-forget) rather than left to eventually
+   * settle a request nobody is awaiting anymore.
+   */
+  private abandonPendingWorkerRequest(): void {
+    const worker = this.worker;
+    this.worker = null;
+    this.pendingRequest = null;
+    if (worker) {
+      void worker.terminate();
     }
   }
 
@@ -134,16 +157,7 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
     const worker = this.getWorker();
     const requestId = ++this.workerRequestId;
     return new Promise<void>((resolve, reject) => {
-      const timeoutHandle = this.timer.setTimeout(() => {
-        this.pendingRequest = null;
-        this.worker = null;
-        void worker.terminate();
-        reject(new Error(`Database health probe timed out after ${this.timeoutMs}ms`));
-      }, this.timeoutMs);
-      if (typeof (timeoutHandle as { unref?: () => void }).unref === "function") {
-        (timeoutHandle as { unref: () => void }).unref();
-      }
-      this.pendingRequest = { resolve, reject, timeoutHandle };
+      this.pendingRequest = { resolve, reject };
       worker.postMessage({ id: requestId });
     });
   }
@@ -162,7 +176,6 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       }
       const pending = this.pendingRequest;
       this.pendingRequest = null;
-      this.timer.clearTimeout(pending.timeoutHandle);
       if (message.ok) {
         pending.resolve();
         return;
@@ -183,7 +196,6 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       }
       const pending = this.pendingRequest;
       this.pendingRequest = null;
-      this.timer.clearTimeout(pending.timeoutHandle);
       pending.reject(error);
     });
     worker.on("exit", (code) => {
@@ -196,7 +208,6 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       }
       const pending = this.pendingRequest;
       this.pendingRequest = null;
-      this.timer.clearTimeout(pending.timeoutHandle);
       pending.reject(new Error(`Database health probe worker exited with code ${code}`));
     });
     this.worker = worker;

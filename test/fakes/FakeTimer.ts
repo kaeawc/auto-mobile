@@ -447,6 +447,30 @@ export class FakeTimer implements Timer {
   }
 
   /**
+   * Fire the most-recently-registered pending timeout immediately, ignoring
+   * the normal due-time/FIFO-registration-order tie-break that `advanceTime`
+   * uses. Simulates a Timer implementation (or runtime) that does not
+   * guarantee FIFO-among-equal-delay firing, so a test can assert behavior
+   * holds regardless of which of two same-duration timers actually fires
+   * first (see the `DatabaseHealthProbe` two-timeout ordering fragility,
+   * issue #6655). No-op if there are no pending timeouts.
+   */
+  fireNewestPendingTimeout(): void {
+    let newest: PendingTimeout | undefined;
+    for (const timeout of this.pendingTimeouts) {
+      if (!newest || timeout.seq > newest.seq) {
+        newest = timeout;
+      }
+    }
+    if (!newest) {
+      return;
+    }
+    this.pendingTimeouts = this.pendingTimeouts.filter((candidate) => candidate !== newest);
+    this.currentTime = Math.max(this.currentTime, newest.timestamp + newest.ms);
+    newest.callback();
+  }
+
+  /**
    * Get count of pending intervals.
    */
   getPendingIntervalCount(): number {

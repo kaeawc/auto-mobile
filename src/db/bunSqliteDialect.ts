@@ -47,7 +47,6 @@ const DEFAULT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
 export const DEFAULT_OPTIMIZE_INTERVAL_MS = 5 * 60 * 1000;
 
 type BunStatement = ReturnType<BunDatabase["prepare"]>;
-type SchemaVersionRow = { schema_version?: number | bigint };
 
 /**
  * Kysely dialect for Bun's built-in SQLite.
@@ -174,7 +173,6 @@ export class BunSqliteConnectionState {
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
   #statementCache = new Map<string, BunStatement>();
-  #observedSchemaVersion: number | null = null;
   #closed = false;
   readonly #maxRetryAttempts: number;
   readonly #retryBackoff: BackoffPolicy;
@@ -456,21 +454,23 @@ export class BunSqliteConnectionState {
     return this.#db;
   }
 
+  /**
+   * Cache lookup for non-DDL statements. Does NOT re-check schema on a hit
+   * (issue #6649): every schema change this dialect can make goes through
+   * `#executeOnce`'s `#isSchemaChangingSql` branch, which already calls
+   * `#clearStatementCache()` right after executing the DDL — so a cached
+   * entry reaching this method is, by construction, never stale. Re-reading
+   * `PRAGMA schema_version` per hit was a redundant extra
+   * prepare/execute/finalize round trip on the hottest path in the module for
+   * a schema change this connection could only make itself.
+   */
   #getStatement(db: BunDatabase, sql: string): BunStatement {
-    if (this.#statementCache.size === 0) {
-      this.#observedSchemaVersion = this.#readSchemaVersion(db);
-    }
-
     const cached = this.#statementCache.get(sql);
     if (cached) {
-      this.#invalidateCacheIfSchemaVersionChanged(db);
-      const current = this.#statementCache.get(sql);
-      if (!current) {
-        return this.#prepareAndCacheStatement(db, sql);
-      }
+      // Refresh LRU order.
       this.#statementCache.delete(sql);
-      this.#statementCache.set(sql, current);
-      return current;
+      this.#statementCache.set(sql, cached);
+      return cached;
     }
 
     return this.#prepareAndCacheStatement(db, sql);
@@ -488,32 +488,6 @@ export class BunSqliteConnectionState {
       }
     }
     return statement;
-  }
-
-  #invalidateCacheIfSchemaVersionChanged(db: BunDatabase): void {
-    const schemaVersion = this.#readSchemaVersion(db);
-    if (this.#observedSchemaVersion === null) {
-      this.#observedSchemaVersion = schemaVersion;
-      return;
-    }
-    if (this.#observedSchemaVersion !== schemaVersion) {
-      this.#clearStatementCache();
-      this.#observedSchemaVersion = schemaVersion;
-    }
-  }
-
-  #readSchemaVersion(db: BunDatabase): number {
-    const statement = db.prepare("PRAGMA schema_version");
-    try {
-      const row = statement.get() as SchemaVersionRow | undefined;
-      const schemaVersion = row?.schema_version;
-      if (schemaVersion === undefined) {
-        throw new Error("PRAGMA schema_version did not return a schema_version value");
-      }
-      return Number(schemaVersion);
-    } finally {
-      statement.finalize();
-    }
   }
 
   #isSchemaChangingSql(sql: string): boolean {

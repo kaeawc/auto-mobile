@@ -420,20 +420,42 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
   });
 
-  test("clears cached statements before reuse when schema_version changes", async () => {
+  test("issues zero PRAGMA schema_version reads across repeated cache hits (#6649)", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    // One miss (first call) followed by four hits on the same SQL. Before the
+    // fix, `#getStatement` re-read `PRAGMA schema_version` on every hit — an
+    // O(N) extra prepare/execute/finalize round trip per repeated query.
+    for (let index = 0; index < 5; index += 1) {
+      await state.executeQuery(rawQuery("select * from foo where id = ?", [index]), owner);
+    }
+
+    expect(db.preparedFor("select * from foo where id = ?")).toHaveLength(1);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(0);
+  });
+
+  test("still re-prepares after DDL through this connection, with no schema_version PRAGMA read", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);
     const owner = Symbol("lease");
 
     await state.executeQuery(rawQuery("select * from foo"), owner);
-    const cachedSelect = db.preparedFor("select * from foo")[0];
-
-    db.schemaVersion += 1;
     await state.executeQuery(rawQuery("select * from foo"), owner);
 
-    expect(cachedSelect.finalized).toBe(true);
-    expect(db.preparedFor("select * from foo")).toHaveLength(2);
-    expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
+    await state.executeQuery(rawQuery("alter table foo add column name text"), owner);
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+
+    const selectStatements = db.preparedFor("select * from foo");
+    expect(selectStatements).toHaveLength(2);
+    // The pre-DDL cached statement was finalized by #clearStatementCache();
+    // the post-DDL query re-prepared a fresh one — invalidation still holds
+    // via the existing DDL cache-clear, with no PRAGMA round trip involved.
+    expect(selectStatements[0].finalized).toBe(true);
+    expect(selectStatements[1].finalized).toBe(false);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(0);
   });
 
   test("preserves SELECT, RETURNING, and write result shapes", async () => {

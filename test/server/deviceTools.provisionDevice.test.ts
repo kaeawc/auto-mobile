@@ -30,6 +30,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -257,6 +258,18 @@ describe("provisionDevice handler", () => {
       boot: true,
       readiness: "automation",
     });
+  });
+
+  test("reserves enough outer request time for bounded rollback", () => {
+    const args = provisionTestArgs("android", "operation-max-provision-timeout");
+
+    expect(
+      provisionDeviceSchema.parse({ ...args, timeoutMs: MAX_PROVISION_DEVICE_TIMEOUT_MS })
+        .timeoutMs,
+    ).toBe(MAX_PROVISION_DEVICE_TIMEOUT_MS);
+    expect(() =>
+      provisionDeviceSchema.parse({ ...args, timeoutMs: MAX_PROVISION_DEVICE_TIMEOUT_MS + 1 }),
+    ).toThrow();
   });
 
   test("accepts only documented display-cutout preferences", () => {
@@ -712,6 +725,68 @@ describe("provisionDevice handler", () => {
       expect(provisionCalls).toBe(2);
     });
   }
+
+  test("rolls back before a queued provision for the same device begins", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const provisioned = provisionedTestDevice("android", true);
+    const firstReadinessStarted = Promise.withResolvers<void>();
+    const failFirstReadiness = Promise.withResolvers<void>();
+    let readinessCalls = 0;
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+        if (readinessCalls === 1) {
+          firstReadinessStarted.resolve();
+          await failFirstReadiness.promise;
+          throw new Error("first readiness attempt failed");
+        }
+      },
+      idGenerator: new FakeIdGenerator(["cleanup-queued-provision"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const first = tool.handler(provisionTestArgs("android", "operation-queued-first"));
+    await firstReadinessStarted.promise;
+    let secondSettled = false;
+    const second = tool
+      .handler(provisionTestArgs("android", "operation-queued-second"))
+      .finally(() => {
+        secondSettled = true;
+      });
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    expect(secondSettled).toBe(false);
+
+    failFirstReadiness.resolve();
+    const firstResponse = JSON.parse(((await first) as any).content[0].text);
+    const secondResponse = JSON.parse(((await second) as any).content[0].text);
+
+    expect(firstResponse).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded" },
+    });
+    expect(secondResponse).toMatchObject({
+      operationId: "operation-queued-second",
+      lifecycleState: "ready",
+      readiness: { status: "automation_ready" },
+    });
+  });
 
   test("adopts a running Android AVD by resolving its transport ID before boot", async () => {
     const existing = {

@@ -12,3 +12,7 @@ export const MAX_DEVICE_READY_TIMEOUT_MS =
   DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS -
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS -
   DAEMON_RPC_SOCKET_COMPLETION_HEADROOM_MS;
+// Provisioning reserves one bounded teardown window after its own requested
+// budget so a failed newly-created device can report verified rollback status.
+export const MAX_PROVISION_DEVICE_TIMEOUT_MS =
+  MAX_DEVICE_READY_TIMEOUT_MS - DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;

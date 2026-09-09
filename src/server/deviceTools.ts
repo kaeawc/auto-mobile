@@ -88,6 +88,7 @@ import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
+  MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../utils/deviceTimeouts";
 import {
@@ -384,7 +385,7 @@ export const provisionDeviceSchema = z
       .number()
       .int()
       .positive()
-      .max(MAX_DEVICE_READY_TIMEOUT_MS)
+      .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
       .optional()
       .describe("Total provision, boot, and readiness timeout in ms"),
   })
@@ -4500,6 +4501,7 @@ export function registerDeviceTools() {
     deps: DeviceToolsDependencies,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
     provisionFailure: ProvisionDeviceError,
+    lifecycleLease: VirtualDeviceLifecycleLease | undefined,
   ): Promise<ProvisionDeviceRollbackError> {
     const stableId =
       provisioned.device.platform === "android"
@@ -4540,11 +4542,45 @@ export function registerDeviceTools() {
       resultTtlMs: TEARDOWN_OPERATION_RESULT_TTL_MS,
     });
     try {
-      const response = await executeDeleteDevice(cleanupArgs, deps, undefined, cleanupService);
+      if (!lifecycleLease) {
+        return new ProvisionDeviceRollbackError(provisionFailure, {
+          status: "failed",
+          operationId: cleanupArgs.operationId,
+          target: cleanupArgs.target,
+          failure: {
+            code: "lifecycle_reservation_lost",
+            phase: "precondition",
+            message: "The provisioning lifecycle reservation was lost before cleanup.",
+          },
+        });
+      }
+      lifecycleLease.transitionToTeardown();
+      await lifecycleLease.bindCanonicalIdentity({
+        platform: provisioned.device.platform,
+        stableId,
+      });
+      const response = await executeDeleteDevice(
+        cleanupArgs,
+        deps,
+        undefined,
+        cleanupService,
+        lifecycleLease,
+      );
       return new ProvisionDeviceRollbackError(
         provisionFailure,
         provisionDeviceCleanupResult(cleanupArgs, response),
       );
+    } catch (error) {
+      return new ProvisionDeviceRollbackError(provisionFailure, {
+        status: "failed",
+        operationId: cleanupArgs.operationId,
+        target: cleanupArgs.target,
+        failure: {
+          code: "lifecycle_reservation_lost",
+          phase: "precondition",
+          message: errorMessage(error),
+        },
+      });
     } finally {
       // Rollback is not caller-replayable, so it must not retain operation state.
       cleanupService.dispose();
@@ -4555,18 +4591,18 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
-    lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+    takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
   ): Promise<never> {
     if (!provisioned?.created) {
       throw error;
     }
-    lifecycleLease?.release();
     throw await cleanupFailedProvisionDevice(
       args,
       deps,
       provisioned,
       toProvisionDeviceError(args, error),
+      takeLifecycleLease(),
     );
   }
 
@@ -4732,7 +4768,11 @@ export function registerDeviceTools() {
         args,
         deps,
         provisioned,
-        lifecycleLease,
+        () => {
+          const rollbackLease = lifecycleLease;
+          lifecycleLease = undefined;
+          return rollbackLease;
+        },
         error,
       );
     } finally {
@@ -5741,6 +5781,7 @@ export function registerDeviceTools() {
     deps: DeviceToolsDependencies,
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
+    lifecycleLease?: VirtualDeviceLifecycleLease,
   ): Promise<TeardownToolResponse> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
@@ -5761,6 +5802,7 @@ export function registerDeviceTools() {
           identity: args.target,
           deadlineMs,
           callerSignal,
+          lifecycleLease,
         },
         {
           resolve: async (requestAbortSignal, lifecycleLease) => {

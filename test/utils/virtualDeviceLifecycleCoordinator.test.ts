@@ -71,6 +71,34 @@ describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
     selectorReuse.release();
   });
 
+  test("canonical binding retains teardown priority after a lease transfer", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const provisioning = await coordinator.reserve(
+      { kind: "selector", platform: "ios", selector: "iPhone 17" },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+
+    provisioning.transitionToTeardown();
+    await provisioning.bindCanonicalIdentity({
+      platform: "ios",
+      stableId: "11111111-2222-3333-4444-555555555555",
+    });
+    const competingTeardown = coordinator.reserve(
+      {
+        kind: "stable",
+        platform: "ios",
+        stableId: "11111111-2222-3333-4444-555555555555",
+      },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+
+    expect(provisioning.signal.aborted).toBe(false);
+    provisioning.release();
+    const teardown = await competingTeardown;
+    teardown.release();
+  });
+
   test("different stable identities remain concurrent", async () => {
     const timer = new FakeTimer();
     const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

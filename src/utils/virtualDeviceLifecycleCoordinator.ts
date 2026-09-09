@@ -32,6 +32,7 @@ export interface VirtualDeviceLifecycleLease {
   readonly signal: AbortSignal;
   readonly identity: VirtualDeviceLifecycleIdentity;
   bindCanonicalIdentity(identity: StableVirtualDeviceIdentity): Promise<void>;
+  transitionToTeardown(): void;
   release(): void;
 }
 
@@ -103,9 +104,10 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     options: VirtualDeviceLifecycleReservationOptions,
   ): Promise<VirtualDeviceLifecycleLease> {
     const controller = new AbortController();
-    const releaseByKey = new Map<string, () => void>();
-    await this.acquire(identity, options, controller, releaseByKey);
+    const ownerByKey = new Map<string, LifecycleOwner>();
+    await this.acquire(identity, options, controller, ownerByKey);
     let currentIdentity = identity;
+    let currentOperation = options.operation;
     let released = false;
 
     return {
@@ -120,15 +122,29 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           throw new ActionableError("Cannot bind a released device lifecycle reservation");
         }
         const nextIdentity = stableIdentity(canonical);
-        const previousKeys = [...releaseByKey.keys()];
-        await this.acquire(nextIdentity, options, controller, releaseByKey);
+        const previousKeys = [...ownerByKey.keys()];
+        await this.acquire(
+          nextIdentity,
+          { ...options, operation: currentOperation },
+          controller,
+          ownerByKey,
+        );
         currentIdentity = nextIdentity;
         const nextKey = lifecycleIdentityKey(nextIdentity);
         for (const key of previousKeys) {
           if (key !== nextKey) {
-            releaseByKey.get(key)?.();
-            releaseByKey.delete(key);
+            ownerByKey.get(key)?.release();
+            ownerByKey.delete(key);
           }
+        }
+      },
+      transitionToTeardown: () => {
+        if (released) {
+          throw new ActionableError("Cannot transition a released device lifecycle reservation");
+        }
+        currentOperation = "teardown";
+        for (const owner of ownerByKey.values()) {
+          owner.operation = "teardown";
         }
       },
       release: () => {
@@ -136,10 +152,10 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           return;
         }
         released = true;
-        for (const release of releaseByKey.values()) {
-          release();
+        for (const owner of ownerByKey.values()) {
+          owner.release();
         }
-        releaseByKey.clear();
+        ownerByKey.clear();
       },
     };
   }
@@ -148,14 +164,14 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     identity: VirtualDeviceLifecycleIdentity,
     options: VirtualDeviceLifecycleReservationOptions,
     controller: AbortController,
-    releaseByKey: Map<string, () => void>,
+    ownerByKey: Map<string, LifecycleOwner>,
   ): Promise<void> {
     const key = lifecycleIdentityKey(identity);
-    if (releaseByKey.has(key)) {
+    if (ownerByKey.has(key)) {
       return;
     }
     const owner = await this.waitForOwner(key, identity, options, controller);
-    releaseByKey.set(key, owner.release);
+    ownerByKey.set(key, owner);
   }
 
   private async waitForOwner(

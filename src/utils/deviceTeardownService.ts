@@ -20,6 +20,8 @@ export interface DeviceTeardownRequest {
   identity: StableVirtualDeviceIdentity;
   deadlineMs: number;
   callerSignal?: AbortSignal;
+  /** An already-held reservation transferred atomically from failed provisioning. */
+  lifecycleLease?: VirtualDeviceLifecycleLease;
 }
 
 export interface DeviceTeardownWorkflow<TTarget, TStop, TResponse> {
@@ -220,17 +222,21 @@ export class DeviceTeardownService {
   ): Promise<TResponse> {
     let phase: DeviceTeardownPhase = "precondition";
     let target: TTarget | undefined;
-    let lease: VirtualDeviceLifecycleLease | undefined;
+    let lease = request.lifecycleLease;
     let retainLease = false;
     try {
-      lease = await this.dependencies.lifecycleCoordinator.reserve(
-        { kind: "stable", ...request.identity },
-        {
-          operation: "teardown",
-          deadlineMs: request.deadlineMs,
-          signal,
-        },
-      );
+      if (lease) {
+        lease.transitionToTeardown();
+      } else {
+        lease = await this.dependencies.lifecycleCoordinator.reserve(
+          { kind: "stable", ...request.identity },
+          {
+            operation: "teardown",
+            deadlineMs: request.deadlineMs,
+            signal,
+          },
+        );
+      }
       const resolution = await workflow.resolve(signal, lease);
       if ("response" in resolution) {
         return resolution.response;

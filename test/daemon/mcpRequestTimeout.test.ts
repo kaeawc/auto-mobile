@@ -46,6 +46,7 @@ import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+  MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../../src/utils/deviceTimeouts";
 
@@ -882,7 +883,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     );
   });
 
-  test("keeps transport alive beyond the provisionDevice tool budget", () => {
+  test("keeps transport alive through provisionDevice rollback", () => {
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
@@ -894,7 +895,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
-      600_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      600_000 + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
   });
 
@@ -910,11 +911,35 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     expect(MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS).toBe(
-      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS +
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
-      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS +
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
+  });
+
+  test("caps provisionDevice lifecycle and rollback budgets below socket idle timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "provisionDevice",
+        arguments: { timeoutMs: Number.MAX_SAFE_INTEGER },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      MAX_PROVISION_DEVICE_TIMEOUT_MS +
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+    expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
 
   test("keeps transport alive beyond the deleteDevice tool budget", () => {

@@ -108,6 +108,45 @@ describe("DeviceTeardownService", () => {
     ).resolves.toEqual({ status: "failed", phase: "verification" });
   });
 
+  test("uses a transferred provision lease without preempting a queued provision", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const provisionLease = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const queuedProvision = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+
+    await expect(
+      service.teardown(
+        {
+          operationId: "failed-provision-cleanup",
+          fingerprint: "fingerprint",
+          identity,
+          deadlineMs: 1_000,
+          lifecycleLease: provisionLease,
+        },
+        workflow,
+      ),
+    ).resolves.toEqual({ status: "destroyed" });
+
+    const nextProvision = await queuedProvision;
+    expect(nextProvision.signal.aborted).toBe(false);
+    nextProvision.release();
+  });
+
   test("caller cancellation stops waiting without cancelling accepted teardown", async () => {
     const timer = new FakeTimer();
     const { service } = createService(timer);

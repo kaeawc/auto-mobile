@@ -35,6 +35,67 @@ public enum AnnexBConverter {
             throw ConversionError.invalidNalHeaderLength(nalUnitHeaderLength)
         }
         var output = Data()
+        // For the common 4-byte header the Annex-B output is exactly the input size
+        // (a 4-byte length prefix becomes a 4-byte start code), so one reservation
+        // avoids reallocating as each NAL is appended.
+        output.reserveCapacity(sample.count)
+        try appendAnnexB(fromAvcc: sample, nalUnitHeaderLength: nalUnitHeaderLength, into: &output)
+        return output
+    }
+
+    /// Concatenate parameter-set NALs (SPS then PPS) as Annex-B, each prefixed
+    /// with a start code. The NALs are passed already stripped of any length
+    /// prefix (as VideoToolbox surfaces them via
+    /// `CMVideoFormatDescriptionGetH264ParameterSetAtIndex`).
+    public static func parameterSetsAnnexB(_ parameterSets: [Data]) -> Data {
+        var output = Data()
+        output.reserveCapacity(parameterSetsAnnexBLength(parameterSets))
+        for nal in parameterSets where !nal.isEmpty {
+            output.append(startCode)
+            output.append(nal)
+        }
+        return output
+    }
+
+    /// Assemble one Annex-B access unit from an avcC sample. When `isKeyframe`
+    /// is true the parameter sets are prepended so the IDR is self-decodable
+    /// (the RTP path drops SPS/PPS otherwise). `parameterSets` are the raw
+    /// SPS/PPS NALs (no length prefix); pass an empty array for delta frames or
+    /// when they are unavailable.
+    ///
+    /// The access unit is built into ONE pre-sized `Data`: the parameter-set NALs
+    /// (keyframes only) then the sample's slices are appended in place. This replaces
+    /// the previous three-allocation path — `parameterSetsAnnexB(...)`, `annexB(...)`,
+    /// and their `+` concatenation — with a single per-frame allocation.
+    public static func assembleAccessUnit(
+        fromAvcc sample: Data,
+        nalUnitHeaderLength: Int,
+        parameterSets: [Data],
+        isKeyframe: Bool
+    ) throws -> Data {
+        guard nalUnitHeaderLength >= 1, nalUnitHeaderLength <= 4 else {
+            throw ConversionError.invalidNalHeaderLength(nalUnitHeaderLength)
+        }
+        let prependedSets = isKeyframe ? parameterSets : []
+        var output = Data()
+        output.reserveCapacity(parameterSetsAnnexBLength(prependedSets) + sample.count)
+        for nal in prependedSets where !nal.isEmpty {
+            output.append(startCode)
+            output.append(nal)
+        }
+        try appendAnnexB(fromAvcc: sample, nalUnitHeaderLength: nalUnitHeaderLength, into: &output)
+        return output
+    }
+
+    /// Appends each NAL of a length-prefixed (avcC) sample to `output` as a
+    /// start-code-prefixed Annex-B NAL. The single NAL-walking implementation shared
+    /// by `annexB` and `assembleAccessUnit`, so both build into one caller-owned
+    /// buffer. The caller validates `nalUnitHeaderLength`.
+    private static func appendAnnexB(
+        fromAvcc sample: Data,
+        nalUnitHeaderLength: Int,
+        into output: inout Data
+    ) throws {
         // Index into the sample using its own start index so this is correct even
         // for a `Data` slice whose indices do not begin at 0.
         var cursor = sample.startIndex
@@ -55,35 +116,15 @@ public enum AnnexBConverter {
             output.append(sample[nalStart..<(nalStart + nalLength)])
             cursor = nalStart + nalLength
         }
-        return output
     }
 
-    /// Concatenate parameter-set NALs (SPS then PPS) as Annex-B, each prefixed
-    /// with a start code. The NALs are passed already stripped of any length
-    /// prefix (as VideoToolbox surfaces them via
-    /// `CMVideoFormatDescriptionGetH264ParameterSetAtIndex`).
-    public static func parameterSetsAnnexB(_ parameterSets: [Data]) -> Data {
-        var output = Data()
+    /// The Annex-B byte length of `parameterSets` (start code + NAL per non-empty
+    /// set), used to size the assembly buffer exactly.
+    private static func parameterSetsAnnexBLength(_ parameterSets: [Data]) -> Int {
+        var total = 0
         for nal in parameterSets where !nal.isEmpty {
-            output.append(startCode)
-            output.append(nal)
+            total += startCode.count + nal.count
         }
-        return output
-    }
-
-    /// Assemble one Annex-B access unit from an avcC sample. When `isKeyframe`
-    /// is true the parameter sets are prepended so the IDR is self-decodable
-    /// (the RTP path drops SPS/PPS otherwise). `parameterSets` are the raw
-    /// SPS/PPS NALs (no length prefix); pass an empty array for delta frames or
-    /// when they are unavailable.
-    public static func assembleAccessUnit(
-        fromAvcc sample: Data,
-        nalUnitHeaderLength: Int,
-        parameterSets: [Data],
-        isKeyframe: Bool
-    ) throws -> Data {
-        let slices = try annexB(fromAvcc: sample, nalUnitHeaderLength: nalUnitHeaderLength)
-        guard isKeyframe, !parameterSets.isEmpty else { return slices }
-        return parameterSetsAnnexB(parameterSets) + slices
+        return total
     }
 }

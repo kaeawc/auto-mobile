@@ -30,8 +30,10 @@ final class SimulatorCaptureSessionTests: XCTestCase {
     }
 
     /// Fake `CaptureStream` that records calls and can be told to fail specific
-    /// operations, standing in for a real `SCStream`.
-    private final class FakeCaptureStream: CaptureStream {
+    /// operations, standing in for a real `SCStream`. `@unchecked Sendable` (as the
+    /// `Sendable` `CaptureStream` seam requires): the test drives it single-threaded,
+    /// awaiting each session call before inspecting its recorded state.
+    private final class FakeCaptureStream: CaptureStream, @unchecked Sendable {
         private(set) var addedScreenOutput = false
         private(set) var addedAudioOutput = false
         private(set) var startCaptureCallCount = 0

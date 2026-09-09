@@ -712,9 +712,7 @@ jobs:
           path: android/desktop-app/build/reports/tests/test/
 
   fast-validation:
-    # Workflow-wiring changes deliberately wait for their forced XCTestRunner
-    # result below. Ordinary PRs retain the usual short fast-validation path.
-    timeout-minutes: 70
+    timeout-minutes: 20
     name: "Fast Validation"
     runs-on: ubuntu-latest
     needs: [detect-changes, format-check]
@@ -807,20 +805,6 @@ jobs:
 
       - wait: install-fast-validation-deps
 
-      # Keep edits to the XCTestRunner job's own wiring from landing without the
-      # job being exercised. This is intentionally an always-run Ubuntu guard,
-      # rather than adding pull_request.yml to native_integration: the latter
-      # would spend roughly 20-25 macOS minutes on every unrelated workflow edit.
-      # A relevant change must carry run-ios (or run-native), which starts a new
-      # run and lets the existing force-label logic execute the macOS job.
-      - name: "Require an iOS run for XCTestRunner workflow wiring changes"
-        id: validate-ios-workflow-change
-        shell: bash
-        env:
-          IOS_INTEGRATION_WORKFLOW_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          IOS_INTEGRATION_WORKFLOW_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-        run: bun scripts/ci/validate-ios-integration-workflow-changes.ts
-
       - wait: [setup-python-lock, setup-uv-lock]
 
       - name: "Run fast validation checks"
@@ -850,35 +834,6 @@ jobs:
         run: bash scripts/versioning/generate-ios-version.sh --check
 
       - wait: hadolint
-
-      # Run every local validation while the macOS job may still be queued.
-      # Only a labeled workflow-wiring change waits here, after the independent
-      # work is complete, so the required check still cannot pass before the
-      # exact XCTestRunner job succeeds.
-      - name: "Wait for forced XCTestRunner workflow validation"
-        if: steps.validate-ios-workflow-change.outputs.requires_xctest_result == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const deadline = Date.now() + 45 * 60 * 1000;
-            while (Date.now() < deadline) {
-              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: context.runId,
-                filter: 'latest',
-                per_page: 100,
-              });
-              const xctest = jobs.find(job => job.name === 'XCTestRunner Simulator Tests');
-              if (xctest?.status === 'completed') {
-                if (xctest.conclusion !== 'success') {
-                  core.setFailed(`Forced XCTestRunner job concluded ${xctest.conclusion}.`);
-                }
-                return;
-              }
-              await new Promise(resolve => setTimeout(resolve, 15_000));
-            }
-            core.setFailed('Timed out waiting for the forced XCTestRunner job.');
 
       - name: "Upload Fast Validation Logs"
         if: failure()

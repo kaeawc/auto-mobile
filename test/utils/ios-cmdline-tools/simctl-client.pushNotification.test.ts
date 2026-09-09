@@ -1,7 +1,42 @@
 import { describe, expect, test } from "bun:test";
-import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SimCtlClient,
+  type SimCtlFileSystem,
+} from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
+
+// In-memory fake for SimCtlFileSystem so these tests never touch the real
+// host tmp dir (repo fake-injection rule). Tracks calls so a test could
+// assert on them if needed; storage is a plain Map keyed by path.
+function createFakeSimCtlFileSystem(): SimCtlFileSystem & { writes: Map<string, string> } {
+  const writes = new Map<string, string>();
+  let mkdtempCount = 0;
+  return {
+    writes,
+    mkdtemp: async (prefix: string) => `${prefix}fake-${++mkdtempCount}`,
+    writeFile: async (path: string, data: string) => {
+      writes.set(path, data);
+    },
+    readFile: async (path: string) => {
+      const data = writes.get(path);
+      if (data === undefined) {
+        throw new Error(`fake fs: no file written at ${path}`);
+      }
+      return data;
+    },
+    rm: async (path: string) => {
+      // Recursive delete semantics: drop this exact path plus anything nested
+      // under it, mirroring `fs.promises.rm({ recursive: true })` removing a
+      // whole temp directory.
+      for (const key of writes.keys()) {
+        if (key === path || key.startsWith(`${path}/`)) {
+          writes.delete(key);
+        }
+      }
+    },
+  };
+}
 
 describe("SimCtlClient pushNotification", () => {
   const device: BootedDevice = {
@@ -26,7 +61,8 @@ describe("SimCtlClient pushNotification", () => {
       return createExecResult("", "");
     };
 
-    const simctl = new SimCtlClient(device, execAsync);
+    const fileSystem = createFakeSimCtlFileSystem();
+    const simctl = new SimCtlClient(device, execAsync, undefined, undefined, undefined, fileSystem);
     const result = await simctl.pushNotification(
       "ios-device-push",
       "com.example.app",
@@ -34,6 +70,8 @@ describe("SimCtlClient pushNotification", () => {
     );
 
     expect(result).toEqual({ success: true });
+    // Confirms the write went through the fake, not the real host tmp dir.
+    expect(fileSystem.writes.size).toBe(0);
   });
 
   test("returns failure when simctl push exits non-zero", async () => {
@@ -47,7 +85,8 @@ describe("SimCtlClient pushNotification", () => {
       return createExecResult("", "");
     };
 
-    const simctl = new SimCtlClient(device, execAsync);
+    const fileSystem = createFakeSimCtlFileSystem();
+    const simctl = new SimCtlClient(device, execAsync, undefined, undefined, undefined, fileSystem);
     const result = await simctl.pushNotification(
       "ios-device-push",
       "com.example.app",
@@ -56,5 +95,7 @@ describe("SimCtlClient pushNotification", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid device state");
+    // Confirms the write went through the fake, not the real host tmp dir.
+    expect(fileSystem.writes.size).toBe(0);
   });
 });

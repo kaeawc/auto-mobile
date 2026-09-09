@@ -2116,10 +2116,10 @@ export class SimCtlClient implements SimCtl {
     bundleId: string,
     payloadJson: string,
   ): Promise<{ success: boolean; error?: string }> {
-    const dir = await fsPromises.mkdtemp(join(tmpdir(), "automobile-apns-"));
+    const dir = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-apns-"));
     const file = join(dir, "payload.apns");
     try {
-      await fsPromises.writeFile(file, payloadJson, "utf-8");
+      await this.fileSystem.writeFile(file, payloadJson, "utf8");
       // `xcrun simctl push <udid> <bundleId> <file>`; bundleId may be omitted when the
       // payload carries "Simulator Target Bundle", but passing it explicitly is harmless.
       const result = await this.executeCommandArgs(["push", deviceId, bundleId, file]);
@@ -2136,7 +2136,7 @@ export class SimCtlClient implements SimCtl {
     } catch (error) {
       return { success: false, error: errorMessage(error) };
     } finally {
-      await fsPromises.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

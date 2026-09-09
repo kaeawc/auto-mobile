@@ -96,9 +96,7 @@ function hasSessionReleaseSnapshotFields(
   ].every(Boolean);
 }
 
-function isSessionReleaseHeartbeat(
-  value: unknown,
-): value is SessionReleaseSnapshot["heartbeat"] {
+function isSessionReleaseHeartbeat(value: unknown): value is SessionReleaseSnapshot["heartbeat"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }

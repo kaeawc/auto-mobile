@@ -397,7 +397,10 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
 
       firstApple.client.emitConnectionClosed();
       secondApple.client.emitConnectionClosed();
-      await Promise.all([firstProxy.callTool("getApple", {}), secondProxy.callTool("getApple", {})]);
+      await Promise.all([
+        firstProxy.callTool("getApple", {}),
+        secondProxy.callTool("getApple", {}),
+      ]);
       await Promise.all([
         firstProxy.callTool("observe", { deviceId: "ios-simulator-a" }),
         secondProxy.callTool("observe", { deviceId: "ios-simulator-b" }),

@@ -627,13 +627,13 @@ export class DaemonClient {
         boundSessionLoss
           ? new DaemonBoundSessionLostError(boundSessionLoss)
           : transportFailure
-          ? new DeviceControlTransportError(
-              response.error || "Device-control transport failure",
-              transportFailure,
-            )
-          : response.error === DAEMON_SHUTTING_DOWN_ERROR_MESSAGE
-            ? new DaemonShuttingDownError()
-            : new ActionableError(response.error || "Unknown error from daemon"),
+            ? new DeviceControlTransportError(
+                response.error || "Device-control transport failure",
+                transportFailure,
+              )
+            : response.error === DAEMON_SHUTTING_DOWN_ERROR_MESSAGE
+              ? new DaemonShuttingDownError()
+              : new ActionableError(response.error || "Unknown error from daemon"),
       );
     }
   }

@@ -309,11 +309,17 @@ export class XcodeSigningManager {
       join("ios", "control-proxy", "CtrlProxy.xcodeproj"),
     );
     try {
-      if (this.dependencies.platform() !== "darwin") {
-        const available = await this.dependencies.xcodebuild.isAvailable();
-        if (!available) {
-          return [];
-        }
+      const projectExists = await this.dependencies
+        .stat(projectPath)
+        .then(() => true)
+        .catch(() => false);
+      if (!projectExists) {
+        return [];
+      }
+
+      const available = await this.dependencies.xcodebuild.isAvailable();
+      if (!available) {
+        return [];
       }
 
       const result = await this.dependencies.xcodebuild.executeCommand(

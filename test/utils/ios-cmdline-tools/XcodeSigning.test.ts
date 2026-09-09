@@ -442,4 +442,40 @@ describe("XcodeSigningManager", () => {
       "CtrlProxyApp",
     ]);
   });
+
+  // #6585: installed (non-checkout) AutoMobile has no ios/control-proxy
+  // Xcode project on disk relative to the daemon's launch cwd. Detecting that
+  // up front must skip the xcodebuild spawn entirely rather than shelling out
+  // to a path that can never resolve.
+  test("skips xcodebuild entirely when the resolved Xcode project path does not exist", async () => {
+    const launchCwd = resolve("/Users/test/installed-package");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+    const { deps, xcodebuildArgs } = createFakeDependencies();
+    deps.stat = async () => {
+      throw new Error("ENOENT: no such file or directory");
+    };
+    const manager = new XcodeSigningManager(deps);
+
+    const teamIds = await manager.detectTeamIdsFromXcode();
+
+    expect(teamIds).toEqual([]);
+    expect(xcodebuildArgs.length).toBe(0);
+  });
+
+  // #6585: on darwin the isAvailable() gate was previously skipped entirely,
+  // so a darwin host without Xcode CLI tools still attempted the spawn. The
+  // gate must be exercised identically on darwin and non-darwin.
+  test("checks xcodebuild.isAvailable() on darwin too, skipping when unavailable", async () => {
+    const launchCwd = resolve("/Users/test/project");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+    const { deps, xcodebuildArgs } = createFakeDependencies();
+    deps.platform = () => "darwin" as const;
+    deps.xcodebuild.isAvailable = async () => false;
+    const manager = new XcodeSigningManager(deps);
+
+    const teamIds = await manager.detectTeamIdsFromXcode();
+
+    expect(teamIds).toEqual([]);
+    expect(xcodebuildArgs.length).toBe(0);
+  });
 });

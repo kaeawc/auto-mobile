@@ -2362,6 +2362,59 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("does not let an unrelated typed loss clear the current binding", async () => {
+      const client = new ScriptedDaemonClient({});
+      const originalCallTool = client.callTool.bind(client);
+      let failedRequestParams: Record<string, any> | undefined;
+      client.callTool = async (toolName, params) => {
+        if (params.sessionUuid === "ios-session-b") {
+          failedRequestParams = { ...params };
+          throw new DaemonBoundSessionLostError({
+            code: "bound_session_lost",
+            sessionUuid: "ios-session-b",
+            reason: "session-not-found",
+          });
+        }
+        return await originalCallTool(toolName, params);
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          deviceId: "ios-simulator-a",
+          sessionUuid: "ios-session-a",
+        });
+        await expect(
+          proxy.callTool("observe", {
+            deviceId: "ios-simulator-b",
+            sessionUuid: "ios-session-b",
+            __autoMobileBoundSessionUuid: "ios-session-b",
+          }),
+        ).rejects.toMatchObject({
+          sessionUuid: "ios-session-b",
+          reason: "session-not-found",
+        });
+        expect(failedRequestParams).toEqual({
+          deviceId: "ios-simulator-b",
+          sessionUuid: "ios-session-b",
+        });
+
+        await proxy.callTool("observe", { deviceId: "ios-simulator-a" });
+        expect(client.callToolCalls.at(-1)).toEqual({
+          toolName: "observe",
+          params: { deviceId: "ios-simulator-a", sessionUuid: "ios-session-a" },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("callTool recovers when a sibling's socket dropped (DaemonUnavailableError)", async () => {
       const recoveredResult = { content: [{ type: "text", text: "sibling recovered" }] };
       const staleClient = new ScriptedDaemonClient({

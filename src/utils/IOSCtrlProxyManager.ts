@@ -2903,8 +2903,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info("[IOSCtrlProxy] Installed CtrlProxy app hash matches expected bundle");
   }
 
+  /**
+   * The primary "is our runner up" gate. Routes through the identity-checked
+   * probe (issue #6415) rather than the loose "any 'ok'/'healthy' body" check,
+   * so a foreign responder on the service port — a sibling simulator's runner,
+   * a stale runner from a previous daemon run, or the Android runner reached
+   * through `adb forward` — is never mistaken for this device's runner. Every
+   * caller (`isRunning()`, the `start()` short-circuit, `waitForHealthEndpoint`,
+   * `isCtrlProxyProcessAlive()`) inherits the identity check through this one
+   * method.
+   */
   private async checkHealthEndpoint(): Promise<boolean> {
-    return this.healthClient.checkHealthEndpointOnPort(this.servicePort);
+    return this.healthClient.checkHealthEndpointOnPortForDevice(
+      this.servicePort,
+      this.device.deviceId,
+    );
   }
 
   /**

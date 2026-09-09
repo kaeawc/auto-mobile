@@ -2,6 +2,7 @@ import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -147,6 +148,7 @@ const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS = Math.max(
 );
 
 const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
+  setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
   getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
   setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -282,15 +284,8 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
       return resolveNamedDevicePreparationBudgetMs(argumentsRecord);
     case "startDevice":
       return resolveLegacyStartDeviceBudgetMs(argumentsRecord);
-    case "provisionDevice": {
-      const timeoutMs =
-        positiveFiniteNumber(argumentsRecord.timeoutMs) ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
-      return (
-        Math.min(timeoutMs, MAX_PROVISION_DEVICE_TIMEOUT_MS) +
-        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
-        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
-      );
-    }
+    case "provisionDevice":
+      return resolveProvisionDeviceBudgetMs(argumentsRecord);
     case "deleteDevice": {
       const timeoutMs =
         positiveFiniteNumber(argumentsRecord.timeoutMs) ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
@@ -298,9 +293,25 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
         Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
       );
     }
+    case "setDeviceResources":
+      return resolveDeviceResourceBudgetMs(argumentsRecord);
     default:
       return undefined;
   }
+}
+
+function resolveProvisionDeviceBudgetMs(args: Record<string, unknown>): number {
+  const timeoutMs = positiveFiniteNumber(args.timeoutMs) ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
+  return (
+    Math.min(timeoutMs, MAX_PROVISION_DEVICE_TIMEOUT_MS) +
+    DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+    START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
+  );
+}
+
+function resolveDeviceResourceBudgetMs(args: Record<string, unknown>): number {
+  const timeoutMs = positiveFiniteNumber(args.timeoutMs) ?? DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS;
+  return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 }
 
 /**

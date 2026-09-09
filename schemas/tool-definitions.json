@@ -7572,6 +7572,209 @@
           "type": "string",
           "minLength": 1
         },
+        "resources": {
+          "description": "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+          "type": "object",
+          "properties": {
+            "wallpaperRendering": {
+              "description": "Home and Lock Screen wallpaper rendering; excludes widgets and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "widgets": {
+              "description": "Widget refresh, including app widgets; excludes wallpaper and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "liveActivities": {
+              "description": "Live Activities and Dynamic Island updates; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthServices": {
+              "description": "HealthKit data and Health app background work. Health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "homeServices": {
+              "description": "HomeKit accessories and automations. Home integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "fitnessServices": {
+              "description": "Apple Fitness, coaching, activity awards, and activity sharing.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "familyServices": {
+              "description": "Family Sharing, family approvals, and parental controls. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screenTime": {
+              "description": "Screen Time limits and usage tracking. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "newsServices": {
+              "description": "Apple News background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "weatherServices": {
+              "description": "Apple Weather background forecasts.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tipsServices": {
+              "description": "Apple Tips background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "gameServices": {
+              "description": "Game Center and saved-game synchronization; excludes controller input.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsSync": {
+              "description": "Maps favorites, history, background updates, and suggested destinations; excludes MapKit rendering and location services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "advertising": {
+              "description": "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "diagnosticReporting": {
+              "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photoAnalysis": {
+              "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantSuggestions": {
+              "description": "Siri inference, knowledge, and proactive suggestions; preserves speech, system voices, and shared language/model infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleIntelligence": {
+              "description": "Apple Intelligence orchestration and generative experiences; system writing tools and intelligence integrations may become unavailable. Preserves shared model and speech services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "searchIndexing": {
+              "description": "Spotlight and Settings search, including app-provided system indexes; excludes an app's own search service.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appStoreServices": {
+              "description": "App Store installation/update services; excludes push and StoreKit payment services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleMediaSync": {
+              "description": "Apple Music and subscribed/purchased media background services; excludes generic audio/video playback and StoreKit payments.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailServices": {
+              "description": "Apple Mail background services. Mail-based sign-in email workflows may be unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarServices": {
+              "description": "Local Calendar database access; excludes server-side calendar integrations in apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "reminderServices": {
+              "description": "Apple Reminders database and background work; excludes reminders maintained by other apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "personalDataSync": {
+              "description": "Exchange, CalDAV, and CardDAV synchronization; preserves local Contacts database access.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "safariSync": {
+              "description": "Safari bookmark/history synchronization; preserves associated domains, shared credentials, browsing protections, and WebKit.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSettingsSync": {
+              "description": "iCloud system-settings synchronization and storage-plan recommendations; preserves accounts, credentials, CloudKit data, Drive, and Photos transfers.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagingMaintenance": {
+              "description": "Apple Messages history cleanup, attachment transfer, and FaceTime message storage; preserves identity, message database XPC helpers, and system calling services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "watchConnectivity": {
+              "description": "Paired Watch and companion-device communication.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "carPlay": {
+              "description": "CarPlay vehicle connectivity.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tvRemote": {
+              "description": "Apple TV discovery and remote control.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "findMy": {
+              "description": "Find My device-location services; excludes general location APIs.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "continuity": {
+              "description": "Nearby-device Continuity discovery; cross-device workflows may stop working. Preserves system share sheets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "walletServices": {
+              "description": "Wallet, Apple Pay, digital identity, and merchant services. Payment sheets, including dependent StoreKit workflows, may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "businessServices": {
+              "description": "Apple business messaging services; excludes ordinary app messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backgroundSync": {
+              "description": "General OS background app scheduling. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "animations": {
+              "description": "System UI animations. Control is currently unsupported.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googlePlayServices": {
+              "description": "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSync": {
+              "description": "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
         "device": {
           "oneOf": [
             {
@@ -7675,14 +7878,24 @@
           "enum": ["automation", "none"]
         },
         "timeoutMs": {
-          "description": "Total provision, boot, and readiness timeout in ms",
+          "description": "Total provision, boot, resource configuration, and readiness timeout in ms",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 830000
         }
       },
       "required": ["operationId", "device"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["resources"]
+      },
+      "then": {
+        "properties": {
+          "boot": {
+            "const": true
+          }
+        }
+      }
     }
   },
   {
@@ -8413,6 +8626,241 @@
           }
         }
       }
+    }
+  },
+  {
+    "name": "setDeviceResources",
+    "description": "Set selected device resources and verify installed services. Wallpaper, widgets, and Live Activities are independent. All settings are opt-in; omitted resources stay unchanged. iOS Simulator controls are runtime-dependent; Android controls report unsupported.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "resources": {
+          "type": "object",
+          "properties": {
+            "wallpaperRendering": {
+              "description": "Home and Lock Screen wallpaper rendering; excludes widgets and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "widgets": {
+              "description": "Widget refresh, including app widgets; excludes wallpaper and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "liveActivities": {
+              "description": "Live Activities and Dynamic Island updates; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthServices": {
+              "description": "HealthKit data and Health app background work. Health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "homeServices": {
+              "description": "HomeKit accessories and automations. Home integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "fitnessServices": {
+              "description": "Apple Fitness, coaching, activity awards, and activity sharing.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "familyServices": {
+              "description": "Family Sharing, family approvals, and parental controls. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screenTime": {
+              "description": "Screen Time limits and usage tracking. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "newsServices": {
+              "description": "Apple News background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "weatherServices": {
+              "description": "Apple Weather background forecasts.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tipsServices": {
+              "description": "Apple Tips background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "gameServices": {
+              "description": "Game Center and saved-game synchronization; excludes controller input.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsSync": {
+              "description": "Maps favorites, history, background updates, and suggested destinations; excludes MapKit rendering and location services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "advertising": {
+              "description": "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "diagnosticReporting": {
+              "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photoAnalysis": {
+              "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantSuggestions": {
+              "description": "Siri inference, knowledge, and proactive suggestions; preserves speech, system voices, and shared language/model infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleIntelligence": {
+              "description": "Apple Intelligence orchestration and generative experiences; system writing tools and intelligence integrations may become unavailable. Preserves shared model and speech services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "searchIndexing": {
+              "description": "Spotlight and Settings search, including app-provided system indexes; excludes an app's own search service.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appStoreServices": {
+              "description": "App Store installation/update services; excludes push and StoreKit payment services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleMediaSync": {
+              "description": "Apple Music and subscribed/purchased media background services; excludes generic audio/video playback and StoreKit payments.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailServices": {
+              "description": "Apple Mail background services. Mail-based sign-in email workflows may be unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarServices": {
+              "description": "Local Calendar database access; excludes server-side calendar integrations in apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "reminderServices": {
+              "description": "Apple Reminders database and background work; excludes reminders maintained by other apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "personalDataSync": {
+              "description": "Exchange, CalDAV, and CardDAV synchronization; preserves local Contacts database access.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "safariSync": {
+              "description": "Safari bookmark/history synchronization; preserves associated domains, shared credentials, browsing protections, and WebKit.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSettingsSync": {
+              "description": "iCloud system-settings synchronization and storage-plan recommendations; preserves accounts, credentials, CloudKit data, Drive, and Photos transfers.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagingMaintenance": {
+              "description": "Apple Messages history cleanup, attachment transfer, and FaceTime message storage; preserves identity, message database XPC helpers, and system calling services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "watchConnectivity": {
+              "description": "Paired Watch and companion-device communication.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "carPlay": {
+              "description": "CarPlay vehicle connectivity.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tvRemote": {
+              "description": "Apple TV discovery and remote control.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "findMy": {
+              "description": "Find My device-location services; excludes general location APIs.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "continuity": {
+              "description": "Nearby-device Continuity discovery; cross-device workflows may stop working. Preserves system share sheets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "walletServices": {
+              "description": "Wallet, Apple Pay, digital identity, and merchant services. Payment sheets, including dependent StoreKit workflows, may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "businessServices": {
+              "description": "Apple business messaging services; excludes ordinary app messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backgroundSync": {
+              "description": "General OS background app scheduling. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "animations": {
+              "description": "System UI animations. Control is currently unsupported.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googlePlayServices": {
+              "description": "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSync": {
+              "description": "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "timeoutMs": {
+          "description": "Total configuration budget in milliseconds. Defaults to 300000.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["resources"],
+      "additionalProperties": false
     }
   },
   {

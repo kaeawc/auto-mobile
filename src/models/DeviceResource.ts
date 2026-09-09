@@ -23,6 +23,10 @@ export interface DeviceResourceStatus {
  * - animations: system UI transition animations, excluding app-rendered animation.
  */
 export interface DeviceResourceMap {
+  /** System wallpaper renderer; excludes widgets and Live Activities. */
+  wallpaperRendering: DeviceResourceStatus;
+  widgets: DeviceResourceStatus;
+  liveActivities: DeviceResourceStatus;
   backgroundSync: DeviceResourceStatus;
   searchIndexing: DeviceResourceStatus;
   animations: DeviceResourceStatus;

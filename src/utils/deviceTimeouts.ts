@@ -1,4 +1,6 @@
 export const DEFAULT_DEVICE_READY_TIMEOUT_MS = 120000;
+// A full resource request may verify dozens of native services sequentially.
+export const DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS = 300_000;
 export const DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS = 60_000;
 // Exact virtual-device provisioning can spend up to five minutes in
 // `avdmanager create avd` before the regular boot/readiness phases begin.

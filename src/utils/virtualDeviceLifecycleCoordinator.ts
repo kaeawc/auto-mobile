@@ -4,6 +4,7 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 export type VirtualDeviceLifecycleOperation =
   | "start"
   | "provision"
+  | "configure"
   | "recovery"
   | "shutdown"
   | "teardown";

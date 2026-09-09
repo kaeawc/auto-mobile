@@ -620,12 +620,30 @@ export class NavigationRepository {
 
   /**
    * Set modal stack for a node.
+   *
+   * Wraps the delete+insert pair in a transaction (issue #6656): without it, a
+   * concurrent caller replacing the same node's modal stack can interleave
+   * DELETE/DELETE/INSERT/INSERT, transiently exposing an empty stack to a reader
+   * and racing the second INSERT into a UNIQUE(node_id, stack_level) collision.
+   * Mirrors the db.isTransaction guard in getOrCreateUIElement/linkUIElementsToEdge
+   * so a repo already bound to a caller's transaction runs the body directly
+   * instead of attempting a nested BEGIN.
    */
   async setNodeModals(nodeId: number, modalStack: string[]): Promise<void> {
     const db = this.getDb();
+    if (db.isTransaction) {
+      return this.setNodeModalsWithin(db, nodeId, modalStack);
+    }
+    return db.transaction().execute((trx) => this.setNodeModalsWithin(trx, nodeId, modalStack));
+  }
 
+  private async setNodeModalsWithin(
+    trx: Kysely<Database>,
+    nodeId: number,
+    modalStack: string[],
+  ): Promise<void> {
     // Delete existing modals
-    await db.deleteFrom("node_modals").where("node_id", "=", nodeId).execute();
+    await trx.deleteFrom("node_modals").where("node_id", "=", nodeId).execute();
 
     if (modalStack.length === 0) {
       return;
@@ -638,7 +656,7 @@ export class NavigationRepository {
       stack_level: index,
     }));
 
-    await db.insertInto("node_modals").values(values).execute();
+    await trx.insertInto("node_modals").values(values).execute();
   }
 
   /**
@@ -658,6 +676,15 @@ export class NavigationRepository {
 
   /**
    * Set modal stack for an edge (from or to position).
+   *
+   * Wraps the delete+insert pair in a transaction (issue #6656), symmetric to
+   * setNodeModals: without it, a concurrent caller replacing the same
+   * (edge_id, position) modal stack can interleave DELETE/DELETE/INSERT/INSERT,
+   * transiently exposing an empty stack to a reader and racing the second INSERT
+   * into a UNIQUE(edge_id, position, stack_level) collision. The db.isTransaction
+   * guard mirrors getOrCreateUIElement/linkUIElementsToEdge so a repo already
+   * bound to a caller's transaction runs the body directly instead of attempting
+   * a nested BEGIN.
    */
   async setEdgeModals(
     edgeId: number,
@@ -665,9 +692,22 @@ export class NavigationRepository {
     modalStack: string[],
   ): Promise<void> {
     const db = this.getDb();
+    if (db.isTransaction) {
+      return this.setEdgeModalsWithin(db, edgeId, position, modalStack);
+    }
+    return db
+      .transaction()
+      .execute((trx) => this.setEdgeModalsWithin(trx, edgeId, position, modalStack));
+  }
 
+  private async setEdgeModalsWithin(
+    trx: Kysely<Database>,
+    edgeId: number,
+    position: "from" | "to",
+    modalStack: string[],
+  ): Promise<void> {
     // Delete existing modals for this position
-    await db
+    await trx
       .deleteFrom("edge_modals")
       .where("edge_id", "=", edgeId)
       .where("position", "=", position)
@@ -685,7 +725,7 @@ export class NavigationRepository {
       stack_level: index,
     }));
 
-    await db.insertInto("edge_modals").values(values).execute();
+    await trx.insertInto("edge_modals").values(values).execute();
   }
 
   /**
@@ -706,6 +746,15 @@ export class NavigationRepository {
 
   /**
    * Set scroll position for an edge.
+   *
+   * Wraps the delete+insert pair in a transaction (issue #6656): without it, a
+   * concurrent caller replacing the same edge's scroll position can interleave
+   * DELETE/DELETE/INSERT/INSERT, transiently exposing a missing scroll position
+   * to a reader and racing the second INSERT into the scroll_positions.edge_id
+   * PRIMARY KEY collision. The db.isTransaction guard mirrors
+   * getOrCreateUIElement/linkUIElementsToEdge so a repo already bound to a
+   * caller's transaction runs the body directly instead of attempting a nested
+   * BEGIN.
    */
   async setScrollPosition(
     edgeId: number,
@@ -716,7 +765,6 @@ export class NavigationRepository {
     swipeCount?: number,
   ): Promise<void> {
     const db = this.getDb();
-
     const scrollPos: NewScrollPosition = {
       edge_id: edgeId,
       target_element_id: targetElementId,
@@ -726,10 +774,21 @@ export class NavigationRepository {
       swipe_count: swipeCount ?? null,
     };
 
-    // Upsert: delete if exists, then insert
-    await db.deleteFrom("scroll_positions").where("edge_id", "=", edgeId).execute();
+    if (db.isTransaction) {
+      return this.setScrollPositionWithin(db, edgeId, scrollPos);
+    }
+    return db.transaction().execute((trx) => this.setScrollPositionWithin(trx, edgeId, scrollPos));
+  }
 
-    await db.insertInto("scroll_positions").values(scrollPos).execute();
+  private async setScrollPositionWithin(
+    trx: Kysely<Database>,
+    edgeId: number,
+    scrollPos: NewScrollPosition,
+  ): Promise<void> {
+    // Upsert: delete if exists, then insert
+    await trx.deleteFrom("scroll_positions").where("edge_id", "=", edgeId).execute();
+
+    await trx.insertInto("scroll_positions").values(scrollPos).execute();
   }
 
   /**

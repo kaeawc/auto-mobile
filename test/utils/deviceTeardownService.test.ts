@@ -4,7 +4,10 @@ import {
   type DeviceTeardownPhase,
 } from "../../src/utils/deviceTeardownService";
 import type { DeviceTeardownOperationStore } from "../../src/db/deviceTeardownOperationRepository";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -145,6 +148,49 @@ describe("DeviceTeardownService", () => {
     const nextProvision = await queuedProvision;
     expect(nextProvision.signal.aborted).toBe(false);
     nextProvision.release();
+  });
+
+  test("uses a live teardown signal after another teardown preempts provisioning", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const provisionLease = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const competingTeardown = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    expect(provisionLease.signal.aborted).toBe(true);
+    let resolveLease: VirtualDeviceLifecycleLease | undefined;
+    const workflow = {
+      resolve: async (_signal: AbortSignal, lease: VirtualDeviceLifecycleLease) => {
+        resolveLease = lease;
+        return { target: "target" } as const;
+      },
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+
+    await expect(
+      service.teardown(
+        {
+          operationId: "preempted-provision-cleanup",
+          fingerprint: "fingerprint",
+          identity,
+          deadlineMs: 1_000,
+          lifecycleLease: provisionLease,
+        },
+        workflow,
+      ),
+    ).resolves.toEqual({ status: "destroyed" });
+
+    expect(resolveLease?.signal.aborted).toBe(false);
+    (await competingTeardown).release();
   });
 
   test("caller cancellation stops waiting without cancelling accepted teardown", async () => {

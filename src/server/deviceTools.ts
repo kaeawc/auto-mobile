@@ -42,6 +42,10 @@ import {
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import {
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+} from "../daemon/constants";
+import {
   DEVICE_CREATE_ENV_VAR,
   getDeviceCreationGate,
   type DeviceCreationGate,
@@ -90,6 +94,7 @@ import {
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
+  START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
 import {
   createDefaultExactDeviceProvisioner,
@@ -561,6 +566,10 @@ export interface ProvisionDeviceArgs {
   readiness: "automation" | "none";
   timeoutMs?: number;
   __mcpSessionId?: string;
+  /** Daemon-provided remaining transport budget. */
+  __mcpRequestTimeoutMs?: number;
+  /** Daemon-provided absolute transport deadline. */
+  __mcpRequestDeadlineMs?: number;
 }
 
 export interface KillDeviceArgs {
@@ -3073,17 +3082,38 @@ function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
 
 function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
+  const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const publicInput: Record<string, unknown> = { ...input };
   delete publicInput.__mcpSessionId;
   delete publicInput.__executionId;
   delete publicInput.__executionStartTime;
+  delete publicInput[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  delete publicInput[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,
+    __mcpRequestDeadlineMs,
   };
+}
+
+function provisionDeviceDeadlineMs(
+  args: ProvisionDeviceArgs,
+  timer: Pick<Timer, "now">,
+  reserveRollbackTime: boolean,
+): number {
+  const requestedDeadlineMs = timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+  if (!reserveRollbackTime || args.__mcpRequestDeadlineMs === undefined) {
+    return requestedDeadlineMs;
+  }
+  return Math.min(
+    requestedDeadlineMs,
+    args.__mcpRequestDeadlineMs -
+      DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS -
+      START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+  );
 }
 
 function provisionDeviceTimeoutError(phase: string): ProvisionDeviceError {
@@ -4184,8 +4214,7 @@ export function registerDeviceTools() {
     if (!device || !stableId) {
       return undefined;
     }
-    const totalDeadlineMs =
-      deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
     return await reserveStableDeviceLifecycle(
       { platform: device.platform, stableId },
       {
@@ -4249,8 +4278,7 @@ export function registerDeviceTools() {
           const perf = createPerformanceTracker(true);
           perf.serial("provisionDeviceReplay");
           try {
-            const totalDeadlineMs =
-              deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+            const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
             await ensureProvisionDeviceReadiness(
               args,
               deps,
@@ -4499,23 +4527,21 @@ export function registerDeviceTools() {
   async function cleanupFailedProvisionDevice(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
-    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+    createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
     lifecycleLease: VirtualDeviceLifecycleLease | undefined,
   ): Promise<ProvisionDeviceRollbackError> {
     const stableId =
-      provisioned.device.platform === "android"
-        ? provisioned.device.name
-        : provisioned.device.deviceId;
+      createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
       return new ProvisionDeviceRollbackError(provisionFailure, {
         status: "failed",
         operationId: deps.idGenerator.next(),
         target: {
-          platform: provisioned.device.platform,
+          platform: createdDevice.platform,
           isVirtual: true,
           stableId: args.device.name,
-          stableName: provisioned.device.name,
+          stableName: createdDevice.name,
         },
         failure: {
           code: "target_identity_unresolved",
@@ -4527,10 +4553,10 @@ export function registerDeviceTools() {
     const cleanupArgs: TeardownDeviceArgs = {
       operationId: deps.idGenerator.next(),
       target: {
-        platform: provisioned.device.platform,
+        platform: createdDevice.platform,
         isVirtual: true,
         stableId,
-        stableName: provisioned.device.name,
+        stableName: createdDevice.name,
       },
       mode: "destroy",
       verifyAbsence: true,
@@ -4541,6 +4567,7 @@ export function registerDeviceTools() {
       timer: deps.timer,
       resultTtlMs: TEARDOWN_OPERATION_RESULT_TTL_MS,
     });
+    let lifecycleLeaseTransferred = false;
     try {
       if (!lifecycleLease) {
         return new ProvisionDeviceRollbackError(provisionFailure, {
@@ -4556,16 +4583,18 @@ export function registerDeviceTools() {
       }
       lifecycleLease.transitionToTeardown();
       await lifecycleLease.bindCanonicalIdentity({
-        platform: provisioned.device.platform,
+        platform: createdDevice.platform,
         stableId,
       });
-      const response = await executeDeleteDevice(
+      const cleanup = executeDeleteDevice(
         cleanupArgs,
         deps,
         undefined,
         cleanupService,
         lifecycleLease,
       );
+      lifecycleLeaseTransferred = true;
+      const response = await cleanup;
       return new ProvisionDeviceRollbackError(
         provisionFailure,
         provisionDeviceCleanupResult(cleanupArgs, response),
@@ -4584,6 +4613,9 @@ export function registerDeviceTools() {
     } finally {
       // Rollback is not caller-replayable, so it must not retain operation state.
       cleanupService.dispose();
+      if (!lifecycleLeaseTransferred) {
+        lifecycleLease?.release();
+      }
     }
   }
 
@@ -4591,16 +4623,24 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
+    creationStarted: boolean,
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
   ): Promise<never> {
-    if (!provisioned?.created) {
+    const createdDevice =
+      provisioned?.created || creationStarted
+        ? (provisioned?.device ??
+          (args.device.platform === "android"
+            ? { name: args.device.name, platform: "android", isRunning: false }
+            : undefined))
+        : undefined;
+    if (!createdDevice) {
       throw error;
     }
     throw await cleanupFailedProvisionDevice(
       args,
       deps,
-      provisioned,
+      createdDevice,
       toProvisionDeviceError(args, error),
       takeLifecycleLease(),
     );
@@ -4688,11 +4728,11 @@ export function registerDeviceTools() {
   ): Promise<Record<string, unknown>> {
     const perf = createPerformanceTracker(true);
     perf.serial("provisionDevice");
-    const totalDeadlineMs =
-      deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const deviceManager = deps.deviceManagerFactory();
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
+    let creationStarted = reconcileExistingConfiguration;
     try {
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
@@ -4734,7 +4774,10 @@ export function registerDeviceTools() {
         deps.timer,
         totalDeadlineMs,
         reconcileExistingConfiguration,
-        markDeviceCreationStarted,
+        async () => {
+          await markDeviceCreationStarted();
+          creationStarted = true;
+        },
         lifecycleLease,
         signal,
       );
@@ -4768,6 +4811,7 @@ export function registerDeviceTools() {
         args,
         deps,
         provisioned,
+        creationStarted,
         () => {
           const rollbackLease = lifecycleLease;
           lifecycleLease = undefined;

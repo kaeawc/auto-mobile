@@ -103,7 +103,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     identity: VirtualDeviceLifecycleIdentity,
     options: VirtualDeviceLifecycleReservationOptions,
   ): Promise<VirtualDeviceLifecycleLease> {
-    const controller = new AbortController();
+    let controller = new AbortController();
     const ownerByKey = new Map<string, LifecycleOwner>();
     await this.acquire(identity, options, controller, ownerByKey);
     let currentIdentity = identity;
@@ -143,8 +143,14 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           throw new ActionableError("Cannot transition a released device lifecycle reservation");
         }
         currentOperation = "teardown";
+        // A queued teardown may already have preempted the failed provision.
+        // Its signal must not cancel the cleanup that now owns this reservation.
+        if (controller.signal.aborted) {
+          controller = new AbortController();
+        }
         for (const owner of ownerByKey.values()) {
           owner.operation = "teardown";
+          owner.controller = controller;
         }
       },
       release: () => {

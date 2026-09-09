@@ -99,6 +99,27 @@ describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
     teardown.release();
   });
 
+  test("replaces a provision signal already preempted by teardown", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const provisioning = await coordinator.reserve(
+      { kind: "stable", platform: "android", stableId: "Pixel_8" },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const competingTeardown = coordinator.reserve(
+      { kind: "stable", platform: "android", stableId: "Pixel_8" },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+
+    expect(provisioning.signal.aborted).toBe(true);
+    provisioning.transitionToTeardown();
+    expect(provisioning.signal.aborted).toBe(false);
+
+    provisioning.release();
+    const teardown = await competingTeardown;
+    teardown.release();
+  });
+
   test("different stable identities remain concurrent", async () => {
     const timer = new FakeTimer();
     const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

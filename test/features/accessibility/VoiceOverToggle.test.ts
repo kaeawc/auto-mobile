@@ -262,6 +262,62 @@ describe("VoiceOverToggle", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
+    // #6496: an indeterminate post-disable probe (CtrlProxy down/timeout)
+    // must never be coalesced into a coincidental confirmed-false match.
+    // Wires the real DefaultIosVoiceOverDetector against a CtrlProxy client
+    // whose requestVoiceOverState always throws, so the tri-state stays
+    // `null` for the entire confirmation window rather than collapsing to
+    // `false` on the very first poll.
+    test("does not report applied:true when the post-disable confirmation probe is indeterminate", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const realDetector = new DefaultIosVoiceOverDetector(timer);
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setFailureMode("voiceOverState", new Error("not connected"));
+
+      const toggle = new VoiceOverToggle(
+        SIMULATOR_DEVICE,
+        realDetector,
+        fakeExec,
+        timer,
+        () => fakeClient,
+      );
+      const result = await toggle.toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.currentState).toBeUndefined();
+      expect(result.reason).toBeTruthy();
+      // The poll loop must run its full window rather than short-circuiting
+      // on the first (unreadable) probe.
+      expect(timer.getCurrentTime()).toBe(10_000);
+    });
+
+    // Companion happy-path check (#6496): a confirmed-false probe on the
+    // very first read must still report applied:true immediately — the fix
+    // for the indeterminate case must not slow down the honest-success path.
+    test("reports applied:true immediately when the post-disable probe confirms disabled on the first read", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const realDetector = new DefaultIosVoiceOverDetector(timer);
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setVoiceOverState(false);
+
+      const toggle = new VoiceOverToggle(
+        SIMULATOR_DEVICE,
+        realDetector,
+        fakeExec,
+        timer,
+        () => fakeClient,
+      );
+      const result = await toggle.toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(true);
+      expect(result.currentState).toBe(false);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+
     test("runs correct xcrun simctl spawn commands when disabling", async () => {
       const udid = SIMULATOR_DEVICE.deviceId;
 

@@ -89,6 +89,27 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
   }
 
+  /**
+   * Fake tri-state variant. This fake models a resolved boolean outcome, not
+   * the indeterminate/confirmed distinction the real detector's
+   * `resolveState` diverges on for a `null` probe — that distinction is
+   * covered at the DefaultIosVoiceOverDetector / VoiceOverToggle
+   * integration-test level (#6496) by wiring the real detector against a
+   * fake CtrlProxy client configured to fail.
+   */
+  async resolveState(
+    _deviceId: string,
+    _client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+    _signal?: AbortSignal,
+  ): Promise<boolean | null> {
+    this.callCount++;
+    this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
+    this.isVoiceOverEnabledTimeoutMsArgs.push(timeoutMs);
+    return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
+  }
+
   invalidateCache(deviceId: string): void {
     this.invalidatedDevices.push(deviceId);
   }

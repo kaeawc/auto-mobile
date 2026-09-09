@@ -138,16 +138,28 @@ export class VoiceOverToggle {
     // Flush the detection cache and re-detect to CONFIRM the state actually
     // changed — never report success optimistically. If the simctl write + post
     // did not land, `applied` reflects the real post-apply state rather than the
-    // requested one (#3921). Detection failure maps to `false`, so a confirmation
-    // that cannot be read reports the toggle as not-applied (conservative).
+    // requested one (#3921). An unreadable confirmation (CtrlProxy down,
+    // timeout, or an unsuccessful probe) is reported as unconfirmed rather
+    // than coalesced into `false` — a `toggle(false)` must not coincidentally
+    // match an indeterminate probe and short-circuit the poll window (#6496).
     // Resolve lazily so the iOS singleton is only touched on the iOS path.
     const client = this.clientProvider();
-    const confirmedEnabled = await this.waitForState(enabled, client);
+    const confirmedState = await this.waitForState(enabled, client);
+
+    if (confirmedState === null) {
+      const reason = `VoiceOver state could not be confirmed within ${VOICEOVER_CONFIRMATION_TIMEOUT_MS}ms`;
+      logger.warn(`[VoiceOverToggle] ${reason}`);
+      return {
+        supported: true,
+        applied: false,
+        reason,
+      };
+    }
 
     return {
       supported: true,
-      applied: confirmedEnabled === enabled,
-      currentState: confirmedEnabled,
+      applied: confirmedState === enabled,
+      currentState: confirmedState,
     };
   }
 
@@ -159,26 +171,34 @@ export class VoiceOverToggle {
    * CtrlProxy can observe VoiceOver before its launchctl job has fully started.
    * Poll the post-apply confirmation through the injectable timer so a successful
    * enable is not reported as failed merely because its service is still starting.
+   *
+   * Uses the tri-state `resolveState` (not the boolean-coalescing
+   * `isVoiceOverEnabled`) so an indeterminate probe (`null`) keeps polling
+   * for the full window instead of coincidentally matching `enabled: false`
+   * on the first, unreadable read (#6496). The last-observed tri-state is
+   * returned as-is on deadline expiry — `null` means the confirmation was
+   * never actually read, which the caller must report as unconfirmed rather
+   * than a coincidental match.
    */
-  private async waitForState(enabled: boolean, client: IOSCtrlProxy): Promise<boolean> {
+  private async waitForState(enabled: boolean, client: IOSCtrlProxy): Promise<boolean | null> {
     const deadline = this.timer.now() + VOICEOVER_CONFIRMATION_TIMEOUT_MS;
-    let confirmedEnabled = false;
+    let lastObservedState: boolean | null = null;
 
     while (true) {
       const remainingMs = deadline - this.timer.now();
       if (remainingMs <= 0) {
-        return confirmedEnabled;
+        return lastObservedState;
       }
 
       this.detector.invalidateCache(this.device.deviceId);
-      confirmedEnabled = await this.detector.isVoiceOverEnabled(
+      lastObservedState = await this.detector.resolveState(
         this.device.deviceId,
         client,
         undefined,
         remainingMs,
       );
-      if (confirmedEnabled === enabled || this.timer.now() >= deadline) {
-        return confirmedEnabled;
+      if (lastObservedState === enabled || this.timer.now() >= deadline) {
+        return lastObservedState;
       }
 
       await this.timer.sleep(

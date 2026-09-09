@@ -259,6 +259,54 @@ describe("MultiPlatformDeviceManager", () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
+  test("startDevice rejects a name-only iOS DeviceInfo instead of booting by name (#6414)", async () => {
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      getBootedSimulators: async () => [],
+      isSimulatorRunning: async () => false,
+      startSimulator: async () => {
+        throw new Error("simctl bootstatus must not run for a name-only iOS target");
+      },
+    } as unknown as SimCtlClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      null,
+    );
+    const device: DeviceInfo = {
+      name: "iPhone 17 Pro",
+      platform: "ios",
+      isRunning: false,
+    };
+
+    await expect(manager.startDevice(device)).rejects.toThrow(
+      /iPhone 17 Pro.*UDID|UDID.*iPhone 17 Pro/,
+    );
+  });
+
+  test("waitForDeviceReady rejects a name-only iOS DeviceInfo instead of polling bootstatus by name (#6414)", async () => {
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      waitForSimulatorReady: async () => {
+        throw new Error("simctl bootstatus must not run for a name-only iOS target");
+      },
+    } as unknown as SimCtlClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      {} as unknown as AndroidEmulatorClient,
+    );
+    const device: DeviceInfo = {
+      name: "iPhone 17 Pro",
+      platform: "ios",
+      isRunning: false,
+    };
+
+    await expect(manager.waitForDeviceReady(device)).rejects.toThrow(
+      /iPhone 17 Pro.*UDID|UDID.*iPhone 17 Pro/,
+    );
+  });
+
   test("isDeviceImageRunning uses UDID when present for iOS", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,

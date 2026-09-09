@@ -686,7 +686,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           })
         ).process;
       case "ios":
-        return this.simctl.startSimulator(device.deviceId ?? device.name, timeoutMs);
+        if (!device.deviceId) {
+          throw new ActionableError(
+            `Cannot boot iOS simulator '${device.name}' without a simulator UDID: ` +
+              `a name-only target cannot be verified against 'simctl' state after boot`,
+          );
+        }
+        return this.simctl.startSimulator(device.deviceId, timeoutMs);
       default:
         throw new ActionableError("Unknown platform");
     }
@@ -803,11 +809,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           signal,
         );
       case "ios":
+        if (!device.deviceId) {
+          throw new ActionableError(
+            `Cannot wait for iOS simulator '${device.name}' without a simulator UDID: ` +
+              `a name-only target cannot be verified against 'simctl' state after boot`,
+          );
+        }
         // A connected physical device has no simulator lifecycle: `simctl
         // bootstatus` cannot answer for its UDID, and discovery already proved
         // it reachable. Treat successful discovery as readiness rather than
         // shelling out to a tool that would only fail (issue #5620).
-        if (device.deviceId && isIosPhysicalUdid(device.deviceId)) {
+        if (isIosPhysicalUdid(device.deviceId)) {
           return {
             name: device.name,
             platform: "ios",
@@ -821,7 +833,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         // `startSimulator` has already run `bootstatus -b`. Signal that so the
         // wait doesn't redundantly repeat the full boot-readiness wait; the
         // already-running path (no childProcess) still performs it.
-        return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name, timeoutMs, {
+        return this.simctl.waitForSimulatorReady(device.deviceId, timeoutMs, {
           assumeBooted: Boolean(childProcess),
         });
       default:

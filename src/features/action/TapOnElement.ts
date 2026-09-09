@@ -1553,6 +1553,10 @@ export class TapOnElement extends BaseVisualChange {
       baseError = `Element not found with provided text '${options.text}'${containerHint}`;
     } else if (options.textAny) {
       baseError = `Element not found with any provided text '${options.textAny.join("', '")}'${containerHint}`;
+    } else if (options.testTag) {
+      baseError = `Element not found with provided testTag '${options.testTag}'${containerHint}`;
+    } else if (options.accessibilityLink) {
+      baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
     } else {
       baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
     }

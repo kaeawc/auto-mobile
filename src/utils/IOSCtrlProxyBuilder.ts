@@ -237,6 +237,19 @@ export class IOSCtrlProxyBuilder {
    * swap even though there is no release-pinned baseline to compare against.
    */
   private derivedLocalRunnerSha256: Map<IOSCtrlProxyPlatform, string> = new Map();
+  /**
+   * Single-flight guard for {@link build}. `IOSCtrlProxyBuilder` is a
+   * process-wide singleton shared by every `IOSCtrlProxyManager` device
+   * instance (issue #6417): with no in-flight guard, two devices whose
+   * `needsRebuild()` both observe `true` before either has finished would
+   * each independently download-then-extract into the same
+   * `derivedDataPath`, and the second extraction's destructive
+   * `fs.rm(destination, { recursive: true, force: true })` (see
+   * `IOSCtrlProxyBundleDownloader.extractBundle`) would wipe out the tree the
+   * first just populated. Mirrors the existing static `prefetchPromise` idiom
+   * below, but scoped per-instance since `build()` is an instance method.
+   */
+  private buildInFlight: Promise<CtrlProxyIosBuildResult> | null = null;
 
   private constructor(
     config: Partial<CtrlProxyIosBuildConfig> = {},
@@ -613,6 +626,25 @@ export class IOSCtrlProxyBuilder {
    * Download and extract CtrlProxy release bundle
    */
   public async build(
+    platform?: IOSCtrlProxyPlatform,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<CtrlProxyIosBuildResult> {
+    // Single-flight: a caller that arrives while a build is already running
+    // joins that build instead of starting its own independent
+    // download-then-extract against the same shared derived-data tree
+    // (issue #6417). Cleared in `finally` so the next genuinely-new build
+    // (after this one settles) starts its own flight.
+    if (this.buildInFlight !== null) {
+      return this.buildInFlight;
+    }
+
+    this.buildInFlight = this.doBuild(platform, perf).finally(() => {
+      this.buildInFlight = null;
+    });
+    return this.buildInFlight;
+  }
+
+  private async doBuild(
     platform?: IOSCtrlProxyPlatform,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<CtrlProxyIosBuildResult> {

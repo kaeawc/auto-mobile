@@ -149,9 +149,10 @@ describe("SimulatorTccSqliteClient", () => {
     expect(executor.calls).toHaveLength(2);
     expect(executor.calls[0]).toMatchObject({
       file: "sqlite3",
-      args: ["-json", databasePath, "pragma table_info(access);"],
+      args: ["-readonly", "-json", databasePath, "pragma table_info(access);"],
     });
     expect(executor.calls[1]?.args).toEqual([
+      "-readonly",
       "-json",
       "-cmd",
       ".parameter init",
@@ -166,6 +167,9 @@ describe("SimulatorTccSqliteClient", () => {
         "where client = :appId and service in (:service0);",
       ].join("\n"),
     ]);
+    for (const call of executor.calls) {
+      expect(call.args[0]).toBe("-readonly");
+    }
   });
 
   test("encodes apostrophes and quotes for sqlite dot-command parameters", async () => {
@@ -305,5 +309,76 @@ describe("SimulatorTccSqliteClient", () => {
       "Timed out after 123ms while reading simulator TCC database",
     );
     expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  test("resolves the TCC database under an injected custom device-set root", async () => {
+    const executor = new FakeSqliteExecutor();
+    const fileSystem = new FakeTccFileSystem();
+    executor.onExecute = async () =>
+      executor.calls.at(-1)?.args.at(-1) === "pragma table_info(access);"
+        ? result(JSON.stringify([{ name: "service" }, { name: "client" }]))
+        : result("[]");
+    const customDeviceSetRoot = "/Users/tester/CustomDeviceSets/ci-job-42/Devices";
+    const client = new SimulatorTccSqliteClient({
+      executor,
+      fileSystem,
+      homeDirectory: "/Users/tester",
+      deviceSetRoot: customDeviceSetRoot,
+    });
+    const expectedPath = join(customDeviceSetRoot, DEVICE_ID, "data", "Library", "TCC", "TCC.db");
+
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).resolves.toEqual([]);
+
+    expect(fileSystem.paths).toEqual([expectedPath]);
+  });
+
+  test("honors CORESIMULATOR_DEVICE_SET_PATH when no deviceSetRoot dependency is injected", async () => {
+    const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    process.env.CORESIMULATOR_DEVICE_SET_PATH = "/Volumes/CI/DeviceSets/job-7/Devices";
+    try {
+      const fileSystem = new FakeTccFileSystem();
+      fileSystem.error = Object.assign(new Error("no such file or directory"), { code: "ENOENT" });
+      const client = new SimulatorTccSqliteClient({
+        executor: new FakeSqliteExecutor(),
+        fileSystem,
+        homeDirectory: "/Users/tester",
+      });
+
+      await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+        "Simulator TCC database is unavailable",
+      );
+
+      expect(fileSystem.paths).toEqual([
+        join("/Volumes/CI/DeviceSets/job-7/Devices", DEVICE_ID, "data", "Library", "TCC", "TCC.db"),
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+      } else {
+        process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+      }
+    }
+  });
+
+  test("classifies a locked/busy TCC database distinctly from a corrupted one", async () => {
+    const executor = new FakeSqliteExecutor();
+    const client = new SimulatorTccSqliteClient({
+      executor,
+      fileSystem: new FakeTccFileSystem(),
+      homeDirectory: "/Users/tester",
+    });
+
+    executor.error = new Error("database is locked");
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+      /locked|busy/i,
+    );
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.not.toThrow(
+      "Failed to read simulator TCC database",
+    );
+
+    executor.error = new Error("SQLITE_BUSY: database is busy");
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+      /locked|busy/i,
+    );
   });
 });

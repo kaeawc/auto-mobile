@@ -49,6 +49,14 @@ export interface SimulatorTccSqliteClientDependencies {
   executor?: HostCommandExecutor;
   fileSystem?: TccDatabaseFileSystem;
   homeDirectory?: string;
+  /**
+   * Root directory containing the `<deviceId>/data/...` layout for a
+   * CoreSimulator device set. Defaults to `CORESIMULATOR_DEVICE_SET_PATH`
+   * when set, otherwise the default `~/Library/Developer/CoreSimulator/Devices`
+   * layout. Inject an override in tests to simulate a custom device set
+   * (e.g. CI runners that isolate simulator state per job).
+   */
+  deviceSetRoot?: string;
   timer?: Timer;
   timeoutMs?: number;
 }
@@ -122,6 +130,36 @@ function hasErrorCode(error: unknown, code: string): boolean {
   );
 }
 
+/**
+ * Classifies a sqlite3 argv execution failure into an actionable error so
+ * callers can distinguish a missing binary, a corrupted database, and a
+ * transient lock held by a live `tccd` writer from a truly unclassified
+ * failure. Throws in every branch, including the generic fallback.
+ */
+function classifySqliteExecutionError(
+  error: unknown,
+  databasePath: string,
+  deviceId: string,
+): never {
+  const detail = sqliteErrorDetail(error);
+  if (hasErrorCode(error, "ENOENT") || /\bENOENT\b|spawn sqlite3/i.test(detail)) {
+    throw new ActionableError(
+      "sqlite3 is unavailable; install the macOS SQLite command-line tool and retry",
+    );
+  }
+  if (/file is not a database|malformed database/i.test(detail)) {
+    throw new ActionableError(
+      `Simulator TCC database is malformed for ${deviceId}: ${databasePath}`,
+    );
+  }
+  if (/database is locked|database is busy|SQLITE_BUSY/i.test(detail)) {
+    throw new ActionableError(
+      `Simulator TCC database for ${deviceId} is temporarily locked by a live tccd writer; retry the read: ${detail}`,
+    );
+  }
+  throw new ActionableError(`Failed to read simulator TCC database for ${deviceId}: ${detail}`);
+}
+
 function optionalNumberField(
   row: Record<string, unknown>,
   field: "auth_value" | "allowed" | "prompt_count",
@@ -156,6 +194,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
   private readonly executor: HostCommandExecutor;
   private readonly fileSystem: TccDatabaseFileSystem;
   private readonly homeDirectory: string;
+  private readonly deviceSetRoot: string;
   private readonly timer: Timer;
   private readonly timeoutMs: number;
 
@@ -163,6 +202,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     this.executor = dependencies.executor ?? new DefaultHostCommandExecutor();
     this.fileSystem = dependencies.fileSystem ?? nodeFileSystem;
     this.homeDirectory = dependencies.homeDirectory ?? homedir();
+    this.deviceSetRoot = dependencies.deviceSetRoot ?? defaultDeviceSetRoot(this.homeDirectory);
     this.timer = dependencies.timer ?? defaultTimer;
     this.timeoutMs = dependencies.timeoutMs ?? DEFAULT_TCC_QUERY_TIMEOUT_MS;
   }
@@ -225,11 +265,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       );
     }
     const databasePath = join(
-      this.homeDirectory,
-      "Library",
-      "Developer",
-      "CoreSimulator",
-      "Devices",
+      this.deviceSetRoot,
       normalizedDeviceId,
       "data",
       "Library",
@@ -289,7 +325,9 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     }, this.timeoutMs);
 
     try {
-      return await this.executor.executeCommand("sqlite3", args, { signal: controller.signal });
+      return await this.executor.executeCommand("sqlite3", ["-readonly", ...args], {
+        signal: controller.signal,
+      });
     } catch (error) {
       if (timedOut) {
         throw new ActionableError(
@@ -299,18 +337,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       if (parentSignal?.aborted) {
         throw new ActionableError(`Reading simulator TCC database for ${deviceId} was cancelled`);
       }
-      const detail = sqliteErrorDetail(error);
-      if (hasErrorCode(error, "ENOENT") || /\bENOENT\b|spawn sqlite3/i.test(detail)) {
-        throw new ActionableError(
-          "sqlite3 is unavailable; install the macOS SQLite command-line tool and retry",
-        );
-      }
-      if (/file is not a database|malformed database/i.test(detail)) {
-        throw new ActionableError(
-          `Simulator TCC database is malformed for ${deviceId}: ${databasePath}`,
-        );
-      }
-      throw new ActionableError(`Failed to read simulator TCC database for ${deviceId}: ${detail}`);
+      classifySqliteExecutionError(error, databasePath, deviceId);
     } finally {
       this.timer.clearTimeout(timeout);
       parentSignal?.removeEventListener("abort", cancelFromParent);

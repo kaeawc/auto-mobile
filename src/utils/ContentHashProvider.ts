@@ -77,7 +77,12 @@ export class CachingContentHashProvider implements ContentHashProvider {
       return existing;
     }
     const promise = this.computeAndCache(device, packageId, versionCode, key).finally(() => {
-      this.inFlight.delete(key);
+      // An invalidation can remove this entry and a later caller can start a
+      // fresh computation for the same key. Do not let the older computation's
+      // cleanup erase that newer in-flight promise.
+      if (this.inFlight.get(key) === promise) {
+        this.inFlight.delete(key);
+      }
     });
     this.inFlight.set(key, promise);
     return promise;
@@ -116,6 +121,14 @@ export class CachingContentHashProvider implements ContentHashProvider {
     for (const key of this.cache.keys()) {
       if (key.startsWith(prefix)) {
         this.cache.delete(key);
+      }
+    }
+    // A post-invalidation caller must not share work that began against the
+    // previous install generation. The older caller can still receive its own
+    // best-effort result, but new callers recompute from the updated package.
+    for (const key of this.inFlight.keys()) {
+      if (key.startsWith(prefix)) {
+        this.inFlight.delete(key);
       }
     }
   }

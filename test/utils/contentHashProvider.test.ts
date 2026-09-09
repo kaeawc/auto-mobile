@@ -239,6 +239,41 @@ describe("CachingContentHashProvider", () => {
     expect(result).toBe("sha256:FRESH");
     expect(computeCalls).toBe(2);
   });
+
+  test("invalidate prevents a later caller from sharing an older in-flight hash", async () => {
+    let releaseStale: (value: string) => void = () => {};
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        if (computeCalls === 1) {
+          return new Promise<string>((resolve) => {
+            releaseStale = resolve;
+          });
+        }
+        return "sha256:FRESH";
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    const stale = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    provider.invalidate("emu-1", "com.example.app");
+    const fresh = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+
+    // The new caller starts fresh work immediately; it must not receive the
+    // pre-invalidation promise even though that promise has not settled yet.
+    expect(await fresh).toBe("sha256:FRESH");
+    expect(computeCalls).toBe(2);
+
+    releaseStale("sha256:STALE");
+    expect(await stale).toBe("sha256:STALE");
+
+    // The old promise's finally must not clear the newer cache/in-flight state.
+    expect(
+      await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5),
+    ).toBe("sha256:FRESH");
+    expect(computeCalls).toBe(2);
+  });
 });
 
 describe("parsePmPathOutput", () => {

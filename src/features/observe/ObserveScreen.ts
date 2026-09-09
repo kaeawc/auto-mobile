@@ -49,7 +49,7 @@ import {
 } from "./screenshot/ObserveScreenshotRecorder";
 import { HierarchyCollector } from "./collectors/HierarchyCollector";
 import { DeviceStateCollector } from "./collectors/DeviceStateCollector";
-import { PerformanceAuditor } from "./audits/PerformanceAuditor";
+import { findAppWindowBounds, PerformanceAuditor } from "./audits/PerformanceAuditor";
 import { AccessibilityAuditor, resolveLatestScreenshotPath } from "./audits/AccessibilityAuditor";
 import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { appendObserveError } from "./ObserveError";
@@ -221,6 +221,45 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
     }
   }
   return hasBounds;
+}
+
+function isEmptyFocusedWindow(result: ObserveResult): boolean {
+  if (!result.activeWindow?.appId || !result.elements) {
+    return false;
+  }
+  if (SYSTEM_UI_WINDOW_PACKAGES.has(result.activeWindow.appId)) {
+    return false;
+  }
+  const appBounds = findAppWindowBounds(result, result.activeWindow.appId);
+  const focused = appBounds ?? {
+    top: 0,
+    bottom: Infinity,
+    left: -Infinity,
+    right: Infinity,
+  };
+  // Native snapshots aggregate all windows and do not label individual nodes with
+  // their package. Restrict content to the focused window and exclude system bars,
+  // so a clock/icon sibling cannot certify an empty application window (#6352).
+  const insets = result.systemInsets;
+  const top = Math.max(focused.top, insets.top);
+  const bottom = Math.min(
+    focused.bottom,
+    (result.viewHierarchy?.screenHeight ?? Infinity) - insets.bottom,
+  );
+  const left = Math.max(focused.left, insets.left);
+  const right = Math.min(
+    focused.right,
+    (result.viewHierarchy?.screenWidth ?? Infinity) - insets.right,
+  );
+  return Object.values(result.elements).every((elements) =>
+    elements.every(
+      ({ bounds }) =>
+        bounds.bottom <= top ||
+        bounds.top >= bottom ||
+        bounds.right <= left ||
+        bounds.left >= right,
+    ),
+  );
 }
 
 /**
@@ -782,6 +821,10 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
+        // A matching package and recent timestamp do not verify an empty first-run
+        // capture (#6352). Use all content collections, not just clickable controls:
+        // text-only and media-only screens remain valid. This runs before caching.
+        emptyFocusedWindow: this.device.platform === "android" && isEmptyFocusedWindow(result),
         // The SETTLED/confirmed foreground, not the initial parallel sample: during an
         // A→B transition the initial sample can still read A while the hierarchy and the
         // confirming read are already on B, and comparing against stale A would retract a

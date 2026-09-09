@@ -1062,7 +1062,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           scrollable = if (node.isScrollable) "true" else null,
           password = if (node.isPassword) "true" else null,
           checkable = if (node.isCheckable) "true" else null,
-          checked = if (node.isChecked) "true" else null,
+          checked = if (node.isCheckable) node.isChecked.toString() else null,
           selected = if (node.isSelected) "true" else null,
           longClickable = if (node.isLongClickable) "true" else null,
           children = children,

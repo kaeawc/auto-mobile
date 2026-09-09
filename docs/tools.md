@@ -31,7 +31,7 @@ the exact arguments supported by your connection.
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                        |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                     |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.        |
-| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility.                        |
+| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility; disabled by default.   |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                        |
 | 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                     |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                               |
@@ -66,9 +66,11 @@ standalone `{ "action": "clear" }` command clears the focused field. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
 
-`sendKeys` becomes default-enabled when the bundled CtrlProxy artifacts reach
-0.0.68. Until then, `inputText` remains the default compatibility path; a local
-fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
+`sendKeys` is the default text-input path on any AutoMobile release whose
+CtrlProxy artifacts are 0.0.68 or newer, which is the case for current releases.
+On older pinned releases `inputText` and `clearText` are default-enabled instead
+and `sendKeys` is off; enable `sendKeys` there explicitly with `setToolEnabled`
+or `--enable-tool sendKeys`.
 
 ??? note "Pinch rotation semantics"
 

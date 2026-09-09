@@ -12,10 +12,20 @@ import {
   resolveIosScreenCaptureHelperPath,
 } from "../screen-stream/screenCaptureHelperPath";
 
+import { IOSCtrlProxyClient } from "../observe/ios";
+import { parseCapabilityMarker } from "../screen-stream/IOSScreenCaptureHelper";
+
 export interface SimulatorHighlightsDependencies {
+  fallback?: () => {
+    requestAddHighlight(
+      id: string,
+      shape: HighlightShape,
+      timeoutMs: number,
+    ): Promise<HighlightOperationResult>;
+  };
   executor?: HostProcessExecutor;
   timer?: Timer;
-  resolveHelper?: () => Promise<string>;
+  resolveHelper?: () => Promise<string | null>;
 }
 
 interface OverlayHost {
@@ -36,14 +46,17 @@ const acknowledgementSchema = z.object({
 export class SimulatorHighlights {
   private readonly executor: HostProcessExecutor;
   private readonly timer: Timer;
-  private readonly resolveHelper: () => Promise<string>;
+  private readonly resolveHelper: () => Promise<string | null>;
 
   private readonly hosts: Map<string, OverlayHost>;
+  private readonly supportedHelpers = new Map<string, boolean>();
+  private readonly fallback: NonNullable<SimulatorHighlightsDependencies["fallback"]>;
 
   constructor(
     private readonly device: BootedDevice,
     deps?: SimulatorHighlightsDependencies,
   ) {
+    this.fallback = deps?.fallback ?? (() => IOSCtrlProxyClient.getInstance(device));
     this.executor = deps?.executor ?? new DefaultHostCommandExecutor();
     this.timer = deps?.timer ?? defaultTimer;
     this.hosts = deps ? new Map() : sharedHosts;
@@ -53,11 +66,7 @@ export class SimulatorHighlights {
         if (readScreenCaptureHelperEnvOverride()) {
           return resolveIosScreenCaptureHelperPath();
         }
-        const helper = await ScreenCaptureHelperProvider.getInstance().ensure();
-        if (!helper) {
-          throw new Error("No screen-capture-helper is available for Simulator highlighting.");
-        }
-        return helper;
+        return ScreenCaptureHelperProvider.getInstance().ensure();
       });
   }
 
@@ -75,7 +84,10 @@ export class SimulatorHighlights {
       }, timeoutMs);
     });
     try {
-      return await Promise.race([this.sendHighlight(id, shape, controller.signal), expired]);
+      return await Promise.race([
+        this.sendHighlight(id, shape, controller.signal, timeoutMs),
+        expired,
+      ]);
     } finally {
       if (deadline) {
         this.timer.clearTimeout(deadline);
@@ -87,10 +99,26 @@ export class SimulatorHighlights {
     id: string,
     shape: HighlightShape,
     signal: AbortSignal,
+    timeoutMs: number,
   ): Promise<HighlightOperationResult> {
     try {
       const helper = await this.resolveHelper();
       signal.throwIfAborted();
+      if (!helper) {
+        return await this.fallback().requestAddHighlight(id, shape, timeoutMs);
+      }
+      let supported = this.supportedHelpers.get(helper);
+      if (supported === undefined) {
+        const probe = await this.executor.executeCommand(helper, ["--help"], { timeoutMs, signal });
+        signal.throwIfAborted();
+        supported = probe.stderr
+          .split(/\r?\n/)
+          .some((line) => parseCapabilityMarker(line) === "simulator-highlights");
+        this.supportedHelpers.set(helper, supported);
+      }
+      if (!supported) {
+        return await this.fallback().requestAddHighlight(id, shape, timeoutMs);
+      }
       const key = `${helper}:${this.device.deviceId}`;
       const requestId = String(++nextRequestId);
       const json = JSON.stringify({ requestId, id, shape });

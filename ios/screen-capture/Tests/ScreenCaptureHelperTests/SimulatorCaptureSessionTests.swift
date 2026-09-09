@@ -227,6 +227,30 @@ final class SimulatorCaptureSessionTests: XCTestCase {
 
     // MARK: - Reconfigure success / failure
 
+    func testOverlayConfigurationPreservesRetinaPixels() async throws {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        session.configuredPixelWidth = 920
+        session.configuredPixelHeight = 1970
+        try await session.applyOverlayConfiguration(stream: fake)
+        XCTAssertEqual(fake.updatedConfigurations.last?.width, 920)
+        XCTAssertEqual(fake.updatedConfigurations.last?.height, 1970)
+        XCTAssertEqual(session.configuredPixelWidth, 920)
+        XCTAssertEqual(session.configuredPixelHeight, 1970)
+    }
+
+    func testOverlayConfigurationFailurePropagatesAfterRetry() async {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        fake.updateConfigurationError = StubError(id: 1)
+        do {
+            try await session.applyOverlayConfiguration(stream: fake)
+            XCTFail("A failed crop transition must not be accepted")
+        } catch {
+            XCTAssertEqual(fake.updatedConfigurations.count, 2)
+        }
+    }
+
     func testReconfigureSuccessUpdatesDimensionsAndPushesConfig() async {
         let diagnostics = DiagnosticRecorder()
         let session = makeSession(diagnostics: diagnostics)

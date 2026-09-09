@@ -82,7 +82,9 @@ network failures; browser viewers may need to reconnect too.
 ### iOS Simulator highlights
 
 On macOS, `highlight` draws over the Simulator through `screen-capture-helper`;
-Simulators do not need the AutoMobile SDK in the target app. Physical iOS devices
+With a helper advertising `simulator-highlights`, Simulators do not need the
+AutoMobile SDK in the target app. Older pinned helpers retain the SDK route until
+a capable helper is released; a local helper can be selected using the override below. Physical iOS devices
 continue to use the SDK overlay. The host helper needs Screen Recording and
 Accessibility access in System Settings → Privacy & Security. The Simulator window
 must be visible. For capture of highlights, keep the window fully on one monitor.

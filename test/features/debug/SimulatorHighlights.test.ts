@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { SimulatorHighlights } from "../../../src/features/debug/SimulatorHighlights";
@@ -19,6 +20,15 @@ class Executor extends DefaultHostCommandExecutor {
   readonly timer = new FakeTimer();
   readonly children: FakeChildProcess[] = [];
   args: string[] = [];
+  supportsHighlight = true;
+  override async executeCommand() {
+    return createExecResult(
+      "help",
+      this.supportsHighlight
+        ? "capture-capability: simulator-highlights\n"
+        : "capture-capability: encoded-video-h264\n",
+    );
+  }
   override spawn(_file: string, args: string[]): ChildProcess {
     this.args = args;
     const child = new FakeChildProcess(this.timer);
@@ -42,6 +52,25 @@ async function spawned() {
 }
 
 describe("SimulatorHighlights", () => {
+  test("old pinned helpers use the SDK without sending unsupported flags", async () => {
+    const executor = new Executor();
+    executor.supportsHighlight = false;
+    const calls: unknown[] = [];
+    const client = new SimulatorHighlights(device, {
+      executor,
+      timer: executor.timer,
+      resolveHelper: async () => "/old-helper",
+      fallback: () => ({
+        requestAddHighlight: async (...args) => {
+          calls.push(args);
+          return { success: true };
+        },
+      }),
+    });
+    expect(await client.requestAddHighlight("legacy", shape, 100)).toEqual({ success: true });
+    expect(calls).toEqual([["legacy", shape, 100]]);
+    expect(executor.children).toHaveLength(0);
+  });
   test("waits for a complete native acknowledgement and preserves shape argv", async () => {
     const { client, executor } = setup();
     const pending = client.requestAddHighlight("a", shape);

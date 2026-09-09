@@ -64,7 +64,8 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
+                bundleURL:
+                  "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
               },
             ],
           };
@@ -445,7 +446,8 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
+                bundleURL:
+                  "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
               },
             ],
           };
@@ -584,7 +586,8 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
+                bundleURL:
+                  "file:///private/var/containers/Bundle/Application/ABC/AutoMobileTest.app",
               },
             ],
           };

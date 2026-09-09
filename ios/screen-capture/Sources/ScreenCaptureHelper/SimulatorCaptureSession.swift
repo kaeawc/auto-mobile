@@ -448,21 +448,21 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             sourceRect = .zero
         }
         stateLock.withLock { _updatingOverlay = true; _overlaySourceRect = sourceRect }
-        defer { stateLock.withLock { _updatingOverlay = false } }
         try await stream.updateContentFilter(filter)
-        var size = currentConfiguredSize()
-        if includeOverlay {
-            let windowSize = H264EncodeMath.EncoderSize(
-                width: Int(window.frame.width),
-                height: Int(window.frame.height)
-            )
-            let target = isEncoding ? (H264EncodeMath.resolveEncoderScale(windowSize) ?? windowSize) : windowSize
-            size = (target.width, target.height)
-            stateLock.withLock { _configuredPixelWidth = size.width; _configuredPixelHeight = size.height }
-        }
-        await applyStreamConfiguration(stream: stream, width: size.width, height: size.height)
+        try await applyOverlayConfiguration(stream: stream)
+        stateLock.withLock { _updatingOverlay = false }
         forceKeyFrameLatch.request()
         return key
+    }
+
+    /// Filter source rectangles use points; output dimensions remain native pixels.
+    /// Keep frames paused on failure and let the supervisor restart the stream,
+    /// rather than emitting an uncropped display or accepting a failed transition.
+    func applyOverlayConfiguration(stream: CaptureStream) async throws {
+        let size = currentConfiguredSize()
+        guard await applyStreamConfiguration(stream: stream, width: size.width, height: size.height) else {
+            throw OverlayError("Failed to configure Simulator overlay capture after retry")
+        }
     }
 
     /// Snapshot of the encode pipeline under `stateLock`, for use on the frame queue.
@@ -542,7 +542,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// Applies a new capture size to the given stream. Split out so tests can `await`
     /// it deterministically and assert both the success path and the swallowed-failure
     /// warning. Reads only the set-once `configuredPixelFormat`/`fps`/`audioEnabled`.
-    private func applyStreamConfiguration(stream: CaptureStream, width: Int, height: Int) async {
+    @discardableResult
+    private func applyStreamConfiguration(stream: CaptureStream, width: Int, height: Int) async -> Bool {
         let updated = SCStreamConfiguration()
         updated.sourceRect = stateLock.withLock { _overlaySourceRect }
         updated.width = width
@@ -563,7 +564,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         // size change still attempts a correcting update.
         do {
             try await stream.updateConfiguration(updated)
-            return
+            return true
         } catch {
             diagnosticSink("warn: stream configuration update failed; retrying once: \(error)\n")
         }
@@ -572,7 +573,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             try await stream.updateConfiguration(updated)
         } catch {
             diagnosticSink("warn: failed to update stream configuration after retry: \(error)\n")
+            return false
         }
+        return true
     }
 
     /// Applies a new capture size to the live stream. Retained as the directly-`await`able

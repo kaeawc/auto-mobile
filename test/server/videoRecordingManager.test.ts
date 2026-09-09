@@ -738,12 +738,12 @@ describe("videoRecordingManager", () => {
       {
         description: "Expected position",
         shape: highlightShapeOne,
-        timeline: { appearedAtSeconds: 0, disappearedAtSeconds: 3 },
+        timeline: { appearedAtSeconds: 0, disappearedAtSeconds: 1.2 },
       },
       {
         description: "Actual position",
         shape: highlightShapeTwo,
-        timeline: { appearedAtSeconds: 1, disappearedAtSeconds: 3 },
+        timeline: { appearedAtSeconds: 1, disappearedAtSeconds: 2.2 },
       },
     ]);
   });
@@ -814,7 +814,7 @@ describe("videoRecordingManager", () => {
       {
         description: "iOS target",
         shape: highlightShape,
-        timeline: { appearedAtSeconds: 0, disappearedAtSeconds: 3 },
+        timeline: { appearedAtSeconds: 0, disappearedAtSeconds: 1.2 },
       },
     ]);
   });

@@ -156,12 +156,12 @@ describe("proxy server session ownership errors", () => {
     }
   });
 
-  test("marks daemon-shutdown loss retryable and binds an in-band replacement session (#6336)", async () => {
+  test("returns iOS daemon-shutdown loss and requires an in-band replacement session (#6724)", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const originalClient = new FakeDaemonClient({
       daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       toolResultFor: (toolName) =>
-        toolName === "getAndroid"
+        toolName === "getApple"
           ? {
               content: [{ type: "text", text: JSON.stringify({ sessionId: "shutdown-session" }) }],
             }
@@ -170,7 +170,7 @@ describe("proxy server session ownership errors", () => {
     const replacementClient = new FakeDaemonClient({
       daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       toolResultFor: (toolName) =>
-        toolName === "getAndroid"
+        toolName === "getApple"
           ? {
               content: [
                 { type: "text", text: JSON.stringify({ sessionId: "replacement-session" }) },
@@ -201,7 +201,7 @@ describe("proxy server session ownership errors", () => {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       await proxy.listTools();
-      await client.callTool({ name: "getAndroid", arguments: {} });
+      await client.callTool({ name: "getApple", arguments: {} });
       originalClient.emitNotification(
         SESSION_RELEASED_NOTIFICATION_METHOD,
         "shutdown-session",
@@ -210,7 +210,7 @@ describe("proxy server session ownership errors", () => {
 
       const loss = await client.callTool({
         name: "observe",
-        arguments: { deviceId: "emulator-5554" },
+        arguments: { deviceId: "ios-simulator-1" },
       });
       expect(loss).toMatchObject({
         isError: true,
@@ -237,18 +237,18 @@ describe("proxy server session ownership errors", () => {
       });
 
       originalClient.emitConnectionClosed();
-      await client.callTool({ name: "getAndroid", arguments: {} });
+      await client.callTool({ name: "getApple", arguments: {} });
       await client.callTool({
         name: "observe",
-        arguments: { deviceId: "emulator-5554" },
+        arguments: { deviceId: "ios-simulator-1" },
       });
 
-      expect(originalClient.callToolCalls).toEqual([{ toolName: "getAndroid", params: {} }]);
+      expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
       expect(replacementClient.callToolCalls).toEqual([
-        { toolName: "getAndroid", params: {} },
+        { toolName: "getApple", params: {} },
         {
           toolName: "observe",
-          params: { deviceId: "emulator-5554", sessionUuid: "replacement-session" },
+          params: { deviceId: "ios-simulator-1", sessionUuid: "replacement-session" },
         },
       ]);
     } finally {

@@ -59,11 +59,101 @@ export interface DaemonResponse {
    */
   transportFailure?: DeviceControlTransportFailure;
   /**
+   * Machine-readable terminal loss of the device session explicitly bound to
+   * this request. This must never be mistaken for an expired loopback MCP
+   * transport session and retried against a replacement daemon.
+   */
+  boundSessionLoss?: BoundSessionLoss;
+  /**
    * Number of leading characters delivered by a failed Android
    * `input/typeText` append request. Present only when the append operation
    * reached the device before failing, or explicitly reports zero progress.
    */
   charsSent?: number;
+}
+
+export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
+
+export interface BoundSessionLoss {
+  code: typeof BOUND_SESSION_LOSS_CODE;
+  sessionUuid: string;
+  reason: string;
+  /** Captured before the terminal session was removed, when still available. */
+  release?: SessionReleaseSnapshot;
+}
+
+function hasSessionReleaseSnapshotFields(
+  record: Record<string, unknown>,
+  expectedSessionUuid: string,
+): record is Record<string, unknown> &
+  Pick<SessionReleaseSnapshot, "deviceId" | "releaseReason" | "releasedAtMs" | "terminal"> {
+  return [
+    record.sessionId === expectedSessionUuid,
+    typeof record.deviceId === "string",
+    typeof record.releaseReason === "string",
+    typeof record.releasedAtMs === "number" && Number.isFinite(record.releasedAtMs),
+    typeof record.terminal === "boolean",
+  ].every(Boolean);
+}
+
+function isSessionReleaseHeartbeat(value: unknown): value is SessionReleaseSnapshot["heartbeat"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return [
+    typeof record.lastHeartbeatMs === "number" && Number.isFinite(record.lastHeartbeatMs),
+    typeof record.hasReceivedHeartbeat === "boolean",
+    typeof record.timeoutMs === "number" && Number.isFinite(record.timeoutMs),
+    typeof record.ageMs === "number" && Number.isFinite(record.ageMs),
+  ].every(Boolean);
+}
+
+function sanitizeSessionReleaseSnapshot(
+  value: unknown,
+  expectedSessionUuid: string,
+): SessionReleaseSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    !hasSessionReleaseSnapshotFields(record, expectedSessionUuid) ||
+    !isSessionReleaseHeartbeat(record.heartbeat)
+  ) {
+    return undefined;
+  }
+  return {
+    sessionId: expectedSessionUuid,
+    deviceId: record.deviceId,
+    releaseReason: record.releaseReason,
+    releasedAtMs: record.releasedAtMs,
+    terminal: record.terminal,
+    heartbeat: record.heartbeat,
+  };
+}
+
+export function sanitizeBoundSessionLoss(value: unknown): BoundSessionLoss | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.code !== BOUND_SESSION_LOSS_CODE ||
+    typeof record.sessionUuid !== "string" ||
+    record.sessionUuid.trim().length === 0 ||
+    typeof record.reason !== "string" ||
+    record.reason.trim().length === 0
+  ) {
+    return undefined;
+  }
+  const release = sanitizeSessionReleaseSnapshot(record.release, record.sessionUuid);
+  return {
+    code: BOUND_SESSION_LOSS_CODE,
+    sessionUuid: record.sessionUuid,
+    reason: record.reason,
+    ...(release ? { release } : {}),
+  };
 }
 
 /**

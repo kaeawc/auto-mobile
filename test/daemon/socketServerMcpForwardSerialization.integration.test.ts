@@ -1044,7 +1044,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("Session not found: released-session");
+    expect(response.boundSessionLoss).toEqual({
+      code: "bound_session_lost",
+      sessionUuid: "released-session",
+      reason: "session-not-found",
+    });
     expect(clientBindings).toEqual([]);
     expect(forwardedArguments).toEqual([]);
   });
@@ -1075,7 +1079,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("Session not found: released-session");
+    expect(response.boundSessionLoss).toEqual({
+      code: "bound_session_lost",
+      sessionUuid: "released-session",
+      reason: "session-not-found",
+    });
     expect(clientBindings).toEqual([]);
   });
 
@@ -1105,7 +1113,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
       });
 
       expect(response.success).toBe(false);
-      expect(response.error).toContain("Session not found: released-session");
+      expect(response.boundSessionLoss).toEqual({
+        code: "bound_session_lost",
+        sessionUuid: "released-session",
+        reason: "session-not-found",
+      });
     }
     expect(clientBindings).toEqual([]);
   });

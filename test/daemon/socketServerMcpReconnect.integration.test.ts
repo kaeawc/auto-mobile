@@ -11,7 +11,9 @@ import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketR
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
+import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 
 /**
  * Minimal fake MCP client interface for testing.
@@ -53,6 +55,7 @@ function createFakeDaemonState(
   resolveDeviceLabelSession: () => string | undefined,
   resolvePrimaryDeviceOwnerSession: () => string | undefined,
   resolvePrimarySessionGeneration: () => number,
+  resolveTerminalReleaseSnapshot: () => SessionReleaseSnapshot | undefined,
 ) {
   const session = {
     sessionId: "session-a",
@@ -111,6 +114,7 @@ function createFakeDaemonState(
           ? { B: labeledSession }
           : undefined;
       },
+      getTerminalReleaseSnapshot: resolveTerminalReleaseSnapshot,
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
@@ -223,6 +227,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let deviceLabelSessionUuid: string | undefined;
   let primaryDeviceOwnerSessionUuid: string | undefined;
   let primarySessionGeneration: number;
+  let terminalReleaseSnapshot: SessionReleaseSnapshot | undefined;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);
@@ -235,6 +240,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     deviceLabelSessionUuid = "session-b";
     primaryDeviceOwnerSessionUuid = "session-a";
     primarySessionGeneration = 0;
+    terminalReleaseSnapshot = undefined;
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -247,6 +253,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
         () => deviceLabelSessionUuid,
         () => primaryDeviceOwnerSessionUuid,
         () => primarySessionGeneration,
+        () => terminalReleaseSnapshot,
       ),
       fakeTimer,
     );
@@ -304,6 +311,59 @@ describe("UnixSocketServer MCP session reconnect", () => {
     // After reconnect, the per-key client cache should hold the fresh client.
     expect((server as any).mcpClients.size).toBe(1);
     expect(clientsCreated).toBe(2);
+  });
+
+  test("returns typed bound-session loss without replaying through a fresh loopback client", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    terminalReleaseSnapshot = {
+      sessionId: "session-a",
+      deviceId: "ios-simulator-a",
+      releaseReason: "daemon-shutdown",
+      releasedAtMs: 20_000,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: 19_000,
+        hasReceivedHeartbeat: true,
+        timeoutMs: 10_000,
+        ageMs: 1_000,
+      },
+    };
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      // The route was admitted while session-a existed, then the shared daemon
+      // released it before this loopback request could execute.
+      sessionIsValid = false;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          return { content: [] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        [DAEMON_BOUND_SESSION_PARAM]: "session-a",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toBe(
+      "Device session session-a is no longer active (daemon-shutdown). " +
+        "Acquire a new device session before continuing.",
+    );
+    expect(response.boundSessionLoss).toEqual({
+      code: "bound_session_lost",
+      sessionUuid: "session-a",
+      reason: "daemon-shutdown",
+      release: terminalReleaseSnapshot,
+    });
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(0);
   });
 
   test("does not retry on non-session errors and returns failure", async () => {

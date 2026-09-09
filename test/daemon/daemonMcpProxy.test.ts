@@ -6,6 +6,7 @@ import {
   DaemonToolUnavailableError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
+  DaemonBoundSessionLostError,
   DaemonClient,
   DaemonShuttingDownError,
   DaemonUnavailableError,
@@ -2318,6 +2319,101 @@ describe("DaemonMcpProxy", () => {
     // Critically, a *daemon-returned application error* that merely mentions a
     // transport code (e.g. a tool reporting a downstream `connect ECONNREFUSED`)
     // stays an ActionableError and must NOT be retried.
+
+    test("fences typed bound-session loss without reconnecting or replaying", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolError: new DaemonBoundSessionLostError({
+          code: "bound_session_lost",
+          sessionUuid: "ios-session-a",
+          reason: "daemon-shutdown",
+        }),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "must not replay" }] },
+      });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "ios-session-a",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(
+          proxy.callTool("observe", { deviceId: "ios-simulator-a" }),
+        ).rejects.toMatchObject({
+          sessionUuid: "ios-session-a",
+          reason: "daemon-shutdown",
+        });
+        expect(staleClient.closeCallCount).toBe(0);
+        expect(staleClient.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { deviceId: "ios-simulator-a", sessionUuid: "ios-session-a" },
+          },
+        ]);
+        expect(freshClient.connectCallCount).toBe(0);
+        expect(freshClient.callToolCalls).toEqual([]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not let an unrelated typed loss clear the current binding", async () => {
+      const client = new ScriptedDaemonClient({});
+      const originalCallTool = client.callTool.bind(client);
+      let failedRequestParams: Record<string, any> | undefined;
+      client.callTool = async (toolName, params) => {
+        if (params.sessionUuid === "ios-session-b") {
+          failedRequestParams = { ...params };
+          throw new DaemonBoundSessionLostError({
+            code: "bound_session_lost",
+            sessionUuid: "ios-session-b",
+            reason: "session-not-found",
+          });
+        }
+        return await originalCallTool(toolName, params);
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          deviceId: "ios-simulator-a",
+          sessionUuid: "ios-session-a",
+        });
+        await expect(
+          proxy.callTool("observe", {
+            deviceId: "ios-simulator-b",
+            sessionUuid: "ios-session-b",
+            __autoMobileBoundSessionUuid: "ios-session-b",
+          }),
+        ).rejects.toMatchObject({
+          sessionUuid: "ios-session-b",
+          reason: "session-not-found",
+        });
+        expect(failedRequestParams).toEqual({
+          deviceId: "ios-simulator-b",
+          sessionUuid: "ios-session-b",
+        });
+
+        await proxy.callTool("observe", { deviceId: "ios-simulator-a" });
+        expect(client.callToolCalls.at(-1)).toEqual({
+          toolName: "observe",
+          params: { deviceId: "ios-simulator-a", sessionUuid: "ios-session-a" },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
 
     test("callTool recovers when a sibling's socket dropped (DaemonUnavailableError)", async () => {
       const recoveredResult = { content: [{ type: "text", text: "sibling recovered" }] };

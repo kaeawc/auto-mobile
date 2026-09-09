@@ -77,13 +77,13 @@ describe("ProvisionDeviceOperationRepository", () => {
     await repository.markDeviceCreationStarted("operation-created");
     await repository.complete("operation-created", { created: true });
 
-    expect(await repository.begin("operation-created", "request-a", 0, FAR_FUTURE_EXPIRY_MS)).toEqual(
-      {
-        started: false,
-        result: { created: true },
-        reconcileExistingConfiguration: true,
-      },
-    );
+    expect(
+      await repository.begin("operation-created", "request-a", 0, FAR_FUTURE_EXPIRY_MS),
+    ).toEqual({
+      started: false,
+      result: { created: true },
+      reconcileExistingConfiguration: true,
+    });
   });
 
   test("reports in-progress instead of restarting a still-running operation (#6652 defect 1)", async () => {

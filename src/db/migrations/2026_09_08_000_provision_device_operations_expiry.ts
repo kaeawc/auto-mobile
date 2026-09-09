@@ -21,8 +21,5 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  await db.schema
-    .alterTable("provision_device_operations")
-    .dropColumn("expires_at_ms")
-    .execute();
+  await db.schema.alterTable("provision_device_operations").dropColumn("expires_at_ms").execute();
 }

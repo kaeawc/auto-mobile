@@ -10,7 +10,9 @@ import {
   DaemonNotification,
   isDaemonNotification,
   PROGRESS_NOTIFICATION_METHOD,
+  sanitizeBoundSessionLoss,
 } from "./types";
+import type { BoundSessionLoss } from "./types";
 import {
   SOCKET_PATH,
   PID_FILE_PATH,
@@ -46,6 +48,17 @@ export class DaemonShuttingDownError extends DaemonUnavailableError {
   constructor() {
     super(DAEMON_SHUTTING_DOWN_ERROR_MESSAGE);
     this.name = "DaemonShuttingDownError";
+  }
+}
+
+/** A terminal loss of a session explicitly bound to the forwarded request. */
+export class DaemonBoundSessionLostError extends ActionableError {
+  constructor(readonly failure: BoundSessionLoss) {
+    super(
+      `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). ` +
+        "Acquire a new device session before continuing.",
+    );
+    this.name = "DaemonBoundSessionLostError";
   }
 }
 
@@ -609,8 +622,11 @@ export class DaemonClient {
       pending.resolve(response);
     } else {
       const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
+      const boundSessionLoss = sanitizeBoundSessionLoss(response.boundSessionLoss);
       pending.reject(
-        transportFailure
+        boundSessionLoss
+          ? new DaemonBoundSessionLostError(boundSessionLoss)
+          : transportFailure
           ? new DeviceControlTransportError(
               response.error || "Device-control transport failure",
               transportFailure,

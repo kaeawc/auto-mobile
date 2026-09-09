@@ -51,24 +51,36 @@ function deviceStartResult(sessionUuid: string): {
   return { content: [{ type: "text", text: JSON.stringify({ sessionUuid }) }] };
 }
 
+interface AcquiringClientOptions {
+  acquisitionTool?: "getAndroid" | "getApple";
+  deviceId?: string;
+  platform?: "android" | "ios";
+}
+
 // A FakeDaemonClient standing in for a daemon that mints a fresh device session
-// on each getAndroid call (recorded in a real SessionManager), returns its id in
-// the RESULT, and forwards daemon/heartbeat to the same SessionManager.
+// on each device-acquisition call (recorded in a real SessionManager), returns
+// its id in the RESULT, and forwards daemon/heartbeat to the same SessionManager.
 function acquiringClient(
   sessionManager: SessionManager,
   mintedIds: string[],
+  options: AcquiringClientOptions = {},
 ): { client: FakeDaemonClient; nextIndex: () => number } {
+  const {
+    acquisitionTool = "getAndroid",
+    deviceId = "emulator-5554",
+    platform = "android",
+  } = options;
   let acquired = 0;
   const client = new FakeDaemonClient({
     onCallTool: async (toolName) => {
-      if (toolName === "getAndroid") {
+      if (toolName === acquisitionTool) {
         const sessionId = mintedIds[acquired];
         acquired += 1;
-        await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+        await sessionManager.createSession(sessionId, deviceId, platform, 60_000);
       }
     },
     toolResultFor: (toolName) =>
-      toolName === "getAndroid" ? deviceStartResult(mintedIds[acquired - 1]) : undefined,
+      toolName === acquisitionTool ? deviceStartResult(mintedIds[acquired - 1]) : undefined,
     onCallDaemonMethod: (method, params) => {
       if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
         sessionManager.recordHeartbeat(params.sessionId);
@@ -317,6 +329,96 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       expect(sessionManager.getSession(M2)?.hasReceivedHeartbeat).toBe(true);
     } finally {
       await proxy.close();
+    }
+  });
+
+  test("fences independent iOS clients across a shared-daemon restart (#6724)", async () => {
+    const firstApple = acquiringClient(sessionManager, ["ios-session-a"], {
+      acquisitionTool: "getApple",
+      deviceId: "ios-simulator-a",
+      platform: "ios",
+    });
+    const secondApple = acquiringClient(sessionManager, ["ios-session-b"], {
+      acquisitionTool: "getApple",
+      deviceId: "ios-simulator-b",
+      platform: "ios",
+    });
+    const replacementApple = acquiringClient(sessionManager, ["ios-replacement-a"], {
+      acquisitionTool: "getApple",
+      deviceId: "ios-simulator-a",
+      platform: "ios",
+    });
+    const replacementSecondApple = acquiringClient(sessionManager, ["ios-replacement-b"], {
+      acquisitionTool: "getApple",
+      deviceId: "ios-simulator-b",
+      platform: "ios",
+    });
+    const firstClients = [firstApple.client, replacementApple.client];
+    const secondClients = [secondApple.client, replacementSecondApple.client];
+    const firstProxy = new DaemonMcpProxy({
+      clientFactory: () => firstClients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+    const secondProxy = new DaemonMcpProxy({
+      clientFactory: () => secondClients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await Promise.all([
+        firstProxy.callTool("getApple", {}),
+        secondProxy.callTool("getApple", {}),
+      ]);
+      firstApple.client.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "ios-session-a",
+        "daemon-shutdown",
+      );
+      secondApple.client.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "ios-session-b",
+        "daemon-shutdown",
+      );
+
+      await Promise.all([
+        expect(
+          firstProxy.callTool("observe", { deviceId: "ios-simulator-a" }),
+        ).rejects.toMatchObject({ reason: "daemon-shutdown" }),
+        expect(
+          secondProxy.callTool("observe", { deviceId: "ios-simulator-b" }),
+        ).rejects.toMatchObject({ reason: "daemon-shutdown" }),
+      ]);
+      expect(firstApple.client.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(secondApple.client.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+
+      firstApple.client.emitConnectionClosed();
+      secondApple.client.emitConnectionClosed();
+      await Promise.all([firstProxy.callTool("getApple", {}), secondProxy.callTool("getApple", {})]);
+      await Promise.all([
+        firstProxy.callTool("observe", { deviceId: "ios-simulator-a" }),
+        secondProxy.callTool("observe", { deviceId: "ios-simulator-b" }),
+      ]);
+
+      expect(replacementApple.client.callToolCalls).toEqual([
+        { toolName: "getApple", params: {} },
+        {
+          toolName: "observe",
+          params: { deviceId: "ios-simulator-a", sessionUuid: "ios-replacement-a" },
+        },
+      ]);
+      expect(replacementSecondApple.client.callToolCalls).toEqual([
+        { toolName: "getApple", params: {} },
+        {
+          toolName: "observe",
+          params: { deviceId: "ios-simulator-b", sessionUuid: "ios-replacement-b" },
+        },
+      ]);
+    } finally {
+      await Promise.all([firstProxy.close(), secondProxy.close()]);
     }
   });
 

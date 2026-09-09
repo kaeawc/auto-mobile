@@ -1,6 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { shellQuote } from "../utils/shellQuote";
 import {
+  DaemonBoundSessionLostError,
   DaemonClient,
   DaemonShuttingDownError,
   DaemonUnavailableError,
@@ -1550,6 +1551,14 @@ export class DaemonMcpProxy {
         throw error;
       }
       this.throwIfBoundSessionFenced(allowReleasedSession);
+      if (error instanceof DaemonBoundSessionLostError) {
+        this.fenceBoundSessionUuid(
+          error.failure.sessionUuid,
+          error.failure.reason,
+          error.failure.release,
+        );
+        throw this.boundSessionExpiredError();
+      }
       if (!this.isRecoverableDaemonSessionError(error)) {
         throw error;
       }

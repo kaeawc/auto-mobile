@@ -1,5 +1,5 @@
 import { DaemonRequest } from "./types";
-import { DeviceLabelMap, Session } from "./sessionManager";
+import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import { DAEMON_HEARTBEAT_METHOD, DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
@@ -21,6 +21,7 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
     getSessionForDevice?(deviceId: string): string | null;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;

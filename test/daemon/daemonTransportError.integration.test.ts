@@ -3,7 +3,11 @@ import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import {
+  DaemonBoundSessionLostError,
+  DaemonClient,
+  DaemonUnavailableError,
+} from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 const isWindows = platform() === "win32";
@@ -129,6 +133,66 @@ describe("DaemonClient device-control transport response", () => {
         expect(JSON.stringify((error as DeviceControlTransportError).failure)).not.toContain(
           "secret.invalid",
         );
+      } finally {
+        await client.close();
+      }
+    },
+  );
+});
+
+describe("DaemonClient bound-session loss response", () => {
+  const tempDirs: string[] = [];
+  let server: Server | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = null;
+    }
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
+  (isWindows ? test.skip : test)(
+    "rehydrates a bound-session loss without treating it as transport failure",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "daemon-bound-session-loss-test-"));
+      tempDirs.push(dir);
+      const socketPath = join(dir, "daemon.sock");
+      const failure = {
+        code: "bound_session_lost" as const,
+        sessionUuid: "ios-session-a",
+        reason: "daemon-shutdown",
+      };
+
+      server = createServer((connection: Socket) => {
+        connection.once("data", (data) => {
+          const request = JSON.parse(data.toString().trim()) as { id: string };
+          connection.write(
+            `${JSON.stringify({
+              id: request.id,
+              type: "mcp_response",
+              success: false,
+              error: "Device session ios-session-a is no longer active (daemon-shutdown).",
+              boundSessionLoss: failure,
+            })}\n`,
+          );
+        });
+      });
+      await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
+
+      const client = new DaemonClient(socketPath, 2000);
+      await client.connect();
+
+      try {
+        await client.callTool("observe", { sessionUuid: "ios-session-a" });
+        throw new Error("Expected observe to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(DaemonBoundSessionLostError);
+        expect((error as DaemonBoundSessionLostError).failure).toEqual(failure);
+        expect(error).not.toBeInstanceOf(DeviceControlTransportError);
       } finally {
         await client.close();
       }

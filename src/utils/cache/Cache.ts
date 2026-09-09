@@ -1,5 +1,5 @@
 import { Timer, defaultTimer } from "../SystemTimer";
-import { logger } from "../logger";
+import { logger, type Logger } from "../logger";
 
 /**
  * Configuration for cache behavior.
@@ -103,11 +103,9 @@ interface Cache<K, V> {
   getStats(): CacheStats;
 
   /**
-   * Remove all currently-expired entries, in ascending creation-time order,
-   * stopping at the first entry that has not expired yet (everything created
-   * after it is at least as fresh, so it cannot be expired either). Cost is
-   * proportional to the number of expired entries removed, not the total
-   * cache size.
+   * Remove all currently-expired entries. With monotonic timestamps, this
+   * stops at the first live entry and costs only the expired prefix; after a
+   * backwards wall-clock step it scans the remaining entries for correctness.
    *
    * `set()` runs this same bounded sweep automatically before every insert,
    * and `get()`/`has()` opportunistically evict the single key they touch
@@ -135,14 +133,18 @@ export const DEFAULT_CACHE_OPTIONS: Required<Omit<CacheOptions, "maxSizeBytes">>
  *  - `entries` iteration order tracks access recency: a hit in `get()` moves
  *    its key to the tail, so the front is always the least-recently-used
  *    entry and `evictOldest()` just peeks it.
- *  - `expiryOrder` iteration order tracks creation time ascending (a fresh
- *    `set()` always appends, including on overwrite): the front is always
- *    the oldest-created entry, so a TTL sweep can stop as soon as it hits a
- *    non-expired one instead of walking the whole cache.
+ *  - `expiryOrder` iteration order tracks creation time while the injected
+ *    clock is monotonic (a fresh `set()` appends, including on overwrite), so
+ *    the front is the oldest-created entry and a TTL sweep can stop at the
+ *    first live entry. A backwards wall-clock step falls back to a full scan.
  */
 export class TTLCache<K, V> implements Cache<K, V> {
   private readonly entries: Map<K, CacheEntry<V>> = new Map();
   private readonly expiryOrder: Set<K> = new Set();
+  // Date.now() can move backwards. When it does, insertion order is no longer
+  // guaranteed to match expiration order, so a sweep must inspect every entry.
+  private newestCreatedAt = Number.NEGATIVE_INFINITY;
+  private expiryOrderMayBeOutOfOrder = false;
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly maxSizeBytes: number;
@@ -163,6 +165,7 @@ export class TTLCache<K, V> implements Cache<K, V> {
   constructor(
     private readonly timer: Timer = defaultTimer,
     options?: CacheOptions,
+    private readonly log: Logger = logger,
   ) {
     this.ttlMs = options?.ttlMs ?? DEFAULT_CACHE_OPTIONS.ttlMs;
     this.maxEntries = options?.maxEntries ?? DEFAULT_CACHE_OPTIONS.maxEntries;
@@ -202,7 +205,7 @@ export class TTLCache<K, V> implements Cache<K, V> {
     // Checked before any mutation so a rejected call is a complete no-op,
     // including leaving any existing entry for this key untouched.
     if (this.isOversizedValue(sizeBytes)) {
-      logger.warn(
+      this.log.warn(
         `[TTLCache] rejecting value for key that alone exceeds maxSizeBytes ` +
           `(${sizeBytes} > ${this.maxSizeBytes} bytes); value not cached`,
       );
@@ -210,6 +213,10 @@ export class TTLCache<K, V> implements Cache<K, V> {
     }
 
     const now = this.timer.now();
+    if (now < this.newestCreatedAt) {
+      this.expiryOrderMayBeOutOfOrder = true;
+    }
+    this.newestCreatedAt = Math.max(this.newestCreatedAt, now);
 
     // Remove existing entry if present
     if (this.entries.has(key)) {
@@ -272,6 +279,8 @@ export class TTLCache<K, V> implements Cache<K, V> {
   clear(): void {
     this.entries.clear();
     this.expiryOrder.clear();
+    this.newestCreatedAt = Number.NEGATIVE_INFINITY;
+    this.expiryOrderMayBeOutOfOrder = false;
     this.currentSizeBytes = 0;
     this.updateSizeStats();
   }
@@ -314,11 +323,10 @@ export class TTLCache<K, V> implements Cache<K, V> {
   }
 
   /**
-   * Remove entries from the front of `expiryOrder` (ascending creation time)
-   * while they are expired, stopping at the first one that is not -- every
-   * entry after it was created no earlier, so it cannot be expired yet
-   * either. Cost is proportional to entries actually removed, not the total
-   * cache size (issue #6653).
+   * Remove expired entries. While timestamps are monotonic, `expiryOrder` is
+   * ascending and the sweep stops at the first live entry. A backwards
+   * wall-clock step removes that guarantee, so the sweep continues through
+   * every entry to avoid retaining a later, already-expired value.
    */
   private sweepExpiredPrefix(now: number): number {
     let evicted = 0;
@@ -326,11 +334,16 @@ export class TTLCache<K, V> implements Cache<K, V> {
     for (const key of this.expiryOrder) {
       this.evictionScanWork++;
       const entry = this.entries.get(key);
-      // expiryOrder and entries are kept in lockstep by every mutator below,
-      // so a missing entry here would indicate a bug rather than legitimate
-      // state -- treat it the same as "not expired" and stop.
-      if (!entry || now - entry.createdAt < this.ttlMs) {
-        break;
+      // expiryOrder and entries are kept in lockstep by every mutator below.
+      // Keep progressing defensively if that invariant is ever broken.
+      if (!entry) {
+        continue;
+      }
+      if (now - entry.createdAt < this.ttlMs) {
+        if (!this.expiryOrderMayBeOutOfOrder) {
+          break;
+        }
+        continue;
       }
       this.removeEntry(key);
       this.stats.ttlEvictions++;
@@ -401,6 +414,10 @@ export class TTLCache<K, V> implements Cache<K, V> {
       this.entries.delete(key);
     }
     this.expiryOrder.delete(key);
+    if (this.entries.size === 0) {
+      this.newestCreatedAt = Number.NEGATIVE_INFINITY;
+      this.expiryOrderMayBeOutOfOrder = false;
+    }
   }
 
   private updateSizeStats(): void {

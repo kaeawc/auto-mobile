@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { TTLCache } from "../../../src/utils/cache/Cache";
+import type { Timer } from "../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeLogger } from "../../fakes/FakeLogger";
 
 describe("TTLCache", () => {
   let cache: TTLCache<string, string>;
@@ -322,19 +324,27 @@ describe("TTLCache", () => {
   // these assertions pin the fix without a flaky wall-clock benchmark.
   describe("bounded eviction/cleanup scan work (issue #6653)", () => {
     it("evictOldest() touches ~O(1) entries per insert under a maxEntries cap, not O(n)", () => {
-      const capped = new TTLCache<string, number>(timer, { ttlMs: 10000, maxEntries: 1 });
+      const capacity = 128;
+      const capped = new TTLCache<string, number>(timer, { ttlMs: 10000, maxEntries: capacity });
       const n = 500;
 
+      // Warm enough resident entries that the old linear eviction scan would
+      // have substantial work to do on every following insertion.
+      for (let i = 0; i < capacity; i++) {
+        capped.set(`warm-${i}`, i);
+      }
+      const before = capped.evictionScanWorkUnits;
       for (let i = 0; i < n; i++) {
         capped.set(`key-${i}`, i);
       }
+      const workDuringEviction = capped.evictionScanWorkUnits - before;
 
-      // Each set() after the first evicts exactly one entry via an O(1)
+      // Each set evicts exactly one entry via an O(1)
       // peek, plus one O(1) peek from the expiry sweep finding a live front
-      // entry: work grows linearly with n. A per-insert O(n) scan (the
-      // pre-fix evictOldest()) would touch roughly n*(n-1)/2 entries across
-      // this loop -- 124,750 for n=500 -- which the bound below rules out.
-      expect(capped.evictionScanWorkUnits).toBeLessThanOrEqual(3 * n);
+      // entry: work grows linearly with n. A per-insert O(capacity) scan (the
+      // pre-fix evictOldest()) would touch at least 64,000 entries across this
+      // loop, which the bound below rules out.
+      expect(workDuringEviction).toBeLessThanOrEqual(2 * n);
     });
 
     it("cleanup() stops at the first non-expired entry instead of scanning the whole cache", () => {
@@ -365,6 +375,29 @@ describe("TTLCache", () => {
       expect(workDuringCleanup).toBeLessThanOrEqual(4);
       expect(mixedCache.size()).toBe(200);
     });
+
+    it("continues past a live entry after the wall clock moves backwards", () => {
+      const backingTimer = new FakeTimer();
+      let wallTime = 1_000;
+      const wallClock: Timer = {
+        sleep: (ms) => backingTimer.sleep(ms),
+        setTimeout: (callback, ms) => backingTimer.setTimeout(callback, ms),
+        clearTimeout: (handle) => backingTimer.clearTimeout(handle),
+        setInterval: (callback, ms) => backingTimer.setInterval(callback, ms),
+        clearInterval: (handle) => backingTimer.clearInterval(handle),
+        now: () => wallTime,
+      };
+      const cacheWithWallClock = new TTLCache<string, string>(wallClock, { ttlMs: 1_000 });
+
+      cacheWithWallClock.set("live-first", "live");
+      wallTime = 500; // a backwards Date.now() step before the next insert
+      cacheWithWallClock.set("expired-second", "expired");
+      wallTime = 1_600;
+
+      expect(cacheWithWallClock.cleanup()).toBe(1);
+      expect(cacheWithWallClock.get("live-first")).toBe("live");
+      expect(cacheWithWallClock.get("expired-second")).toBeUndefined();
+    });
   });
 
   // issue #6653: the maxSizeBytes eviction loop stopped once entries.size
@@ -373,7 +406,12 @@ describe("TTLCache", () => {
   // pinned currentSizeBytes above maxSizeBytes.
   describe("oversized single values (issue #6653)", () => {
     it("rejects a value whose size alone exceeds maxSizeBytes, without touching other entries", () => {
-      const sizedCache = new TTLCache<string, Buffer>(timer, { ttlMs: 10000, maxSizeBytes: 100 });
+      const log = new FakeLogger();
+      const sizedCache = new TTLCache<string, Buffer>(
+        timer,
+        { ttlMs: 10000, maxSizeBytes: 100 },
+        log,
+      );
       const small = Buffer.alloc(50);
       sizedCache.set("small", small, 50);
 
@@ -383,10 +421,16 @@ describe("TTLCache", () => {
       expect(sizedCache.get("small")).toBe(small);
       expect(sizedCache.getCurrentSizeBytes()).toBe(50);
       expect(sizedCache.size()).toBe(1);
+      expect(log.at("warn")).toHaveLength(1);
+      expect(log.at("warn")[0]?.message).toContain("rejecting value");
     });
 
     it("leaves an existing entry untouched when overwriting it with an oversized value", () => {
-      const sizedCache = new TTLCache<string, Buffer>(timer, { ttlMs: 10000, maxSizeBytes: 100 });
+      const sizedCache = new TTLCache<string, Buffer>(
+        timer,
+        { ttlMs: 10000, maxSizeBytes: 100 },
+        new FakeLogger(),
+      );
       const original = Buffer.alloc(50);
       sizedCache.set("key", original, 50);
 

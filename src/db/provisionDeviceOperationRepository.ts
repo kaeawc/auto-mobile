@@ -18,7 +18,12 @@ export interface ProvisionDeviceOperationStore {
   >;
   markDeviceCreationStarted(operationId: string): Promise<void>;
   complete(operationId: string, result: Record<string, unknown>): Promise<void>;
-  fail(operationId: string, errorCode: string, message: string): Promise<void>;
+  fail(
+    operationId: string,
+    errorCode: string,
+    message: string,
+    options?: { clearCreationStarted?: boolean },
+  ): Promise<void>;
 }
 
 export class ProvisionDeviceOperationConflictError extends Error {
@@ -131,13 +136,19 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       .execute();
   }
 
-  async fail(operationId: string, errorCode: string, message: string): Promise<void> {
+  async fail(
+    operationId: string,
+    errorCode: string,
+    message: string,
+    options?: { clearCreationStarted?: boolean },
+  ): Promise<void> {
     await this.getDb()
       .updateTable("provision_device_operations")
       .set({
         status: "failed",
         error_code: errorCode,
         error_message: message,
+        ...(options?.clearCreationStarted ? { creation_started: 0 } : {}),
         updated_at: new Date().toISOString(),
       })
       .where("operation_id", "=", operationId)

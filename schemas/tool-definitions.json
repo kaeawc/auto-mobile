@@ -7678,7 +7678,7 @@
           "description": "Total provision, boot, and readiness timeout in ms",
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 890000
+          "maximum": 830000
         }
       },
       "required": ["operationId", "device"],

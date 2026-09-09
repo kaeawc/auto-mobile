@@ -73,4 +73,26 @@ describe("ProvisionDeviceOperationRepository", () => {
       reconcileExistingConfiguration: true,
     });
   });
+
+  test("clears creation provenance only after verified rollback", async () => {
+    const repository = new ProvisionDeviceOperationRepository(db);
+
+    await repository.begin("operation-cleaned-up", "request-a");
+    await repository.markDeviceCreationStarted("operation-cleaned-up");
+    await repository.fail("operation-cleaned-up", "platform_command_failed", "cleanup failed");
+
+    expect(await repository.begin("operation-cleaned-up", "request-a")).toEqual({
+      started: true,
+      reconcileExistingConfiguration: true,
+    });
+
+    await repository.fail("operation-cleaned-up", "platform_command_failed", "cleanup succeeded", {
+      clearCreationStarted: true,
+    });
+
+    expect(await repository.begin("operation-cleaned-up", "request-a")).toEqual({
+      started: true,
+      reconcileExistingConfiguration: false,
+    });
+  });
 });

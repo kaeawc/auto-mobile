@@ -42,6 +42,10 @@ import {
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import {
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+} from "../daemon/constants";
+import {
   DEVICE_CREATE_ENV_VAR,
   getDeviceCreationGate,
   type DeviceCreationGate,
@@ -88,7 +92,9 @@ import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
+  MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
+  START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
 import {
   createDefaultExactDeviceProvisioner,
@@ -384,7 +390,7 @@ export const provisionDeviceSchema = z
       .number()
       .int()
       .positive()
-      .max(MAX_DEVICE_READY_TIMEOUT_MS)
+      .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
       .optional()
       .describe("Total provision, boot, and readiness timeout in ms"),
   })
@@ -483,13 +489,17 @@ function isAlreadyStoppedDeviceError(
   return false;
 }
 
-function createToolErrorResponse(code: string, message: string) {
+function createToolErrorResponse(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+) {
   return {
     isError: true,
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify({ success: false, message, error: { code, message } }),
+        text: JSON.stringify({ success: false, message, error: { code, message }, ...details }),
       },
     ],
   };
@@ -556,6 +566,10 @@ export interface ProvisionDeviceArgs {
   readiness: "automation" | "none";
   timeoutMs?: number;
   __mcpSessionId?: string;
+  /** Daemon-provided remaining transport budget. */
+  __mcpRequestTimeoutMs?: number;
+  /** Daemon-provided absolute transport deadline. */
+  __mcpRequestDeadlineMs?: number;
 }
 
 export interface KillDeviceArgs {
@@ -2349,6 +2363,35 @@ type TeardownToolResponse =
   | ReturnType<typeof createTeardownResponse>
   | ReturnType<typeof createTeardownFailureResponse>;
 
+interface ProvisionDeviceCleanup {
+  status: "succeeded" | "failed";
+  operationId: string;
+  target: TeardownDeviceArgs["target"];
+  state?: string;
+  failure?: {
+    code: string;
+    phase: string;
+    message: string;
+  };
+}
+
+class ProvisionDeviceRollbackError extends ProvisionDeviceError {
+  constructor(
+    readonly provisionFailure: ProvisionDeviceError,
+    readonly cleanup: ProvisionDeviceCleanup,
+  ) {
+    super(
+      cleanup.status === "failed" ? "cleanup_failed" : provisionFailure.code,
+      cleanup.status === "failed"
+        ? `${provisionFailure.message} Cleanup of the newly created device also failed: ${
+            cleanup.failure?.message ?? "unknown cleanup failure"
+          }`
+        : provisionFailure.message,
+    );
+    this.name = "ProvisionDeviceRollbackError";
+  }
+}
+
 function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
   return stableStringify({
     target: args.target,
@@ -3039,17 +3082,38 @@ function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
 
 function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
+  const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const publicInput: Record<string, unknown> = { ...input };
   delete publicInput.__mcpSessionId;
   delete publicInput.__executionId;
   delete publicInput.__executionStartTime;
+  delete publicInput[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  delete publicInput[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,
+    __mcpRequestDeadlineMs,
   };
+}
+
+function provisionDeviceDeadlineMs(
+  args: ProvisionDeviceArgs,
+  timer: Pick<Timer, "now">,
+  reserveRollbackTime: boolean,
+): number {
+  const requestedDeadlineMs = timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+  if (!reserveRollbackTime || args.__mcpRequestDeadlineMs === undefined) {
+    return requestedDeadlineMs;
+  }
+  return Math.min(
+    requestedDeadlineMs,
+    args.__mcpRequestDeadlineMs -
+      DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS -
+      START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+  );
 }
 
 function provisionDeviceTimeoutError(phase: string): ProvisionDeviceError {
@@ -4096,7 +4160,10 @@ export function registerDeviceTools() {
       return result;
     } catch (error) {
       const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, provisionError.code, provisionError.message);
+      await store.fail(args.operationId, provisionError.code, provisionError.message, {
+        clearCreationStarted:
+          error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
+      });
       throw provisionError;
     }
   }
@@ -4165,8 +4232,7 @@ export function registerDeviceTools() {
     if (!device || !stableId) {
       return undefined;
     }
-    const totalDeadlineMs =
-      deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
     return await reserveStableDeviceLifecycle(
       { platform: device.platform, stableId },
       {
@@ -4230,8 +4296,7 @@ export function registerDeviceTools() {
           const perf = createPerformanceTracker(true);
           perf.serial("provisionDeviceReplay");
           try {
-            const totalDeadlineMs =
-              deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+            const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
             await ensureProvisionDeviceReadiness(
               args,
               deps,
@@ -4412,6 +4477,193 @@ export function registerDeviceTools() {
     );
   }
 
+  function teardownResponsePayload(
+    response: TeardownToolResponse,
+  ): Record<string, unknown> | undefined {
+    const text = response.content.find((content) => content.type === "text")?.text;
+    if (!text) {
+      return undefined;
+    }
+    try {
+      const payload: unknown = JSON.parse(text);
+      return typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : undefined;
+    } catch (error) {
+      logger.warn(`[DeviceTools] Failed to decode internal teardown response: ${error}`, error);
+      return undefined;
+    }
+  }
+
+  function provisionDeviceCleanupResult(
+    cleanupArgs: TeardownDeviceArgs,
+    response: TeardownToolResponse,
+  ): ProvisionDeviceCleanup {
+    const payload = teardownResponsePayload(response);
+    const failure = payload?.failure;
+    if (
+      isTeardownFailure(response) &&
+      typeof failure === "object" &&
+      failure !== null &&
+      !Array.isArray(failure)
+    ) {
+      const failureRecord = failure as Record<string, unknown>;
+      return {
+        status: "failed",
+        operationId: cleanupArgs.operationId,
+        target: cleanupArgs.target,
+        failure: {
+          code: typeof failureRecord.code === "string" ? failureRecord.code : "operation_failed",
+          phase: typeof failureRecord.phase === "string" ? failureRecord.phase : "verification",
+          message:
+            typeof failureRecord.message === "string"
+              ? failureRecord.message
+              : "Device cleanup failed without a diagnostic.",
+        },
+      };
+    }
+    if (isTeardownFailure(response)) {
+      return {
+        status: "failed",
+        operationId: cleanupArgs.operationId,
+        target: cleanupArgs.target,
+        failure: {
+          code: "operation_failed",
+          phase: "verification",
+          message: "Device cleanup failed without a structured diagnostic.",
+        },
+      };
+    }
+    return {
+      status: "succeeded",
+      operationId: cleanupArgs.operationId,
+      target: cleanupArgs.target,
+      state: typeof payload?.state === "string" ? payload.state : "destroyed",
+    };
+  }
+
+  async function cleanupFailedProvisionDevice(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    createdDevice: DeviceInfo,
+    provisionFailure: ProvisionDeviceError,
+    lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+  ): Promise<ProvisionDeviceRollbackError> {
+    const stableId =
+      createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
+    if (!stableId) {
+      return new ProvisionDeviceRollbackError(provisionFailure, {
+        status: "failed",
+        operationId: deps.idGenerator.next(),
+        target: {
+          platform: createdDevice.platform,
+          isVirtual: true,
+          stableId: args.device.name,
+          stableName: createdDevice.name,
+        },
+        failure: {
+          code: "target_identity_unresolved",
+          phase: "precondition",
+          message: "The newly created device has no stable identity for cleanup.",
+        },
+      });
+    }
+    const cleanupArgs: TeardownDeviceArgs = {
+      operationId: deps.idGenerator.next(),
+      target: {
+        platform: createdDevice.platform,
+        isVirtual: true,
+        stableId,
+        stableName: createdDevice.name,
+      },
+      mode: "destroy",
+      verifyAbsence: true,
+      timeoutMs: DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+    };
+    const cleanupService = new DeviceTeardownService({
+      lifecycleCoordinator: deps.lifecycleCoordinator,
+      timer: deps.timer,
+      resultTtlMs: TEARDOWN_OPERATION_RESULT_TTL_MS,
+    });
+    let lifecycleLeaseTransferred = false;
+    try {
+      if (!lifecycleLease) {
+        return new ProvisionDeviceRollbackError(provisionFailure, {
+          status: "failed",
+          operationId: cleanupArgs.operationId,
+          target: cleanupArgs.target,
+          failure: {
+            code: "lifecycle_reservation_lost",
+            phase: "precondition",
+            message: "The provisioning lifecycle reservation was lost before cleanup.",
+          },
+        });
+      }
+      lifecycleLease.transitionToTeardown();
+      await lifecycleLease.bindCanonicalIdentity({
+        platform: createdDevice.platform,
+        stableId,
+      });
+      const cleanup = executeDeleteDevice(
+        cleanupArgs,
+        deps,
+        undefined,
+        cleanupService,
+        lifecycleLease,
+      );
+      lifecycleLeaseTransferred = true;
+      const response = await cleanup;
+      return new ProvisionDeviceRollbackError(
+        provisionFailure,
+        provisionDeviceCleanupResult(cleanupArgs, response),
+      );
+    } catch (error) {
+      return new ProvisionDeviceRollbackError(provisionFailure, {
+        status: "failed",
+        operationId: cleanupArgs.operationId,
+        target: cleanupArgs.target,
+        failure: {
+          code: "lifecycle_reservation_lost",
+          phase: "precondition",
+          message: errorMessage(error),
+        },
+      });
+    } finally {
+      // Rollback is not caller-replayable, so it must not retain operation state.
+      cleanupService.dispose();
+      if (!lifecycleLeaseTransferred) {
+        lifecycleLease?.release();
+      }
+    }
+  }
+
+  async function rethrowFailedProvisionDeviceLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
+    creationStarted: boolean,
+    takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
+    error: unknown,
+  ): Promise<never> {
+    const createdDevice =
+      provisioned?.created || creationStarted
+        ? (provisioned?.device ??
+          (args.device.platform === "android"
+            ? { name: args.device.name, platform: "android", isRunning: false }
+            : undefined))
+        : undefined;
+    if (!createdDevice) {
+      throw error;
+    }
+    throw await cleanupFailedProvisionDevice(
+      args,
+      deps,
+      createdDevice,
+      toProvisionDeviceError(args, error),
+      takeLifecycleLease(),
+    );
+  }
+
   async function reserveExistingIosProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
@@ -4494,10 +4746,11 @@ export function registerDeviceTools() {
   ): Promise<Record<string, unknown>> {
     const perf = createPerformanceTracker(true);
     perf.serial("provisionDevice");
-    const totalDeadlineMs =
-      deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const deviceManager = deps.deviceManagerFactory();
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+    let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
+    let creationStarted = reconcileExistingConfiguration;
     try {
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
@@ -4532,14 +4785,17 @@ export function registerDeviceTools() {
         );
       }
       const deviceCreationGate = deps.deviceCreationGateFactory();
-      const provisioned = await provisionExactDevice(
+      provisioned = await provisionExactDevice(
         args,
         deps.exactDeviceProvisionerFactory(deviceManager, deviceCreationGate),
         perf,
         deps.timer,
         totalDeadlineMs,
         reconcileExistingConfiguration,
-        markDeviceCreationStarted,
+        async () => {
+          await markDeviceCreationStarted();
+          creationStarted = true;
+        },
         lifecycleLease,
         signal,
       );
@@ -4569,7 +4825,18 @@ export function registerDeviceTools() {
       return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);
     } catch (error) {
       perf.end();
-      throw error;
+      return await rethrowFailedProvisionDeviceLifecycle(
+        args,
+        deps,
+        provisioned,
+        creationStarted,
+        () => {
+          const rollbackLease = lifecycleLease;
+          lifecycleLease = undefined;
+          return rollbackLease;
+        },
+        error,
+      );
     } finally {
       lifecycleLease?.release();
     }
@@ -4797,6 +5064,15 @@ export function registerDeviceTools() {
   }
 
   function provisionDeviceErrorResponse(error: unknown) {
+    if (error instanceof ProvisionDeviceRollbackError) {
+      return createToolErrorResponse(error.code, error.message, {
+        provisionFailure: {
+          code: error.provisionFailure.code,
+          message: error.provisionFailure.message,
+        },
+        cleanup: error.cleanup,
+      });
+    }
     if (error instanceof ProvisionDeviceError) {
       return createToolErrorResponse(error.code, error.message);
     }
@@ -5562,13 +5838,13 @@ export function registerDeviceTools() {
     }
   };
 
-  const deleteDeviceHandler = async (
+  async function executeDeleteDevice(
     args: TeardownDeviceArgs,
-    _progress?: ProgressCallback,
-    abortSignal?: AbortSignal,
-  ) => {
-    const deps = getDeviceToolsDependencies();
-    const callerSignal = abortSignal ?? getAbortSignal();
+    deps: DeviceToolsDependencies,
+    callerSignal: AbortSignal | undefined,
+    teardownService: DeviceTeardownService,
+    lifecycleLease?: VirtualDeviceLifecycleLease,
+  ): Promise<TeardownToolResponse> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
     type TeardownState = {
@@ -5577,7 +5853,7 @@ export function registerDeviceTools() {
       earlyResponse?: TeardownToolResponse;
     };
     try {
-      return await getDeviceTeardownService(deps).teardown<
+      return await teardownService.teardown<
         TeardownState,
         "accepted" | "not_required",
         TeardownToolResponse
@@ -5588,6 +5864,7 @@ export function registerDeviceTools() {
           identity: args.target,
           deadlineMs,
           callerSignal,
+          lifecycleLease,
         },
         {
           resolve: async (requestAbortSignal, lifecycleLease) => {
@@ -5698,6 +5975,20 @@ export function registerDeviceTools() {
         String(error instanceof Error ? error.message : error),
       );
     }
+  }
+
+  const deleteDeviceHandler = async (
+    args: TeardownDeviceArgs,
+    _progress?: ProgressCallback,
+    abortSignal?: AbortSignal,
+  ) => {
+    const deps = getDeviceToolsDependencies();
+    return await executeDeleteDevice(
+      args,
+      deps,
+      abortSignal ?? getAbortSignal(),
+      getDeviceTeardownService(deps),
+    );
   };
 
   // Register with the tool registry

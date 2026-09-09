@@ -537,6 +537,7 @@ describe("MultiPlatformDeviceManager", () => {
           identity,
           signal: new AbortController().signal,
           bindCanonicalIdentity: async () => {},
+          transitionToTeardown: () => {},
           release: () => {},
         };
       },

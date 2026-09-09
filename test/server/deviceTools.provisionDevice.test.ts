@@ -8,12 +8,7 @@ import {
 } from "../../src/server/deviceTools";
 import { classifyDisplayCutout } from "../../src/utils/displayCutout";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import {
-  installNoOpReadinessDriver,
-  setDeviceReadinessProxyDriverProviderForTesting,
-} from "../helpers/stubCtrlProxySetup";
+import { stubCtrlProxySetup } from "../helpers/stubCtrlProxySetup";
 import type {
   ExactDeviceProvisionRequest,
   ExactDeviceProvisioner,
@@ -23,12 +18,14 @@ import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDevice
 import { ProvisionDeviceOperationConflictError } from "../../src/db/provisionDeviceOperationRepository";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -113,9 +110,115 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     return this.results.get(operationId)?.result;
   }
 
-  async fail(): Promise<void> {
+  async fail(
+    operationId: string,
+    _errorCode: string,
+    _message: string,
+    options?: { clearCreationStarted?: boolean },
+  ): Promise<void> {
     this.failCalls++;
+    if (options?.clearCreationStarted) {
+      const operation = this.results.get(operationId);
+      if (!operation) {
+        throw new Error(`missing operation ${operationId}`);
+      }
+      operation.creationStarted = false;
+    }
   }
+}
+
+type ProvisionTestPlatform = "android" | "ios";
+
+function provisionTestArgs(platform: ProvisionTestPlatform, operationId: string) {
+  return platform === "android"
+    ? {
+        operationId,
+        device: {
+          platform,
+          name: "phone-api-36-a",
+          spec: {
+            runtime: "system-images;android-36;google_apis;x86_64",
+            deviceType: "pixel_9",
+          },
+        },
+        boot: true,
+        readiness: "automation" as const,
+      }
+    : {
+        operationId,
+        device: {
+          platform,
+          name: "iPhone 17",
+          spec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          },
+        },
+        boot: true,
+        readiness: "automation" as const,
+      };
+}
+
+function provisionedTestDevice(
+  platform: ProvisionTestPlatform,
+  created: boolean,
+): ExactProvisionedDevice {
+  const args = provisionTestArgs(platform, "unused");
+  return {
+    created,
+    device: {
+      name: args.device.name,
+      platform,
+      ...(platform === "ios" ? { deviceId: "SIM-123" } : {}),
+      isRunning: false,
+      runtime: args.device.spec.runtime,
+      deviceType: args.device.spec.deviceType,
+    },
+    resolvedSpec: {
+      ...args.device.spec,
+      displayCutout: classifyDisplayCutout(platform, args.device.spec.deviceType),
+    },
+  };
+}
+
+function configureProvisionBootAndTeardown(
+  manager: FakeDeviceUtils,
+  platform: ProvisionTestPlatform,
+): void {
+  const deviceName = provisionTestArgs(platform, "unused").device.name;
+  let exitListener: (() => void) | undefined;
+  const processHandle: any = {
+    exitCode: null,
+    signalCode: null,
+    once: (event: string, listener: () => void) => {
+      if (event === "exit") {
+        exitListener = listener;
+      }
+      return processHandle;
+    },
+    kill: () => {
+      processHandle.exitCode = 0;
+      manager.setBootedDevices(platform, []);
+      exitListener?.();
+      return true;
+    },
+  };
+  manager.setMockChildProcess(deviceName, processHandle as any);
+  const originalWaitForDeviceReady = manager.waitForDeviceReady.bind(manager);
+  manager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
+    const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+    const resolved = {
+      ...booted,
+      deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
+    };
+    manager.setBootedDevices(platform, [resolved]);
+    return resolved;
+  };
+  const originalKillDevice = manager.killDevice.bind(manager);
+  manager.killDevice = async (device) => {
+    await originalKillDevice(device);
+    manager.setBootedDevices(platform, []);
+  };
 }
 
 describe("provisionDevice handler", () => {
@@ -135,6 +238,7 @@ describe("provisionDevice handler", () => {
       provisionDeviceOperationStoreFactory: () => operationStore,
       teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       notifyResourcesChanged: async () => {},
+      clearInstalledAppsForDevice: async () => {},
     });
     registerDeviceTools();
   });
@@ -161,6 +265,18 @@ describe("provisionDevice handler", () => {
       boot: true,
       readiness: "automation",
     });
+  });
+
+  test("reserves enough outer request time for bounded rollback", () => {
+    const args = provisionTestArgs("android", "operation-max-provision-timeout");
+
+    expect(
+      provisionDeviceSchema.parse({ ...args, timeoutMs: MAX_PROVISION_DEVICE_TIMEOUT_MS })
+        .timeoutMs,
+    ).toBe(MAX_PROVISION_DEVICE_TIMEOUT_MS);
+    expect(() =>
+      provisionDeviceSchema.parse({ ...args, timeoutMs: MAX_PROVISION_DEVICE_TIMEOUT_MS + 1 }),
+    ).toThrow();
   });
 
   test("accepts only documented display-cutout preferences", () => {
@@ -407,14 +523,420 @@ describe("provisionDevice handler", () => {
     });
   });
 
-  test("adopts a running Android AVD by resolving its transport ID before boot", async () => {
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: true,
+  for (const platform of ["android", "ios"] as const) {
+    test(`${platform}: cleans up a newly created device when readiness fails`, async () => {
+      const provisioned = provisionedTestDevice(platform, true);
+      configureProvisionBootAndTeardown(deviceManager, platform);
+      const provisioner: ExactDeviceProvisioner = {
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      };
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => provisioner,
+        ensureCtrlProxyReady: async () => {
+          throw new Error("runner readiness failed");
+        },
+        idGenerator: new FakeIdGenerator([`cleanup-${platform}`]),
+      });
+      registerDeviceTools();
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+
+      const response = JSON.parse(
+        ((await tool.handler(provisionTestArgs(platform, `operation-cleanup-${platform}`))) as any)
+          .content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        error: { code: "platform_command_failed" },
+        provisionFailure: {
+          code: "platform_command_failed",
+          message: expect.stringContaining("runner readiness failed"),
+        },
+        cleanup: {
+          status: "succeeded",
+          operationId: `cleanup-${platform}`,
+          state: "destroyed",
+        },
+      });
+      expect(deviceManager.getExecutedOperations()).toContainEqual(
+        expect.stringContaining(`destroyDevice:${platform}:`),
+      );
+      expect(await deviceManager.listDeviceImages(platform)).toEqual([]);
+      expect(operationStore.failCalls).toBe(1);
+    });
+
+    test(`${platform}: never deletes an adopted device when readiness fails`, async () => {
+      const provisioned = provisionedTestDevice(platform, false);
+      configureProvisionBootAndTeardown(deviceManager, platform);
+      deviceManager.setDeviceImages(platform, [provisioned.device]);
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => ({
+          provision: async () => provisioned,
+        }),
+        ensureCtrlProxyReady: async () => {
+          throw new Error("runner readiness failed");
+        },
+      });
+      registerDeviceTools();
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+
+      const response = JSON.parse(
+        ((await tool.handler(provisionTestArgs(platform, `operation-adopted-${platform}`))) as any)
+          .content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        error: { code: "platform_command_failed" },
+      });
+      expect(response.cleanup).toBeUndefined();
+      expect(deviceManager.getExecutedOperations()).not.toContainEqual(
+        expect.stringContaining("destroyDevice:"),
+      );
+      expect(await deviceManager.listDeviceImages(platform)).toEqual([provisioned.device]);
+    });
+
+    test(`${platform}: reports a structured cleanup failure without false success`, async () => {
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const provisioned = provisionedTestDevice(platform, true);
+      configureProvisionBootAndTeardown(deviceManager, platform);
+      const provisioner: ExactDeviceProvisioner = {
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      };
+      let destroyCalls = 0;
+      deviceManager.destroyDevice = async () => {
+        destroyCalls++;
+        throw new Error("platform delete failed");
+      };
+      setDeviceToolsDependencies({
+        timer,
+        lifecycleCoordinator,
+        exactDeviceProvisionerFactory: () => provisioner,
+        ensureCtrlProxyReady: async () => {
+          throw new Error("runner readiness failed");
+        },
+        idGenerator: new FakeIdGenerator([`cleanup-failure-${platform}`]),
+      });
+      registerDeviceTools();
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+
+      const response = JSON.parse(
+        (
+          (await tool.handler(
+            provisionTestArgs(platform, `operation-cleanup-failure-${platform}`),
+          )) as any
+        ).content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        error: {
+          code: "cleanup_failed",
+          message: expect.stringContaining("platform delete failed"),
+        },
+        provisionFailure: {
+          code: "platform_command_failed",
+          message: expect.stringContaining("runner readiness failed"),
+        },
+        cleanup: {
+          status: "failed",
+          operationId: `cleanup-failure-${platform}`,
+          failure: {
+            code: "operation_failed",
+            phase: "destroy",
+            message: expect.stringContaining("platform delete failed"),
+          },
+        },
+      });
+      expect(destroyCalls).toBe(1);
+
+      const releasedLease = await lifecycleCoordinator.reserve(
+        {
+          kind: "stable",
+          platform,
+          stableId: platform === "android" ? provisioned.device.name : "SIM-123",
+        },
+        { operation: "provision", deadlineMs: timer.now() + 1 },
+      );
+      releasedLease.release();
+    });
+
+    test(`${platform}: retries the same failed operation and returns stable success fields`, async () => {
+      const provisioned = provisionedTestDevice(platform, true);
+      configureProvisionBootAndTeardown(deviceManager, platform);
+      let provisionCalls = 0;
+      const provisioner: ExactDeviceProvisioner = {
+        provision: async (request) => {
+          provisionCalls++;
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      };
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => provisioner,
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+          if (readinessCalls === 1) {
+            throw new Error("first readiness attempt failed");
+          }
+        },
+        idGenerator: new FakeIdGenerator([`cleanup-retry-${platform}`]),
+      });
+      registerDeviceTools();
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+      const args = provisionTestArgs(platform, `operation-retry-cleanup-${platform}`);
+
+      const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+      const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+      expect(failed).toMatchObject({
+        success: false,
+        cleanup: { status: "succeeded" },
+      });
+      expect(retried).toMatchObject({
+        operationId: args.operationId,
+        created: true,
+        adopted: false,
+        lifecycleState: "ready",
+        readiness: { mode: "automation", status: "automation_ready" },
+        sessionId: expect.any(String),
+        device: {
+          name: provisioned.device.name,
+          platform,
+          deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
+        },
+      });
+      expect(provisionCalls).toBe(2);
+    });
+  }
+
+  test("rolls back before a queued provision for the same device begins", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const provisioned = provisionedTestDevice("android", true);
+    const firstReadinessStarted = Promise.withResolvers<void>();
+    const failFirstReadiness = Promise.withResolvers<void>();
+    let readinessCalls = 0;
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+        if (readinessCalls === 1) {
+          firstReadinessStarted.resolve();
+          await failFirstReadiness.promise;
+          throw new Error("first readiness attempt failed");
+        }
       },
-    ]);
+      idGenerator: new FakeIdGenerator(["cleanup-queued-provision"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const first = tool.handler(provisionTestArgs("android", "operation-queued-first"));
+    await firstReadinessStarted.promise;
+    let secondSettled = false;
+    const second = tool
+      .handler(provisionTestArgs("android", "operation-queued-second"))
+      .finally(() => {
+        secondSettled = true;
+      });
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    expect(secondSettled).toBe(false);
+
+    failFirstReadiness.resolve();
+    const firstResponse = JSON.parse(((await first) as any).content[0].text);
+    const secondResponse = JSON.parse(((await second) as any).content[0].text);
+
+    expect(firstResponse).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded" },
+    });
+    expect(secondResponse).toMatchObject({
+      operationId: "operation-queued-second",
+      lifecycleState: "ready",
+      readiness: { status: "automation_ready" },
+    });
+  });
+
+  test("cleans up an Android AVD created before exact provisioning fails", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [created.device]);
+          throw new Error("writing AVD memory configuration failed");
+        },
+      }),
+      idGenerator: new FakeIdGenerator(["cleanup-partial-android"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse(
+      (
+        (await tool.handler(
+          provisionTestArgs("android", "operation-partial-create-android"),
+        )) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", operationId: "cleanup-partial-android" },
+    });
+    expect(await deviceManager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("cleans up a retried operation's adopted device when the original cleanup failed", async () => {
+    const adopted = provisionedTestDevice("android", false);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    const originalDestroyDevice = deviceManager.destroyDevice.bind(deviceManager);
+    let failFirstCleanup = true;
+    deviceManager.destroyDevice = async (device) => {
+      if (failFirstCleanup) {
+        failFirstCleanup = false;
+        throw new Error("first cleanup failed");
+      }
+      await originalDestroyDevice(device);
+    };
+    let provisionCalls = 0;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls++;
+          if (provisionCalls === 1) {
+            await request.onBeforeCreate?.();
+            deviceManager.setDeviceImages("android", [adopted.device]);
+            throw new Error("writing AVD memory configuration failed");
+          }
+          return adopted;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("retry readiness failed");
+      },
+      idGenerator: new FakeIdGenerator([
+        "cleanup-partial-first-android",
+        "cleanup-partial-retry-android",
+      ]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs("android", "operation-partial-retry-android");
+
+    const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(initial).toMatchObject({
+      success: false,
+      cleanup: { status: "failed", operationId: "cleanup-partial-first-android" },
+    });
+    expect(retried).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", operationId: "cleanup-partial-retry-android" },
+    });
+    expect(await deviceManager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("does not retain creation ownership after verified rollback", async () => {
+    const created = provisionedTestDevice("android", true);
+    const replacement = provisionedTestDevice("android", false);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    let provisionCalls = 0;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls++;
+          if (provisionCalls === 1) {
+            await request.onBeforeCreate?.();
+            deviceManager.setDeviceImages("android", [created.device]);
+            throw new Error("writing AVD memory configuration failed");
+          }
+          return replacement;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("replacement readiness failed");
+      },
+      idGenerator: new FakeIdGenerator(["cleanup-original-android"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs("android", "operation-cleaned-up-retry-android");
+
+    const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    deviceManager.setDeviceImages("android", [replacement.device]);
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(initial).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", operationId: "cleanup-original-android" },
+    });
+    expect(retried).toMatchObject({ success: false });
+    expect(retried.cleanup).toBeUndefined();
+    expect(await deviceManager.listDeviceImages("android")).toEqual([replacement.device]);
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toHaveLength(1);
+  });
+
+  test("adopts a running Android AVD by resolving its transport ID before boot", async () => {
+    const existing = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      isRunning: true,
+    };
+    deviceManager.setDeviceImages("android", [existing]);
     deviceManager.setBootedDevices("android", [
       {
         name: "phone-api-36-a",
@@ -422,6 +944,20 @@ describe("provisionDevice handler", () => {
         deviceId: "emulator-5554",
       },
     ]);
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () => ({
+          created: false,
+          device: existing,
+          resolvedSpec: {
+            runtime: "system-images;android-36;google_apis;x86_64",
+            deviceType: "pixel_9",
+            displayCutout: "hole_punch",
+          },
+        }),
+      }),
+    });
+    registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
@@ -447,7 +983,11 @@ describe("provisionDevice handler", () => {
 
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
     expect(result).toMatchObject({
+      created: false,
+      adopted: true,
       lifecycleState: "ready",
+      readiness: { mode: "none", status: "device_ready" },
+      sessionId: expect.any(String),
       device: {
         deviceId: "emulator-5554",
         name: "phone-api-36-a",
@@ -518,6 +1058,11 @@ describe("provisionDevice handler", () => {
     );
 
     expect(response).toMatchObject({
+      created: false,
+      adopted: true,
+      lifecycleState: "ready",
+      readiness: { mode: "none", status: "device_ready" },
+      sessionId: expect.any(String),
       device: {
         deviceId: "requested-udid",
       },
@@ -834,27 +1379,7 @@ describe("provisionDevice handler", () => {
       ensureCtrlProxyReady: async () => {},
     });
 
-    let setupCalls = 0;
-    const originalGetInstance = AndroidCtrlProxyManager.getInstance;
-    const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      close: async () => {},
-    })) as any;
-    AndroidCtrlProxyClient.resetInstances();
-    // This test drives the real `ensureAccessibilityServiceReady` path and
-    // counts setup via the `getInstance` overrides above; restore the real
-    // readiness driver so those overrides take effect (the shared preload's
-    // no-op driver is re-installed in `finally`) — #6227.
-    setDeviceReadinessProxyDriverProviderForTesting(null);
+    const ctrlProxySetup = stubCtrlProxySetup();
 
     try {
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -897,13 +1422,10 @@ describe("provisionDevice handler", () => {
       });
 
       expect(automationResponse).toMatchObject({ success: true });
-      expect(setupCalls).toBe(1);
+      expect(ctrlProxySetup.setupCallCount()).toBe(1);
       expect(sessionManager.getDeviceReadiness(sessionUuid)).toBe("automationReady");
     } finally {
-      AndroidCtrlProxyManager.getInstance = originalGetInstance;
-      AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
-      AndroidCtrlProxyClient.resetInstances();
-      installNoOpReadinessDriver();
+      ctrlProxySetup.restore();
       sessionManager.stopCleanupTimer();
     }
   });
@@ -1205,7 +1727,7 @@ describe("provisionDevice handler", () => {
     expect(second).toMatchObject({ created: true, adopted: false });
   });
 
-  test("retains creation ownership after a failed lifecycle retry", async () => {
+  test("clears creation ownership after a successful lifecycle rollback", async () => {
     let calls = 0;
     const retryingProvisioner: ExactDeviceProvisioner = {
       provision: async (request) => {
@@ -1267,7 +1789,7 @@ describe("provisionDevice handler", () => {
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(failed).toMatchObject({ success: false });
-    expect(retried).toMatchObject({ created: true, adopted: false });
+    expect(retried).toMatchObject({ created: false, adopted: true });
     expect(calls).toBe(2);
   });
 
@@ -1427,5 +1949,37 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionSignal?.aborted).toBe(true);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("reserves rollback and response time from the daemon's queued-request deadline", async () => {
+    const timer = new FakeTimer();
+    let provisionDeadlineMs: number | undefined;
+    setDeviceToolsDependencies({
+      timer,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionDeadlineMs = request.deadlineMs;
+          return provisionedTestDevice("android", true);
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    await tool.handler({
+      ...provisionTestArgs("android", "operation-queued-deadline"),
+      boot: false,
+      readiness: "none",
+      timeoutMs: 100_000,
+      // The outer request originally had 165s (100s provisioning + 60s
+      // rollback + 5s response headroom); 20s elapsed in the socket queue.
+      __mcpRequestTimeoutMs: 145_000,
+      __mcpRequestDeadlineMs: 145_000,
+    });
+
+    expect(provisionDeadlineMs).toBe(80_000);
   });
 });

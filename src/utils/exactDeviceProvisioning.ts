@@ -75,6 +75,7 @@ export interface ExactProvisionedDevice {
 }
 
 export type ProvisionDeviceFailureCode =
+  | "cleanup_failed"
   | "creation_not_allowed"
   | "identity_conflict"
   | "timeout"

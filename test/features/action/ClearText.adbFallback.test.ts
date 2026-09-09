@@ -46,6 +46,7 @@ describe("ClearText Android ADB fallback", () => {
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {
+      updatedAt: 100,
       hierarchy: {
         node: {
           $: {
@@ -109,7 +110,9 @@ describe("ClearText Android ADB fallback", () => {
 
   test("rejects an accessibility success when no editable field remains focused after refresh", async () => {
     const result = await runClearText(noFocusedFieldObserve(), (clearText) => {
-      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(noFocusedFieldObserve());
+      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
+        noFocusedFieldObserve(),
+      );
     });
 
     expect(result).toEqual({
@@ -127,7 +130,47 @@ describe("ClearText Android ADB fallback", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(refreshSpy).toHaveBeenCalledWith({ skipWaitForFresh: false });
+    expect(refreshSpy).toHaveBeenCalledWith({ skipWaitForFresh: false, minTimestamp: 101 });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("uses the refreshed focused field for the ADB fallback when a11y clear fails", async () => {
+    fakeA11yService.setClearTextResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "no focused node",
+    });
+
+    const result = await runClearText(noFocusedFieldObserve(), (clearText) => {
+      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
+        focusedFieldObserve("hello"),
+      );
+    });
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+    ]);
+  });
+
+  test("does not treat a stale refreshed hierarchy as proof that no field is focused", async () => {
+    const staleNoFocusObserve = {
+      ...noFocusedFieldObserve(),
+      freshness: { isFresh: false },
+    };
+    const result = await runClearText(noFocusedFieldObserve(), (clearText) => {
+      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(staleNoFocusObserve);
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: "No focused editable node found",
+    });
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 

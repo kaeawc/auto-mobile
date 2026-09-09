@@ -5,6 +5,19 @@ import type { CrashEvent, AnrEvent } from "../utils/interfaces/CrashMonitor";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import {
+  createRowCapRetentionState,
+  pruneTableByRowCap,
+  runAmortizedRetention,
+} from "./rowCapRetention";
+
+// `crashes`/`anrs` accumulate per crash/ANR detection with no prior cap (#6464).
+// Separate amortization counters since the two tables are inserted into
+// independently (a crash burst must not starve ANR retention and vice versa).
+const CRASH_RETENTION_MAX_ROWS = 10_000;
+const ANR_RETENTION_MAX_ROWS = 10_000;
+const crashRetentionState = createRowCapRetentionState();
+const anrRetentionState = createRowCapRetentionState();
 
 /**
  * Query options for fetching failures
@@ -112,6 +125,8 @@ export class FailureEventRepository {
       `[FAILURE_REPO] Saved crash for ${event.packageName}: ${event.exceptionClass ?? "unknown"}`,
     );
 
+    await this.cleanupCrashRetention();
+
     return result.id;
   }
 
@@ -149,6 +164,8 @@ export class FailureEventRepository {
     logger.info(
       `[FAILURE_REPO] Saved ANR for ${event.packageName}: ${event.reason ?? "unknown reason"}`,
     );
+
+    await this.cleanupAnrRetention();
 
     return result.id;
   }
@@ -453,13 +470,44 @@ export class FailureEventRepository {
 
     await db.deleteFrom("anrs").where("timestamp", "<", cutoffTimestamp).execute();
 
-    await db
-      .deleteFrom("tool_calls")
-      .where("status", "=", "failure")
-      .where("timestamp", "<", cutoffDate)
-      .execute();
+    // No `status = 'failure'` filter (#6464): the real write path
+    // (`ToolCallRepository.recordToolCall`) never sets `status`, so it falls
+    // through to the column's schema-level `DEFAULT 'success'`
+    // (`2026_01_27_000_crash_anr_monitoring.ts`) — never `'failure'` — so that
+    // filter previously matched zero rows regardless of age. Age-based
+    // deletion now mirrors the unconditional crash/ANR deletes above.
+    await db.deleteFrom("tool_calls").where("timestamp", "<", cutoffDate).execute();
 
     logger.info(`[FAILURE_REPO] Deleted failures older than ${olderThanDays} days`);
+  }
+
+  // Amortize the offset-probe: fire at most once per CLEANUP_CHECK_INTERVAL
+  // inserts (#6464), mirroring the other RowCapTable repositories so retention
+  // does not add a scan to the hot insert path.
+  private async cleanupCrashRetention(): Promise<void> {
+    await runAmortizedRetention(crashRetentionState, () => this.pruneCrashesToRowCap());
+  }
+
+  private async cleanupAnrRetention(): Promise<void> {
+    await runAmortizedRetention(anrRetentionState, () => this.pruneAnrsToRowCap());
+  }
+
+  // `maxRows` is injectable so tests can exercise trimming at a small cap
+  // without inserting 10k rows.
+  private async pruneCrashesToRowCap(maxRows: number = CRASH_RETENTION_MAX_ROWS): Promise<void> {
+    try {
+      await pruneTableByRowCap(this.getDb(), "crashes", maxRows);
+    } catch (error) {
+      logger.warn(`[FAILURE_REPO] Crash row-cap retention cleanup failed: ${error}`);
+    }
+  }
+
+  private async pruneAnrsToRowCap(maxRows: number = ANR_RETENTION_MAX_ROWS): Promise<void> {
+    try {
+      await pruneTableByRowCap(this.getDb(), "anrs", maxRows);
+    } catch (error) {
+      logger.warn(`[FAILURE_REPO] ANR row-cap retention cleanup failed: ${error}`);
+    }
   }
 
   /**

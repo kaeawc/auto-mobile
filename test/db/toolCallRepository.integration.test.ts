@@ -157,3 +157,84 @@ describe("ToolCallRepository", () => {
     expect(result).toEqual(["keep1", "keep2"]);
   });
 });
+
+// Regression for #6464: `tool_calls` received one insert per MCP tool call for
+// the life of the process with no cap and no scheduled cleanup. These tests
+// prove the row-cap retention wired directly into `recordToolCall` — the real
+// production write path (`toolRegistry.ts`) — actually bounds the table.
+describe("ToolCallRepository row-cap retention (#6464)", () => {
+  let db: Kysely<Database>;
+  let repo: ToolCallRepository;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    repo = new ToolCallRepository(db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  test("pruneToRowCap trims to exactly the cap, keeping the newest rows by (timestamp, id)", async () => {
+    for (let i = 1; i <= 12; i++) {
+      await repo.recordToolCall({
+        toolName: `tool-${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    await (repo as any).pruneToRowCap(5);
+
+    const rows = await db
+      .selectFrom("tool_calls")
+      .select("tool_name")
+      .orderBy("timestamp", "asc")
+      .execute();
+    expect(rows.map((r) => r.tool_name)).toEqual([
+      "tool-8",
+      "tool-9",
+      "tool-10",
+      "tool-11",
+      "tool-12",
+    ]);
+  });
+
+  test("pruneToRowCap under the cap deletes nothing (count(*) gate short-circuits)", async () => {
+    for (let i = 1; i <= 3; i++) {
+      await repo.recordToolCall({
+        toolName: `tool-${i}`,
+        timestamp: `2024-01-01T00:00:0${i}.000Z`,
+      });
+    }
+
+    await (repo as any).pruneToRowCap(10);
+
+    const rows = await db.selectFrom("tool_calls").selectAll().execute();
+    expect(rows).toHaveLength(3);
+  });
+
+  // The row-cap retention must trim rows written via the REAL production
+  // write path — status left unset, matching real call sites (#6464) — not a
+  // hand-built fixture that sets `status` directly.
+  test("row-cap retention bounds rows inserted with status left unset (the real recordToolCall shape)", async () => {
+    for (let i = 1; i <= 6; i++) {
+      await repo.recordToolCall({
+        toolName: `tool-${i}`,
+        timestamp: `2024-01-01T00:00:0${i}.000Z`,
+      });
+    }
+    // `status` defaults to "success" at the schema level when the real write
+    // path (`recordToolCall`) omits it — never "failure" or NULL.
+    const beforePrune = await db.selectFrom("tool_calls").selectAll().execute();
+    expect(beforePrune.every((row) => row.status === "success")).toBe(true);
+
+    await (repo as any).pruneToRowCap(2);
+
+    const rows = await db
+      .selectFrom("tool_calls")
+      .select("tool_name")
+      .orderBy("timestamp", "asc")
+      .execute();
+    expect(rows.map((r) => r.tool_name)).toEqual(["tool-5", "tool-6"]);
+  });
+});

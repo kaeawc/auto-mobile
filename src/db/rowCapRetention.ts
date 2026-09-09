@@ -25,7 +25,17 @@ export const CLEANUP_CHECK_INTERVAL = 256;
 // column (the trim's ordering keys). Kept as an explicit union — rather than a
 // broad `keyof Database` — so `.select(["id", "timestamp"])` stays type-checked
 // and callers can't point the helper at a table that lacks those columns.
-export type RowCapTable = "performance_audit_results" | "test_executions" | "failure_occurrences";
+// `tool_calls`/`crashes`/`anrs` (#6464) join the same union: `tool_calls.timestamp`
+// is an ISO string like `performance_audit_results`, while `crashes`/`anrs.timestamp`
+// are numeric like `test_executions` — the mixed-type precedent already established
+// by this union's first two members.
+export type RowCapTable =
+  | "performance_audit_results"
+  | "test_executions"
+  | "failure_occurrences"
+  | "tool_calls"
+  | "crashes"
+  | "anrs";
 
 /**
  * Trim `table` to at most `maxRows` rows, keeping the newest by

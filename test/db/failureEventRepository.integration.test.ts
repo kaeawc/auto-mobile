@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { FailureEventRepository } from "../../src/db/failureEventRepository";
+import { ToolCallRepository } from "../../src/db/toolCallRepository";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { CrashEvent, AnrEvent } from "../../src/utils/interfaces/CrashMonitor";
@@ -535,6 +536,42 @@ describe("FailureEventRepository", () => {
       expect(crashes).toHaveLength(1);
       expect(anrs).toHaveLength(1);
     });
+
+    // Regression for #6464: the `status = 'failure'` filter on the tool_calls
+    // delete never matched, because the real production write path
+    // (`ToolCallRepository.recordToolCall`) never sets `status` — it is always
+    // NULL there. Insert via that real path (status left unset, matching real
+    // call sites) rather than `saveToolCall`'s hand-built fixture that sets
+    // `status` directly, and confirm the age-based delete now removes rows
+    // regardless of status.
+    test("deletes old tool calls written via the real recordToolCall path (status left unset)", async () => {
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      timer.setCurrentTime(10 * oneDayMs);
+
+      const toolCallRepo = new ToolCallRepository(db);
+      await toolCallRepo.recordToolCall({
+        toolName: "old-tool",
+        timestamp: new Date(1 * oneDayMs).toISOString(),
+      });
+      await toolCallRepo.recordToolCall({
+        toolName: "new-tool",
+        timestamp: new Date(9 * oneDayMs).toISOString(),
+      });
+
+      // `status` defaults to "success" at the schema level (never "failure")
+      // when the real write path omits it — the old `status = 'failure'`
+      // filter matched neither this default nor a NULL, so it never matched
+      // real recordToolCall rows regardless of age.
+      const seeded = await db.selectFrom("tool_calls").selectAll().execute();
+      expect(seeded).toHaveLength(2);
+      expect(seeded.every((row) => row.status === "success")).toBe(true);
+
+      await repo.deleteOldFailures(5);
+
+      const remaining = await db.selectFrom("tool_calls").selectAll().execute();
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].tool_name).toBe("new-tool");
+    });
   });
 
   describe("getFailureCounts", () => {
@@ -640,6 +677,76 @@ describe("FailureEventRepository", () => {
 
       const counts = await repo.getFailureCounts({ packageName: "com.a" });
       expect(counts.toolCallFailures).toBe(1);
+    });
+  });
+
+  // Regression for #6464: `crashes`/`anrs` accumulate per crash/ANR detection
+  // with no prior cap. These tests prove the row-cap retention wired directly
+  // into `saveCrash`/`saveAnr` — the real production write path via
+  // `AndroidCtrlProxyClient`'s `CrashEventSink` — actually bounds the tables.
+  describe("row-cap retention (#6464)", () => {
+    test("pruneCrashesToRowCap trims to exactly the cap, keeping the newest rows", async () => {
+      for (let i = 1; i <= 12; i++) {
+        await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
+      }
+
+      await (repo as any).pruneCrashesToRowCap(5);
+
+      const crashes = await repo.getCrashes();
+      expect(crashes).toHaveLength(5);
+      expect(crashes.map((c) => c.timestamp)).toEqual([1012, 1011, 1010, 1009, 1008]);
+    });
+
+    test("pruneCrashesToRowCap under the cap deletes nothing", async () => {
+      for (let i = 1; i <= 3; i++) {
+        await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
+      }
+
+      await (repo as any).pruneCrashesToRowCap(10);
+
+      const crashes = await repo.getCrashes();
+      expect(crashes).toHaveLength(3);
+    });
+
+    test("pruneAnrsToRowCap trims to exactly the cap, keeping the newest rows", async () => {
+      for (let i = 1; i <= 12; i++) {
+        await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
+      }
+
+      await (repo as any).pruneAnrsToRowCap(5);
+
+      const anrs = await repo.getAnrs();
+      expect(anrs).toHaveLength(5);
+      expect(anrs.map((a) => a.timestamp)).toEqual([2012, 2011, 2010, 2009, 2008]);
+    });
+
+    test("pruneAnrsToRowCap under the cap deletes nothing", async () => {
+      for (let i = 1; i <= 3; i++) {
+        await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
+      }
+
+      await (repo as any).pruneAnrsToRowCap(10);
+
+      const anrs = await repo.getAnrs();
+      expect(anrs).toHaveLength(3);
+    });
+
+    // A crash burst must not starve ANR retention (and vice versa): the two
+    // tables use independent amortization counters/row caps.
+    test("crash and ANR row caps are independent", async () => {
+      for (let i = 1; i <= 4; i++) {
+        await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
+      }
+      for (let i = 1; i <= 2; i++) {
+        await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
+      }
+
+      await (repo as any).pruneCrashesToRowCap(2);
+
+      const crashes = await repo.getCrashes();
+      const anrs = await repo.getAnrs();
+      expect(crashes).toHaveLength(2);
+      expect(anrs).toHaveLength(2);
     });
   });
 });

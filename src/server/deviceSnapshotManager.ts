@@ -91,24 +91,55 @@ const LEGACY_MANIFEST_FILENAME = "manifest.json";
 // sufficient — cross-process coordination is out of scope.
 const captureLocks = new Map<string, Promise<unknown>>();
 
-function withCaptureLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
-  const prior = captureLocks.get(snapshotName) ?? Promise.resolve();
+// Serializes the archive byte-budget eviction pass across ALL names and devices.
+// Captures on different names/devices take different (per-name) capture locks, so
+// their eviction passes would otherwise interleave against the same table and the
+// same budget: each reads the same up-front list and running total, then both
+// delete least-recently-accessed rows, and a pass that gets `deleted === false`
+// for rows another pass already removed credits itself nothing and keeps walking
+// — over-evicting well past the budget and emptying the archive (issue #6491).
+// Running the whole pass under one lock keyed on a CONSTANT makes passes QUEUE,
+// so each pass's up-front list/total read is accurate for its own duration. This
+// narrows rather than widens what is held: capture work stays parallel; only the
+// budget arithmetic is one-at-a-time. A separate map (not captureLocks) is used so
+// a snapshot whose name happens to equal the key can't serialize against it.
+const archiveBudgetLocks = new Map<string, Promise<unknown>>();
+const ARCHIVE_BUDGET_LOCK_KEY = "archive-budget";
+
+// Shared serialization primitive: run `task` after any prior holder of `key`
+// settles, keeping a promise-chain tail in `locks` and dropping the entry once
+// this is the last holder so the map doesn't grow unbounded.
+function withSerializedLock<T>(
+  locks: Map<string, Promise<unknown>>,
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const prior = locks.get(key) ?? Promise.resolve();
   // Run after the prior holder settles, regardless of whether it resolved or
-  // rejected, so one failed capture doesn't wedge every later same-name capture.
+  // rejected, so one failed holder doesn't wedge every later one for this key.
   const run = prior.then(task, task);
   const tail = run.then(
     () => undefined,
     () => undefined,
   );
-  captureLocks.set(snapshotName, tail);
+  locks.set(key, tail);
   void tail.finally(() => {
-    // Drop the entry once this is the last holder, so the map doesn't grow
-    // unbounded across distinct snapshot names.
-    if (captureLocks.get(snapshotName) === tail) {
-      captureLocks.delete(snapshotName);
+    if (locks.get(key) === tail) {
+      locks.delete(key);
     }
   });
   return run;
+}
+
+function withCaptureLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
+  return withSerializedLock(captureLocks, snapshotName, task);
+}
+
+// A capture holds its per-NAME capture lock while awaiting this DISTINCT
+// constant-keyed lock; the budget lock is a leaf (nothing acquired here awaits a
+// capture lock), so there is no re-entrancy and no deadlock.
+function withArchiveBudgetLock<T>(task: () => Promise<T>): Promise<T> {
+  return withSerializedLock(archiveBudgetLocks, ARCHIVE_BUDGET_LOCK_KEY, task);
 }
 
 function getSnapshotPathOptions(context: {
@@ -170,6 +201,7 @@ export async function setDeviceSnapshotManagerDependencies(
 export function resetDeviceSnapshotManagerDependencies(): void {
   moduleDependencies = null;
   captureLocks.clear();
+  archiveBudgetLocks.clear();
 }
 
 function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput {
@@ -469,55 +501,62 @@ function isReservedScopeSegment(snapshotName: string): boolean {
 async function enforceDeviceSnapshotArchiveLimit(
   maxArchiveSizeMb: number,
 ): Promise<SnapshotArchiveEvictionResult> {
-  const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
-  const { snapshotRepository } = await getDeviceSnapshotDependencies();
-  const snapshots = await snapshotRepository.listSnapshots({
-    orderByLastAccessed: "asc",
-  });
+  // The entire pass — list read, running total, and delete loop — runs under one
+  // constant-keyed lock so concurrent passes queue instead of interleaving. A
+  // later pass therefore re-reads a fresh, accurate list AFTER the prior pass
+  // finished deleting, and only ever credits/reports rows it actually removed
+  // (issue #6491).
+  return withArchiveBudgetLock(async () => {
+    const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
+    const { snapshotRepository } = await getDeviceSnapshotDependencies();
+    const snapshots = await snapshotRepository.listSnapshots({
+      orderByLastAccessed: "asc",
+    });
 
-  let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
+    let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
 
-  if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
+    if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
+      return {
+        evictedSnapshotNames: [],
+        currentSizeBytes,
+        maxSizeBytes,
+      };
+    }
+
+    const evictedSnapshotNames: string[] = [];
+
+    for (const snapshot of snapshots) {
+      if (currentSizeBytes <= maxSizeBytes) {
+        break;
+      }
+
+      try {
+        const deleted = await deleteDeviceSnapshotRecord(snapshot);
+        if (deleted) {
+          evictedSnapshotNames.push(snapshot.snapshotName);
+          currentSizeBytes -= snapshot.sizeBytes;
+        }
+      } catch (error) {
+        logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`);
+      }
+    }
+
+    if (currentSizeBytes > maxSizeBytes) {
+      logger.warn(
+        `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
+      );
+    }
+
+    if (evictedSnapshotNames.length > 0) {
+      await notifySnapshotResources();
+    }
+
     return {
-      evictedSnapshotNames: [],
+      evictedSnapshotNames,
       currentSizeBytes,
       maxSizeBytes,
     };
-  }
-
-  const evictedSnapshotNames: string[] = [];
-
-  for (const snapshot of snapshots) {
-    if (currentSizeBytes <= maxSizeBytes) {
-      break;
-    }
-
-    try {
-      const deleted = await deleteDeviceSnapshotRecord(snapshot);
-      if (deleted) {
-        evictedSnapshotNames.push(snapshot.snapshotName);
-        currentSizeBytes -= snapshot.sizeBytes;
-      }
-    } catch (error) {
-      logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`);
-    }
-  }
-
-  if (currentSizeBytes > maxSizeBytes) {
-    logger.warn(
-      `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
-    );
-  }
-
-  if (evictedSnapshotNames.length > 0) {
-    await notifySnapshotResources();
-  }
-
-  return {
-    evictedSnapshotNames,
-    currentSizeBytes,
-    maxSizeBytes,
-  };
+  });
 }
 
 export async function getDeviceSnapshotConfig(): Promise<DeviceSnapshotConfig> {

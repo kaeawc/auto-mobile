@@ -247,6 +247,144 @@ describe("deviceSnapshotManager", () => {
     expect(listed[0]?.snapshotName).toBe("race");
   });
 
+  test("concurrent captures on two devices run one budget eviction, never over-evicting (#6491)", async () => {
+    // Two sessions capture DIFFERENT names on DIFFERENT devices. They take
+    // different per-NAME capture locks, so both reach the archive-budget
+    // eviction phase concurrently. Under the pre-fix code both eviction passes
+    // read the same list and the same running total up front, then delete
+    // least-recently-accessed first: pass A evicts the over-budget tail while
+    // pass B — getting `deleted === false` for every row A already removed —
+    // credits itself nothing and keeps walking, deleting snapshots that were
+    // never over budget (including a snapshot the other session just captured),
+    // emptying the archive. The fix serializes the budget arithmetic on one
+    // constant-keyed lock, so the second pass re-reads a fresh, accurate list.
+    const MB = 1024 * 1024;
+    const maxArchiveSizeMb = 3;
+    const maxSizeBytes = maxArchiveSizeMb * MB;
+
+    const config: DeviceSnapshotConfig = {
+      includeAppData: true,
+      includeSettings: true,
+      useVmSnapshot: false,
+      strictBackupMode: false,
+      vmSnapshotTimeoutMs: 12000,
+      maxArchiveSizeMb,
+    };
+    await configRepository.setConfig(config);
+
+    // Physical-style device ids (not "emulator-...") keep the eviction delete on
+    // the simple unscoped path — no AVD-scoped second delete to reason about.
+    const deviceA: BootedDevice = { deviceId: "device-a", name: "Device A", platform: "android" };
+    const deviceB: BootedDevice = { deviceId: "device-b", name: "Device B", platform: "android" };
+
+    // Three pre-seeded 1 MB snapshots, oldest-accessed first.
+    for (const [name, accessedMs] of [
+      ["s1", 1000],
+      ["s2", 2000],
+      ["s3", 3000],
+    ] as const) {
+      const timestamp = new Date(accessedMs).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: name,
+        timestamp,
+        deviceId: "seed-device",
+        deviceName: "Seed Device",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName: name,
+        deviceId: "seed-device",
+        deviceName: "Seed Device",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 1 * MB,
+        manifest,
+      });
+    }
+
+    // The two new captures are the newest-accessed and 1 MB each. After both
+    // insert, the archive holds 5 MB against a 3 MB budget, so a correct single
+    // pass evicts exactly the two oldest (s1, s2) and stops.
+    fakeTimer.advanceTime(1_000_000);
+    store.setSnapshotSize("cap-a", 1 * MB);
+    store.setSnapshotSize("cap-b", 1 * MB);
+
+    // A deferred gate per capture: both captures block inside the provider until
+    // released, so both are in flight and both reach eviction together.
+    const started: string[] = [];
+    const releases: Array<() => void> = [];
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async (args) => {
+          started.push(args.snapshotName);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          const timestamp = new Date(fakeTimer.now()).toISOString();
+          const manifest: DeviceSnapshotManifest = {
+            snapshotName: args.snapshotName,
+            timestamp,
+            deviceId: TEST_DEVICE.deviceId,
+            deviceName: TEST_DEVICE.name,
+            platform: TEST_DEVICE.platform,
+            snapshotType: "adb",
+            includeAppData: args.includeAppData ?? true,
+            includeSettings: args.includeSettings ?? true,
+          };
+          return { snapshotName: args.snapshotName, timestamp, snapshotType: "adb", manifest };
+        },
+      }),
+    });
+
+    // Deterministic microtask-only polling — no real timers.
+    const waitUntil = async (cond: () => boolean): Promise<void> => {
+      for (let i = 0; i < 1000 && !cond(); i++) {
+        await Promise.resolve();
+      }
+      if (!cond()) {
+        throw new Error(`waitUntil timed out; started=${JSON.stringify(started)}`);
+      }
+    };
+
+    const p1 = captureDeviceSnapshot(deviceA, { snapshotName: "cap-a", includeAppData: true });
+    const p2 = captureDeviceSnapshot(deviceB, { snapshotName: "cap-b", includeAppData: true });
+
+    // Both captures are simultaneously in flight (different names => different locks).
+    await waitUntil(() => started.length >= 2);
+    expect(started.slice().sort()).toEqual(["cap-a", "cap-b"]);
+
+    // Release both; both proceed to insert their record and then evict.
+    releases.forEach((release) => release());
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    const survivors = (await repository.listSnapshots()).map((record) => record.snapshotName);
+    const survivorNames = new Set(survivors);
+    const totalSize = (await repository.listSnapshots()).reduce(
+      (sum, record) => sum + record.sizeBytes,
+      0,
+    );
+    const allInitial = ["s1", "s2", "s3", "cap-a", "cap-b"];
+    const rowsRemoved = allInitial.filter((name) => !survivorNames.has(name)).sort();
+    const evictedUnion = [...r1.evictedSnapshotNames, ...r2.evictedSnapshotNames].sort();
+
+    // Only the over-budget tail (the two oldest) is evicted; nothing beyond it.
+    expect(survivorNames).toEqual(new Set(["s3", "cap-a", "cap-b"]));
+    // Neither session's freshly-captured snapshot was destroyed by the other pass.
+    expect(await repository.getSnapshot("cap-a")).not.toBeNull();
+    expect(await repository.getSnapshot("cap-b")).not.toBeNull();
+    // The archive ends trimmed to (not below) the budget.
+    expect(totalSize).toBe(maxSizeBytes);
+    expect(totalSize).toBeLessThanOrEqual(maxSizeBytes);
+    // Reported evicted names equal the rows actually removed — no phantoms, no omissions.
+    expect(rowsRemoved).toEqual(["s1", "s2"]);
+    expect(evictedUnion).toEqual(["s1", "s2"]);
+  });
+
   test("restoreDeviceSnapshot touches lastAccessedAt and forwards manifest", async () => {
     const createdAt = new Date(0).toISOString();
     const manifest: DeviceSnapshotManifest = {

@@ -9,7 +9,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatalog";
 import { deviceResourceDescriptions } from "../../src/models/deviceResourceDescriptions";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 
 const udid = "12345678-1234-1234-1234-123456789ABC";
 const label = "com.apple.PosterBoard";
@@ -167,7 +167,7 @@ describe("device resource control", () => {
       ["spawn", udid, "launchctl", "bootout", `system/${label}`],
     ]);
     expect(plist.paths).toEqual([
-      "/runtime/System/Library/LaunchAngels/com.apple.PosterBoard.plist",
+      join("/runtime", "System", "Library", "LaunchAngels", "com.apple.PosterBoard.plist"),
     ]);
   });
 
@@ -184,7 +184,7 @@ describe("device resource control", () => {
         "launchctl",
         "bootstrap",
         "system",
-        "/runtime/System/Library/LaunchAngels/com.apple.PosterBoard.plist",
+        join("/runtime", "System", "Library", "LaunchAngels", "com.apple.PosterBoard.plist"),
       ],
     ]);
   });
@@ -493,7 +493,13 @@ describe("device resource control", () => {
     request.resources = { icloudSettingsSync: "disabled" };
     expect((await aliasController.setResources(request)).success).toBe(true);
     expect(plist.paths).toContain(
-      "/runtime/System/Library/LaunchDaemons/com.apple.CloudSettingsSyncAgent.plist",
+      join(
+        "/runtime",
+        "System",
+        "Library",
+        "LaunchDaemons",
+        "com.apple.CloudSettingsSyncAgent.plist",
+      ),
     );
   });
 

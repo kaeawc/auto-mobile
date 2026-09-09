@@ -1092,6 +1092,10 @@ export class CtrlProxyHierarchy {
 
     const converted: any = {};
 
+    if (node.actions) {
+      converted.actions = node.actions;
+    }
+
     // Copy over all properties
     if (node.text) {
       converted.text = node.text;

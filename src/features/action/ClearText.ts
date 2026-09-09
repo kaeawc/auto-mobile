@@ -11,6 +11,8 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
 
+export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
+
 export function getFocusedTextLength(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
@@ -149,6 +151,34 @@ export class ClearText extends BaseVisualChange {
    * Falls back to ADB delete key events if a11y service is unavailable.
    */
   private async executeAndroidClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
+    const viewHierarchy = observeResult.viewHierarchy;
+    let fallbackObserveResult = observeResult;
+    if (
+      viewHierarchy &&
+      !viewHierarchy.hierarchy.error &&
+      !hasFocusedTextInput(viewHierarchy, this.parser)
+    ) {
+      const refreshedObserveResult = await this.refreshFocusedTextInputObservation(
+        viewHierarchy,
+      ).catch((error: unknown) => {
+        logger.warn("[ClearText] Focus refresh unavailable; trying live clearing", error);
+        return undefined;
+      });
+      if (
+        refreshedObserveResult?.viewHierarchy &&
+        !hasFocusedTextInput(refreshedObserveResult.viewHierarchy, this.parser)
+      ) {
+        return {
+          success: false,
+          error: "No focused editable node found",
+        };
+      }
+      fallbackObserveResult = refreshedObserveResult ?? {
+        ...observeResult,
+        viewHierarchy: undefined,
+      };
+    }
+
     // Use accessibility service (fastest method, ~50-80ms vs ~200-500ms for ADB deletes)
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestClearText();
@@ -164,7 +194,37 @@ export class ClearText extends BaseVisualChange {
     logger.warn(
       `[ClearText] Accessibility service clear failed: ${a11yResult.error}, falling back to ADB`,
     );
-    return this.executeAdbClearText(observeResult);
+    return this.executeAdbClearText(fallbackObserveResult);
+  }
+
+  /** Returns a fresh usable hierarchy, or undefined when focus cannot be determined. */
+  private async refreshFocusedTextInputObservation(
+    viewHierarchy: ViewHierarchyResult,
+  ): Promise<ObserveResult | undefined> {
+    let minTimestamp: number;
+    if (typeof viewHierarchy.updatedAt === "number") {
+      minTimestamp = viewHierarchy.updatedAt + 1;
+    } else {
+      const timestampResult = await this.adb.getDeviceTimestampMsWithSource();
+      if (timestampResult.source === "host") {
+        return undefined;
+      }
+      minTimestamp =
+        timestampResult.source === "device-seconds"
+          ? timestampResult.timestampMs + DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS
+          : timestampResult.timestampMs;
+    }
+
+    const refreshedObserveResult = await this.observeScreen.execute({
+      skipWaitForFresh: false,
+      minTimestamp,
+    });
+    const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
+    return refreshedObserveResult.freshness?.isFresh !== false &&
+      refreshedViewHierarchy &&
+      !refreshedViewHierarchy.hierarchy.error
+      ? refreshedObserveResult
+      : undefined;
   }
 
   /**

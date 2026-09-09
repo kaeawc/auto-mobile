@@ -3,6 +3,7 @@ import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/Ctr
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/android/types";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { hasFocusedTextInput } from "../../../../src/features/action/ClearText";
 
 function createHierarchy(): CtrlProxyHierarchy {
   const timer = new FakeTimer();
@@ -23,6 +24,17 @@ function createHierarchy(): CtrlProxyHierarchy {
 }
 
 describe("CtrlProxyHierarchy semantic links", () => {
+  test("preserves text actions so focused custom controls remain editable after conversion", () => {
+    const result = createHierarchy().convertToViewHierarchyResult({
+      hierarchy: {
+        className: "custom.Container",
+        node: { className: "custom.Editor", focused: "true", actions: ["set_text"] },
+      },
+      updatedAt: 1,
+    });
+    expect(hasFocusedTextInput(result)).toBe(true);
+  });
+
   test("retains Android runner semantic-link metadata in the converted hierarchy", () => {
     const result = createHierarchy().convertToViewHierarchyResult({
       hierarchy: {

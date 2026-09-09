@@ -150,7 +150,7 @@ IOS_DIR="${PROJECT_ROOT}/ios"
 
 # Detect minimum iOS version from project files if not specified
 detect_min_ios_version() {
-    local min_version="15.0"  # Default fallback
+    local min_version="17.0"  # Default fallback
 
     # Use ripgrep to find all iOS deployment targets in one pass
     # Pattern matches: iOS: "16.0" or iOS: 16.0

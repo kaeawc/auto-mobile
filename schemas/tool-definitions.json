@@ -7772,7 +7772,8 @@
               "enum": ["enabled", "disabled"]
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "minProperties": 1
         },
         "device": {
           "oneOf": [
@@ -7884,7 +7885,17 @@
         }
       },
       "required": ["operationId", "device"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["resources"]
+      },
+      "then": {
+        "properties": {
+          "boot": {
+            "const": true
+          }
+        }
+      }
     }
   },
   {
@@ -8823,7 +8834,8 @@
               "enum": ["enabled", "disabled"]
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "minProperties": 1
         },
         "timeoutMs": {
           "description": "Total configuration budget in milliseconds. Defaults to 300000.",

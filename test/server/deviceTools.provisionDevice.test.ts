@@ -312,6 +312,47 @@ describe("provisionDevice handler", () => {
     },
   );
 
+  test("resource timeout leaves readiness time and returns the retained device and session", async () => {
+    const timer = new FakeTimer();
+    const resources = new FakeDeviceResourceController();
+    resources.result.success = false;
+    resources.result.resources = { wallpaperRendering: { state: "unknown", reason: "timed out" } };
+    resources.onRequest = async (request) => {
+      timer.advanceTime(request.deadlineMs - timer.now());
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", true);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    let readinessBudget = 0;
+    setDeviceToolsDependencies({
+      timer,
+      deviceResourceControllerFactory: () => resources,
+      ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
+        readinessBudget = totalDeadlineMs - timer.now();
+        if (readinessBudget <= 0) {
+          throw new Error("No readiness budget remaining");
+        }
+      },
+    });
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "resource-timeout"),
+      timeoutMs: 60_000,
+      resources: { wallpaperRendering: "disabled" },
+    });
+    expect(readinessBudget).toBeGreaterThan(0);
+    expect((response as any).isError).toBe(true);
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      success: false,
+      created: true,
+      device: { deviceId: "emulator-5554" },
+      sessionId: expect.any(String),
+      readiness: { status: "automation_ready" },
+      resources: { success: false, resources: { wallpaperRendering: { state: "unknown" } } },
+    });
+    expect(operationStore.failCalls).toBe(0);
+  });
+
   test("a changed resource request conflicts with a reused operation ID", async () => {
     const resources = new FakeDeviceResourceController();
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
@@ -1379,7 +1420,9 @@ describe("provisionDevice handler", () => {
       DaemonState.getInstance().initialize(sessionManager, pool);
       let readinessCalls = 0;
       setDeviceToolsDependencies({
-        ensureCtrlProxyReady: async () => {
+        timer,
+        ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
+          expect(totalDeadlineMs).toBeGreaterThan(timer.now());
           readinessCalls++;
         },
       });
@@ -1401,6 +1444,7 @@ describe("provisionDevice handler", () => {
         },
         boot: true,
         readiness: "automation" as const,
+        timeoutMs: 60_000,
       };
 
       const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
@@ -1412,6 +1456,9 @@ describe("provisionDevice handler", () => {
       expect(readinessCalls).toBe(2);
       expect(resourceController.requests).toHaveLength(configureResources ? 2 : 0);
       if (configureResources) {
+        resourceController.onRequest = async (request) => {
+          timer.advanceTime(request.deadlineMs - timer.now());
+        };
         resourceController.result = {
           ...resourceController.result,
           success: false,
@@ -1419,6 +1466,9 @@ describe("provisionDevice handler", () => {
         };
         const drift = await tool.handler(args);
         expect((drift as any).isError).toBe(true);
+        expect(JSON.parse((drift as any).content[0].text).sessionId).toBe(first.sessionId);
+        expect(exactProvisioner.requests).toHaveLength(1);
+        expect(readinessCalls).toBe(3);
         expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
           success: false,
         });

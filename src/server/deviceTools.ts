@@ -367,55 +367,61 @@ const iosProvisionDeviceSpecSchema = z
   })
   .strict();
 
-export const provisionDeviceSchema = z
-  .object({
-    operationId: z.string().min(1).describe("Caller-generated idempotency key"),
-    resources: deviceResourceConfigurationSchema
-      .optional()
-      .describe(
-        "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+export const provisionDeviceSchema = withJsonSchemaOverride(
+  z
+    .object({
+      operationId: z.string().min(1).describe("Caller-generated idempotency key"),
+      resources: deviceResourceConfigurationSchema
+        .optional()
+        .describe(
+          "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+        ),
+      device: withCanonicalDiscriminatedUnionJsonSchema(
+        z.discriminatedUnion("platform", [
+          z
+            .object({
+              platform: z.literal("android"),
+              name: z.string().min(1).describe("Exact AVD name"),
+              spec: androidProvisionDeviceSpecSchema,
+            })
+            .strict(),
+          z
+            .object({
+              platform: z.literal("ios"),
+              name: z.string().min(1).describe("Exact simulator name"),
+              spec: iosProvisionDeviceSpecSchema,
+            })
+            .strict(),
+        ]),
       ),
-    device: withCanonicalDiscriminatedUnionJsonSchema(
-      z.discriminatedUnion("platform", [
-        z
-          .object({
-            platform: z.literal("android"),
-            name: z.string().min(1).describe("Exact AVD name"),
-            spec: androidProvisionDeviceSpecSchema,
-          })
-          .strict(),
-        z
-          .object({
-            platform: z.literal("ios"),
-            name: z.string().min(1).describe("Exact simulator name"),
-            spec: iosProvisionDeviceSpecSchema,
-          })
-          .strict(),
-      ]),
-    ),
-    boot: z
-      .boolean()
-      .default(true)
-      .optional()
-      .describe("Boot the resolved device after creation or adoption"),
-    readiness: z
-      .enum(["automation", "none"])
-      .default("automation")
-      .optional()
-      .describe("Whether to wait for the AutoMobile automation runner after device boot"),
-    timeoutMs: z
-      .number()
-      .int()
-      .positive()
-      .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
-      .optional()
-      .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
-  })
-  .strict()
-  .refine((args) => !args.resources || args.boot !== false, {
-    path: ["resources"],
-    message: "Resource configuration requires boot=true.",
-  });
+      boot: z
+        .boolean()
+        .default(true)
+        .optional()
+        .describe("Boot the resolved device after creation or adoption"),
+      readiness: z
+        .enum(["automation", "none"])
+        .default("automation")
+        .optional()
+        .describe("Whether to wait for the AutoMobile automation runner after device boot"),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
+        .optional()
+        .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
+    })
+    .strict()
+    .refine((args) => !args.resources || args.boot !== false, {
+      path: ["resources"],
+      message: "Resource configuration requires boot=true.",
+    }),
+  (jsonSchema) => {
+    jsonSchema.if = { required: ["resources"] };
+    jsonSchema.then = { properties: { boot: { const: true } } };
+  },
+);
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -5103,9 +5109,23 @@ export function registerDeviceTools() {
     if (!args.resources) {
       return undefined;
     }
+    // Leave readiness and session binding time inside the existing total budget.
+    // On short requests, split the remaining time rather than exhausting it in resources.
+    const remainingMs = Math.max(0, deadlineMs - deps.timer.now());
+    const completionBudgetMs = Math.min(
+      remainingMs / 2,
+      args.readiness === "automation"
+        ? serverConfig.getRunnerReadinessTimeoutMs()
+        : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
     return deps
       .deviceResourceControllerFactory()
-      .setResources({ device, resources: args.resources, deadlineMs, signal });
+      .setResources({
+        device,
+        resources: args.resources,
+        deadlineMs: deadlineMs - completionBudgetMs,
+        signal,
+      });
   }
 
   async function reserveProvisionDeviceReadiness(

@@ -3,7 +3,7 @@ import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../utils/deviceTimeouts";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import {
   deviceResourceDescriptions,
   type ConfigurableDeviceResource,
@@ -18,13 +18,18 @@ const resourceShape = Object.fromEntries(
   ]),
 ) as Record<ConfigurableDeviceResource, typeof requestedState>;
 
-export const deviceResourceConfigurationSchema = z
-  .object(resourceShape)
-  .strict()
-  .refine(
-    (value) => Object.values(value).some((state) => state !== undefined),
-    "Specify at least one resource. Omitted resources remain unchanged.",
-  );
+export const deviceResourceConfigurationSchema = withJsonSchemaOverride(
+  z
+    .object(resourceShape)
+    .strict()
+    .refine(
+      (value) => Object.values(value).some((state) => state !== undefined),
+      "Specify at least one resource. Omitted resources remain unchanged.",
+    ),
+  (jsonSchema) => {
+    jsonSchema.minProperties = 1;
+  },
+);
 
 export const setDeviceResourcesSchema = addDeviceTargetingToSchema(
   z

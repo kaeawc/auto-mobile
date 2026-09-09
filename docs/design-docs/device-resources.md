@@ -93,6 +93,8 @@ completed operation.
 `setDeviceResources.timeoutMs` defaults to 300,000 milliseconds for requests
 that configure many services. Provisioning uses its existing shared deadline
 for creation, boot, resource configuration, and automation readiness.
+Within that deadline, resource configuration reserves time for readiness and
+session binding. It cannot consume the whole remaining provisioning budget.
 
 The iOS Simulator implementation controls narrow, disjoint service groups.
 Wallpaper, widgets, and Live Activities are three independent controls: disabling

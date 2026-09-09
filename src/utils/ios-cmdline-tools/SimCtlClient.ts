@@ -17,7 +17,10 @@ import {
   type DiscoveryObservationSequence,
 } from "../DiscoveryObservationSequence";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS,
+} from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
 import { getAbortSignal } from "../AbortContext";
@@ -1133,9 +1136,13 @@ export class SimCtlClient implements SimCtl {
     expectedOwnerToken?: object,
   ): Promise<void> {
     // Waiting for an active boot must not consume the shutdown command's own
-    // timeout. The caller's abort signal bounds the queue wait; once acquired,
-    // simctl shutdown receives the complete timeout budget.
-    const lease = await this.acquireSimulatorBoot(udid, undefined, signal);
+    // timeout, so the queue wait gets its own dedicated deadline instead of
+    // `timeoutMs`. That deadline is still a hard ceiling, independent of
+    // `signal`: callers with no ambient abort signal (CI boot recovery, a boot
+    // handle's cleanup) must not queue forever behind a wedged boot (issue #6577).
+    // Once the lease is acquired, simctl shutdown receives the complete timeoutMs budget.
+    const leaseDeadlineMs = this.timer.now() + SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS;
+    const lease = await this.acquireSimulatorBoot(udid, leaseDeadlineMs, signal);
     try {
       if (
         expectedOwnerToken !== undefined &&

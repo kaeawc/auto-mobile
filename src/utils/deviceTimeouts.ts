@@ -18,3 +18,9 @@ export const MAX_DEVICE_READY_TIMEOUT_MS =
 // budget so a failed newly-created device can report verified rollback status.
 export const MAX_PROVISION_DEVICE_TIMEOUT_MS =
   MAX_DEVICE_READY_TIMEOUT_MS - DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+// A coordinated shutdown must queue behind an in-flight boot without consuming
+// the shutdown command's own timeout budget (see SimCtlClient.shutdownSimulatorCoordinated),
+// but the queue wait still needs its own ceiling so a caller with no ambient
+// abort signal (CI boot recovery, boot-handle cleanup) can't block forever on a
+// wedged boot. Bound it by the same allowance a boot itself is granted.
+export const SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;

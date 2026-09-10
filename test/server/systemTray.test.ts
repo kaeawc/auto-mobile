@@ -256,6 +256,33 @@ describe("systemTray post-tap observation", () => {
     });
   }
 
+  test("stops post-tap observation when the request is cancelled", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult((index) => {
+      if (index > 0) controller.abort(new Error("request cancelled"));
+      return createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 1000 + index });
+    });
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => new SequencedFakeAdbExecutor([900]),
+      observeScreenFactory: () => observer,
+    });
+    registerInteractionTools();
+    const pending = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(
+      device,
+      { action: "tap", notification: { title: "Reply" }, platform: "android" },
+      undefined,
+      controller.signal,
+    );
+    await expect(pending).rejects.toThrow("Operation cancelled");
+    expect(observer.getExecuteCallCount()).toBe(2);
+    expect(observer.getExecuteOptions()[1].signal).toBe(controller.signal);
+    expect(timer.now()).toBe(0);
+  });
+
   for (const stale of [false, true]) {
     test(`omits uncertain evidence when ${stale ? "changed captures are stale" : "no effect arrives"}`, async () => {
       const fakeTimer = new FakeTimer();

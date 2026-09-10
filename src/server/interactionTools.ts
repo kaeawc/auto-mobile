@@ -1599,6 +1599,7 @@ export function registerInteractionTools() {
     device: BootedDevice,
     args: SystemTrayArgs,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ) => {
     try {
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
@@ -1713,6 +1714,7 @@ export function registerInteractionTools() {
         const { observation: nextObservation, settled } = await observeSystemTrayAfterTap(
           device,
           baseline,
+          signal,
         );
         await captureSystemTrayTerminalEvidence(device, nextObservation);
 

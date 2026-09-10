@@ -249,6 +249,7 @@ const observeSystemTray = (
 export const observeSystemTrayAfterTap = async (
   device: BootedDevice,
   baseline: ObserveResult,
+  signal?: AbortSignal,
 ): Promise<{ observation?: ObserveResult; settled: boolean }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
   // ADB clock probes can fall back to host time. Only hierarchy timestamps
@@ -262,6 +263,7 @@ export const observeSystemTrayAfterTap = async (
       timeoutMs: SYSTEM_TRAY_POST_TAP_TIMEOUT_MS,
       pollMs: SYSTEM_TRAY_POST_TAP_POLL_MS,
       initialMinTimestampMs: minTimestamp,
+      signal,
     },
     (observation, previous) => {
       // A freshly captured source screen still does not prove a tap effect.

@@ -18,6 +18,47 @@ describe("per-session exact-tool selection", () => {
   });
 
   for (const acquisition of ["getAndroid", "getApple"]) {
+    test(acquisition + " preserves acquisition when profile discovery fails", async () => {
+      fixture = new McpTestFixture({
+        sessionToolSelectionService: {
+          isEnabled: async (_sessionUuid, toolName, declaredDefault) => {
+            if (toolName === "inputText") {
+              throw new Error("profile database unavailable");
+            }
+            return declaredDefault;
+          },
+        },
+      });
+      await fixture.setup();
+      ToolRegistry.clearTools();
+      ToolRegistry.register(
+        acquisition,
+        "acquire",
+        z.object({}),
+        async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "acquired-session", timing: { total: 1 } }),
+            },
+          ],
+        }),
+        { defaultEnabled: true },
+      );
+      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: false,
+      });
+      const response = await fixture.client.request(
+        { method: "tools/call", params: { name: acquisition, arguments: {} } },
+        z.any(),
+      );
+      expect(response.isError).not.toBe(true);
+      expect(JSON.parse(response.content[0].text)).toEqual({
+        sessionUuid: "acquired-session",
+        timing: { total: 1 },
+      });
+    });
+
     test(
       acquisition + " names gated tools after acquisition and respects re-enabling",
       async () => {

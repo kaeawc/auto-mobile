@@ -884,30 +884,36 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !result?.isError &&
         getDeviceSessionIdFromResult(result)
       ) {
-        const listed = new Set((await listSessionTools()).tools.map((tool) => tool.name));
-        const gatedTools = ToolRegistry.getAllTools()
-          .filter(
-            (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
-          )
-          .map((tool) => tool.name)
-          .sort();
-        let enriched = false;
-        result = {
-          ...result,
-          content: result.content.map((item: { type: string; text?: string }) => {
-            if (enriched || item.type !== "text" || typeof item.text !== "string") {
-              return item;
-            }
-            enriched = true;
-            return {
-              ...item,
-              text: stringifyToolResponse({ ...JSON.parse(item.text), gatedTools }),
-            };
-          }),
-          ...(result.structuredContent
-            ? { structuredContent: { ...result.structuredContent, gatedTools } }
-            : {}),
-        };
+        try {
+          const listed = new Set((await listSessionTools()).tools.map((tool) => tool.name));
+          const gatedTools = ToolRegistry.getAllTools()
+            .filter(
+              (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
+            )
+            .map((tool) => tool.name)
+            .sort();
+          let enriched = false;
+          result = {
+            ...result,
+            content: result.content.map((item: { type: string; text?: string }) => {
+              if (enriched || item.type !== "text" || typeof item.text !== "string") {
+                return item;
+              }
+              enriched = true;
+              return {
+                ...item,
+                text: stringifyToolResponse({ ...JSON.parse(item.text), gatedTools }),
+              };
+            }),
+            ...(result.structuredContent
+              ? { structuredContent: { ...result.structuredContent, gatedTools } }
+              : {}),
+          };
+        } catch (error) {
+          // Acquisition already succeeded. Preserve its session handle so the
+          // proxy can bind and heartbeat it even if optional discovery fails.
+          logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
+        }
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&

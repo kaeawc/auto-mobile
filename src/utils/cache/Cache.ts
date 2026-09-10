@@ -213,10 +213,6 @@ export class TTLCache<K, V> implements Cache<K, V> {
     }
 
     const now = this.timer.now();
-    if (now < this.newestCreatedAt) {
-      this.expiryOrderMayBeOutOfOrder = true;
-    }
-    this.newestCreatedAt = Math.max(this.newestCreatedAt, now);
 
     // Remove existing entry if present
     if (this.entries.has(key)) {
@@ -236,6 +232,13 @@ export class TTLCache<K, V> implements Cache<K, V> {
     if (this.maxEntries <= 0) {
       return;
     }
+
+    // Removals can reset the ordering when the cache becomes empty. Record
+    // the incoming timestamp only once those removals have finished.
+    if (now < this.newestCreatedAt) {
+      this.expiryOrderMayBeOutOfOrder = true;
+    }
+    this.newestCreatedAt = Math.max(this.newestCreatedAt, now);
 
     // Add new entry
     const entry: CacheEntry<V> = {

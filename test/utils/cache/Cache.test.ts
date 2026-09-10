@@ -323,6 +323,29 @@ describe("TTLCache", () => {
   // test-only counter (mirrors BufferQueue.compactionWorkUnits) that lets
   // these assertions pin the fix without a flaky wall-clock benchmark.
   describe("bounded eviction/cleanup scan work (issue #6653)", () => {
+    it.each(["sweep", "overwrite", "capacity"])(
+      "retains clock ordering after %s removes the last entry",
+      (removal) => {
+        const wallClock = new FakeTimer();
+        const cache = new TTLCache<string, string>(
+          wallClock,
+          { ttlMs: 1000, maxSizeBytes: 2 },
+          new FakeLogger(),
+        );
+        wallClock.advanceTime(1000);
+        cache.set("old", "old", removal === "capacity" ? 2 : 1);
+        wallClock.advanceTime(removal === "sweep" ? 1000 : 100);
+        const liveKey = removal === "overwrite" ? "old" : "new";
+        cache.set(liveKey, "live", 1);
+        wallClock.advanceTime(-500);
+        cache.set("second", "expired", 1);
+        wallClock.advanceTime(1100);
+
+        expect(cache.cleanup()).toBe(1);
+        expect(cache.keys()).toEqual([liveKey]);
+      },
+    );
+
     it("evictOldest() touches ~O(1) entries per insert under a maxEntries cap, not O(n)", () => {
       const capacity = 128;
       const capped = new TTLCache<string, number>(timer, { ttlMs: 10000, maxEntries: capacity });

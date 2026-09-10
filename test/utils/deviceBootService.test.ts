@@ -337,6 +337,27 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadySignal()).toBeDefined();
   });
 
+  it("reuses a running image when deviceId names the AVD rather than the serial", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.setDeviceImages("android", [{ ...image, isRunning: true }]);
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: image.name,
+      preferRunning: true,
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe(running.deviceId);
+    expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
+  });
+
   it("preserves a cooperative readiness diagnostic at the boot deadline", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

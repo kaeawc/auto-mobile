@@ -11,7 +11,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -220,6 +220,39 @@ describe("platform device preparation tools", () => {
 
     expect(result.sessionUuid).toBeDefined();
     expect(result.deviceIdentity).toMatchObject({ adbSerial: "emulator-5554" });
+  });
+
+  test("getAndroid reuses an already-running AVD named through deviceId (#5870)", async () => {
+    // Mirrors MultiPlatformDeviceManager.startDevice's production guard
+    // (src/utils/deviceUtils.ts) which the plain fake omits: cold-booting a
+    // second copy of a live AVD is rejected by the platform.
+    class GuardedDeviceUtils extends FakeDeviceUtils {
+      override async startDevice(device: DeviceInfo, timeoutMs?: number) {
+        if (await this.isDeviceImageRunning(device)) {
+          throw new ActionableError(
+            `${device.platform} device '${device.name}' is already running`,
+          );
+        }
+        return await super.startDevice(device, timeoutMs);
+      }
+    }
+    const guarded = new GuardedDeviceUtils();
+    const running: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    guarded.setBootedDevices("android", [running]);
+    guarded.setDeviceImages("android", [
+      { platform: "android", name: running.name, isRunning: true, source: "local" },
+    ]);
+    setDeviceToolsDependencies({ deviceManagerFactory: () => guarded });
+    matcher.setBootedResult(running);
+
+    const result = await callTool("getAndroid", { deviceId: running.name });
+
+    expect(result.deviceIdentity).toMatchObject({ adbSerial: running.deviceId });
+    expect(guarded.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
   test("getApple accepts a deviceId target alongside udid (#5870)", async () => {

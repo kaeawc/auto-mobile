@@ -3295,7 +3295,18 @@ function validateBootIdentity(
         "phase=pool-match: resolved platform differs from requested platform",
     );
   }
-  if (source === "booted" && args.deviceId && device.deviceId !== args.deviceId) {
+  // On Android `deviceId` doubles as an AVD image name (see getAndroidSchema),
+  // so a running device resolved through that spelling IS the requested device
+  // even though its serial necessarily differs from the requested string.
+  const requestedByAndroidAvdName =
+    device.platform === "android" &&
+    (device.name === args.deviceId || sourceImage?.name === args.deviceId);
+  if (
+    source === "booted" &&
+    args.deviceId &&
+    device.deviceId !== args.deviceId &&
+    !requestedByAndroidAvdName
+  ) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
         "phase=pool-match: running device ID differs from the requested device ID",

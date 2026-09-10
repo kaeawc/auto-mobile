@@ -8,6 +8,7 @@ final class SdkHierarchyServerTests: XCTestCase {
         var bundleId: String? {
             "test.bundle"
         }
+        var isApplicationActive: Bool { true }
 
         func getLatestHierarchy() -> SdkViewHierarchy? {
             nil

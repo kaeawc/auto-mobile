@@ -81,6 +81,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "set_network_mock_rules",
   "set_network_fault_rules",
   "set_network_error_simulation",
+  "get_sdk_capabilities",
 
   // Database inspection
   "execute_sql",

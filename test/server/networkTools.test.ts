@@ -3,6 +3,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
 import { NetworkState } from "../../src/server/NetworkState";
+import { buildNetworkMockRules } from "../../src/server/networkMockRules";
 import {
   isIosNetworkErrorSimulationAvailable,
   registerNetworkTools,
@@ -67,6 +68,14 @@ describe("network tool schema", () => {
       setNetworkErrorSimulation: async (config: unknown) => {
         iosErrorSimulations.push(config);
         return { success: true, totalTimeMs: 0 };
+      },
+      syncNetworkMockRulesIfAvailable: async () => {
+        iosMessages.push(
+          JSON.stringify({
+            type: "set_network_mock_rules",
+            rules: buildNetworkMockRules(NetworkState.getInstance()),
+          }),
+        );
       },
     } as IOSCtrlProxyClient);
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({

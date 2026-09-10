@@ -74,6 +74,15 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         AutoMobileSDK.shared.bundleId
     }
 
+    var isApplicationActive: Bool {
+        if Thread.isMainThread {
+            return UIApplication.shared.applicationState == .active
+        }
+        return DispatchQueue.main.sync {
+            UIApplication.shared.applicationState == .active
+        }
+    }
+
     /// Performs a synchronous main-thread walk and returns the result.
     /// Must NOT be called from the main thread (will deadlock).
     public func walkNow() -> SdkViewHierarchy {

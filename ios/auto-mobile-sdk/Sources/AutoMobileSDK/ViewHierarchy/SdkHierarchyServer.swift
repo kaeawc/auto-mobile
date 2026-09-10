@@ -9,6 +9,7 @@ protocol SdkHierarchyServing: AnyObject {
     func getLatestHierarchy() -> SdkViewHierarchy?
     func walkNow() -> SdkViewHierarchy
     var bundleId: String? { get }
+    var isApplicationActive: Bool { get }
 }
 
 /// The subset of `NWListener` operations `SdkHierarchyServer` drives. This
@@ -134,6 +135,15 @@ final class SdkHierarchyServer: @unchecked Sendable {
                       let headerData = Self.httpHeaderData(from: requestData),
                       let request = String(data: headerData, encoding: .utf8) else {
                     connection.cancel()
+                    return
+                }
+
+                guard self.tracker?.isApplicationActive == true else {
+                    self.sendResponse(
+                        connection,
+                        statusCode: 409,
+                        body: Data("{\"error\":\"app_not_active\"}".utf8)
+                    )
                     return
                 }
 

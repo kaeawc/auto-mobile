@@ -67,6 +67,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case setNetworkMockRules(RequestSetNetworkMockRules)
     case setNetworkFaultRules(RequestSetNetworkFaultRules)
     case setNetworkErrorSimulation(RequestSetNetworkErrorSimulation)
+    case getSdkCapabilities(RequestEnvelope)
 
     case executeSql(RequestExecuteSql)
     case listDatabases(RequestListDatabases)
@@ -174,6 +175,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             self = try .setNetworkFaultRules(RequestSetNetworkFaultRules(from: decoder))
         case .setNetworkErrorSimulation:
             self = try .setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(from: decoder))
+        case .getSdkCapabilities:
+            self = try .getSdkCapabilities(RequestEnvelope(from: decoder))
         case .executeSql:
             self = try .executeSql(RequestExecuteSql(from: decoder))
         case .listDatabases:
@@ -234,6 +237,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .setNetworkMockRules: return .setNetworkMockRules
         case .setNetworkFaultRules: return .setNetworkFaultRules
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulation
+        case .getSdkCapabilities: return .getSdkCapabilities
         case .executeSql: return .executeSql
         case .listDatabases: return .listDatabases
         case .storageCapabilities: return .storageCapabilities
@@ -263,7 +267,8 @@ public enum WebSocketRequest: Decodable, Sendable {
              let .getCurrentFocus(payload),
              let .getTraversalOrder(payload),
              let .getVoiceOverState(payload),
-             let .listPreferenceFiles(payload):
+             let .listPreferenceFiles(payload),
+             let .getSdkCapabilities(payload):
             return payload
         case let .setVoiceOverState(payload): return payload
         case let .tapCoordinates(payload): return payload

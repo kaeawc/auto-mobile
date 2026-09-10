@@ -152,17 +152,20 @@ describe("listDevices tool (#5870)", () => {
       );
       expect(payload.note.resources).toContain(uri);
       const listed = ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri);
-      for (const recommended of payload.note.resources) {expect(listed).toContain(recommended);}
+      for (const recommended of payload.note.resources) {
+        expect(listed).toContain(recommended);
+      }
     } finally {
       ResourceRegistry.unregister(uri);
-      if (previous)
-        {ResourceRegistry.register(
+      if (previous) {
+        ResourceRegistry.register(
           previous.uri,
           previous.name,
           previous.description,
           previous.mimeType,
           previous.handler,
-        );}
+        );
+      }
     }
   });
 

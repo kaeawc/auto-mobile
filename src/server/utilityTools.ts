@@ -496,7 +496,23 @@ async function captureBiometricEnrollment(
 export function registerUtilityTools() {
   // Set active device handler
   const setActiveDeviceHandler = async (args: SetActiveDeviceArgs & { sessionUuid?: string }) => {
+    const mcpSessionId = (args as SetActiveDeviceArgs & { __mcpSessionId?: string }).__mcpSessionId;
+    let selectedAutolockSession: string | undefined;
     try {
+      if (mcpSessionId && DaemonState.getInstance().isInitialized()) {
+        const ownedSession = DaemonState.getInstance()
+          .getDevicePool()
+          .resolveAutolockSessionForMcpSession(
+            mcpSessionId,
+            args.platform,
+            undefined,
+            args.deviceId,
+          );
+        args.sessionUuid ??= ownedSession;
+        if (ownedSession === args.sessionUuid) {
+          selectedAutolockSession = ownedSession;
+        }
+      }
       if (args.sessionUuid && DaemonState.getInstance().isInitialized()) {
         // Session-scoped: bind the specific requested device to this session
         const sessionManager = DaemonState.getInstance().getSessionManager();
@@ -567,9 +583,15 @@ export function registerUtilityTools() {
         }
       }
 
+      if (selectedAutolockSession) {
+        await DaemonState.getInstance()
+          .getDevicePool()
+          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId);
+      }
       return createJSONToolResponse({
         message: `Active device set to '${args.deviceId}'`,
         deviceId: args.deviceId,
+        ...(args.sessionUuid ? { sessionUuid: args.sessionUuid } : {}),
       });
     } catch (error) {
       logger.error("Failed to set active device:", error);

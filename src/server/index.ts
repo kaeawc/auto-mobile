@@ -594,7 +594,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
@@ -607,6 +607,56 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
+    }
+
+    if (
+      (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) ||
+      name === "setActiveDevice"
+    ) {
+      const daemonState = DaemonState.getInstance();
+      const rawArgs = toolParams as Record<string, unknown>;
+      if (
+        daemonState.isInitialized() &&
+        implicitAutolockMcpSessionId &&
+        !options.sessionContext?.initialSessionToolBinding &&
+        !rawArgs.sessionUuid &&
+        !rawArgs.device
+      ) {
+        // Loopback MCP clients are reused by execution scope, not by socket.
+        // Their local bindings are partial; only the pool owns all acquisitions.
+        const platform =
+          rawArgs.platform === "android" || rawArgs.platform === "ios"
+            ? rawArgs.platform
+            : undefined;
+        const deviceId = typeof rawArgs.deviceId === "string" ? rawArgs.deviceId : undefined;
+        routingSessionUuid = daemonState
+          .getDevicePool()
+          .resolveAutolockSessionForMcpSession(
+            implicitAutolockMcpSessionId,
+            platform,
+            undefined,
+            deviceId,
+          );
+      } else {
+        routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
+          sessionId,
+          toolParams,
+          (id) => {
+            if (!DaemonState.getInstance().isInitialized()) {
+              return resolveDirectSessionDevice(id)?.device;
+            }
+            const manager = DaemonState.getInstance().getSessionManager();
+            const session = manager.getSession(id);
+            if (!session || !manager.isAdmittedForAutomation(session) || !session.assignedDevice) {
+              return undefined;
+            }
+            const device = DaemonState.getInstance()
+              .getDevicePool()
+              .getDevice(session.assignedDevice);
+            return device ? { deviceId: device.id, platform: device.platform } : undefined;
+          },
+        );
+      }
     }
 
     // #6069: enforce connection ownership on the DEVICE-routing path. If this
@@ -639,7 +689,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
-        explicitSessionUuid !== boundDeviceSessionUuid
+        explicitSessionUuid !== boundDeviceSessionUuid &&
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
@@ -781,6 +832,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       parsedParams && typeof parsedParams === "object"
         ? {
             ...parsedParams,
+            ...(name === "setActiveDevice" && routingSessionUuid
+              ? { sessionUuid: routingSessionUuid }
+              : {}),
             ...(implicitAutolockMcpSessionId
               ? { [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
               : {}),
@@ -990,6 +1044,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
           failCancelledAcquisition(acquiredSessionUuid);
         }
+      }
+      if (
+        name === "setActiveDevice" &&
+        !result?.isError &&
+        sessionToolBinding.bind(
+          sessionId,
+          getDeviceSessionIdFromResult(result) ?? routingSessionUuid,
+        )
+      ) {
+        ToolRegistry.notifyToolListChanged();
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&

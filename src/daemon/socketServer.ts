@@ -1434,6 +1434,15 @@ export class UnixSocketServer {
     const sessionUuid = this.getSessionUuid(args);
     const toolSelectionProfileUuid =
       this.getToolSelectionProfileUuid(args) ?? boundRoute?.toolSelectionProfileUuid;
+    if (this.hasImplicitDeviceSelector(args)) {
+      return this.selectorMcpForwardRoute(
+        socketSessionId,
+        args,
+        scopedKey,
+        toolSelectionProfileUuid,
+      );
+    }
+
     if (sessionUuid) {
       return this.sessionScopedForwardRoute(
         socketSessionId,
@@ -1469,6 +1478,40 @@ export class UnixSocketServer {
     // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
     // pre-forward key so separate daemon clients can autolock and run independently.
     return this.sharedMcpForwardRoute(`socket:${socketSessionId}`);
+  }
+
+  private selectorMcpForwardRoute(
+    socketSessionId: string,
+    args: unknown,
+    scopedKey: string | undefined,
+    profileUuid: string | undefined,
+  ): McpForwardRoute {
+    const key =
+      scopedKey ??
+      this.getImplicitAutolockScopeKey(socketSessionId, args) ??
+      `socket:${socketSessionId}`;
+    return profileUuid
+      ? this.toolSelectionProfileScopedForwardRoute(socketSessionId, profileUuid, key)
+      : this.sharedMcpForwardRoute(key);
+  }
+
+  private hasImplicitDeviceSelector(args: unknown): boolean {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return false;
+    }
+    const record = args as Record<string, unknown>;
+    if (record.device) {
+      return false;
+    }
+    const sessionUuid = this.getSessionUuid(args);
+    if (sessionUuid) {
+      return false;
+    }
+    return (
+      record.platform === "android" ||
+      record.platform === "ios" ||
+      typeof record.deviceId === "string"
+    );
   }
 
   private sharedMcpForwardRoute(key: string): McpForwardRoute {

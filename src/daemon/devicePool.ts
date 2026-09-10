@@ -378,6 +378,7 @@ export class DevicePool {
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
+  private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
@@ -5883,6 +5884,9 @@ export class DevicePool {
     this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+      acquired.add(sessionId);
+      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
@@ -6073,11 +6077,32 @@ export class DevicePool {
     mcpSessionId: string | undefined,
     platform?: Platform,
     execution?: SessionExecutionMetadata,
+    deviceId?: string,
   ): string | undefined {
     if (!mcpSessionId) {
       return undefined;
     }
 
+    if (platform || deviceId) {
+      const selected = this.resolveAutolockDeviceSelector(
+        mcpSessionId,
+        platform,
+        execution,
+        deviceId,
+      );
+      if (selected || deviceId) {
+        return selected;
+      }
+    }
+
+    return this.resolveLatestAutolockSession(mcpSessionId, platform, execution);
+  }
+
+  private resolveLatestAutolockSession(
+    mcpSessionId: string,
+    platform: Platform | undefined,
+    execution: SessionExecutionMetadata | undefined,
+  ): string | undefined {
     const sessionId = this.mcpSessionAutolockMap.get(mcpSessionId);
     if (!sessionId) {
       return undefined;
@@ -6103,6 +6128,41 @@ export class DevicePool {
     }
 
     return sessionId;
+  }
+
+  private resolveAutolockDeviceSelector(
+    mcpSessionId: string,
+    platform: Platform | undefined,
+    execution: SessionExecutionMetadata | undefined,
+    deviceId: string | undefined,
+  ): string | undefined {
+    const candidates = [...(this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? [])].flatMap(
+      (id) => {
+        const session = this.sessionManager.getSessionForNewExecution(id, execution);
+        const device = session ? this.devices.get(session.assignedDevice) : undefined;
+        return session && device && device.autolockSessionId === id && device.sessionId === id
+          ? [{ sessionId: id, deviceId: device.id, platform: device.platform }]
+          : [];
+      },
+    );
+    const matches = candidates.filter(
+      (candidate) =>
+        (!platform || candidate.platform === platform) &&
+        (!deviceId || candidate.deviceId === deviceId),
+    );
+    if (matches.length === 1) {
+      return matches[0].sessionId;
+    }
+    if (candidates.length > 0 && !deviceId) {
+      throw new ActionableError(
+        `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
+          .map(
+            (candidate) => `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform})`,
+          )
+          .join(", ")}. Pass an explicit sessionUuid/deviceId.`,
+      );
+    }
+    return undefined;
   }
 
   /**
@@ -6134,6 +6194,9 @@ export class DevicePool {
         expiresAtMs: session.expiresAt,
       });
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+      acquired.add(sessionId);
+      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     });
   }
 
@@ -6203,6 +6266,12 @@ export class DevicePool {
   }
 
   private clearMcpAutolockMappings(sessionId: string): void {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      acquired.delete(sessionId);
+      if (acquired.size === 0) {
+        this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
+      }
+    }
     for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
       if (mappedSessionId === sessionId) {
         this.mcpSessionAutolockMap.delete(mcpSessionId);

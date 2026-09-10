@@ -1,6 +1,7 @@
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
+  private readonly acquiredSessions = new Map<string | undefined, Set<string>>();
   private readonly boundDeviceSessions = new Map<string, string>();
   private readonly releasedDeviceSessions = new Map<string, string>();
   private initialSessionUuid?: string;
@@ -50,6 +51,71 @@ export class SessionToolBinding {
       );
     }
     return explicitSessionUuid ?? boundSessionUuid;
+  }
+
+  /** Resolve selectors only within sessions admitted on this connection. */
+  resolveDeviceSessionUuid(
+    mcpSessionId: string | undefined,
+    params: Record<string, unknown>,
+    lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
+  ): string | undefined {
+    const fallback = this.effectiveSessionUuid(mcpSessionId, params);
+    const platform =
+      params.platform === "android" || params.platform === "ios" ? params.platform : undefined;
+    const deviceId = typeof params.deviceId === "string" ? params.deviceId : undefined;
+    if ((!platform && !deviceId) || params.device) {
+      return fallback;
+    }
+    const matches = (device: { deviceId: string; platform: string }) =>
+      (!platform || device.platform === platform) && (!deviceId || device.deviceId === deviceId);
+    if (params.sessionUuid) {
+      return fallback;
+    }
+    if (this.initialSessionUuid) {
+      const device = lookup(this.initialSessionUuid);
+      if (device && !matches(device)) {
+        throw new Error(
+          `Bound device session ${fallback} does not match the requested platform/deviceId. Pass an explicit sessionUuid.`,
+        );
+      }
+      return fallback;
+    }
+    return this.resolveAcquiredDeviceSession(mcpSessionId, lookup, matches);
+  }
+
+  private resolveAcquiredDeviceSession(
+    mcpSessionId: string | undefined,
+    lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
+    matches: (device: { deviceId: string; platform: string }) => boolean,
+  ): string | undefined {
+    const candidates = [...(this.acquiredSessions.get(mcpSessionId) ?? [])].flatMap(
+      (sessionUuid) => {
+        const device = lookup(sessionUuid);
+        return device ? [{ sessionUuid, ...device }] : [];
+      },
+    );
+    if (candidates.length === 0) {
+      // With no live acquired device, let ordinary device discovery resolve the selector.
+      return undefined;
+    }
+    const selected = candidates.filter(matches);
+    if (selected.length === 1) {
+      return selected[0].sessionUuid;
+    }
+    throw new Error(
+      `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
+        .map(
+          (candidate) => `${candidate.sessionUuid} (${candidate.deviceId}, ${candidate.platform})`,
+        )
+        .join(", ")}. Pass an explicit sessionUuid/deviceId.`,
+    );
+  }
+
+  ownsSession(mcpSessionId: string | undefined, sessionUuid: string): boolean {
+    return (
+      this.initialSessionUuid === sessionUuid ||
+      this.acquiredSessions.get(mcpSessionId)?.has(sessionUuid) === true
+    );
   }
 
   /**
@@ -111,6 +177,12 @@ export class SessionToolBinding {
     if (this.initialSessionUuid && sessionUuid !== this.initialSessionUuid) {
       return false;
     }
+    let acquired = this.acquiredSessions.get(mcpSessionId);
+    if (!acquired) {
+      acquired = new Set<string>();
+      this.acquiredSessions.set(mcpSessionId, acquired);
+    }
+    acquired.add(sessionUuid);
     if (!mcpSessionId) {
       if (this.directDeviceSessionUuid === sessionUuid) {
         return false;
@@ -174,6 +246,9 @@ export class SessionToolBinding {
       return false;
     }
     let removed = false;
+    for (const acquired of this.acquiredSessions.values()) {
+      removed = acquired.delete(sessionUuid) || removed;
+    }
     for (const [mcpSessionId, boundSessionUuid] of this.boundDeviceSessions) {
       if (boundSessionUuid === sessionUuid) {
         this.boundDeviceSessions.delete(mcpSessionId);

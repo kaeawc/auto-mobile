@@ -616,7 +616,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
       }
-      if (platform === "either" && context.devicePlatform) {
+      if (context.devicePlatform) {
         platform = context.devicePlatform;
       }
     } else if (shouldResolveDevice && sessionUuid) {
@@ -640,9 +640,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // narrowing to the session's platform here would send an explicit
         // cross-platform deviceId to the wrong platform's search and fail
         // (mirrors the #5870 deviceId-resolves-platform rule).
-        if (platform === "either") {
-          platform = directSession.device.platform;
-        }
+        platform = directSession.device.platform;
       }
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
@@ -767,7 +765,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
     const sessionId = DaemonState.getInstance()
       .getDevicePool()
-      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter, execution);
+      .resolveAutolockSessionForMcpSession(
+        mcpSessionId,
+        platformFilter,
+        execution,
+        providedDeviceId,
+      );
     if (!sessionId) {
       return undefined;
     }

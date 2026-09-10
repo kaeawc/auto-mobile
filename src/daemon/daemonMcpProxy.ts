@@ -35,6 +35,7 @@ import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBr
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   getDeviceSessionIdFromResult,
+  DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
 import {
@@ -1956,7 +1957,7 @@ export class DaemonMcpProxy {
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
         ? callerArgs
-        : this.withBoundSessionUuid(callerArgs);
+        : this.withBoundSessionUuid(callerArgs, name === "setActiveDevice");
     const forwardedArgs = this.withToolSelectionProfile(routingArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -1967,7 +1968,10 @@ export class DaemonMcpProxy {
     // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
-    this.retainAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
+    const learnsResultSession = ["setActiveDevice", ...DEVICE_SESSION_ACQUISITION_TOOLS].includes(
+      name,
+    );
+    this.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
     if (progressToken !== undefined && onProgress) {
       this.progressListeners.set(progressToken, onProgress);
     }
@@ -2004,6 +2008,7 @@ export class DaemonMcpProxy {
       // being mistaken for idleness, so a later reconnect re-seeds the still-live
       // session instead of creating an unseeded transport (issue #4610).
       this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
+      this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
       return result;
     } catch (error) {
       // The success-only rememberSessionUuid above never runs when the handler
@@ -2031,14 +2036,43 @@ export class DaemonMcpProxy {
       throw error;
     } finally {
       this.releaseReleaseEpochReference(forwardedSessionUuid);
-      this.releaseAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
+      this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
       if (progressToken !== undefined) {
         this.progressListeners.delete(progressToken);
       }
     }
   }
 
-  private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+  private rememberActiveDeviceSession(name: string, result: unknown, releaseEpoch: number): void {
+    if (name !== "setActiveDevice") {
+      return;
+    }
+    const sessionUuid = getDeviceSessionIdFromResult(result);
+    if (sessionUuid) {
+      this.throwIfSessionReleasedSince(sessionUuid, releaseEpoch);
+      this.rememberSessionUuid(name, { sessionUuid }, releaseEpoch);
+    }
+  }
+
+  private hasImplicitDeviceSelector(
+    args: Record<string, unknown>,
+    selectingActiveDevice: boolean,
+  ): boolean {
+    if (this.initialSessionBindingConfigured || args.device) {
+      return false;
+    }
+    if (selectingActiveDevice) {
+      return true;
+    }
+    return (
+      typeof args.deviceId === "string" || args.platform === "android" || args.platform === "ios"
+    );
+  }
+
+  private withBoundSessionUuid(
+    args: Record<string, unknown>,
+    selectingActiveDevice = false,
+  ): Record<string, unknown> {
     // A daemon session released by ordinary heartbeat/idle expiry leaves this
     // remembered binding dangling; replaying its UUID on a later sessionless call
     // would silently recreate the session and reacquire a device without the
@@ -2052,12 +2086,6 @@ export class DaemonMcpProxy {
         ? { ...args, sessionUuid: explicitSessionUuid }
         : args;
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
-      if (explicitSessionUuid === this.boundSessionUuid && this.boundSessionUuid) {
-        return {
-          ...normalizedArgs,
-          [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
-        };
-      }
       return normalizedArgs;
     }
     if (explicitSessionUuid && this.initialSessionBindingConfigured) {
@@ -2067,6 +2095,11 @@ export class DaemonMcpProxy {
       );
     }
     if (explicitSessionUuid) {
+      return normalizedArgs;
+    }
+    // A caller's device selector must reach daemon autolock resolution without
+    // being disguised as an explicitly supplied session UUID (#6807).
+    if (this.hasImplicitDeviceSelector(args, selectingActiveDevice)) {
       return normalizedArgs;
     }
     return {

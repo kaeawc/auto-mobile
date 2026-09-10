@@ -1229,12 +1229,20 @@ export class DaemonMcpProxy {
   private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
     const recorded = await this.daemonManager.status();
     const actual = await this.daemonStatusProbe!();
-    // PID files are discovery hints, not proof of who serves the socket. Retain
-    // startup configuration only when the record agrees with that live identity.
+    // Compatibility allows legacy missing build fields, but missing identity is not
+    // evidence that a PID record belongs to this socket. Only enrich a known matching
+    // process, build and entry script; never manufacture live build/options from a legacy probe.
+    const actualBuild = buildIdentityFromStatus(actual);
     const matchesRecord =
       recorded.running &&
+      actual.pid !== undefined &&
+      actual.pid === recorded.pid &&
       recorded.version === actual.version &&
-      buildIdentitiesMatch(buildIdentityFromStatus(recorded), buildIdentityFromStatus(actual));
+      actualBuild.buildId !== "unknown" &&
+      actualBuild.buildId.length > 0 &&
+      actualBuild.entryScript.length > 0 &&
+      recorded.buildId === actualBuild.buildId &&
+      recorded.entryScript === actualBuild.entryScript;
     return matchesRecord ? { ...recorded, ...actual } : actual;
   }
 

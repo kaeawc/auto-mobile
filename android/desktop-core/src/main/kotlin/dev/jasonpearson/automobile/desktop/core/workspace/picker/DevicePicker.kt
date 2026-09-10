@@ -176,7 +176,7 @@ private fun Content(
       ActiveChips(content.filters, onAction)
       content.inventoryError?.let { message ->
         Text(
-          text = "Showing previous device status. $message",
+          text = message,
           modifier = Modifier.padding(16.dp),
           color = MaterialTheme.colorScheme.error,
         )
@@ -339,21 +339,22 @@ private fun DeviceGrid(
     horizontalArrangement = Arrangement.spacedBy(12.dp),
     verticalItemSpacing = 12.dp,
   ) {
-    items(devices, key = { it.id }) { device ->
+    items(devices, key = { it.uiKey }) { device ->
       DeviceCard(
         device = device,
-        selected = device.id in content.selectedIds,
-        booting = device.id in content.bootingIds,
-        error = content.bootErrors[device.id],
+        selected = device.uiKey in content.selectedIds,
+        booting = device.uiKey in content.bootingIds,
+        error = content.bootErrors[device.uiKey],
         thumbnail = thumbnail,
         onClick = { multiSelect ->
           when {
             // A shut-down card boots on click; the boot auto-observes once it completes.
-            device.state != DeviceState.Booted -> onAction(DevicePickerAction.BootDevice(device.id))
+            device.state != DeviceState.Booted ->
+              onAction(DevicePickerAction.BootDevice(device.uiKey))
             // Cmd/Shift-click builds a multi-device selection to observe together.
-            multiSelect -> onAction(DevicePickerAction.ToggleSelect(device.id))
+            multiSelect -> onAction(DevicePickerAction.ToggleSelect(device.uiKey))
             // Plain click observes this device immediately.
-            else -> onAction(DevicePickerAction.ObserveOne(device.id))
+            else -> onAction(DevicePickerAction.ObserveOne(device.uiKey))
           }
         },
       )

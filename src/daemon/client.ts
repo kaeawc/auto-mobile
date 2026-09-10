@@ -37,6 +37,7 @@ import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonH
 import type { DaemonStatus } from "./types";
 
 const socketStatusSchema = z.object({
+  pid: z.number().int().positive().optional(),
   version: z.string().trim().min(1),
   buildId: z.string().optional(),
   entryScript: z.string().optional(),

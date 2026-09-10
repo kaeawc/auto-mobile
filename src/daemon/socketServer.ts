@@ -2751,6 +2751,7 @@ export class UnixSocketServer {
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).
           version: this.daemonIdentity.version,
+          pid: process.pid,
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
           startedAt: this.identityStartedAt,

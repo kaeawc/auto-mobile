@@ -50,6 +50,79 @@ class DevicePickerViewModelTest {
   ) = DevicePickerViewModel(resourceClient, bootController, testScope, UnconfinedTestDispatcher())
 
   @Test
+  fun `identical raw runtime ids have distinct grid keys and selection targets`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse =
+        """{"totalCount":2,"androidCount":1,"iosCount":1,"virtualCount":0,"physicalCount":2,"lastUpdated":"x","devices":[{"name":"Android","platform":"android","deviceId":"shared","source":"local","isVirtual":false,"status":"booted"},{"name":"iPhone","platform":"ios","deviceId":"shared","source":"local","isVirtual":false,"status":"booted"}]}"""
+      val viewModel = vm(client)
+      val twins = content(viewModel).devices.filter { it.id == "shared" }
+      assertEquals(setOf("android:shared", "ios:shared"), twins.map { it.uiKey }.toSet())
+      viewModel.onAction(DevicePickerAction.ToggleSelect("shared"))
+      assertTrue(
+        content(viewModel).selectedIds.isEmpty()
+      ) // ambiguous legacy input cannot target a sibling
+      viewModel.onAction(DevicePickerAction.ToggleSelect("ios:shared"))
+      assertEquals(setOf("ios:shared"), content(viewModel).selectedIds)
+      viewModel.effect.test {
+        viewModel.onAction(DevicePickerAction.ObserveSelected)
+        val column = (awaitItem() as DevicePickerEffect.Observe).columns.single()
+        assertEquals("shared", column.deviceId)
+        assertEquals(Platform.Ios, column.platform)
+        cancelAndIgnoreRemainingEvents()
+      }
+    }
+
+  @Test
+  fun `identical image ids boot the selected platform using the raw daemon target`() =
+    testScope.runTest {
+      val client = fake()
+      client.deviceImagesResponse =
+        """{"totalCount":2,"androidCount":1,"iosCount":1,"lastUpdated":"x","images":[{"name":"Android image","platform":"android","deviceId":"shared"},{"name":"iOS image","platform":"ios","deviceId":"shared","state":"Shutdown"}]}"""
+      val boot = FakeDeviceBootController()
+      val viewModel = vm(client, boot)
+      viewModel.onAction(DevicePickerAction.BootDevice("ios:shared"))
+      assertEquals("shared", boot.bootRequests.single().id)
+      assertEquals(Platform.Ios, boot.bootRequests.single().platform)
+    }
+
+  @Test
+  fun `unavailable iOS does not block Android inventory or Android boots on Linux and Windows`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse =
+        client.bootedDevicesResponse.replace(
+          "\"lastUpdated\":\"x\"",
+          "\"lastUpdated\":\"x\",\"observationComplete\":false,\"platformObservations\":{\"android\":{\"observationComplete\":true},\"ios\":{\"observationComplete\":false,\"discoveryError\":{\"code\":\"unavailable\"}}}",
+        )
+      val boot = FakeDeviceBootController()
+      val viewModel = vm(client, boot)
+      assertTrue(content(viewModel).devices.isNotEmpty())
+      assertTrue(content(viewModel).devices.all { it.platform == Platform.Android })
+      viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertEquals(1, boot.bootRequests.size)
+    }
+
+  @Test
+  fun `partial iOS discovery retains only missing iOS rows while accepting fresh Android inventory`() =
+    testScope.runTest {
+      val client = fake()
+      val boot = FakeDeviceBootController()
+      val viewModel = vm(client, boot)
+      client.bootedDevicesResponse =
+        """{"totalCount":1,"androidCount":0,"iosCount":1,"virtualCount":1,"physicalCount":0,"lastUpdated":"x","observationComplete":false,"platformObservations":{"android":{"observationComplete":true},"ios":{"observationComplete":false}},"devices":[{"name":"New iPhone","platform":"ios","deviceId":"fresh-ios","source":"local","isVirtual":true,"status":"booted"}]}"""
+      viewModel.onAction(DevicePickerAction.SilentRefresh)
+      val devices = content(viewModel).devices
+      assertTrue(devices.none { it.id == "emulator-5554" })
+      assertTrue(devices.any { it.id == "fresh-ios" && !it.inventoryUncertain })
+      assertTrue(devices.any { it.id == "iphone-15" && it.inventoryUncertain })
+      viewModel.onAction(DevicePickerAction.BootDevice("iphone-15"))
+      assertTrue(boot.bootRequests.isEmpty())
+      viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertEquals(1, boot.bootRequests.size)
+    }
+
+  @Test
   fun `an external emulator with unresolved identity does not create shutdown candidates on first load`() =
     testScope.runTest {
       val client = fake()
@@ -70,7 +143,10 @@ class DevicePickerViewModelTest {
       client.bootedDevicesResponse =
         client.bootedDevicesResponse.replace("Pixel 8 API 35", "Unknown (emulator-5554)")
       viewModel.onAction(DevicePickerAction.SilentRefresh)
-      assertEquals(before, content(viewModel).devices)
+      assertEquals(
+        before.map { it.id to it.state },
+        content(viewModel).devices.map { it.id to it.state },
+      )
       assertTrue(content(viewModel).inventoryError?.contains("identity is unavailable") == true)
       viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       assertTrue(bootController.bootRequests.isEmpty())
@@ -86,7 +162,10 @@ class DevicePickerViewModelTest {
       client.bootedDevicesResponse =
         """{"totalCount":0,"androidCount":0,"iosCount":0,"virtualCount":0,"physicalCount":0,"lastUpdated":"x","observationComplete":false,"devices":[]}"""
       viewModel.onAction(DevicePickerAction.SilentRefresh)
-      assertEquals(before, content(viewModel).devices)
+      assertEquals(
+        before.map { it.id to it.state },
+        content(viewModel).devices.map { it.id to it.state },
+      )
       assertTrue(content(viewModel).inventoryError != null)
       viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       assertTrue(bootController.bootRequests.isEmpty())
@@ -114,7 +193,10 @@ class DevicePickerViewModelTest {
       val before = content(viewModel).devices
       client.deviceImagesResponse = client.deviceImagesResponse.replace("Shutdown", "Booting")
       viewModel.onAction(DevicePickerAction.SilentRefresh)
-      assertEquals(before, content(viewModel).devices)
+      assertEquals(
+        before.map { it.id to it.state },
+        content(viewModel).devices.map { it.id to it.state },
+      )
     }
 
   @Test
@@ -149,7 +231,7 @@ class DevicePickerViewModelTest {
     vm.onAction(DevicePickerAction.ToggleSelect("iphone-15")) // shutdown — ignored
     assertTrue(content(vm).selectedIds.isEmpty())
     vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554")) // booted
-    assertEquals(setOf("emulator-5554"), content(vm).selectedIds)
+    assertEquals(setOf("android:emulator-5554"), content(vm).selectedIds)
   }
 
   @Test
@@ -219,7 +301,7 @@ class DevicePickerViewModelTest {
       assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
       // Auto-observed, so the device must NOT linger in the selection (no stale "Observe (1)" when
       // the grid reopens) — issue #5220.
-      assertTrue("emulator-5556" !in content(v).selectedIds)
+      assertTrue("android:emulator-5556" !in content(v).selectedIds)
       cancelAndIgnoreRemainingEvents()
     }
   }
@@ -229,10 +311,10 @@ class DevicePickerViewModelTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
     vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
-    assertEquals(setOf("emulator-5554"), content(vm).selectedIds)
+    assertEquals(setOf("android:emulator-5554"), content(vm).selectedIds)
     vm.onAction(DevicePickerAction.ObserveSelected)
     // Once observed, the device is no longer selected — reopening the grid shows a clean selection.
-    assertTrue("emulator-5554" !in content(vm).selectedIds)
+    assertTrue("android:emulator-5554" !in content(vm).selectedIds)
   }
 
   @Test
@@ -241,7 +323,7 @@ class DevicePickerViewModelTest {
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
     vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
     vm.onAction(DevicePickerAction.ObserveOne("emulator-5554"))
-    assertTrue("emulator-5554" !in content(vm).selectedIds)
+    assertTrue("android:emulator-5554" !in content(vm).selectedIds)
   }
 
   @Test
@@ -313,7 +395,7 @@ class DevicePickerViewModelTest {
         reloadGate.complete(Unit) // stale reload resumes: auto-observe must see the device is gone
         expectNoEvents() // no Observe effect for the now-dead device
         // ...and the gone device is not left lingering in the selection either (#5220).
-        assertTrue("emulator-5556" !in content(v).selectedIds)
+        assertTrue("android:emulator-5556" !in content(v).selectedIds)
         cancelAndIgnoreRemainingEvents()
       }
     }
@@ -387,7 +469,7 @@ class DevicePickerViewModelTest {
     val boot = FakeDeviceBootController().apply { autoComplete = false }
     val v = vm(bootController = boot)
     v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
-    assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+    assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
     assertEquals(listOf("Pixel_6_API_33"), boot.bootRequests.map { it.id })
     boot.complete() // let the held boot resolve so runTest can finish
   }
@@ -417,7 +499,9 @@ class DevicePickerViewModelTest {
       val v = vm(resourceClient = resources, bootController = boot)
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       val c = content(v)
-      assertTrue("emulator-5556" !in c.selectedIds) // auto-observed, not auto-selected (#5220)
+      assertTrue(
+        "android:emulator-5556" !in c.selectedIds
+      ) // auto-observed, not auto-selected (#5220)
       assertTrue(c.bootingIds.isEmpty())
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
       assertTrue(c.devices.none { it.id == "Pixel_6_API_33" }) // shut-down entry replaced by booted
@@ -431,7 +515,7 @@ class DevicePickerViewModelTest {
     v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
     val c = content(v)
     assertTrue(c.bootingIds.isEmpty())
-    assertEquals("boom", c.bootErrors["Pixel_6_API_33"])
+    assertEquals("boom", c.bootErrors["android:Pixel_6_API_33"])
   }
 
   @Test
@@ -459,10 +543,13 @@ class DevicePickerViewModelTest {
       val boot = FakeDeviceBootController().apply { autoComplete = false } // hold the boot open
       val v = vm(bootController = boot)
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
-      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
       // Reopen/refresh while the boot is still in flight — load() swaps Content out and back.
       v.onAction(DevicePickerAction.Refresh)
-      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds) // guard survived the reload
+      assertEquals(
+        setOf("android:Pixel_6_API_33"),
+        content(v).bootingIds,
+      ) // guard survived the reload
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // clicking again must not re-boot
       assertEquals(1, boot.bootRequests.size)
       boot.complete() // release; device still shut down on reload -> boot did not complete
@@ -480,7 +567,7 @@ class DevicePickerViewModelTest {
       val v = vm(resourceClient = resources, bootController = boot)
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       v.onAction(DevicePickerAction.Refresh) // state cycled Loading -> Content, guard preserved
-      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
       // The daemon finished the boot; it now reports the device booted under a runtime serial.
       resources.bootedDevicesResponse =
         """
@@ -494,7 +581,9 @@ class DevicePickerViewModelTest {
           .trimIndent()
       boot.complete() // reloadAfterBoot fetches -> device booted -> auto-observe by runtime id
       val c = content(v)
-      assertTrue("emulator-5556" !in c.selectedIds) // auto-observed, not auto-selected (#5220)
+      assertTrue(
+        "android:emulator-5556" !in c.selectedIds
+      ) // auto-observed, not auto-selected (#5220)
       assertTrue(c.bootingIds.isEmpty())
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
     }
@@ -509,7 +598,7 @@ class DevicePickerViewModelTest {
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // in flight (held)
       v.onAction(DevicePickerAction.BootDevice("iphone-15")) // ignored — a boot is already running
       assertEquals(listOf("Pixel_6_API_33"), boot.bootRequests.map { it.id })
-      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
       boot.complete() // release so runTest can finish
     }
 
@@ -534,11 +623,13 @@ class DevicePickerViewModelTest {
       client.imagesGate = null // the post-boot reload must not be gated
 
       boot.complete() // reloadAfterBoot fetches fresh, emits + auto-observes the booted device
-      assertTrue("emulator-5556" !in content(v).selectedIds) // auto-observed, not selected (#5220)
+      assertTrue(
+        "android:emulator-5556" !in content(v).selectedIds
+      ) // auto-observed, not selected (#5220)
 
       staleGate.complete(Unit) // stale Refresh resumes with the OLD (shut-down) list — dropped
       val c = content(v)
-      assertTrue("emulator-5556" !in c.selectedIds) // fresh post-boot state survived
+      assertTrue("android:emulator-5556" !in c.selectedIds) // fresh post-boot state survived
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
       assertTrue(c.devices.none { it.id == "Pixel_6_API_33" }) // stale shut-down card not restored
 
@@ -569,7 +660,7 @@ class DevicePickerViewModelTest {
       // still-booted Pixel 8 as shut down). Previous snapshot retained; a retry is surfaced.
       assertTrue(c.devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted })
       assertTrue(c.bootingIds.isEmpty())
-      assertTrue(c.bootErrors.containsKey("Pixel_6_API_33"))
+      assertTrue(c.bootErrors.containsKey("android:Pixel_6_API_33"))
     }
 
   @Test
@@ -680,7 +771,9 @@ class DevicePickerViewModelTest {
         reloadGate.complete(Unit) // reload resumes: auto-observes from the winning Content
         val columns = (awaitItem() as DevicePickerEffect.Observe).columns
         assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
-        assertTrue("emulator-5556" !in content(v).selectedIds) // observed, not left selected
+        assertTrue(
+          "android:emulator-5556" !in content(v).selectedIds
+        ) // observed, not left selected
         cancelAndIgnoreRemainingEvents()
       }
     }
@@ -730,7 +823,7 @@ class DevicePickerViewModelTest {
       // NOT
       // a fabricated shut-down card that would permit a duplicate start.
       assertTrue(c.devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted })
-      assertTrue(c.bootErrors.containsKey("Pixel_6_API_33"))
+      assertTrue(c.bootErrors.containsKey("android:Pixel_6_API_33"))
     }
 
   @Test
@@ -765,7 +858,7 @@ class DevicePickerViewModelTest {
         }
       val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
-      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
 
       // The daemon exposes the started device under its runtime serial BEFORE boot() returns. Its
       // same-named card hides the Pixel_6_API_33 source image, so a refresh's list shows that
@@ -775,7 +868,7 @@ class DevicePickerViewModelTest {
       v.onAction(DevicePickerAction.Refresh)
       // The guard must survive on the in-flight boot job even though the source vanished from the
       // list — otherwise a second startDevice could fire while this boot is still running (#4881).
-      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
 
       // A click on a DIFFERENT shut-down card must still be a no-op: boots stay serialized.
       v.onAction(DevicePickerAction.BootDevice("iphone-15"))

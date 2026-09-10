@@ -78,6 +78,7 @@ describe("UnixSocketServer version/build-identity handshake gate", () => {
       expect(status.buildId).toBe(daemonIdentity.build.buildId);
       expect(status.entryScript).toBe(daemonIdentity.build.entryScript);
       expect(status.startedAt).toBe(0);
+      expect(status.pid).toBe(process.pid);
     } finally {
       await client.close();
     }

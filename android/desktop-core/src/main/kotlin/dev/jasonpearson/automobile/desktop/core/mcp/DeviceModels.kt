@@ -14,7 +14,10 @@ data class BootedDevicesResponse(
   val lastUpdated: String,
   val devices: List<BootedDeviceInfo>,
   val observationComplete: Boolean = true,
+  val platformObservations: Map<String, DevicePlatformObservation> = emptyMap(),
 )
+
+@Serializable data class DevicePlatformObservation(val observationComplete: Boolean = false)
 
 @Serializable
 data class DeviceIdentity(

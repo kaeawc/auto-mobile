@@ -1,6 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Duplex } from "node:stream";
-import { DaemonClient, DaemonHandshakeMismatchError } from "../../src/daemon/client";
+import {
+  DaemonClient,
+  DaemonHandshakeMismatchError,
+  DaemonUnavailableError,
+} from "../../src/daemon/client";
 import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStatus, DaemonResponse } from "../../src/daemon/types";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -8,6 +12,104 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("socket-owner daemon preflight", () => {
+  for (const actualIdentity of [
+    {},
+    { pid: 101, buildId: "unknown", entryScript: "/current" },
+    { pid: 101, buildId: "current" },
+    { pid: 101, buildId: "current", entryScript: "/different" },
+    { buildId: "current", entryScript: "/current" },
+    { pid: 202, buildId: "current", entryScript: "/current" },
+  ]) {
+    test(`does not trust PID startup flags without verified socket identity ${JSON.stringify(actualIdentity)}`, async () => {
+      const manager = new FakeDaemonManager();
+      manager.statusResult = {
+        running: true,
+        pid: 101,
+        version: "0.0.70",
+        buildId: "current",
+        entryScript: "/current",
+        options: { debug: true },
+      };
+      const client = new FakeDaemonClient();
+      const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: manager,
+        clientVersion: "0.0.70",
+        buildIdentity: { buildId: "current", entryScript: "/current" },
+        autoStartDaemon: false,
+        daemonOptions: { debug: true },
+        timer: new FakeTimer(),
+        daemonStatusProbe: async () => ({ running: true, version: "0.0.70", ...actualIdentity }),
+      });
+      try {
+        await expect(proxy.callTool("provisionDevice", {})).rejects.toBeInstanceOf(
+          DaemonUnavailableError,
+        );
+        expect(client.callToolCalls).toHaveLength(0);
+        expect(manager.restartCallCount).toBe(0);
+      } finally {
+        available.mockRestore();
+        await proxy.close();
+      }
+    });
+  }
+
+  test("a version-only socket does not borrow a conflicting PID build", async () => {
+    const manager = new FakeDaemonManager();
+    manager.statusResult = {
+      running: true,
+      version: "0.0.70",
+      buildId: "unrelated",
+      entryScript: "/other",
+    };
+    const client = new FakeDaemonClient();
+    const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: manager,
+      clientVersion: "0.0.70",
+      buildIdentity: { buildId: "current", entryScript: "/current" },
+      autoStartDaemon: false,
+      timer: new FakeTimer(),
+      daemonStatusProbe: async () => ({ running: true, version: "0.0.70" }),
+    });
+    try {
+      await proxy.callTool("provisionDevice", {});
+      expect(client.callToolCalls).toHaveLength(1);
+      expect(manager.restartCallCount).toBe(0);
+    } finally {
+      available.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("retains startup flags when the socket identifies the recorded process and build", async () => {
+    const manager = new FakeDaemonManager();
+    const identity = { pid: 101, version: "0.0.70", buildId: "current", entryScript: "/current" };
+    manager.statusResult = { running: true, ...identity, options: { debug: true } };
+    const client = new FakeDaemonClient();
+    const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: manager,
+      clientVersion: "0.0.70",
+      buildIdentity: identity,
+      autoStartDaemon: false,
+      daemonOptions: { debug: true },
+      timer: new FakeTimer(),
+      daemonStatusProbe: async () => ({ running: true, ...identity }),
+    });
+    try {
+      await proxy.callTool("provisionDevice", {});
+      expect(client.callToolCalls).toHaveLength(1);
+      expect(manager.restartCallCount).toBe(0);
+    } finally {
+      available.mockRestore();
+      await proxy.close();
+    }
+  });
+
   test("a structured pre-dispatch rejection reconciles once without duplicating execution", async () => {
     const manager = new FakeDaemonManager();
     manager.statusResult = { running: false };
@@ -175,6 +277,28 @@ describe("socket-owner daemon preflight", () => {
       closed.mockRestore();
     }
   });
+
+  for (const pid of [101, 0, -1, 1.5, "101"]) {
+    test(`socket status validates process identity ${JSON.stringify(pid)}`, async () => {
+      const closed = spyOn(DaemonClient.prototype, "close").mockResolvedValue();
+      const method = spyOn(DaemonClient.prototype, "callDaemonMethod").mockResolvedValue({
+        version: "0.0.70",
+        pid,
+      });
+      try {
+        const result = new DaemonClient("/fake.sock").getDaemonStatus();
+        if (pid === 101) {
+          expect((await result).pid).toBe(101);
+        } else {
+          await expect(result).rejects.toThrow("Daemon preflight failed");
+        }
+        expect(closed).toHaveBeenCalledTimes(1);
+      } finally {
+        method.mockRestore();
+        closed.mockRestore();
+      }
+    });
+  }
 
   test("wire mismatch decodes into a typed preflight rejection", async () => {
     const failure = {

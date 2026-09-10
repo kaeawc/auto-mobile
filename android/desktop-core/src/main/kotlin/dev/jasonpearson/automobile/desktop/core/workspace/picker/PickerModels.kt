@@ -34,7 +34,13 @@ data class PickerDevice(
   val isVirtual: Boolean = true,
   /** Daemon-minted identity for the booted device epoch; absent on older daemon resources. */
   val deviceSessionUuid: String? = null,
-)
+  /** Retained after an incomplete sweep; absence is not evidence of shutdown. */
+  val inventoryUncertain: Boolean = false,
+) {
+  /** UI identity is platform scoped; id remains the raw daemon command target. */
+  val uiKey: String
+    get() = "${platform.name.lowercase()}:$id"
+}
 
 /** An unresolved Android AVD probe reports a runtime label, not a source-image identity. */
 internal fun BootedDeviceInfo.knownSourceImageId(): String? =

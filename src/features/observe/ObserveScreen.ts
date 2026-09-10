@@ -1066,9 +1066,15 @@ export class RealObserveScreen implements ObserveScreen {
             ),
           );
           if (!skipBackStack) {
+            // Fork: collectBackStack's own perf.track() calls run concurrently
+            // with the wakefulness/deviceLock tracks above on this same
+            // Promise.all. A shared tracker's cursor is ambient mutable state,
+            // so without a fork, block-open/close activity deep in the back
+            // stack collector could misparent (or wrongly pop) the sibling
+            // tracks' timings (issue #6706).
             parallelTasks.push(
               perf.track("backStack", () =>
-                this.deviceStateCollector.collectBackStack(result, perf, signal),
+                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal),
               ),
             );
           }
@@ -1089,9 +1095,12 @@ export class RealObserveScreen implements ObserveScreen {
             ),
           ];
           if (!skipBackStack) {
+            // Fork for the same reason as the branch above (issue #6706):
+            // this track runs concurrently with the wakefulness/deviceLock
+            // tracks on the same shared tracker.
             tasks.push(
               perf.track("backStack", () =>
-                this.deviceStateCollector.collectBackStack(result, perf, signal),
+                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal),
               ),
             );
           }

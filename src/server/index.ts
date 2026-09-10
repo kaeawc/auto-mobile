@@ -595,6 +595,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
@@ -637,6 +638,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             undefined,
             deviceId,
           );
+        resolvedImplicitAutolockSessionUuid = routingSessionUuid;
       } else {
         routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
           sessionId,
@@ -827,6 +829,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       executionSessionUuid,
       sessionId,
     );
+    if (resolvedImplicitAutolockSessionUuid) {
+      // Routing resolved before ToolRegistry, so retain its implicit-session
+      // tracking here without following later changes to the socket's default.
+      executionTracker.setResolvedAutolockSessionUuid(
+        execution.id,
+        resolvedImplicitAutolockSessionUuid,
+      );
+    }
     const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
     const handlerParams =
       parsedParams && typeof parsedParams === "object"

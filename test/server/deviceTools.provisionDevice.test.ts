@@ -27,6 +27,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
+import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -56,6 +57,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
   private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
   failCalls = 0;
+  readonly failCodes: string[] = [];
 
   /** Simulate a "running" row left behind by a crashed/earlier attempt. */
   markInProgress(operationId: string): void {
@@ -122,11 +124,12 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
 
   async fail(
     operationId: string,
-    _errorCode: string,
+    errorCode: string,
     _message: string,
     options?: { clearCreationStarted?: boolean },
   ): Promise<void> {
     this.failCalls++;
+    this.failCodes.push(errorCode);
     if (options?.clearCreationStarted) {
       const operation = this.results.get(operationId);
       if (!operation) {
@@ -2447,6 +2450,272 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionSignal?.aborted).toBe(true);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  // `cancelUnownedColdBoot` returns a settlement that resolves on the
+  // emulator child's `exit` event. provisionDevice discarded it, so the AVD's
+  // stable lifecycle lease was released while the emulator was still shutting
+  // down and a concurrent start/teardown of the same AVD could relaunch or
+  // delete it against a live `hardware-qemu.ini.lock`.
+  test("holds the AVD lifecycle lease until a cancelled cold boot has exited", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    const exitListeners: (() => void)[] = [];
+    const handle: any = {
+      exitCode: null,
+      signalCode: null,
+      once: (event: string, listener: () => void) => {
+        if (event === "exit") {
+          exitListeners.push(listener);
+        }
+        return handle;
+      },
+      // A real emulator does not disappear synchronously on kill().
+      kill: () => true,
+    };
+    deviceManager.setMockChildProcess("phone-api-36-a", handle);
+    const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);
+    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
+      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+      const resolved = { ...booted, deviceId: "emulator-5554" };
+      deviceManager.setBootedDevices("android", [resolved]);
+      return resolved;
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: coordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("automation readiness failed");
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "cold-boot-settlement"),
+      timeoutMs: 60_000,
+    });
+    expect((response as any).isError).toBe(true);
+
+    let leaseGranted = false;
+    const contender = coordinator
+      .reserve(
+        { kind: "stable", platform: "android", stableId: "phone-api-36-a" },
+        { operation: "start", deadlineMs: 60_000 },
+      )
+      .then((lease) => {
+        leaseGranted = true;
+        return lease;
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(leaseGranted).toBe(false);
+
+    expect(exitListeners.length).toBeGreaterThan(0);
+
+    handle.exitCode = 0;
+    for (const listener of exitListeners) {
+      listener();
+    }
+    (await contender).release();
+    expect(leaseGranted).toBe(true);
+  });
+
+  // A readiness failure caused by an exhausted deadline was reported and
+  // persisted as `platform_command_failed`, so a controller that retries on
+  // `timeout` but treats `platform_command_failed` as terminal gave up on a
+  // purely time-based failure.
+  test("reports an exhausted readiness budget as a timeout", async () => {
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw new RunnerReadinessError(
+          "provisionDevice automation runner readiness failed: phase=runner-setup " +
+            "attempts=1 remainingBudgetMs=0: readiness budget exhausted before setup lock",
+          false,
+          true,
+        );
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "readiness-budget-timeout"),
+      timeoutMs: 60_000,
+    });
+
+    expect(JSON.parse((response as any).content[0].text).error.code).toBe("timeout");
+    expect(operationStore.failCodes).toEqual(["timeout"]);
+  });
+
+  // Boot and automation readiness share one provision budget, so a slow cold
+  // boot could consume all of it and leave CtrlProxy setup with a
+  // millisecond ("readiness budget exhausted before setup lock"). Boot must be
+  // bounded by its own share of the deadline instead.
+  test("bounds boot by its own share instead of the whole provision budget", async () => {
+    const timer = new FakeTimer();
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    const handle: any = {
+      exitCode: null,
+      signalCode: null,
+      once: () => handle,
+      kill: () => true,
+    };
+    deviceManager.setMockChildProcess("phone-api-36-a", handle);
+    const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);
+    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
+      // Yield once so the boot phase has registered its deadline timer, then
+      // model a slow cold boot that ends 1ms before the whole provision deadline.
+      await Promise.resolve();
+      timer.advanceTime(59_999);
+      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+      const resolved = { ...booted, deviceId: "emulator-5554" };
+      deviceManager.setBootedDevices("android", [resolved]);
+      return resolved;
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    let readinessBudgetMs: number | undefined;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
+        readinessBudgetMs = totalDeadlineMs - timer.now();
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "boot-budget-slice"),
+      timeoutMs: 60_000,
+    });
+
+    const payload = JSON.parse((response as any).content[0].text);
+    // Either boot stayed inside its share and readiness kept a usable budget, or
+    // boot overran its share and the request failed as a timeout. What must not
+    // happen is readiness running with a starved budget.
+    expect(readinessBudgetMs ?? Number.POSITIVE_INFINITY).toBeGreaterThan(1_000);
+    expect(payload.error?.code).toBe("timeout");
+  });
+
+  // `reserveDeviceForReadiness` proves ownership through its `autolockClient`
+  // argument before the caller starts readiness side effects ("Acquisition may
+  // reboot a device during readiness recovery"). provisionDevice passed no
+  // autolock client, so it reset the shared per-device CtrlProxy manager and
+  // rewrote device resource settings on another MCP client's live device, only
+  // failing afterwards at the bind.
+  test("does not touch a device autolocked to another MCP client", async () => {
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    try {
+      const booted = {
+        name: "phone-api-36-a",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+      };
+      deviceManager.setBootedDevices("android", [booted]);
+      deviceManager.setDeviceImages("android", [
+        { name: "phone-api-36-a", platform: "android", isRunning: true },
+      ]);
+      await pool.initializeWithDevices([booted]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.autolockDevice(
+        "emulator-5554",
+        "android",
+        "other-mcp-client",
+        undefined,
+        undefined,
+        booted,
+      );
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      const resources = new FakeDeviceResourceController();
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        timer,
+        deviceResourceControllerFactory: () => resources,
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+        },
+      });
+
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("android", "autolocked-elsewhere"),
+        timeoutMs: 60_000,
+        resources: { wallpaperRendering: "disabled" as const },
+        __mcpSessionId: "my-mcp-client",
+      });
+
+      expect({ readinessCalls, resourceRequests: resources.requests.length }).toEqual({
+        readinessCalls: 0,
+        resourceRequests: 0,
+      });
+      expect((response as any).isError).toBe(true);
+    } finally {
+      sessionManager.stopCleanupTimer();
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    }
+  });
+
+  // `reserveProvisionDeviceReadiness` records a stable-name readiness
+  // reservation keyed `android:<avd>`. If the pooled entry's incarnation changes
+  // while readiness is in flight (a disconnect + rediscovery of the same serial,
+  // i.e. exactly the Android-reboot case the name reservation exists to bridge),
+  // provisionDevice must still be able to bind: its own reservation owner has to
+  // be handed to `bindBootedDeviceSession`, or the reservation denies its own bind.
+  test("binds through its own readiness name reservation after an incarnation change", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const booted = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    const avdInfo = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      isRunning: true,
+      source: "local" as const,
+    };
+    deviceManager.setBootedDevices("android", [booted]);
+    deviceManager.setDeviceImages("android", [avdInfo]);
+    await pool.initializeWithDevices([booted]);
+    // `trackStableName` only fires for an emulator whose pooled AVD name matches.
+    (pool as any).devices.get("emulator-5554").avdName = "phone-api-36-a";
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        // A disconnect + rediscovery of the same serial mints a new incarnation.
+        await pool.removeDevice("emulator-5554");
+        await pool.addDevice(booted, avdInfo);
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "readiness-reservation-owner"),
+      timeoutMs: 60_000,
+    });
+
+    expect((response as any).isError).toBeFalsy();
+    const payload = JSON.parse((response as any).content[0].text);
+    expect(payload.error).toBeUndefined();
+    expect(payload).toMatchObject({
+      lifecycleState: "ready",
+      sessionId: expect.any(String),
+    });
   });
 
   test("reserves rollback and response time from the daemon's queued-request deadline", async () => {

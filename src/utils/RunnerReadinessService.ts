@@ -46,6 +46,12 @@ export class RunnerReadinessError extends ActionableError {
   constructor(
     message: string,
     readonly retryableAndroidFrameworkFailure = false,
+    /**
+     * The phase ran out of budget rather than hitting a platform fault, so the
+     * failure is purely time-based and callers may report it as a timeout and
+     * retry it (`provisionDevice` maps this to error code `"timeout"`).
+     */
+    readonly deadlineExhausted = false,
   ) {
     super(message);
   }
@@ -1035,12 +1041,14 @@ export class RunnerReadinessService {
     const mapping =
       `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId})]`;
+    const remainingBudgetMs = this.remainingForPhase(context, phase);
     throw new RunnerReadinessError(
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
-        `attempts=${attempts} remainingBudgetMs=${this.remainingForPhase(context, phase)}: ${normalizeDiagnostic(detail)}`,
+        `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}: ${normalizeDiagnostic(detail)}`,
       device.platform === "android" &&
         RunnerReadinessService.isSetupPhase(phase) &&
         isAndroidFrameworkUnavailable(detail),
+      remainingBudgetMs <= 0,
     );
   }
 }

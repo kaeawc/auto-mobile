@@ -90,6 +90,7 @@ import {
 } from "./directSessionDeviceRegistry";
 import {
   createDefaultRunnerReadinessService,
+  RunnerReadinessError,
   type RunnerReadinessRequest,
   SystemUiAnrRecoveryRequiredError,
 } from "../utils/RunnerReadinessService";
@@ -4589,8 +4590,14 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceError) {
       return error;
     }
+    // A readiness phase that ran out of budget is a purely time-based failure:
+    // report it as `timeout` so a controller that retries timeouts but treats
+    // `platform_command_failed` as terminal does not give up on it.
+    const isDeadlineFailure =
+      error instanceof DeviceBootTimeoutError ||
+      (error instanceof RunnerReadinessError && error.deadlineExhausted);
     return new ProvisionDeviceError(
-      error instanceof DeviceBootTimeoutError ? "timeout" : "platform_command_failed",
+      isDeadlineFailure ? "timeout" : "platform_command_failed",
       `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
     );
   }
@@ -4736,6 +4743,12 @@ export function registerDeviceTools() {
         provisionDeviceCleanupResult(cleanupArgs, response),
       );
     } catch (error) {
+      // A rollback failure summarizes to a one-line message in the response, so
+      // the daemon log is the only forensic record of what actually went wrong.
+      logger.warn(
+        `[DeviceTools] provisionDevice rollback teardown failed for '${cleanupArgs.target.stableId}': ${errorMessage(error)}`,
+        error,
+      );
       return new ProvisionDeviceRollbackError(provisionFailure, {
         status: "failed",
         operationId: cleanupArgs.operationId,
@@ -4762,6 +4775,7 @@ export function registerDeviceTools() {
     creationStarted: boolean,
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
+    unownedColdBootSettlement: Promise<void> | undefined,
   ): Promise<never> {
     const createdDevice =
       provisioned?.created || creationStarted
@@ -4773,6 +4787,9 @@ export function registerDeviceTools() {
     if (!createdDevice) {
       throw error;
     }
+    // A destructive teardown of this AVD must not race the emulator process the
+    // failed attempt is still killing.
+    await unownedColdBootSettlement;
     throw await cleanupFailedProvisionDevice(
       args,
       deps,
@@ -4869,6 +4886,7 @@ export function registerDeviceTools() {
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
+    const bootState: { unownedColdBootSettlement?: Promise<void> } = {};
     try {
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
@@ -4935,6 +4953,7 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         lifecycleLease,
         signal,
+        bootState,
       );
       if (provisioned.created || booted.source === "cold-boot") {
         await deps.notifyResourcesChanged();
@@ -4954,9 +4973,14 @@ export function registerDeviceTools() {
           return rollbackLease;
         },
         error,
+        bootState.unownedColdBootSettlement,
       );
     } finally {
-      lifecycleLease?.release();
+      if (bootState.unownedColdBootSettlement) {
+        void bootState.unownedColdBootSettlement.then(() => lifecycleLease?.release());
+      } else {
+        lifecycleLease?.release();
+      }
     }
   }
 
@@ -5005,6 +5029,9 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
+    // Carries the cold-boot cancellation settlement back to the caller so the
+    // AVD lifecycle lease is not released while the emulator is still exiting.
+    bootState: { unownedColdBootSettlement?: Promise<void> },
   ): Promise<{
     device: BootedDevice;
     sessionId: string;
@@ -5025,7 +5052,7 @@ export function registerDeviceTools() {
     });
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
-    let releaseReadinessReservation: (() => Promise<void>) | undefined;
+    let readinessReservation: DeviceReadinessReservation | undefined;
     let resources: DeviceResourceConfigurationResult | undefined;
     try {
       const alreadyBooted = await runProvisionDeviceWithinDeadline(
@@ -5050,13 +5077,24 @@ export function registerDeviceTools() {
         );
       }
       perf.startOperation("bootDevice");
+      // Boot and automation readiness share one provision budget. Reserve the
+      // readiness slice up front, the way `applyProvisionDeviceResources` does,
+      // so a slow cold boot cannot consume the whole deadline and leave CtrlProxy
+      // setup with a millisecond ("readiness budget exhausted before setup lock").
+      // The slice is capped at half the remaining budget so a short request still
+      // gets a usable boot window; no budget is inflated.
+      const readinessShareMs = Math.min(
+        Math.max(0, totalDeadlineMs - deps.timer.now()) / 2,
+        args.readiness === "automation"
+          ? serverConfig.getRunnerReadinessTimeoutMs()
+          : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      );
       boot = await bootService.boot({
         operationName: "provisionDevice",
         platform: args.device.platform,
         deviceId:
           exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
-        timeoutMs: Math.max(1, totalDeadlineMs - deps.timer.now()),
-        totalDeadlineMs,
+        totalDeadlineMs: totalDeadlineMs - readinessShareMs,
         signal: operationSignal,
       });
       perf.endOperation("bootDevice");
@@ -5067,20 +5105,20 @@ export function registerDeviceTools() {
         );
       }
       validatePooledDeviceMapping(boot.device, requestedIdentity);
-      releaseReadinessReservation = await runProvisionDeviceWithinDeadline(
+      readinessReservation = await runProvisionDeviceWithinDeadline(
         deps.timer,
         totalDeadlineMs,
         operationSignal,
         "reserving device readiness",
         async (reservationSignal) => {
-          const release = await reserveProvisionDeviceReadiness(boot!.device);
+          const reservation = await reserveProvisionDeviceReadiness(args, boot!);
           if (reservationSignal.aborted) {
-            void release?.().catch((error) =>
+            void reservation?.().catch((error) =>
               logger.warn(`Late provision reservation release failed: ${error}`),
             );
             reservationSignal.throwIfAborted();
           }
-          return release;
+          return reservation;
         },
       );
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
@@ -5124,7 +5162,9 @@ export function registerDeviceTools() {
                 },
                 provisioned.device,
                 boot!.processHandle,
-                undefined,
+                // Our own stable-name readiness reservation must not deny our
+                // own bind when the pooled incarnation changed during readiness.
+                readinessReservation ? new Set([readinessReservation.owner]) : undefined,
                 undefined,
                 resolveProvisionDeviceAchievedReadiness(args.readiness),
               ),
@@ -5140,15 +5180,17 @@ export function registerDeviceTools() {
       };
     } catch (error) {
       if (!ownershipTransferred) {
-        void cancelUnownedColdBoot(boot);
+        bootState.unownedColdBootSettlement = cancelUnownedColdBoot(boot);
       }
       throw error;
     } finally {
-      releaseProvisionReadiness(releaseReadinessReservation);
+      releaseProvisionReadiness(readinessReservation);
     }
   }
 
-  function releaseProvisionReadiness(releaseReservation: (() => Promise<void>) | undefined): void {
+  function releaseProvisionReadiness(
+    releaseReservation: DeviceReadinessReservation | undefined,
+  ): void {
     // Session ownership is already committed on success. A delayed mutex-backed
     // reservation release must neither turn that success into destructive rollback
     // nor replace the original failure. Keep the balanced release queued.
@@ -5198,13 +5240,26 @@ export function registerDeviceTools() {
   }
 
   async function reserveProvisionDeviceReadiness(
-    device: BootedDevice,
-  ): Promise<(() => Promise<void>) | undefined> {
+    args: ProvisionDeviceArgs,
+    boot: DeviceBootResult,
+  ): Promise<DeviceReadinessReservation | undefined> {
     const daemonState = DaemonState.getInstance();
     if (!daemonState.isInitialized()) {
       return undefined;
     }
-    return await daemonState.getDevicePool().reserveDeviceForReadiness(device.deviceId, device);
+    // Reserving may reboot the device during readiness recovery, and the
+    // readiness that follows resets the shared per-device CtrlProxy manager and
+    // rewrites resource settings. Prove this client owns the device first, the
+    // same way `reserveInitialDeviceForReadiness` does for startDevice.
+    return await daemonState
+      .getDevicePool()
+      .reserveDeviceForReadiness(
+        boot.device.deviceId,
+        boot.device,
+        boot.sourceImage?.name ?? boot.device.name,
+        undefined,
+        isDevicePoolAutolockEnabled() ? { mcpSessionId: args.__mcpSessionId } : undefined,
+      );
   }
 
   async function ensureProvisionDeviceReadiness(

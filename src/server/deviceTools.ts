@@ -3883,7 +3883,17 @@ async function reserveAndroidStartupLease(
     return undefined;
   }
   const remainingMs = bootDeadlineMs - timer.now();
-  const requestedName = budgets.androidAvdName ?? args.name;
+  // A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take
+  // the wildcard lease: `androidStartupRequestMatchesAvd` short-circuits on a
+  // missing name, which makes `detachAdbServerResetCohort` defer *every* cohort
+  // and the DisconnectMonitor skip its entire iteration for the minutes this
+  // lease is held. The pool already knows the serial's AVD name; fall back to
+  // the wildcard only when the serial is unknown to it or the request is
+  // criteria-only, where any AVD really may still be selected.
+  const exactAvdName =
+    budgets.androidAvdName ??
+    (args.deviceId ? devicePool.getDevice(args.deviceId)?.avdName : undefined);
+  const requestedName = exactAvdName ?? args.name;
   if (remainingMs <= 0) {
     throw new ActionableError(
       `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
@@ -3907,7 +3917,7 @@ async function reserveAndroidStartupLease(
   try {
     return await devicePool.reserveAndroidStartupLease(
       requestedName,
-      budgets.androidAvdName !== undefined,
+      exactAvdName !== undefined,
       timeoutController.signal,
     );
   } finally {

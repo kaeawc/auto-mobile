@@ -555,9 +555,11 @@ describe("SimCtlClient boot self-verification", () => {
           : createExecResult(JSON.stringify({ devices: {} }), ""),
     );
 
-    await expect(harness.createClient().bootSimulator(UDID)).rejects.toThrow(
+    const client = harness.createClient();
+    await expect(client.bootSimulator(UDID)).rejects.toThrow(
       `Failed to boot iOS simulator ${UDID}`,
     );
+    expect(await client.getBootedSimulatorsChecked()).toEqual([]);
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
   });
 

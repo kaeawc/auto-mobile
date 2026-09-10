@@ -1193,6 +1193,7 @@ export class SimCtlClient implements SimCtl {
       // Cleanup must not inherit the already-aborted request signal.
       const cleanupSignal = new AbortController().signal;
       await this.executeCommandArgs(["shutdown", udid], 10_000, cleanupSignal);
+      SimCtlClient.invalidateDeviceListCache();
     } catch (error) {
       logger.warn(`[iOS] Failed to shut down simulator ${udid} after unsuccessful start: ${error}`);
     }

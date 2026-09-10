@@ -59,7 +59,7 @@ export interface SimulatorTccSqliteClientDependencies {
    */
   deviceSetRoot?: string;
   /** Device-set selection only; launch-directory ownership remains with the daemon. */
-  environment?: Pick<NodeJS.ProcessEnv, "CORESIMULATOR_DEVICE_SET_PATH">;
+  environment?: { CORESIMULATOR_DEVICE_SET_PATH?: string };
   timer?: Timer;
   timeoutMs?: number;
 }
@@ -213,7 +213,12 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     this.homeDirectory = dependencies.homeDirectory ?? homedir();
     this.deviceSetRoot = resolvePathFromDaemonLaunchWorkingDirectory(
       dependencies.deviceSetRoot ??
-        defaultDeviceSetRoot(this.homeDirectory, dependencies.environment ?? process.env),
+        defaultDeviceSetRoot(
+          this.homeDirectory,
+          dependencies.environment ?? {
+            CORESIMULATOR_DEVICE_SET_PATH: process.env.CORESIMULATOR_DEVICE_SET_PATH,
+          },
+        ),
     );
     this.timer = dependencies.timer ?? defaultTimer;
     this.timeoutMs = dependencies.timeoutMs ?? DEFAULT_TCC_QUERY_TIMEOUT_MS;

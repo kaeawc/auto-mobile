@@ -155,7 +155,7 @@ import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
   resolveStableDaemonWorkingDirectory,
-  resolvePathFromDaemonLaunchWorkingDirectory,
+  normalizeCoreSimulatorDeviceSetPathEnv,
 } from "../utils/workingDirectory";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import {
@@ -518,12 +518,8 @@ export class Daemon {
     logger.enableStdoutLogging();
     const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();
     process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd(stableWorkingDirectory);
-    const deviceSetPath = process.env.CORESIMULATOR_DEVICE_SET_PATH?.trim();
-    if (deviceSetPath) {
-      // Keep simctl and direct TCC reads on the same device set after chdir.
-      process.env.CORESIMULATOR_DEVICE_SET_PATH =
-        resolvePathFromDaemonLaunchWorkingDirectory(deviceSetPath);
-    }
+    // Keep simctl and direct TCC reads on the same device set after chdir (issue #6582).
+    normalizeCoreSimulatorDeviceSetPathEnv();
     process.chdir(stableWorkingDirectory);
 
     logger.info("Starting AutoMobile daemon...");

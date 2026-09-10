@@ -318,6 +318,27 @@ describe("systemTray list", () => {
       actions: ["Reply"],
     });
   });
+  test("preserves repeated messages within a MessagingStyle layout", async () => {
+    const notification = row("Conversation");
+    notification.node.push(
+      node("android:id/message_text", "OK"),
+      node("android:id/message_text", "OK"),
+    );
+    setup([page(notification)]);
+    expect((await list()).notifications[0].body).toBe("OK\nOK");
+  });
+  test("selects the fuller MessagingStyle layout without duplicating compact contents", async () => {
+    const notification = row("Conversation");
+    notification.node.push(
+      node("android:id/messaging_linear_layout", "", [node("android:id/message_text", "OK")]),
+      node("android:id/messaging_linear_layout", "", [
+        node("android:id/message_text", "OK"),
+        node("android:id/message_text", "OK"),
+      ]),
+    );
+    setup([page(notification)]);
+    expect((await list()).notifications[0].body).toBe("OK\nOK");
+  });
   test("uses stable row identity when notification text changes", async () => {
     const first = row("progress");
     Object.assign(first.$, { "unique-id": "notification-1" });

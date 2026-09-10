@@ -1441,16 +1441,22 @@ const readTrayNotificationFields = (root: any) => {
     if (["title", "title_big", "conversation_text"].includes(id)) {
       fields.title = text;
     }
-    if (["text", "big_text", "text2", "message_text"].includes(id)) {
+    if (["text", "big_text", "text2"].includes(id)) {
       fields.bodies.push(text);
     }
     if (["action0", "action1", "action2", "action_text"].includes(id)) {
       fields.actions.push(text);
     }
   };
-  const pending = [root];
+  // Each MessagingStyle layout is an alternate rendering of the conversation.
+  // Preserve repeated message nodes within one layout; select the fullest
+  // layout instead of deduplicating message values across compact/expanded UI.
+  const messageLayouts: string[][] = [[]];
+  const pending = [{ node: root, messages: messageLayouts[0] }];
   while (pending.length) {
-    const node = pending.shift();
+    const entry = pending.shift()!;
+    const { node } = entry;
+    let { messages } = entry;
     const props = getNodeProperties(node);
     if (!props) {
       continue;
@@ -1462,17 +1468,24 @@ const readTrayNotificationFields = (root: any) => {
     if (childRows.has(node)) {
       continue;
     }
+    if (id === "messaging_linear_layout") {
+      messages = [];
+      messageLayouts.push(messages);
+    }
     const text = extractNodeTextCandidates(node)[0];
     if (text) {
       appendText(id, text);
+      if (id === "message_text") {
+        messages.push(text);
+      }
     }
-    const children = node.node;
-    if (Array.isArray(children)) {
-      pending.push(...children);
-    } else if (children && typeof children === "object") {
-      pending.push(children);
-    }
+    const children = [node.node].flat().filter((child) => child && typeof child === "object");
+    pending.push(...children.map((node: any) => ({ node, messages })));
   }
+  const messages = messageLayouts.reduce((fullest, layout) =>
+    layout.length > fullest.length ? layout : fullest,
+  );
+  fields.bodies = messages.length ? messages : [...new Set(fields.bodies)];
   return fields;
 };
 
@@ -1495,7 +1508,7 @@ const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[
         id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
         appLabel: label,
         title: fields.title,
-        body: [...new Set(fields.bodies)].join("\n") || null,
+        body: fields.bodies.join("\n") || null,
         actions: [...new Set(fields.actions)],
         texts: [...new Set(fields.texts)],
         inGroup: Boolean(candidate.groupNode),

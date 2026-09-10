@@ -262,7 +262,9 @@ describe("systemTray post-tap observation", () => {
     const controller = new AbortController();
     const observer = new FakeObserveScreen();
     observer.setObserveResult((index) => {
-      if (index > 0) {controller.abort(new Error("request cancelled"));}
+      if (index > 0) {
+        controller.abort(new Error("request cancelled"));
+      }
       return createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 1000 + index });
     });
     setSystemTrayDependencies({

@@ -1283,6 +1283,65 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("killDevice")).toBe(false);
   });
 
+  // The recovery phases run under the whole startDevice budget, not the 30s
+  // device-shutdown budget, and they are not waiting for a device to disappear.
+  // The failure must name the phase that stalled and the budget that elapsed.
+  it("reports the recovery phase and the elapsed budget when the AVD image lookup stalls", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+    const listDeviceImages = fakeDeviceUtils.listDeviceImages.bind(fakeDeviceUtils);
+    let imageListings = 0;
+    fakeDeviceUtils.listDeviceImages = async (platform) => {
+      imageListings++;
+      if (imageListings === 1) {
+        return await listDeviceImages(platform);
+      }
+      // Recovery's image lookup never completes, so its deadline must expire.
+      return await new Promise<DeviceInfo[]>(() => {});
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    const start = callStartDevice({ platform: "android", timeoutMs: 90_000 });
+    let failure: unknown;
+    start.catch((error: unknown) => {
+      failure = error;
+    });
+    for (let attempt = 0; attempt < 500 && imageListings < 2; attempt++) {
+      await Promise.resolve();
+    }
+    expect(imageListings).toBe(2);
+
+    timer.advanceTime(90_000);
+    for (let attempt = 0; attempt < 500 && failure === undefined; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect((failure as Error | undefined)?.message).toBe(
+      "Timed out waiting for android device 'Pixel_7_API_34' (emulator-5554) " +
+        "to resolve its AVD image for System UI ANR recovery after 90000ms: " +
+        "System UI recovery image lookup did not complete. " +
+        "Verify the platform shutdown state and retry.",
+    );
+  });
+
   it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);

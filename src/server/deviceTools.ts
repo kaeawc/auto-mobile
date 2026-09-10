@@ -977,10 +977,15 @@ function shutdownTimeoutError(
   device: BootedDevice,
   detail: string,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  // Not every deadline-bounded phase is a device disappearing (System UI ANR
+  // recovery lists AVD images and issues a kill command under this same
+  // deadline), so callers can name their own phase. The "Timed out waiting for"
+  // prefix is load-bearing: `isShutdownTimeoutError` classifies on it.
+  phase = "to disappear",
 ): ActionableError {
   return new ActionableError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
-      `to disappear after ${timeoutMs}ms: ${detail}. ` +
+      `${phase} after ${timeoutMs}ms: ${detail}. ` +
       "Verify the platform shutdown state and retry.",
   );
 }
@@ -1278,11 +1283,16 @@ async function runWithinShutdownDeadline<T>(
   detail: string,
   requestAbortSignal: AbortSignal | undefined,
   operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
-  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  timeoutMs?: number,
+  phase?: string,
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
+  // The wait is always `remainingMs`; `timeoutMs` only names the caller's own
+  // narrower budget for the message. Without one, quote the budget that
+  // actually elapsed rather than the unrelated default shutdown budget.
+  const reportedTimeoutMs = timeoutMs ?? Math.max(0, remainingMs);
   if (remainingMs <= 0) {
-    throw shutdownTimeoutError(device, detail, timeoutMs);
+    throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
   }
   const deadlineController = new AbortController();
   const signal = requestAbortSignal
@@ -1294,14 +1304,14 @@ async function runWithinShutdownDeadline<T>(
     timeout = timer.setTimeout(() => {
       timedOut = true;
       deadlineController.abort();
-      reject(shutdownTimeoutError(device, detail, timeoutMs));
+      reject(shutdownTimeoutError(device, detail, reportedTimeoutMs, phase));
     }, remainingMs);
   });
   const requestAbort = abortPromise(requestAbortSignal);
   const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(
     (error) => {
       if (timedOut) {
-        throw shutdownTimeoutError(device, detail, timeoutMs);
+        throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
       }
       throw error;
     },
@@ -3415,6 +3425,8 @@ async function resolveSystemUiRecoveryImage(
     "System UI recovery image lookup did not complete",
     signal,
     async () => await deviceManager.listDeviceImages("android"),
+    undefined,
+    "to resolve its AVD image for System UI ANR recovery",
   );
   const image = images.find(
     (candidate) => candidate.platform === "android" && candidate.name === avdName,
@@ -3571,6 +3583,8 @@ async function shutdownAndroidForSystemUiAnr(
     signal,
     async (shutdownSignal, timeoutMs) =>
       await deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs }),
+    undefined,
+    "to accept its System UI ANR recovery shutdown command",
   );
   await waitForDeviceShutdown(
     deviceManager,

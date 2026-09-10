@@ -14,6 +14,17 @@ function release(version: string): ReleaseChecksumEntry {
 }
 
 describe("sendKeysSchema", () => {
+  test("accepts device, session, and bound-session targeting without a platform", () => {
+    for (const target of [{ deviceId: "emulator-5554" }, { sessionUuid: "session-1" }, {}]) {
+      const parsed = sendKeysSchema.parse({
+        ...target,
+        commands: [{ action: "type", text: "Bluetooth" }],
+      });
+      expect(parsed.platform).toBeUndefined();
+      expect(parsed).toMatchObject(target);
+    }
+  });
+
   test("accepts mixed commands and applies type defaults", () => {
     const parsed = sendKeysSchema.parse({
       platform: "android",

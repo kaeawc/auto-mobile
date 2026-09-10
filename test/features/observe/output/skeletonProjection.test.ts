@@ -39,6 +39,41 @@ function findById(skeleton: SkeletonElement[], id: string): SkeletonElement | un
 }
 
 describe("toSkeleton — acceptance criteria", () => {
+  test("quick-settings switches preserve identity and state separately (#6794)", () => {
+    const tiles: Element[] = [
+      "Internet,,Networks available",
+      "Bluetooth.",
+      "Flashlight",
+      "Do Not Disturb.",
+    ].map((description, index) => ({
+      bounds: bounds(0, index * 60, 100, index * 60 + 50),
+      class: "android.widget.Switch",
+      "content-desc": description,
+      text: index < 2 ? "On" : "Off",
+      clickable: true,
+      checkable: true,
+      checked: index < 2,
+    }));
+    const rows = toSkeleton(makeElements({ clickable: tiles, text: tiles }));
+    expect(rows.map((row) => row.label)).toEqual(tiles.map((tile) => tile["content-desc"]));
+    expect(rows.map((row) => row.sublabel)).toEqual(["On", "On", "Off", "Off"]);
+    expect(rows.map((row) => row.checked)).toEqual([true, true, false, false]);
+  });
+
+  test("named toggle state survives descendant label hoisting (#6794)", () => {
+    const tile: Element = {
+      bounds: bounds(0, 0, 100, 100),
+      "content-desc": "Internet",
+      text: "On",
+      clickable: true,
+      checkable: true,
+    };
+    const detail: Element = { bounds: bounds(10, 10, 90, 30), text: "Networks available" };
+    const rows = toSkeleton(makeElements({ clickable: [tile], text: [tile, detail] }));
+    expect(rows[0].label).toBe("Internet");
+    expect(rows[0].sublabel).toBe("On, Networks available");
+  });
+
   describe("AC2: id/label precedence maps onto the tapOn selector union", () => {
     test("id prefers resource-id, else view-id; label prefers text, else content-desc", () => {
       const resourceIdNode: Element = {

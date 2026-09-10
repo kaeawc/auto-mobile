@@ -1,6 +1,9 @@
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
-import { hasAccessibilityAction } from "../../../utils/elementProperties";
+import {
+  getToggleContentDescription,
+  hasAccessibilityAction,
+} from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./elementProvenance";
 
@@ -58,9 +61,16 @@ function deriveId(el: Element): string | undefined {
   return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
 }
 
-/** `label = text ?? content-desc`. */
+/** Named toggles use their accessibility identity; other nodes prefer visible text. */
 function deriveLabel(el: Element): string | undefined {
-  return nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"]);
+  return (
+    getToggleContentDescription(el) ?? nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"])
+  );
+}
+
+/** Preserve a named toggle's own state alongside its identifying label. */
+function deriveSublabel(el: Element, label: string | undefined): string | undefined {
+  return getToggleContentDescription(el) && el.text !== label ? nonEmptyString(el.text) : undefined;
 }
 
 /**
@@ -191,7 +201,13 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
 
     let acc = byIdentity.get(key);
     if (!acc) {
-      acc = { elementId, label, bounds, affordances: new Set<Affordance>() };
+      acc = {
+        elementId,
+        label,
+        sublabel: deriveSublabel(el, label),
+        bounds,
+        affordances: new Set<Affordance>(),
+      };
       byIdentity.set(key, acc);
     }
     if (acc.provenance === undefined) {
@@ -374,7 +390,7 @@ function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): vo
       container.sublabel = parts.slice(1).join(", ");
     }
   } else {
-    container.sublabel = parts.join(", ");
+    container.sublabel = [...new Set([container.sublabel, ...parts].filter(Boolean))].join(", ");
   }
 }
 

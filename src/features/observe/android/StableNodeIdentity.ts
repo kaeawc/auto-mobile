@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { getToggleContentDescription } from "../../../utils/elementProperties";
 
 /**
  * Capture-layer stable node identity for id-less Android nodes (issue #3228).
@@ -193,7 +194,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       .update(
         JSON.stringify([
           node["class"] ?? node.className ?? "",
-          ...fields.map((field) => node[field] ?? ""),
+          ...fields.map((field) =>
+            // A named toggle's text is state (On/Off), not identity (#6794).
+            field === "text" && getToggleContentDescription(node) ? "" : (node[field] ?? ""),
+          ),
           kids,
         ]),
       )

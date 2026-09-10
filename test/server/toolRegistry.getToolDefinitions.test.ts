@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
+import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
 describe("ToolRegistry.getToolDefinitions", () => {
@@ -15,6 +17,39 @@ describe("ToolRegistry.getToolDefinitions", () => {
   afterEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setToolResultsNoStructuredContentEnabled(originalStructuredContentSuppressed);
+  });
+
+  test("selection choices follow availability without leaking hidden or plan-only tools", () => {
+    const originalDebug = isDebugModeEnabled();
+    try {
+      setDebugModeEnabled(false);
+      registerToolSelectionTools();
+      for (const [name, options] of [
+        ["optionalTool", { defaultEnabled: false }],
+        ["debugTool", { debugOnly: true }],
+        ["hiddenTool", { hidden: true }],
+      ] as const) {
+        ToolRegistry.register(name, name, z.object({}), async () => ({}), options);
+      }
+      ToolRegistry.registerDeviceAware("planTool", "Plan only", z.object({}), async () => ({}), {
+        planOnly: true,
+      });
+      const choices = () => {
+        const schema = ToolRegistry.getToolDefinitions().find(
+          (tool) => tool.name === "setToolEnabled",
+        )!.inputSchema;
+        return (schema.properties as Record<string, { enum: string[] }>).toolName.enum;
+      };
+      const initialChoices = choices();
+      expect(initialChoices).toEqual(["optionalTool"]);
+      setDebugModeEnabled(true);
+      expect(choices()).toEqual(["debugTool", "optionalTool"]);
+      expect(initialChoices).toEqual(["optionalTool"]);
+      setDebugModeEnabled(false);
+      expect(choices()).toEqual(["optionalTool"]);
+    } finally {
+      setDebugModeEnabled(originalDebug);
+    }
   });
 
   test("reuses converted input and output schemas across steady-state listings", () => {

@@ -1668,7 +1668,12 @@ export class ToolRegistryClass {
     // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the
     // two in sync for the strip flag.
     const compactBounds = true;
-    return this.getAllTools(options).map((tool) => {
+    const listedTools = this.getAllTools(options);
+    const configurableToolNames = listedTools
+      .filter((tool) => this.isUserConfigurableTool(tool.name))
+      .map((tool) => tool.name)
+      .sort();
+    return listedTools.map((tool) => {
       const { inputSchema, outputSchema } = this.getCachedToolDefinitionSchemas(
         tool,
         suppressOutputSchema,
@@ -1686,6 +1691,19 @@ export class ToolRegistryClass {
         description: tool.description,
         inputSchema,
       };
+      // Keep the compact enabled-tool profile while making optional capabilities
+      // discoverable through the always-listed selection control (#6797).
+      // Copy the cached schema: availability can change between listings.
+      if (tool.name === "setToolEnabled") {
+        const properties = inputSchema.properties as Record<string, Record<string, unknown>>;
+        definition.inputSchema = {
+          ...inputSchema,
+          properties: {
+            ...properties,
+            toolName: { ...properties.toolName, enum: configurableToolNames },
+          },
+        };
+      }
       if (outputSchema) {
         definition.outputSchema = outputSchema;
       }

@@ -140,15 +140,15 @@ describe("resolveMcpServerVersion (property-based)", () => {
   });
 
   test("a resolved (non-override) base survives a release-version round-trip", () => {
-    // env base takes precedence over readPackageVersion; when env is empty the
-    // package fallback is used. Either way, stripping the stamp yields the base.
+    // The package owns its version; the environment is used only without a
+    // manifest. Either way, stripping the stamp yields the selected base.
     const source = fc.constantFrom("env", "package");
     fc.assert(
       fc.property(baseVersion, source, fc.option(gitInfo, { nil: null }), (base, source_, git) => {
         const fromEnv = source_ === "env";
         const resolved = resolveMcpServerVersion({
-          env: { MCP_SERVER_VERSION: undefined, npm_package_version: fromEnv ? base : "" },
-          readPackageVersion: () => (fromEnv ? "should-not-be-read" : base),
+          env: { MCP_SERVER_VERSION: undefined, npm_package_version: fromEnv ? base : "8.8.8" },
+          readPackageVersion: () => (fromEnv ? null : base),
           readGitVersion: () => git,
         });
         return releaseVersion(resolved) === base;

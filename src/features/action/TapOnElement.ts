@@ -49,7 +49,11 @@ import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
-import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
+import {
+  getToggleContentDescription,
+  hasAccessibilityAction,
+  isTruthyFlag,
+} from "../../utils/elementProperties";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -1494,13 +1498,14 @@ export class TapOnElement extends BaseVisualChange {
     const bounds = selection.element.bounds;
     const center = this.geometry.getElementCenter(selection.element);
     const text =
-      typeof selection.element.text === "string" && selection.element.text.length > 0
+      getToggleContentDescription(selection.element) ??
+      (typeof selection.element.text === "string" && selection.element.text.length > 0
         ? selection.element.text
         : typeof selection.element["content-desc"] === "string"
           ? selection.element["content-desc"]
           : typeof selection.element["ios-accessibility-label"] === "string"
             ? selection.element["ios-accessibility-label"]
-            : "";
+            : "");
     const resourceId =
       typeof selection.element["resource-id"] === "string" ? selection.element["resource-id"] : "";
     const testTag =

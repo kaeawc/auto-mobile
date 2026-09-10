@@ -13,7 +13,9 @@ export const setToolEnabledSchema = z.object({
   toolName: z
     .string()
     .min(1)
-    .describe("Exact case-sensitive AutoMobile tool name to enable or disable."),
+    .describe(
+      "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled.",
+    ),
   enabled: z
     .boolean()
     .default(true)

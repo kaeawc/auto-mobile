@@ -14,7 +14,7 @@ import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
-  DEVICE_SESSION_ACQUISITION_TOOLS,
+  DEVICE_SESSION_RECOVERY_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
 
@@ -722,7 +722,8 @@ Examples:
 Options:
   help [tool-name]              Show help for a specific tool
   --session-uuid <uuid>         Associate tool execution with a session (optional).
-                                Ignored for ${DEVICE_SESSION_ACQUISITION_TOOLS.join(", ")},
+                                Ignored for the device-acquisition tools
+                                (${DEVICE_SESSION_RECOVERY_TOOLS.join(", ")}),
                                 which mint their own session.
 
 Parameters:

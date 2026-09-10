@@ -874,15 +874,17 @@ async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> 
 async function clearInstalledAppsAfterShutdown(
   dependencies: DeviceToolsDependencies,
   deviceId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await dependencies.clearInstalledAppsForDevice(deviceId);
+    return true;
   } catch (error) {
     // The device is already stopped; the next app verification refreshes stale cache rows.
     logger.warn(
       `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
       error,
     );
+    return false;
   }
 }
 
@@ -2227,9 +2229,12 @@ async function shutdownDevice(
       unregisterDirectSessionsForDevice(device.deviceId);
 
       const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
-      const notification = cleanup.then(async () => {
+      const notification = cleanup.then(async (cacheCleared) => {
         await notifyResourcesAfterShutdown(dependencies);
-        await getInstalledAppsCacheWriteCoordinator().releaseDevice(device.deviceId);
+        // Failed persistence must keep the dirty fence across device-ID reuse.
+        if (cacheCleared) {
+          await getInstalledAppsCacheWriteCoordinator().releaseDevice(device.deviceId);
+        }
       });
       // Keep late cleanup visible to DB shutdown without blocking a later
       // device teardown retry if resource notification never settles.
@@ -2241,7 +2246,9 @@ async function shutdownDevice(
         "cleanup",
         "installed-app cleanup did not complete",
         strictDeadline,
-        async () => await cleanup,
+        async () => {
+          await cleanup;
+        },
       );
       await runPostShutdownStep(
         shutdownContext,

@@ -601,7 +601,7 @@ describe("killDevice handler", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
-    expect(coordinator.isDirty("emulator-5554")).toBe(false);
+    expect(coordinator.isDirty("emulator-5554")).toBe(true);
     expect(pool.getDevice("emulator-5554")).toBeNull();
     expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
       sessionId: "session-1",

@@ -479,7 +479,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         );
       }
     }
-    PortManager.release(deviceId);
+    if (!IOSCtrlProxyManager.instances.has(deviceId)) {
+      PortManager.release(deviceId);
+    }
   }
 
   /**

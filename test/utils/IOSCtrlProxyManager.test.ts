@@ -418,6 +418,26 @@ describe("IOSCtrlProxyManager", function () {
       expect(second).not.toBe(first);
     });
 
+    test("preserves a replacement port while retiring old cleanup", async function () {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      let finish!: () => void;
+      spyOn(
+        first as unknown as { forceStopForShutdown: () => Promise<void> },
+        "forceStopForShutdown",
+      ).mockImplementation(() => {
+        PortManager.release(testDevice.deviceId);
+        return new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      });
+      const pending = IOSCtrlProxyManager.evict(testDevice.deviceId, fakeTimer);
+      const replacement = IOSCtrlProxyManager.getInstance(testDevice);
+      const port = replacement.getServicePort();
+      finish();
+      await pending;
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).toBe(replacement);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(port);
+    });
     test("leaves other devices' instances and port reservations untouched", async function () {
       const otherDevice: BootedDevice = {
         deviceId: "22222222-2222-2222-2222-222222222222",

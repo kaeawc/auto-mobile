@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { PortManager } from "../../src/utils/PortManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -760,6 +763,53 @@ describe("deleteDevice handler", () => {
     expect(pool.getDevice(device.deviceId!)).toBeNull();
     expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
   });
+
+  test("evicts a cached iOS manager after complete discovery proves absence", async () => {
+    const device = {
+      platform: "ios" as const,
+      name: "Absent Simulator",
+      deviceId: "11111111-1111-1111-1111-111111111111",
+    };
+    const old = IOSCtrlProxyManager.getInstance(device);
+    const stop = spyOn(
+      old as unknown as { forceStopForShutdown: () => Promise<void> },
+      "forceStopForShutdown",
+    ).mockResolvedValue();
+    try {
+      const response = await teardownTool().handler(request("ios", device.deviceId, device.name));
+      expect(responseBody(response).state).toBe("already_absent");
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.getInstance(device)).not.toBe(old);
+    } finally {
+      IOSCtrlProxyManager.resetInstances();
+      stop.mockRestore();
+    }
+  });
+
+  test.each([false, true])(
+    "evicts Android runtime managers for a stopped or absent AVD (absent: %s)",
+    async (absent) => {
+      const device = {
+        platform: "android" as const,
+        name: "Deleted_AVD",
+        deviceId: "emulator-5556",
+      };
+      const old = AndroidCtrlProxyManager.getInstance(device);
+      manager.setBootedDevices("android", []);
+      manager.setDeviceImages(
+        "android",
+        absent ? [] : [{ platform: "android", name: device.name, isRunning: false }],
+      );
+      try {
+        const response = await teardownTool().handler(request("android", device.name, device.name));
+        expect(responseBody(response).state).toBe(absent ? "already_absent" : "destroyed");
+        expect(AndroidCtrlProxyManager.getInstance(device)).not.toBe(old);
+      } finally {
+        AndroidCtrlProxyManager.resetInstances();
+      }
+    },
+  );
 
   test("reports already_absent only after a complete platform inventory finds no target", async () => {
     const response = await teardownTool().handler(request("ios", "IOS-DEVICE-1", "iPhone 16"));

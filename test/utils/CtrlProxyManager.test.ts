@@ -168,6 +168,22 @@ describe("CtrlProxyManager", function () {
       expect(AndroidCtrlProxyManager.getInstance(otherDevice, fakeAdbFactory)).toBe(other);
     });
 
+    test("evicts stopped AVD runtime serials while preserving a same-name physical device", function () {
+      const device = { ...testDevice, deviceId: "emulator-5556", name: "Deleted_AVD" };
+      const physical = { ...device, deviceId: "physical-serial", isEmulator: false };
+      const old = AndroidCtrlProxyManager.getInstance(device, fakeAdbFactory);
+      const retained = AndroidCtrlProxyManager.getInstance(physical, fakeAdbFactory);
+      AndroidCtrlProxyManager.evict("Deleted_AVD", "Deleted_AVD");
+      expect(AndroidCtrlProxyManager.getInstance(device, fakeAdbFactory)).not.toBe(old);
+      expect(AndroidCtrlProxyManager.getInstance(physical, fakeAdbFactory)).toBe(retained);
+    });
+
+    test("preserves a reused serial now belonging to another AVD", function () {
+      const replacement = { ...testDevice, deviceId: "emulator-5556", name: "Replacement_AVD" };
+      const manager = AndroidCtrlProxyManager.getInstance(replacement, fakeAdbFactory);
+      AndroidCtrlProxyManager.evict(replacement.deviceId, "Deleted_AVD");
+      expect(AndroidCtrlProxyManager.getInstance(replacement, fakeAdbFactory)).toBe(manager);
+    });
     test("is a no-op when no instance was ever constructed for the device id", function () {
       expect(() => AndroidCtrlProxyManager.evict("never-constructed-device")).not.toThrow();
     });

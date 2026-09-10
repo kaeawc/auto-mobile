@@ -237,8 +237,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * `AndroidCtrlProxyManager` holds no `PortManager` reservation, so deleting
    * the map entry is the entire eviction.
    */
-  public static evict(deviceId: string): void {
-    AndroidCtrlProxyManager.instances.delete(deviceId);
+  public static evict(deviceId: string, avdName?: string): void {
+    if (!avdName) AndroidCtrlProxyManager.instances.delete(deviceId);
+    if (avdName) {
+      // The stopped AVD inventory lacks an ADB serial. The manager retains
+      // the booted incarnation's name and runtime ID, including direct sessions.
+      for (const [runtimeId, manager] of AndroidCtrlProxyManager.instances) {
+        if (runtimeId.startsWith("emulator-") && manager.device.name === avdName) {
+          AndroidCtrlProxyManager.instances.delete(runtimeId);
+        }
+      }
+    }
   }
 
   /**

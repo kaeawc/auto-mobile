@@ -2646,6 +2646,15 @@ async function readTeardownInventory(
   );
 }
 
+async function evictTeardownManagers(context: TeardownContext, runtimeId?: string): Promise<void> {
+  const { platform, stableId } = context.args.target;
+  if (platform === "ios") {
+    await IOSCtrlProxyManager.evict(runtimeId ?? stableId, context.dependencies.timer);
+  } else {
+    AndroidCtrlProxyManager.evict(runtimeId ?? stableId, stableId);
+  }
+}
+
 async function resolveAbsentTeardownTarget(
   context: TeardownContext,
   booted: BootedDeviceDiscovery,
@@ -2664,6 +2673,7 @@ async function resolveAbsentTeardownTarget(
     };
   }
   await retireAbsentTeardownOwnership(context);
+  await evictTeardownManagers(context);
   unregisterDirectSessionsForStableIdentity(
     context.args.target.platform,
     context.args.target.stableId,
@@ -7001,16 +7011,7 @@ export function registerDeviceTools() {
                 ? target.device.name
                 : (target.device.deviceId ?? args.target.stableId),
             );
-            // Evict the CtrlProxy manager instance and (iOS) its PortManager
-            // reservation for this device id regardless of whether it was
-            // booted, so a deleted device never permanently retains either
-            // (issue #6580).
-            const evictedDeviceId = target.device.deviceId ?? args.target.stableId;
-            if (target.device.platform === "ios") {
-              await IOSCtrlProxyManager.evict(evictedDeviceId);
-            } else {
-              AndroidCtrlProxyManager.evict(evictedDeviceId);
-            }
+            await evictTeardownManagers(context, target.device.deviceId);
           },
           verify: async (state, stop) => {
             if (state.earlyResponse) {

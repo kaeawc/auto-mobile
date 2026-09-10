@@ -3487,6 +3487,7 @@ async function rebootAndroidAfterSystemUiAnr(
       progress,
     );
     const adoptedReplacementBoot = replacementBoot;
+    assertSystemUiAnrReplacementIdentity(adoptedReplacementBoot, sourceImage);
     const handoff = await handoffSystemUiAnrReplacement(
       devicePool,
       shutdownReservation,
@@ -3593,6 +3594,12 @@ async function bootSystemUiAnrReplacement(
       ...args,
       deviceId: undefined,
       name: sourceImage.name,
+      // Recovery already resolved this exact AVD image by name, so the boot must
+      // reuse that resolution. Without `matchExactName` the request falls back to
+      // `DeviceMatcher.matchDeviceImage`, whose name test is a case-insensitive
+      // *substring* match under the LATEST strategy: a System UI ANR on `Pixel_7`
+      // would kill `Pixel_7` and cold-boot `Pixel_7_API_35` instead.
+      matchExactName: true,
       preferRunning: false,
       totalDeadlineMs,
       signal,
@@ -3600,6 +3607,22 @@ async function bootSystemUiAnrReplacement(
     progress,
   );
   return { ...replacement, sourceImage };
+}
+
+function assertSystemUiAnrReplacementIdentity(
+  replacementBoot: DeviceBootResult,
+  sourceImage: DeviceInfo,
+): void {
+  if (replacementBoot.device.name === sourceImage.name) {
+    return;
+  }
+  // The pool enforces the same rule in `assertSystemUiAnrReplacement`, but only
+  // once the handoff is attempted. Failing here keeps a mismatched runtime out of
+  // the pool and lets the caller's catch cancel it as an unowned cold boot.
+  throw new ActionableError(
+    `System UI recovery must replace Android AVD '${sourceImage.name}' with the same runtime, ` +
+      `but booted '${replacementBoot.device.name}' (${replacementBoot.device.deviceId}).`,
+  );
 }
 
 async function handoffSystemUiAnrReplacement(

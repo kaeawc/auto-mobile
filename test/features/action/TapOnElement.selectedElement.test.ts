@@ -204,6 +204,21 @@ describe("TapOnElement selectedElement metadata", () => {
     expect(selectedElement.bounds.centerY).toBe(75);
   });
 
+  test("identifies a quick-settings toggle by content description in tap metadata (#6794)", () => {
+    const selected = (createTapOnElement() as any).buildSelectedElementMetadata({
+      element: {
+        text: "Off",
+        "content-desc": "Do Not Disturb.",
+        checkable: "true",
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      },
+      indexInMatches: 0,
+      totalMatches: 1,
+      strategy: "first",
+    });
+    expect(selected.text).toBe("Do Not Disturb.");
+  });
+
   test("populates selection metadata and computes bounds centers", () => {
     const tapOnElement = createTapOnElement();
     const element: Element = {

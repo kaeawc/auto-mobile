@@ -1725,6 +1725,8 @@ describe("provisionDevice handler", () => {
       )!.handler({
         platform: "android",
         sessionUuid,
+        // This probe verifies readiness setup, not host ADB keep-awake behavior.
+        keepScreenAwake: false,
       });
 
       expect(automationResponse).toMatchObject({ success: true });

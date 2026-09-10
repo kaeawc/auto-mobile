@@ -751,7 +751,8 @@ export const sendKeysSchema = addDeviceTargetingToSchema(
       .min(1)
       .max(100)
       .describe("One to 100 commands executed serially; execution stops on the first failure"),
-    platform: platformSchema,
+    // #5870: Device or session targeting resolves the platform.
+    platform: platformSchema.optional(),
     ...responseShapeControlFields,
   }),
 );

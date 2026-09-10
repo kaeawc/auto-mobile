@@ -1027,6 +1027,30 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test.each(["unknown", ""])(
+        "unresolved client identity %j recommends client repair without restarting",
+        async (clientVersion) => {
+          const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+            clientVersion,
+            runningVersion: "0.0.69",
+            startedAt: ANCIENT_TIMESTAMP,
+          });
+          try {
+            const error = await expectVersionMismatch(proxy.listTools());
+            expect(error.reason).toBe("nonNumeric");
+            expect(error.message).toContain("client package version could not be resolved");
+            expect(error.message).toContain("Reinstall or repair the AutoMobile client package");
+            expect(error.message).toContain("relaunch this MCP client");
+            expect(error.message).not.toContain("--daemon restart");
+            expect(fakeManager.restartCalled).toBe(false);
+            expect(fakeClient.isConnected()).toBe(false);
+          } finally {
+            isAvailableSpy.mockRestore();
+            await proxy.close();
+          }
+        },
+      );
+
       test.each([
         ["prerelease tag", "0.0.21-beta.1"],
         ["unknown fallback", "unknown"],

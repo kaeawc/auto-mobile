@@ -908,7 +908,7 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy), signal);
+    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy) ?? 0, signal);
     for (const keyEventPlan of keyEventPlans) {
       await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
     }

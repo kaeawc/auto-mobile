@@ -136,7 +136,7 @@ describe("SendKeys", () => {
       { text: "First name" },
     );
 
-    expect(calls).toEqual(["focus", "type:secret", "key:tab", "timestamp"]);
+    expect(calls).toEqual(["timestamp", "focus", "type:secret", "key:tab"]);
     expect(result.success).toBe(false);
     expect(result.completedCommands).toBe(1);
     expect(result.failedIndex).toBe(1);
@@ -148,6 +148,36 @@ describe("SendKeys", () => {
     ]);
   });
 
+  test("accepts a hierarchy pushed before command delivery returns", async () => {
+    let deviceTime = 1000;
+    const pushedObservation = { timestamp: 1001 } as ObserveResult;
+    const sendKeys = new SendKeys(androidDevice, undefined, {
+      timestampProvider: { now: async () => deviceTime },
+      executor: {
+        type: async () => {
+          deviceTime = 1002;
+          return { index: -1, action: "type", success: true };
+        },
+        key: async () => {
+          throw new Error("unexpected key");
+        },
+        clear: async () => {
+          throw new Error("unexpected clear");
+        },
+      },
+      observer: {
+        execute: async (options) => {
+          expect(options?.minTimestamp).toBeLessThanOrEqual(pushedObservation.timestamp);
+          return pushedObservation;
+        },
+      },
+    });
+
+    const result = await sendKeys.execute([{ action: "type", text: "updated" }]);
+    expect(result.success).toBe(true);
+    expect(result.observation).toBe(pushedObservation);
+  });
+
   test("does not execute commands when initial targeting fails", async () => {
     const observer = createObserver();
     const type = mock(async () => {
@@ -156,6 +186,7 @@ describe("SendKeys", () => {
     const sendKeys = new SendKeys(androidDevice, undefined, {
       observer,
       focuser: { focus: async () => ({ success: false, error: "field missing" }) },
+      timestampProvider: { now: async () => 1234 },
       executor: {
         type,
         key: mock(async () => {
@@ -186,6 +217,56 @@ describe("SendKeys", () => {
 });
 
 describe("DefaultSendKeysCommandExecutor", () => {
+  test("eventOnly replacement rejects unavailable text before mutation but accepts empty text", async () => {
+    for (const text of [undefined, ""]) {
+      const adb = new FakeAdbExecutor();
+      const { client, calls } = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(
+          focusedAndroidObservation("", { text, class: "custom.Editor", editable: true }),
+        ),
+        { textClient: client },
+      );
+      const result = await executor.type({
+        action: "type",
+        text: "a",
+        operation: "replace",
+        mode: "eventOnly",
+      });
+      expect(result.success).toBe(text === "");
+      expect(calls).toEqual([]);
+      if (text === undefined) {
+        expect(result.error).toContain("text length");
+        expect(adb.getExecutedCommands()).toEqual([]);
+      } else {
+        expect(adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
+        expect(adb.getExecutedCommands()).not.toContain("shell input keyevent KEYCODE_DEL");
+      }
+    }
+  });
+
+  test("iOS delivery exceptions report the XCUITest mechanism", async () => {
+    const { client } = createTextClient();
+    client.insert = async () => {
+      throw new Error("runner unavailable");
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: client },
+    );
+    const result = await executor.type({ action: "type", text: "value", mode: "eventLast" });
+    expect(result).toMatchObject({
+      success: false,
+      requestedMode: "eventLast",
+      resolvedMode: "xcuiTypeText",
+      error: "runner unavailable",
+    });
+  });
+
   test("preserves partial-application metadata from accessibility insertion", async () => {
     const { client } = createTextClient();
     client.insert = async () => ({

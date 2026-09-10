@@ -319,3 +319,21 @@ describe("assignStableViewIds (#3228)", () => {
     expect(empty["view-id"]).not.toEqual(typed["view-id"]);
   });
 });
+
+test("named toggles retain ids across state text changes but remain distinct (#6794)", () => {
+  const capture = (text: string, description: string, checkable = true) => {
+    const tile = node({
+      "view-id": generatedUuid("tile"),
+      class: "android.widget.Switch",
+      "content-desc": description,
+      text,
+      checkable,
+    });
+    assignStableViewIds(tile);
+    return tile["view-id"];
+  };
+  expect(capture("Off", "Do Not Disturb.")).toBe(capture("On", "Do Not Disturb."));
+  expect(capture("On", "Bluetooth.")).not.toBe(capture("On", "Do Not Disturb."));
+  expect(capture("Off", "")).not.toBe(capture("On", ""));
+  expect(capture("Off", "Status", false)).not.toBe(capture("On", "Status", false));
+});

@@ -65,7 +65,7 @@ export interface InputTextArgs {
 export interface SendKeysArgs {
   commands: SendKeysCommand[];
   selector?: SendKeysSelector;
-  platform: Platform;
+  platform?: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";
 }

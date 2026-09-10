@@ -133,8 +133,11 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
       : installableVersion.length > 0 && installableVersion !== "unknown"
         ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
         : "the same installed auto-mobile package";
-    const retryGuidance =
-      params.retryAfterMs !== undefined
+    const unresolvedClientVersion =
+      installableVersion.trim() === "" || installableVersion === "unknown";
+    const retryGuidance = unresolvedClientVersion
+      ? " The client package version could not be resolved. Reinstall or repair the AutoMobile client package, then relaunch this MCP client. Restarting the daemon cannot repair missing client version metadata."
+      : params.retryAfterMs !== undefined
         ? ` Retry after ${params.retryAfterMs}ms or restart the daemon from this client's build: ${restartCommand}`
         : ` Restart the daemon from this client's build: ${restartCommand}`;
     const sameRelease =

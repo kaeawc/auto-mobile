@@ -966,7 +966,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     await expect(manager.ensureDeviceReady("either")).rejects.toThrow(
-      "Both Android and iOS devices are connected",
+      "pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
     );
   });
 

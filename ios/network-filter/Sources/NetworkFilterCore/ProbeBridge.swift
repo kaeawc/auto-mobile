@@ -1,5 +1,17 @@
 import Foundation
 
+public enum ProbeReadbackStartupState {
+    public static let inactiveProviderMessage = "Identity-probe provider is not active"
+
+    /// A provider can expose its XPC listener before `apply` completes. This is
+    /// the only response that means its authenticated readback should be
+    /// retried during controller startup; protocol and signing failures remain
+    /// terminal.
+    public static func isTransient(_ error: String?) -> Bool {
+        error == inactiveProviderMessage
+    }
+}
+
 @objc
 public protocol ProbeBridge {
     func snapshot(version: Int, reply: @escaping (Data?, String?) -> Void)
@@ -42,7 +54,7 @@ public final class ProbeService: NSObject, ProbeBridge {
         let revision = generation
         lock.unlock()
         guard started else {
-            reply(nil, "Identity-probe provider is not active")
+            reply(nil, ProbeReadbackStartupState.inactiveProviderMessage)
             return
         }
         do {

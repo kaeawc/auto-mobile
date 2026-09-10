@@ -3,6 +3,12 @@ import Foundation
 import XCTest
 
 final class IdentityProbeTests: XCTestCase {
+    func testOnlyInactiveProviderResponseIsTransientDuringReadbackStartup() {
+        XCTAssertTrue(ProbeReadbackStartupState.isTransient(ProbeReadbackStartupState.inactiveProviderMessage))
+        XCTAssertFalse(ProbeReadbackStartupState.isTransient("Unsupported identity-probe protocol version"))
+        XCTAssertFalse(ProbeReadbackStartupState.isTransient(nil))
+    }
+
     private final class FakeResolver: ProbeIdentityResolver {
         var tokens: [Data] = []
         var identity: ProbeCodeIdentity?

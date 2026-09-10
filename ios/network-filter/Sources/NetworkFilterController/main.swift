@@ -11,6 +11,7 @@ private struct ControllerResult: Encodable {
 }
 
 private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
+    private static let readbackRetryDelay: TimeInterval = 0.2
     private var connection: NSXPCConnection?
     private var request: OSSystemExtensionRequest?
     private let outputLock = NSLock()
@@ -104,7 +105,8 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         }
     }
 
-    private func readSnapshot() {
+    private func readSnapshot(retryDeadline: Date? = nil) {
+        let deadline = retryDeadline ?? Date().addingTimeInterval(7)
         guard let requirement = ProbeSigning.peerRequirement(identifier: ProbeSigning.providerIdentifier),
               let serviceName = Bundle.main.object(forInfoDictionaryKey: "ProbeMachServiceName") as? String
         else {
@@ -132,6 +134,13 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                   let snapshot = try? JSONDecoder().decode(ProbeSnapshot.self, from: data),
                   snapshot.version == IdentityProbe.version, snapshot.mode == "allow_only"
             else {
+                if ProbeReadbackStartupState.isTransient(error), Date() < deadline {
+                    connection.invalidate()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.readbackRetryDelay) { [self] in
+                        readSnapshot(retryDeadline: deadline)
+                    }
+                    return
+                }
                 finish("unavailable", error ?? "Provider returned an incompatible snapshot", code: 1)
                 return
             }

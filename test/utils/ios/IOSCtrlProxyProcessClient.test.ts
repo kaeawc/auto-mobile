@@ -25,11 +25,19 @@ describe("IOSCtrlProxyProcessClient", () => {
     let childAlive = true;
     const host: HostCommandExecutor = {
       async executeCommand(file, args) {
-        if (file === "ps") {return result(rootAlive ? "42 1\n43 42\n" : "43 1\n");}
-        if (args.includes("--")) {throw new Error("not a process group leader");}
+        if (file === "ps") {
+          return result(rootAlive ? "42 1\n43 42\n" : "43 1\n");
+        }
+        if (args.includes("--")) {
+          throw new Error("not a process group leader");
+        }
         if (args[0] === "-KILL") {
-          if (args[1] === "42") {rootAlive = false;}
-          if (args[1] === "43") {childAlive = false;}
+          if (args[1] === "42") {
+            rootAlive = false;
+          }
+          if (args[1] === "43") {
+            childAlive = false;
+          }
         }
         if (args[0] === "-0" && !(args[1] === "42" ? rootAlive : childAlive)) {
           throw new Error("No such process");

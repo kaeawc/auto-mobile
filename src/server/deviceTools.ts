@@ -5025,7 +5025,7 @@ export function registerDeviceTools() {
     });
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
-    let releaseReadinessReservation: (() => Promise<void>) | undefined;
+    let readinessReservation: DeviceReadinessReservation | undefined;
     let resources: DeviceResourceConfigurationResult | undefined;
     try {
       const alreadyBooted = await runProvisionDeviceWithinDeadline(
@@ -5067,20 +5067,20 @@ export function registerDeviceTools() {
         );
       }
       validatePooledDeviceMapping(boot.device, requestedIdentity);
-      releaseReadinessReservation = await runProvisionDeviceWithinDeadline(
+      readinessReservation = await runProvisionDeviceWithinDeadline(
         deps.timer,
         totalDeadlineMs,
         operationSignal,
         "reserving device readiness",
         async (reservationSignal) => {
-          const release = await reserveProvisionDeviceReadiness(boot!.device);
+          const reservation = await reserveProvisionDeviceReadiness(boot!.device);
           if (reservationSignal.aborted) {
-            void release?.().catch((error) =>
+            void reservation?.().catch((error) =>
               logger.warn(`Late provision reservation release failed: ${error}`),
             );
             reservationSignal.throwIfAborted();
           }
-          return release;
+          return reservation;
         },
       );
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
@@ -5124,7 +5124,9 @@ export function registerDeviceTools() {
                 },
                 provisioned.device,
                 boot!.processHandle,
-                undefined,
+                // Our own stable-name readiness reservation must not deny our own
+                // bind when the pooled incarnation changed during readiness (C-1).
+                readinessReservation ? new Set([readinessReservation.owner]) : undefined,
                 undefined,
                 resolveProvisionDeviceAchievedReadiness(args.readiness),
               ),
@@ -5144,11 +5146,13 @@ export function registerDeviceTools() {
       }
       throw error;
     } finally {
-      releaseProvisionReadiness(releaseReadinessReservation);
+      releaseProvisionReadiness(readinessReservation);
     }
   }
 
-  function releaseProvisionReadiness(releaseReservation: (() => Promise<void>) | undefined): void {
+  function releaseProvisionReadiness(
+    releaseReservation: DeviceReadinessReservation | undefined,
+  ): void {
     // Session ownership is already committed on success. A delayed mutex-backed
     // reservation release must neither turn that success into destructive rollback
     // nor replace the original failure. Keep the balanced release queued.
@@ -5199,7 +5203,7 @@ export function registerDeviceTools() {
 
   async function reserveProvisionDeviceReadiness(
     device: BootedDevice,
-  ): Promise<(() => Promise<void>) | undefined> {
+  ): Promise<DeviceReadinessReservation | undefined> {
     const daemonState = DaemonState.getInstance();
     if (!daemonState.isInitialized()) {
       return undefined;

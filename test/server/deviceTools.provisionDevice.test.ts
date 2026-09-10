@@ -2449,6 +2449,58 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  // C-1: `reserveProvisionDeviceReadiness` records a stable-name readiness
+  // reservation keyed `android:<avd>`. If the pooled entry's incarnation changes
+  // while readiness is in flight (a disconnect + rediscovery of the same serial,
+  // i.e. exactly the Android-reboot case the name reservation exists to bridge),
+  // provisionDevice must still be able to bind: its own reservation owner has to
+  // be handed to `bindBootedDeviceSession`, or the reservation denies its own bind.
+  test("binds through its own readiness name reservation after an incarnation change", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const booted = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    const avdInfo = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      isRunning: true,
+      source: "local" as const,
+    };
+    deviceManager.setBootedDevices("android", [booted]);
+    deviceManager.setDeviceImages("android", [avdInfo]);
+    await pool.initializeWithDevices([booted]);
+    // `trackStableName` only fires for an emulator whose pooled AVD name matches.
+    (pool as any).devices.get("emulator-5554").avdName = "phone-api-36-a";
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        // A disconnect + rediscovery of the same serial mints a new incarnation.
+        await pool.removeDevice("emulator-5554");
+        await pool.addDevice(booted, avdInfo);
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "readiness-reservation-owner"),
+      timeoutMs: 60_000,
+    });
+
+    expect((response as any).isError).toBeFalsy();
+    const payload = JSON.parse((response as any).content[0].text);
+    expect(payload.error).toBeUndefined();
+    expect(payload).toMatchObject({
+      lifecycleState: "ready",
+      sessionId: expect.any(String),
+    });
+  });
+
   test("reserves rollback and response time from the daemon's queued-request deadline", async () => {
     const timer = new FakeTimer();
     let provisionDeadlineMs: number | undefined;

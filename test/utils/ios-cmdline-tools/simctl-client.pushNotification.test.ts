@@ -28,9 +28,12 @@ function createFakeSimCtlFileSystem(): SimCtlFileSystem & { writes: Map<string, 
     rm: async (path: string) => {
       // Recursive delete semantics: drop this exact path plus anything nested
       // under it, mirroring `fs.promises.rm({ recursive: true })` removing a
-      // whole temp directory.
+      // whole temp directory. The real pushNotification joins the child path
+      // with `path.join`, which uses "\" on Windows and "/" elsewhere, so
+      // both separators must be accepted here or a Windows-hosted temp file
+      // silently survives cleanup (issue #6517 windows-latest CI failure).
       for (const key of writes.keys()) {
-        if (key === path || key.startsWith(`${path}/`)) {
+        if (key === path || key.startsWith(`${path}/`) || key.startsWith(`${path}\\`)) {
           writes.delete(key);
         }
       }
@@ -71,6 +74,28 @@ describe("SimCtlClient pushNotification", () => {
 
     expect(result).toEqual({ success: true });
     // Confirms the write went through the fake, not the real host tmp dir.
+    expect(fileSystem.writes.size).toBe(0);
+  });
+
+  // The real implementation joins `dir` + "payload.apns" with `path.join`,
+  // which uses "\" on Windows (issue #6517 windows-latest CI failure: the
+  // fake's `rm` only matched a "/"-joined child path, so the temp-file entry
+  // survived cleanup and `writes.size` was 1, not 0). Exercise the fake
+  // directly with a manually backslash-joined path so this is reproducible on
+  // any host, not just an actual Windows runner.
+  test("fake filesystem rm() recursively clears children joined with either path separator", async () => {
+    const fileSystem = createFakeSimCtlFileSystem();
+    await fileSystem.writeFile(
+      "C:\\Users\\ci\\AppData\\Local\\Temp\\automobile-apns-fake-1\\payload.apns",
+      "{}",
+      "utf8",
+    );
+
+    await fileSystem.rm("C:\\Users\\ci\\AppData\\Local\\Temp\\automobile-apns-fake-1", {
+      recursive: true,
+      force: true,
+    });
+
     expect(fileSystem.writes.size).toBe(0);
   });
 

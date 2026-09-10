@@ -471,7 +471,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       timeout = timer.setTimeout(() => {
         // stop() may be blocked on a remote runner call. Reserve a bounded
         // window to await direct termination before clearing the registry.
-        forceStop = IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
+        forceStop ??= IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
         void forceStop.then(() =>
           resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
         );

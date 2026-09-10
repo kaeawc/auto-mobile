@@ -332,37 +332,45 @@ describe("IOSCtrlProxyManager", function () {
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
     });
 
-    test("retains the force stage when graceful stop expires at the same deadline", async function () {
-      const timer = new FakeTimer();
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
-      spyOn(manager, "stop").mockImplementation(async (deadline) => {
-        await new Promise<void>((_resolve, reject) =>
-          timer.setTimeout(() => reject(new Error("stop expired")), deadline! - timer.now()),
+    test.each([0, 100])(
+      "retains one force stage when graceful stop expires (early by %sms)",
+      async function (earlyBy) {
+        const timer = new FakeTimer();
+        const manager = IOSCtrlProxyManager.getInstance(testDevice);
+        spyOn(manager, "stop").mockImplementation(async (deadline) => {
+          await new Promise<void>((_resolve, reject) =>
+            timer.setTimeout(
+              () => reject(new Error("stop expired")),
+              deadline! - timer.now() - earlyBy,
+            ),
+          );
+        });
+        let releaseForce!: () => void;
+        const force = spyOn(
+          manager as unknown as { forceStopForShutdown: () => Promise<void> },
+          "forceStopForShutdown",
+        ).mockImplementation(
+          () =>
+            new Promise<void>((resolve) => {
+              releaseForce = resolve;
+            }),
         );
-      });
-      let releaseForce!: () => void;
-      const force = spyOn(
-        manager as unknown as { forceStopForShutdown: () => Promise<void> },
-        "forceStopForShutdown",
-      ).mockImplementation(
-        () =>
-          new Promise<void>((resolve) => {
-            releaseForce = resolve;
-          }),
-      );
-      let completed = false;
-      const shutdown = IOSCtrlProxyManager.shutdownAll(timer).then(() => {
-        completed = true;
-      });
-      timer.advanceTime(1200);
-      for (let turn = 0; turn < 20; turn++) await Promise.resolve();
-      expect(force).toHaveBeenCalledTimes(1);
-      expect(completed).toBe(false);
-      releaseForce();
-      await shutdown;
-      expect(completed).toBe(true);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-    });
+        let completed = false;
+        const shutdown = IOSCtrlProxyManager.shutdownAll(timer).then(() => {
+          completed = true;
+        });
+        timer.advanceTime(1200 - earlyBy);
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+        timer.advanceTime(earlyBy);
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+        expect(force).toHaveBeenCalledTimes(1);
+        expect(completed).toBe(false);
+        releaseForce();
+        await shutdown;
+        expect(completed).toBe(true);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
     // Models the runner command shape that isOwnRunnerProcessAlive/
     // isCtrlProxyRunnerCommand recognize as this daemon's own launch, mirroring
     // the "restart prevention" describe block's helper of the same name.

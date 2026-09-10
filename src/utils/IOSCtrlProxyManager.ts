@@ -37,6 +37,9 @@ export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 // consume it all before the remaining owners receive their stop attempt.
 const SHUTDOWN_STOP_TIMEOUT_MS = 1_200;
 const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
+// A fraction of SHUTDOWN_FORCE_STOP_TIMEOUT_MS: the ownership re-verify in
+// forceStopForShutdown must not itself consume the budget the tree kill needs.
+const FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS = 100;
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
 // `stop()` tears the runner's process tree down, but its HTTP listener can keep
 // answering /health for a moment while the process drains. A single probe fired
@@ -665,11 +668,61 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
     }
     if (runnerPid) {
-      await this.processClient
-        .terminateProcessTree(runnerPid, deadline, { skipGraceful: true })
-        .catch((error) => {
-          logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
-        });
+      const stillOwned = await this.isRunnerStillOwnedWithinShutdownDeadline(runnerPid);
+      if (stillOwned) {
+        await this.processClient
+          .terminateProcessTree(runnerPid, deadline, {
+            skipGraceful: true,
+            expectedDeviceId: this.device.deviceId,
+          })
+          .catch((error) => {
+            logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
+          });
+      } else {
+        logger.warn(
+          `[IOSCtrlProxy] Tracked runner PID ${runnerPid} is no longer verifiably ours ` +
+            `(exited/PID-reused); skipping forced termination`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Re-verifies ownership of `runnerPid` right before `forceStopForShutdown`'s tree
+   * kill, mirroring the re-checks in `stop()` and the hung-runner path (#6579). The
+   * field is already nulled by this point, so the pid is passed explicitly. Bounded
+   * by a short timeout, separate from the caller's terminateProcessTree budget, so a
+   * slow `ps`/`kill -0` round trip cannot itself consume the 250 ms force-stop
+   * deadline — on timeout we fail OPEN (treat as still owned) to preserve today's
+   * shutdown behavior rather than silently skip a genuinely hung runner.
+   */
+  private async isRunnerStillOwnedWithinShutdownDeadline(runnerPid: number): Promise<boolean> {
+    let timeout: NodeJS.Timeout | undefined;
+    const fallbackToOwned = new Promise<boolean>((resolve) => {
+      timeout = this.timer.setTimeout(() => resolve(true), FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([
+        this.processClient.isOwnedRunnerAlive(
+          runnerPid,
+          this.device.deviceId,
+          this.timer.now() + FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS,
+        ),
+        fallbackToOwned,
+      ]);
+    } catch (error) {
+      // A failed ownership check (exec error) is treated the same as "cannot
+      // disprove ownership": fail open so a genuinely hung runner still gets
+      // torn down during shutdown, matching the timeout fallback above.
+      logger.debug(
+        `[IOSCtrlProxy] Ownership re-verification for runner ${runnerPid} failed; ` +
+          `assuming owned: ${errorMessage(error)}`,
+      );
+      return true;
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
     }
   }
 

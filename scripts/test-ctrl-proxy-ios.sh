@@ -184,7 +184,7 @@ if [ "$HEALTH_RESPONSE" == "FAILED" ]; then
                         # FormatVersion 2 layout) — an unpatched xctestrun
                         # silently launches the runner on the wrong port
                         # (issue #2731), so this must be a hard failure.
-                        print_status 1 "Failed to patch runner xctestrun (CtrlProxyUITests.EnvironmentVariables keypath not found — is this a FormatVersion 1 xctestrun?)"
+                        print_status 1 "Failed to patch runner xctestrun (CtrlProxyUITests.EnvironmentVariables keypath not found — FormatVersion 2 or unsupported xctestrun layout)"
                         exit 1
                     fi
 

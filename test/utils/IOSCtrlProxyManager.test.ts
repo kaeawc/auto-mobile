@@ -1070,7 +1070,7 @@ describe("IOSCtrlProxyManager", function () {
       expect(legacyProbeCount).toBe(1);
     });
 
-    test("re-arms after resetSetupState so a fresh device/session probes again", async function () {
+    test("keeps the lifetime guard latched across setup resets", async function () {
       const fakeExecutor = new FakeProcessExecutor();
       let healthy = false;
       fakeExecutor.setCommandHandler("curl -s", () =>
@@ -1117,7 +1117,7 @@ describe("IOSCtrlProxyManager", function () {
       manager.resetSetupState();
 
       expect((await manager.setup()).success).toBe(true);
-      expect(legacyProbeCount).toBe(2);
+      expect(legacyProbeCount).toBe(1);
     });
   });
 
@@ -1141,8 +1141,14 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        undefined,
+        {
+          ...createFakeBuilder(),
+          needsRebuild: async () => true,
+          build: async () => ({ success: false, message: "fake rebuild unavailable" }),
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder,
         fakeExecutor,
+        undefined,
+        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
       );
 
       // First pass through the gate: attemptedSetup becomes true and the
@@ -1179,8 +1185,14 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        undefined,
+        {
+          ...createFakeBuilder(),
+          needsRebuild: async () => true,
+          build: async () => ({ success: false, message: "fake rebuild unavailable" }),
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder,
         fakeExecutor,
+        undefined,
+        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
       );
 
       expect((await manager.setup()).success).toBe(true);
@@ -1206,8 +1218,14 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        undefined,
+        {
+          ...createFakeBuilder(),
+          needsRebuild: async () => true,
+          build: async () => ({ success: false, message: "fake rebuild unavailable" }),
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder,
         fakeExecutor,
+        undefined,
+        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
       );
 
       expect((await manager.setup()).success).toBe(true);

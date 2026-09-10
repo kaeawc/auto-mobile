@@ -206,7 +206,7 @@ start_ctrl_proxy_ios() {
   # hard failure rather than a swallowed one.
   if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" \
       -string "${port}" "${runner_xctestrun_path}"; then
-    log_error "Failed to patch CTRL_PROXY_IOS_PORT into runner xctestrun (CtrlProxyUITests.EnvironmentVariables keypath not found — is this a FormatVersion 1 xctestrun?)."
+    log_error "Failed to patch CTRL_PROXY_IOS_PORT into runner xctestrun (CtrlProxyUITests.EnvironmentVariables keypath not found — FormatVersion 2 or unsupported xctestrun layout)."
     return 1
   fi
   if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" \

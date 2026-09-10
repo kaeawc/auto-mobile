@@ -763,7 +763,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public resetSetupState(): void {
     this.attemptedSetup = false;
-    this.legacyCheckDone = false;
     this.clearCaches();
     logger.info("[IOSCtrlProxy] Reset setup state");
   }

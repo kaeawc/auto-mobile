@@ -1037,9 +1037,10 @@ export class SimCtlClient implements SimCtl {
     udid: string,
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
+    operation: "start" | "shut down" = "start",
   ): Promise<SimulatorBootLease> {
     if (signal?.aborted) {
-      throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+      throw signal.reason ?? new ActionableError(`iOS simulator ${operation} aborted for ${udid}`);
     }
 
     let state = SimCtlClient.simulatorBoots.get(udid);
@@ -1067,7 +1068,7 @@ export class SimCtlClient implements SimCtl {
       contenders.push(
         new Promise<never>((_resolve, reject) => {
           timeoutHandle = this.timer.setTimeout(
-            () => reject(new Error(`Timed out waiting to start iOS simulator ${udid}`)),
+            () => reject(new Error(`Timed out waiting to ${operation} iOS simulator ${udid}`)),
             remainingMs,
           );
         }),
@@ -1077,7 +1078,10 @@ export class SimCtlClient implements SimCtl {
       contenders.push(
         new Promise<never>((_resolve, reject) => {
           abortListener = () =>
-            reject(signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`));
+            reject(
+              signal.reason ??
+                new ActionableError(`iOS simulator ${operation} aborted for ${udid}`),
+            );
           signal.addEventListener("abort", abortListener, { once: true });
         }),
       );
@@ -1142,7 +1146,7 @@ export class SimCtlClient implements SimCtl {
     // handle's cleanup) must not queue forever behind a wedged boot (issue #6577).
     // Once the lease is acquired, simctl shutdown receives the complete timeoutMs budget.
     const leaseDeadlineMs = this.timer.now() + SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS;
-    const lease = await this.acquireSimulatorBoot(udid, leaseDeadlineMs, signal);
+    const lease = await this.acquireSimulatorBoot(udid, leaseDeadlineMs, signal, "shut down");
     try {
       if (
         expectedOwnerToken !== undefined &&

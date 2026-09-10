@@ -884,7 +884,13 @@ describe("SimCtlClient boot self-verification", () => {
     // Simulate a wedged boot: readiness never resolves, so the boot lease is
     // held indefinitely. killSimulator (via deviceBootRecovery / handle.kill())
     // is called with no ambient abort signal (no getAbortSignal() in scope).
-    const harness = createConcurrentStartHarness(() => new Promise(() => undefined));
+    let releaseBoot!: () => void;
+    const harness = createConcurrentStartHarness(
+      () =>
+        new Promise((resolve) => {
+          releaseBoot = () => resolve(createExecResult("", ""));
+        }),
+    );
     // A huge readiness timeout keeps the boot's own internal bootstatus exec
     // timeout from firing within this test's assertion window, isolating the
     // boot-lease wait's own deadline as the only thing that can settle `kill`.
@@ -901,9 +907,20 @@ describe("SimCtlClient boot self-verification", () => {
 
     const killResult = await kill;
     expect(killResult).toBeInstanceOf(Error);
+    expect((killResult as Error).message).toBe(
+      `Timed out waiting to shut down iOS simulator ${UDID}`,
+    );
     expect(harness.shutdownInvocations()).toBe(0);
 
-    void readiness.catch(() => undefined);
+    releaseBoot();
+    await readiness;
+    await drainMicrotasks();
+    expect(harness.shutdownInvocations()).toBe(0);
+    await harness
+      .createClient()
+      .killSimulator({ name: "iPhone 17", platform: "ios", deviceId: UDID });
+    expect(harness.shutdownInvocations()).toBe(1);
+    expect(harness.timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("preserves successful boot state when coordinated shutdown fails", async () => {

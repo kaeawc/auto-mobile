@@ -39,6 +39,32 @@ import {
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
 
+async function awaitWithCancellation<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+  if (signal.aborted) {
+    promise.catch(() => undefined);
+    throw new ActionableError("MCP request was cancelled during acquisition.");
+  }
+  let onAbort: (() => void) | undefined;
+  const cancellation = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new ActionableError("MCP request was cancelled during acquisition."));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  promise.catch(() => undefined);
+  try {
+    return await Promise.race([promise, cancellation]);
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
 // Import all tool registration functions
 import { registerObserveTools } from "./observeTools";
 import { registerInteractionTools } from "./interactionTools";
@@ -889,6 +915,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
         ? getDeviceSessionIdFromResult(result)
         : undefined;
+      let acquisitionEnrichmentCancelled = false;
       // Evaluate the returned session directly: a seeded transport may retain
       // its old binding, and a concurrent acquisition may publish another one.
       // Reuse the same route/label union as tools/list without publishing yet.
@@ -899,7 +926,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         try {
           const listed = new Set(
-            (await listSessionTools(acquiredSessionUuid)).tools.map((tool) => tool.name),
+            (
+              await awaitWithCancellation(listSessionTools(acquiredSessionUuid), requestSignal)
+            ).tools.map((tool) => tool.name),
           );
           const gatedTools = ToolRegistry.getAllTools()
             .filter(
@@ -925,10 +954,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               : {}),
           };
         } catch (error) {
+          acquisitionEnrichmentCancelled ||= Boolean(requestSignal?.aborted);
           // Acquisition already succeeded. Preserve its session handle so the
           // proxy can bind and heartbeat it even if optional discovery fails.
           logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
         }
+      }
+      if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
+        throw new ActionableError("MCP request was cancelled during acquisition.");
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&

@@ -26,6 +26,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -1653,6 +1654,11 @@ describe("deleteDevice handler", () => {
   });
 
   test("returns by the teardown deadline when post-stop cleanup does not settle", async () => {
+    const coordinator = getInstalledAppsCacheWriteCoordinator();
+    let finishCleanup!: () => void;
+    const pendingCleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
     const timer = new FakeTimer();
     const device: BootedDevice = {
       platform: "ios",
@@ -1667,8 +1673,9 @@ describe("deleteDevice handler", () => {
       clearInstalledAppsForDevice: async () => {
         cleanupCalls++;
         if (cleanupCalls === 1) {
-          await new Promise<void>(() => {});
+          await pendingCleanup;
         }
+        await coordinator.invalidate(device.deviceId, async () => undefined);
       },
     });
 
@@ -1693,6 +1700,9 @@ describe("deleteDevice handler", () => {
     const retry = responseBody(await teardownTool().handler(args));
     expect(retry.state).toBe("destroyed");
     expect(manager.destroyRequests).toHaveLength(1);
+    finishCleanup();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(coordinator.isDirty(device.deviceId)).toBe(false);
   });
 
   test("holds the stable lifecycle lease until a late shutdown command settles", async () => {

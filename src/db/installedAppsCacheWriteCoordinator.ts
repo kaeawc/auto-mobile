@@ -28,11 +28,20 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
   private generations = new Map<string, number>();
   private dirtyGenerations = new Map<string, number>();
   private tails = new Map<string, Promise<unknown>>();
+  private releasing = new Map<string, number>();
+  private nextGeneration = 0;
 
   constructor(private readonly getBarrier: () => DbWriteBarrier = getDbWriteBarrier) {}
 
   beginRebuild(deviceId: string): number {
-    return this.generations.get(deviceId) ?? 0;
+    const current = this.generations.get(deviceId);
+    if (current === undefined || this.releasing.has(deviceId)) {
+      const generation = ++this.nextGeneration;
+      this.generations.set(deviceId, generation);
+      this.releasing.delete(deviceId);
+      return generation;
+    }
+    return current;
   }
 
   isDirty(deviceId: string): boolean {
@@ -40,7 +49,7 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
   }
 
   markRebuilt(deviceId: string, generation: number): boolean {
-    if ((this.generations.get(deviceId) ?? 0) !== generation) {
+    if (this.generations.get(deviceId) !== generation) {
       return false;
     }
     this.dirtyGenerations.delete(deviceId);
@@ -53,7 +62,7 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
     write: () => Promise<void>,
   ): Promise<boolean> {
     return this.enqueue(deviceId, async () => {
-      if ((this.generations.get(deviceId) ?? 0) !== generation) {
+      if (this.generations.get(deviceId) !== generation) {
         return false;
       }
       await write();
@@ -74,8 +83,9 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
   }
 
   invalidateWithoutWrite(deviceId: string): number {
-    const generation = (this.generations.get(deviceId) ?? 0) + 1;
+    const generation = ++this.nextGeneration;
     this.generations.set(deviceId, generation);
+    this.releasing.delete(deviceId);
     // A failed stale-marker write leaves old DB rows physically fresh. Keep the
     // cache bypassed until ListInstalledApps successfully commits a replacement.
     this.dirtyGenerations.set(deviceId, generation);
@@ -87,6 +97,7 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
     // that already captured an older generation cannot later commit against
     // this device id even if it is reused before cleanup below runs.
     const fenceGeneration = this.invalidateWithoutWrite(deviceId);
+    this.releasing.set(deviceId, fenceGeneration);
 
     // Drain: wait behind any write already queued for this device (including
     // the final invalidate() write this call is expected to follow) before
@@ -100,6 +111,7 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
     if (this.generations.get(deviceId) === fenceGeneration) {
       this.generations.delete(deviceId);
       this.dirtyGenerations.delete(deviceId);
+      this.releasing.delete(deviceId);
     }
   }
 

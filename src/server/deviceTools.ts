@@ -2226,13 +2226,22 @@ async function shutdownDevice(
       await shutdownReservation?.release();
       unregisterDirectSessionsForDevice(device.deviceId);
 
+      const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
+      const notification = cleanup.then(async () => {
+        await notifyResourcesAfterShutdown(dependencies);
+        await getInstalledAppsCacheWriteCoordinator().releaseDevice(device.deviceId);
+      });
+      // Keep late cleanup visible to DB shutdown without blocking a later
+      // device teardown retry if resource notification never settles.
+      void getDbWriteBarrier().trackExisting(notification);
+
       await runPostShutdownStep(
         shutdownContext,
         perf,
         "cleanup",
         "installed-app cleanup did not complete",
         strictDeadline,
-        async () => await clearInstalledAppsAfterShutdown(dependencies, device.deviceId),
+        async () => await cleanup,
       );
       await runPostShutdownStep(
         shutdownContext,
@@ -2240,7 +2249,7 @@ async function shutdownDevice(
         "notifyResources",
         "resource notification did not complete",
         strictDeadline,
-        async () => await notifyResourcesAfterShutdown(dependencies),
+        async () => await notification,
       );
 
       perf.end();

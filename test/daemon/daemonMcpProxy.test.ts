@@ -3914,6 +3914,101 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("fresh session screenshot binding (#5663)", () => {
+    test.each([false, true])(
+      "binds and heartbeats a provisioned session even when resource configuration failed: %s",
+      async (isError) => {
+        const result = {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                sessionUuid: "provisioned-session",
+                sessionId: "provisioned-session",
+              }),
+            },
+          ],
+          isError,
+        };
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolResultFor: (name) =>
+            name === "provisionDevice"
+              ? result
+              : name === "getAndroid"
+                ? {
+                    content: [
+                      { type: "text", text: JSON.stringify({ sessionUuid: "released-session" }) },
+                    ],
+                  }
+                : undefined,
+        });
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: matchingDaemonManager(),
+          autoStartDaemon: false,
+          timer: new FakeTimer(),
+        });
+
+        try {
+          await proxy.callTool("getAndroid", {});
+          fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "released-session");
+          expect(await proxy.callTool("provisionDevice", {})).toEqual(result);
+          expect(fakeClient.callToolCalls.at(-1)).toEqual({
+            toolName: "provisionDevice",
+            params: {},
+          });
+          expect(
+            fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
+          ).toEqual([
+            { method: "daemon/heartbeat", params: { sessionId: "released-session" } },
+            { method: "daemon/heartbeat", params: { sessionId: "provisioned-session" } },
+          ]);
+          await proxy.callTool("observe", {});
+          expect(fakeClient.callToolCalls.at(-1)).toEqual({
+            toolName: "observe",
+            params: { sessionUuid: "provisioned-session" },
+          });
+          await proxy.readResource("automobile:device-session/provisioned-session/screenshot");
+          expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "provisioned-session" }]);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      },
+    );
+
+    test.each([false, true])(
+      "does not bind provisioning without a minted session (isError: %s)",
+      async (isError) => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolResult: {
+            content: [{ type: "text", text: JSON.stringify({ lifecycleState: "created" }) }],
+            isError,
+          },
+        });
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: matchingDaemonManager(),
+          autoStartDaemon: false,
+          timer: new FakeTimer(),
+        });
+        try {
+          await proxy.callTool("provisionDevice", { boot: false });
+          expect(
+            fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
+          ).toEqual([]);
+          await proxy.callTool("observe", {});
+          expect(fakeClient.callToolCalls.at(-1)).toEqual({ toolName: "observe", params: {} });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      },
+    );
+
     // A device-session acquisition tool mints its session id in the RESULT. This
     // models getAndroid/getApple returning `{ sessionId }`.
     const mintingResult = (sessionUuid: string) => ({

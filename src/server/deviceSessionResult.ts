@@ -2,12 +2,17 @@ import { logger } from "../utils/logger";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
- * `sessionId` in the tool RESULT (not the request args). Both the direct MCP
+ * `sessionUuid` in the tool RESULT (not the request args). Both the direct MCP
  * server (`src/server/index.ts`) and the daemon proxy (`DaemonMcpProxy`) must
  * bind the session these tools mint — the proxy additionally heartbeats it so
  * the daemon does not reap a result-minted session (issue #5689).
  */
-export const DEVICE_SESSION_ACQUISITION_TOOLS = ["getAndroid", "getApple", "startDevice"] as const;
+export const DEVICE_SESSION_ACQUISITION_TOOLS = [
+  "getAndroid",
+  "getApple",
+  "startDevice",
+  "provisionDevice",
+] as const;
 
 /** Whether `name` is a device-session acquisition tool (see above). */
 export function isDeviceSessionAcquisitionTool(name: string): boolean {

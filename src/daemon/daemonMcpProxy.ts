@@ -1844,7 +1844,7 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_BOUND_SESSION_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
-    // Device-session acquisition (getAndroid/getApple/startDevice) mints a NEW
+    // Device-session acquisition (including booted provisionDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
     // the client can recover in-band (issue #5689). Forward its raw args and bind
@@ -1883,6 +1883,12 @@ export class DaemonMcpProxy {
         isSessionAcquisition,
       );
       if (result?.isError) {
+        // Provisioning retains its usable device session when optional resource
+        // configuration fails. Own that result-minted session before returning
+        // the evidence-bearing error, so the caller can inspect or retry it.
+        if (name === "provisionDevice") {
+          await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
+        }
         this.refreshReplayLeaseForBoundSessionResult(forwardedArgs, callReleaseEpoch);
         return result;
       }
@@ -2406,7 +2412,7 @@ export class DaemonMcpProxy {
     throw new DaemonBoundSessionExpiredError(forwardedUuid, reason);
   }
 
-  // Bind and heartbeat the device session a getAndroid/getApple/startDevice call
+  // Bind and heartbeat the device session an acquisition call
   // minted in its RESULT — the proxy equivalent of the direct-path bind in
   // src/server/index.ts. Without this the daemon never sees an ownership heartbeat
   // for a result-minted session and reaps it under the pre-first-heartbeat grace

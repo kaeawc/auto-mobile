@@ -107,6 +107,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
 
   test("bypasses the device-list cache only when terminating", async () => {
     const adb = new RecordingAdbExecutor();
+    adb.setCommandResponse("emu avd name", execResult("Pixel 8\nOK\n"));
     adb.setDevices([
       {
         name: "Pixel 8",

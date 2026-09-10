@@ -187,9 +187,9 @@ export interface AndroidEmulator {
   launchEmulator(request: AndroidEmulatorLaunchRequest): Promise<AndroidEmulatorLaunchHandle>;
 
   /**
-   * Kill a running emulator
+   * Request termination of the expected running emulator.
    * @param device - The device to kill
-   * @returns Promise that resolves when emulator is stopped
+   * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   killDevice(
     device: BootedDevice,
@@ -2194,9 +2194,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
-   * Kill a running emulator
+   * Request termination of the expected running emulator.
    * @param device - The device to kill
-   * @returns Promise that resolves when emulator is stopped
+   * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   async killDevice(
     device: BootedDevice,
@@ -2215,16 +2215,30 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }
 
-    // Use ADB to stop the emulator
-    const adb = this.adbFactory.create(emulator);
-    await adb.execute(["emu", "kill"], {
+    if (
+      emulator.name !== device.name ||
+      emulator.platform !== device.platform ||
+      (device.transportId !== undefined && emulator.transportId !== device.transportId)
+    ) {
+      throw new ActionableError(
+        `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
+      );
+    }
+
+    // A serial can be reused after discovery. Pin the destructive command to
+    // the checked ADB transport when available; a disconnected transport fails
+    // instead of selecting a new emulator that inherited the serial. Older
+    // callers without an expected transport may still match a cold-boot AVD.
+    const adb = this.adbFactory.create(emulator.transportId ? null : emulator);
+    const targetArgs = emulator.transportId ? ["-t", emulator.transportId] : [];
+    await adb.execute([...targetArgs, "emu", "kill"], {
       timeoutMs: options.timeoutMs,
       noRetry: true,
       signal: options.signal,
       waitForProcessSettlementAfterAbort: true,
     });
 
-    logger.info(`Killed emulator '${device.name}'`);
+    logger.info(`Requested termination of emulator '${device.name}'`);
     return emulator;
   }
 

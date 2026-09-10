@@ -70,7 +70,13 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     ToolRegistry.registerDeviceAware(
       "observeProbe",
       "observeProbe",
-      z.object({ sessionUuid: z.string().optional(), platform: z.string().optional() }).strict(),
+      z
+        .object({
+          sessionUuid: z.string().optional(),
+          platform: z.string().optional(),
+          device: z.string().optional(),
+        })
+        .strict(),
       async (device: BootedDevice) => {
         handlerDevices.push(device.deviceId);
         return {
@@ -217,6 +223,105 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
       expect(rejected || result?.isError === true).toBe(true);
     } finally {
       delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    }
+  });
+  test.each(["forwarded", "direct", "direct-spoof"] as const)(
+    "rejects a genuinely issued foreign session on an autolock %s connection",
+    async (route) => {
+      const previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      try {
+        if (route !== "forwarded") {
+          await fixture!.teardown();
+          fixture = new McpTestFixture({
+            daemonMode: false,
+            sessionContext: { sessionId: "direct-conn-1" },
+          });
+          await fixture.setup();
+        }
+        const connectionId = route !== "forwarded" ? "direct-conn-1" : "forwarded-conn-1";
+        const { client } = fixture!.getContext();
+
+        // An autolock session is the connection's active session (implicit binding
+        // via the mcp session id), not an explicit SessionToolBinding.
+        const autolockSessionId = await pool.autolockDevice(
+          "emulator-5554",
+          "android",
+          connectionId,
+        );
+        expect(sessionManager.getSession(autolockSessionId)?.assignedDevice).toBe("emulator-5554");
+
+        await sessionManager.createSession("F1", "emulator-5556", "android");
+        let rejected = false;
+        let result: { isError?: boolean } | undefined;
+        try {
+          result = (await client.request(
+            {
+              method: "tools/call",
+              params: {
+                name: "observeProbe",
+                arguments: {
+                  sessionUuid: "F1",
+                  ...(route === "forwarded" ? { __mcpSessionId: connectionId } : {}),
+                  ...(route === "direct-spoof"
+                    ? { __mcpSessionId: "forged-unbound-connection" }
+                    : {}),
+                },
+              },
+            },
+            z.any(),
+          )) as { isError?: boolean };
+        } catch {
+          rejected = true;
+        }
+
+        expect(handlerDevices).not.toContain("emulator-5556");
+        expect(rejected || result?.isError === true).toBe(true);
+      } finally {
+        if (previousAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+        }
+      }
+    },
+  );
+  test("allows an autolock owner's explicit session and allocated second-device label", async () => {
+    const previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    try {
+      const { client } = fixture!.getContext();
+      const ownSession = await pool.autolockDevice("emulator-5554", "android", "forwarded-conn-1");
+      expect(ownSession).toBeDefined();
+      const secondSession = `${ownSession}:B`;
+      await sessionManager.createSession(secondSession, "emulator-5556", "android");
+      sessionManager.setDeviceLabels(ownSession!, { A: ownSession!, B: secondSession });
+      for (const device of ["A", "B"]) {
+        const result = await client.request(
+          {
+            method: "tools/call",
+            params: {
+              name: "observeProbe",
+              arguments: {
+                sessionUuid: ownSession,
+                device,
+                __mcpSessionId: "forwarded-conn-1",
+              },
+            },
+          },
+          z.any(),
+        );
+        expect(result.isError ?? false).toBe(false);
+      }
+      expect(handlerDevices).toEqual(["emulator-5554", "emulator-5556"]);
+      expect(sessionManager.getSession(ownSession!)?.assignedDevice).toBe("emulator-5554");
+      expect(sessionManager.getSession(secondSession)?.assignedDevice).toBe("emulator-5556");
+    } finally {
+      if (previousAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+      }
     }
   });
 });

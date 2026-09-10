@@ -486,6 +486,16 @@ export class SessionManager {
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
+  /** Release owns the device until both bounded teardown and any overflow work settle. */
+  hasDeviceCleanupInProgress(deviceId: string): boolean {
+    return (
+      this.pendingDeviceCleanups.has(deviceId) ||
+      Array.from(this.activeReleasePromises).some(
+        (release) => release.session.assignedDevice === deviceId,
+      )
+    );
+  }
+
   /**
    * Keep sessions assigned while their work is still running, even if their
    * idle timeout elapses. The daemon supplies the execution tracker; tests can

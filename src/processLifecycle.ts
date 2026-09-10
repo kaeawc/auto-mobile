@@ -4,8 +4,9 @@ import { writeEmergencyLog } from "./utils/loggingConfig";
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
 
 // A clean recording finalization alone requires one second. Leave enough time
-// for every child owner to receive a bounded stop or force-stop attempt.
-const PROCESS_SHUTDOWN_TIMEOUT_MS = 10_000;
+// for every child owner to receive a bounded stop or force-stop attempt, while
+// leaving the finalization tail below the daemon supervisor's 10-second kill.
+const PROCESS_SHUTDOWN_TIMEOUT_MS = 9_000;
 const PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS = 100;
 
 export interface StdinShutdownSource {
@@ -72,11 +73,11 @@ export class ProcessLifecycleHandlers {
   private installed = false;
   private stdinShutdownHandlersInstalled = false;
   private shutdownInProgress = false;
-  private stdinShutdownTimeoutArmed = false;
-  private stdinShutdownTimeoutHandle: NodeJS.Timeout | undefined;
-  private resolveStdinShutdownTimeout!: (value: false) => void;
-  private readonly stdinShutdownTimeout = new Promise<false>((resolve) => {
-    this.resolveStdinShutdownTimeout = resolve;
+  private shutdownTimeoutArmed = false;
+  private shutdownTimeoutHandle: NodeJS.Timeout | undefined;
+  private resolveShutdownTimeout!: (value: false) => void;
+  private readonly shutdownTimeout = new Promise<false>((resolve) => {
+    this.resolveShutdownTimeout = resolve;
   });
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
@@ -136,9 +137,6 @@ export class ProcessLifecycleHandlers {
 
   private async shutdown(signal: ShutdownSignal): Promise<void> {
     if (this.shutdownInProgress) {
-      if (signal === "stdin") {
-        this.armStdinShutdownTimeout();
-      }
       return;
     }
     this.shutdownInProgress = true;
@@ -163,27 +161,25 @@ export class ProcessLifecycleHandlers {
       return true;
     }
 
-    if (signal === "stdin") {
-      this.armStdinShutdownTimeout();
-    }
+    this.armShutdownTimeout();
 
     try {
-      return (await Promise.race([handler(signal), this.stdinShutdownTimeout])) !== false;
+      return (await Promise.race([handler(signal), this.shutdownTimeout])) !== false;
     } finally {
-      if (this.stdinShutdownTimeoutHandle !== undefined) {
-        this.timer.clearTimeout(this.stdinShutdownTimeoutHandle);
-        this.stdinShutdownTimeoutHandle = undefined;
+      if (this.shutdownTimeoutHandle !== undefined) {
+        this.timer.clearTimeout(this.shutdownTimeoutHandle);
+        this.shutdownTimeoutHandle = undefined;
       }
     }
   }
 
-  private armStdinShutdownTimeout(): void {
-    if (this.stdinShutdownTimeoutArmed) {
+  private armShutdownTimeout(): void {
+    if (this.shutdownTimeoutArmed) {
       return;
     }
-    this.stdinShutdownTimeoutArmed = true;
-    this.stdinShutdownTimeoutHandle = this.timer.setTimeout(() => {
-      this.resolveStdinShutdownTimeout(false);
+    this.shutdownTimeoutArmed = true;
+    this.shutdownTimeoutHandle = this.timer.setTimeout(() => {
+      this.resolveShutdownTimeout(false);
     }, this.shutdownTimeoutMs);
   }
 

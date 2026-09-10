@@ -18,7 +18,34 @@ function result(stdout = "", stderr = "") {
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
-  test("force termination signals the known group and root before discovery exhausts the deadline", async () => {
+  test("force termination retains a separate-group child after the root exits", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let rootAlive = true;
+    let childAlive = true;
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        if (file === "ps") {return result(rootAlive ? "42 1\n43 42\n" : "43 1\n");}
+        if (args.includes("--")) {throw new Error("not a process group leader");}
+        if (args[0] === "-KILL") {
+          if (args[1] === "42") {rootAlive = false;}
+          if (args[1] === "43") {childAlive = false;}
+        }
+        if (args[0] === "-0" && !(args[1] === "42" ? rootAlive : childAlive)) {
+          throw new Error("No such process");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await client.terminateProcessTree(42, 250, { skipGraceful: true });
+
+    expect(rootAlive).toBe(false);
+    expect(childAlive).toBe(false);
+  });
+
+  test("force termination reserves signaling time when discovery times out", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const commands: string[] = [];
@@ -38,11 +65,11 @@ describe("IOSCtrlProxyProcessClient", () => {
     const client = new IOSCtrlProxyProcessClient(host, timer);
 
     await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
-      "deadline elapsed",
+      "descendant discovery failed",
     );
 
-    expect(commands).toEqual(["kill -KILL -- -42", "kill -KILL 42", "ps -axo pid=,ppid="]);
-    expect(timer.now()).toBe(250);
+    expect(commands).toEqual(["ps -axo pid=,ppid=", "kill -KILL -- -42", "kill -KILL 42"]);
+    expect(timer.now()).toBe(50);
   });
 
   test("force termination skips TERM and bounds commands and exit waiting by its deadline", async () => {
@@ -64,13 +91,13 @@ describe("IOSCtrlProxyProcessClient", () => {
     );
 
     expect(commands).toEqual([
+      "ps -axo pid=,ppid=",
       "kill -KILL -- -42",
       "kill -KILL 42",
-      "ps -axo pid=,ppid=",
       "kill -KILL 43",
       "kill -0 42",
     ]);
-    expect(timeouts.every((timeout) => timeout === 250)).toBe(true);
+    expect(timeouts).toEqual([50, 250, 250, 250, 250]);
     expect(timer.now()).toBe(250);
   });
 

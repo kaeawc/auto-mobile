@@ -4743,6 +4743,12 @@ export function registerDeviceTools() {
         provisionDeviceCleanupResult(cleanupArgs, response),
       );
     } catch (error) {
+      // A rollback failure summarizes to a one-line message in the response, so
+      // the daemon log is the only forensic record of what actually went wrong.
+      logger.warn(
+        `[DeviceTools] provisionDevice rollback teardown failed for '${cleanupArgs.target.stableId}': ${errorMessage(error)}`,
+        error,
+      );
       return new ProvisionDeviceRollbackError(provisionFailure, {
         status: "failed",
         operationId: cleanupArgs.operationId,

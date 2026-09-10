@@ -5689,7 +5689,18 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
-    await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    try {
+      await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    } catch (error) {
+      // Best-effort: the acquisition is already committed (session bound, pooled
+      // device busy), so failing on an advisory resource notification would
+      // strand a session UUID the caller never receives. The shutdown path
+      // treats the same notification as fire-and-forget.
+      logger.warn(
+        `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
     return await buildBootedResponse(
       state.boot.device,
       state.boot.source,

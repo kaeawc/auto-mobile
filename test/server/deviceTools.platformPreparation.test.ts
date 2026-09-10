@@ -367,6 +367,41 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("still returns the bound session when post-boot resource notification fails", async () => {
+    const image: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      isRunning: false,
+      source: "local",
+    };
+    deviceUtils.setDeviceImages("android", [image]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        throw new Error("resource sync failed");
+      },
+    });
+
+    const result = await callTool("getAndroid", { avdName: image.name });
+
+    // The acquisition is already committed by the time the notification runs;
+    // failing it would strand a busy device under a session UUID the caller
+    // never receives.
+    expect(result.sessionUuid).toBeDefined();
+    expect(pool.getDevice(`mock-${image.name}`)).toMatchObject({
+      sessionId: result.sessionUuid,
+    });
+  });
+
   test("waits for a reset-cohort reservation before booting the requested AVD", async () => {
     const stale: BootedDevice = {
       platform: "android",

@@ -430,7 +430,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         new XcodebuildClient(
           async (file, args) => processExecutor.executeCommand(file, args),
           timer,
-          (command, args, options) => processExecutor.spawn(command, args, options),
+          processExecutor.spawn.bind(processExecutor),
         ),
       processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer),
     );

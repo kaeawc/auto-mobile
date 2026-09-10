@@ -3114,6 +3114,12 @@ describe("IOSCtrlProxyManager", function () {
         alive: true,
       };
       installListeningProcessFakes(fakeExecutor, [staleListener, daemonXcodebuild, daemonShell]);
+      const originalSpawn = fakeExecutor.spawn.bind(fakeExecutor);
+      let portWasFreeAtSpawn = false;
+      fakeExecutor.spawn = (command, args, options) => {
+        portWasFreeAtSpawn = !staleListener.alive;
+        return originalSpawn(command, args, options);
+      };
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
       // The health-first direct-runner probe sees this candidate, but its
       // daemon-managed shell root must keep it out of adoption so port cleanup
@@ -3129,13 +3135,6 @@ describe("IOSCtrlProxyManager", function () {
         createFakeBuilder(),
         fakeExecutor,
       );
-      const originalSpawn = fakeExecutor.spawn.bind(fakeExecutor);
-      let portWasFreeAtSpawn = false;
-      fakeExecutor.spawn = (command, args, options) => {
-        portWasFreeAtSpawn = !staleListener.alive;
-        return originalSpawn(command, args, options);
-      };
-
       await manager.start();
 
       expect(fakeExecutor.wasCommandExecuted("ps -p 2226")).toBe(true);

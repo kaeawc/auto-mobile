@@ -906,15 +906,52 @@ describe("Simctl", function () {
       simctl = new Simctl(null, mockExecAsync);
 
       const first = simctl.listSimulatorImages();
-      const second = simctl.listSimulatorImages();
+      const second = simctl.getBootedSimulatorsChecked();
+      const third = simctl.getBootedSimulatorsChecked();
 
       await waitForCondition(() => resolveList !== undefined, "simctl list invocation");
       resolveList(payload);
 
-      const [firstDevices, secondDevices] = await Promise.all([first, second]);
+      const [firstDevices, secondDevices] = await Promise.all([first, second, third]);
       expect(listCalls).toBe(1);
       expect(firstDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
       expect(secondDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+    });
+
+    test("successful shutdown invalidates the cached boot state", async function () {
+      const timer = new FakeTimer();
+      let running = true;
+      let reads = 0;
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          reads++;
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "iPhone 17",
+                state: running ? "Booted" : "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        }
+        if (args.includes("shutdown")) {
+          running = false;
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(null, mockExecAsync, timer);
+      expect(await simctl.getBootedSimulatorsChecked()).toHaveLength(1);
+      await simctl.killSimulator({
+        deviceId: "test-ios-device-id",
+        platform: "ios",
+        name: "iPhone 17",
+      });
+      expect(await simctl.getBootedSimulatorsChecked()).toEqual([]);
+      expect(reads).toBe(2);
+      expect(timer.now()).toBe(0);
     });
 
     test("getBootedSimulatorsChecked reuses a fresh listSimulatorImages cache within the TTL", async function () {

@@ -1226,6 +1226,7 @@ export class SimCtlClient implements SimCtl {
         signal,
         true,
       );
+      SimCtlClient.invalidateDeviceListCache();
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
     } finally {
@@ -1743,30 +1744,31 @@ export class SimCtlClient implements SimCtl {
       return this.runListSimulatorImages(timeoutMs, { bypassCache: true, signal });
     }
 
-    // Concurrent callers racing a cold/expired cache share one `simctl list
-    // devices` invocation rather than each spawning their own process
-    // (issue #6576), mirroring DevicectlDeviceLister.listConnectedDevices().
-    // The shared fetch runs under its OWN ceiling, independent of any single
-    // caller's timeoutMs/signal (see SHARED_DEVICE_LIST_TIMEOUT_MS); each
-    // waiter below races the shared result against its own deadline/signal
-    // instead, so aborting/bounding one waiter can never fail or truncate the
-    // read for a sibling waiter.
+    return this.raceOwnDeadline(this.runListSimulatorImages(undefined, {}), timeoutMs, signal);
+  }
+
+  private sharedDeviceList(): Promise<DeviceInfo[]> {
     if (!SimCtlClient.inFlightDeviceList) {
       const generation = SimCtlClient.deviceListGeneration;
       const flight = runWithAbortSignal(undefined, () =>
-        this.runListSimulatorImages(
-          SimCtlClient.SHARED_DEVICE_LIST_TIMEOUT_MS,
-          { bypassCache: false },
-          generation,
-        ),
-      ).finally(() => {
-        if (SimCtlClient.inFlightDeviceList === flight) {
-          SimCtlClient.inFlightDeviceList = null;
-        }
-      });
+        this.listDevicesForBootedCheck(SimCtlClient.SHARED_DEVICE_LIST_TIMEOUT_MS, undefined),
+      )
+        .then((devices) => {
+          if (SimCtlClient.deviceListGeneration === generation) {
+            const timestamp = this.timer.now();
+            SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
+            SimCtlClient.lastGoodDeviceList = { devices, timestamp };
+          }
+          return devices;
+        })
+        .finally(() => {
+          if (SimCtlClient.inFlightDeviceList === flight) {
+            SimCtlClient.inFlightDeviceList = null;
+          }
+        });
       SimCtlClient.inFlightDeviceList = flight;
     }
-    return this.raceOwnDeadline(SimCtlClient.inFlightDeviceList, timeoutMs, signal);
+    return SimCtlClient.inFlightDeviceList;
   }
 
   /**
@@ -1862,8 +1864,9 @@ export class SimCtlClient implements SimCtl {
     logger.debug("Getting list of iOS simulators");
 
     try {
-      const simulatorList = await this.listSimulators(timeoutMs, options.signal);
-      const devices = SimCtlClient.mapSimulatorListToDeviceInfos(simulatorList);
+      const devices = options.bypassCache
+        ? await this.listDevicesForBootedCheck(timeoutMs, options.signal)
+        : await this.sharedDeviceList();
       // A create/delete (or explicit invalidation) that landed while this fetch
       // was in flight bumps the generation; a snapshot captured under the OLD
       // generation may already be obsolete, so only a fetch that started under
@@ -1925,14 +1928,9 @@ export class SimCtlClient implements SimCtl {
    * swallowing them into an empty list. Callers that must distinguish "no
    * simulators are booted" from "simctl discovery failed" should use this.
    *
-   * Reuses a fresh {@link listSimulatorImages} cache entry instead of spawning
-   * a redundant `simctl list devices` process (issue #6576). On a cold/expired
-   * cache this falls back to calling {@link listSimulators} directly rather
-   * than through `listSimulatorImages`, preserving two contracts existing
-   * callers rely on that the shared listing path does not offer: the raw
-   * discovery error propagates unwrapped (not `listSimulatorImages`'s
-   * `ActionableError`), and `signal` bounds this specific invocation rather
-   * than a request potentially shared with unrelated callers.
+   * Reuses fresh cached discovery or the shared raw listing. Each waiter retains
+   * its own cancellation/deadline, and checked discovery propagates raw errors
+   * instead of returning the UI listing's last-good fallback.
    */
   async getBootedSimulatorsChecked(
     timeoutMs?: number,
@@ -1950,7 +1948,9 @@ export class SimCtlClient implements SimCtl {
       cached &&
       this.timer.now() - cached.timestamp < SimCtlClient.DEVICE_LIST_CACHE_TTL
         ? cached.devices
-        : await this.listDevicesForBootedCheck(timeoutMs, signal);
+        : options.bypassCache
+          ? await this.listDevicesForBootedCheck(timeoutMs, signal)
+          : await this.raceOwnDeadline(this.sharedDeviceList(), timeoutMs, signal);
     const observedAt = this.observationSequence.next();
 
     return devices
@@ -1970,7 +1970,7 @@ export class SimCtlClient implements SimCtl {
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
   }
 
-  /** Cold-cache path for {@link getBootedSimulatorsChecked}: a direct, unshared discovery read. */
+  /** Cold-cache path for {@link getBootedSimulatorsChecked}: the raw discovery primitive. */
   private async listDevicesForBootedCheck(
     timeoutMs: number | undefined,
     signal: AbortSignal | undefined,

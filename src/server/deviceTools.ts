@@ -4234,6 +4234,15 @@ export function registerDeviceTools() {
     // expiry sweep) must not stamp its result over the attempt that replaced
     // it.
     const attemptId = deps.idGenerator.next();
+    // ONE absolute deadline for the whole request, anchored here and sliced
+    // across every phase below. A replay runs up to three phases (waiting for
+    // the stable-device lifecycle lease, revalidating the live session, then
+    // re-running the lifecycle); computing a fresh `timer.now() + timeoutMs`
+    // per phase re-granted the budget already burned by the previous one, so
+    // one request could occupy ~3x its own timeoutMs -- past the operation
+    // row's TTL and past the daemon's queued-request deadline, which only the
+    // `reserveRollbackTime` form respects.
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const operation = await store.begin(
       args.operationId,
       fingerprint,
@@ -4252,7 +4261,13 @@ export function registerDeviceTools() {
     try {
       if (
         !operation.started &&
-        (await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal))
+        (await canReplayCompletedProvisionDeviceOperation(
+          args,
+          deps,
+          operation.result,
+          totalDeadlineMs,
+          signal,
+        ))
       ) {
         const replayResult = backfillProvisionDeviceCutout(args, operation.result);
         if (args.resources || replayResult !== operation.result) {
@@ -4271,6 +4286,7 @@ export function registerDeviceTools() {
           deps,
           operation.reconcileExistingConfiguration,
           () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+          totalDeadlineMs,
           signal,
         );
         const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
@@ -4283,6 +4299,7 @@ export function registerDeviceTools() {
         deps,
         operation.reconcileExistingConfiguration,
         () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+        totalDeadlineMs,
         signal,
       );
       await completeProvisionDeviceOperation(store, args.operationId, attemptId, result);
@@ -4383,6 +4400,7 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease | undefined> {
     const device = getPersistedProvisionDevice(result);
@@ -4390,7 +4408,6 @@ export function registerDeviceTools() {
     if (!device || !stableId) {
       return undefined;
     }
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
     return await reserveStableDeviceLifecycle(
       { platform: device.platform, stableId },
       {
@@ -4415,9 +4432,16 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
-    const replayLease = await reserveProvisionDeviceReplayLifecycle(args, deps, result, signal);
+    const replayLease = await reserveProvisionDeviceReplayLifecycle(
+      args,
+      deps,
+      result,
+      totalDeadlineMs,
+      signal,
+    );
     const replaySignal = replayLease
       ? signal
         ? AbortSignal.any([signal, replayLease.signal])
@@ -4425,7 +4449,8 @@ export function registerDeviceTools() {
       : signal;
     try {
       return (
-        !args.boot || (await revalidateProvisionDeviceReplay(args, deps, result, replaySignal))
+        !args.boot ||
+        (await revalidateProvisionDeviceReplay(args, deps, result, totalDeadlineMs, replaySignal))
       );
     } finally {
       replayLease?.release();
@@ -4436,6 +4461,7 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
     const liveSession = getLiveProvisionDeviceSession(result);
@@ -4450,7 +4476,6 @@ export function registerDeviceTools() {
     return await trackDeviceAcquisitionReadiness(
       deviceReadinessLockKey(liveSession.device.platform, liveSession.device.deviceId),
       async () => {
-        const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
         if (args.resources) {
           result.resources = await applyProvisionDeviceResources(
             args,
@@ -4499,10 +4524,17 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
     try {
-      return await revalidateLiveProvisionDeviceSession(args, deps, result, signal);
+      return await revalidateLiveProvisionDeviceSession(
+        args,
+        deps,
+        result,
+        totalDeadlineMs,
+        signal,
+      );
     } catch (error) {
       // A transport routing conflict does not invalidate the healthy device session.
       if (error instanceof McpSessionRecoveryInProgressError) {
@@ -4942,11 +4974,11 @@ export function registerDeviceTools() {
     deps: DeviceToolsDependencies,
     reconcileExistingConfiguration: boolean,
     markDeviceCreationStarted: () => Promise<void>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<Record<string, unknown>> {
     const perf = createPerformanceTracker(true);
     perf.serial("provisionDevice");
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const deviceManager = deps.deviceManagerFactory();
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;

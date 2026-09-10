@@ -696,6 +696,53 @@ describe("provisionDevice handler", () => {
     expect(exactProvisioner.requests).toHaveLength(1);
   });
 
+  test("slices one absolute deadline across a replay instead of re-granting timeoutMs", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const readinessBudgets: number[] = [];
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
+        readinessBudgets.push(totalDeadlineMs - timer.now());
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-replay-budget"),
+      timeoutMs: 60_000,
+    };
+
+    await tool.handler(args);
+    await Promise.resolve();
+    expect(readinessBudgets).toEqual([60_000]);
+
+    // A competing teardown holds the stable lease for almost the whole
+    // request budget. The replay's readiness must run inside what is LEFT of
+    // that budget, not a freshly re-granted timeoutMs.
+    const teardownLease = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: args.device.name },
+      { operation: "teardown", deadlineMs: 10_000_000 },
+    );
+    const replay = tool.handler(args);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(59_000);
+    teardownLease.release();
+    await replay;
+
+    expect(readinessBudgets).toHaveLength(2);
+    expect(readinessBudgets[1]).toBeLessThanOrEqual(1_000);
+  });
+
   test("boots the exact device and runs automation readiness when requested", async () => {
     deviceManager.setDeviceImages("android", [
       {

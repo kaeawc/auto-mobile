@@ -141,7 +141,7 @@ function nextPollMinTimestamp(
  * screen.
  */
 export async function pollObserveUntil(
-  observeScreen: ObserveScreen,
+  observeScreen: Pick<ObserveScreen, "execute">,
   timer: Timer,
   options: ObservePollOptions,
   onObservation: (

@@ -26,6 +26,18 @@ systemTray({
 })
 ```
 
+## Tap observation result
+
+After dispatching a notification or action-button tap, the tool polls for a
+fresh screen change and a 1-second quiet period, with a 2.5-second polling
+budget. A settled result includes `settled: true` and the final observation,
+so inline Reply returns its input field rather than the pre-tap shade.
+
+If the effect cannot be confirmed within that budget, the response keeps
+dispatch-level `success: true`, sets `settled: false`, and omits the
+observation. Re-observe before continuing; do not interpret an unsettled
+result as proof that the tap failed or retry the tap automatically.
+
 ## Android implementation
 
 Open/close the tray (preferred, emulator):

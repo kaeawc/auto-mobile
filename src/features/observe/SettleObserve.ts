@@ -17,7 +17,7 @@ const DEFAULT_STABLE_READS = 2;
  * capture attributes, including occlusion metadata, so every remaining change is
  * actionable instability.
  */
-function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
+export function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
   return (
     diff.added.length === 0 &&
     diff.removed.length === 0 &&

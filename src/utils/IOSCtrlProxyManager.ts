@@ -1255,11 +1255,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.processSupervisor.stop();
 
-    // stop() is the ONLY place (besides forceRestart(), which calls stop())
-    // permitted to abort the resident runner's process-lifecycle signal —
-    // never an ambient per-request cancellation (issue #6410).
-    this.runnerAbortController?.abort(new Error("iOS CtrlProxy runner stopped"));
-    this.runnerAbortController = null;
+    const retiringController = this.runnerAbortController;
+    const retiringPid = this.xcTestProcessId;
 
     if (this.useRemoteRunner()) {
       try {
@@ -1293,7 +1290,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (this.xcTestProcessId) {
       try {
         if (await this.isOwnRunnerProcessAlive()) {
-          await this.processClient.terminateProcessTree(this.xcTestProcessId, deadline);
+          await this.processClient.terminateProcessTree(retiringPid!, deadline);
         } else {
           logger.debug(
             `[IOSCtrlProxy] Tracked runner PID ${this.xcTestProcessId} is not an owned CtrlProxy runner; ` +
@@ -1320,6 +1317,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         `Failed to stop iOS CtrlProxy runner ${this.xcTestProcessId}: ` +
           `${errorMessage(runnerTerminationError)}`,
       );
+    }
+    // Terminate descendants before abort can synchronously clear process tracking.
+    retiringController?.abort(new Error("iOS CtrlProxy runner stopped"));
+    if (this.runnerAbortController === retiringController) {
+      this.runnerAbortController = null;
     }
     PortManager.release(this.device.deviceId);
     logger.info("[IOSCtrlProxy] Service stopped");
@@ -1694,6 +1696,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       env: { ...process.env, ...runnerEnv },
       stdio: ["ignore", "pipe", "pipe"],
       signal: this.runnerAbortController.signal,
+      startupSignal: this.sharedStart?.controller.signal,
     });
 
     child.on("error", (error) => {
@@ -2852,6 +2855,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       env: { ...process.env, ...runnerEnv },
       stdio: ["ignore", "pipe", "pipe"],
       signal: this.runnerAbortController.signal,
+      startupSignal: this.sharedStart?.controller.signal,
     });
 
     child.on("error", (error) => {

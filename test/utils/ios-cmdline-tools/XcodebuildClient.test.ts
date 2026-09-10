@@ -307,7 +307,8 @@ describe("XcodebuildClient streaming runner", () => {
     const client = new XcodebuildClient(
       async () => createExecResult("Xcode 26.5", ""),
       new FakeTimer(),
-      (_command, _args, _options) => {
+      (_command, _args, options) => {
+        options.signal?.addEventListener("abort", () => child.kill());
         child.simulateSpawn();
         return child as never;
       },
@@ -329,5 +330,56 @@ describe("XcodebuildClient streaming runner", () => {
     requestController.abort();
 
     expect(killed).toBe(false);
+  });
+  test("startup cancellation rejects a pending probe without spawning the resident", async () => {
+    const timer = new FakeTimer();
+    const startup = new AbortController();
+    const owner = new AbortController();
+    let release!: (result: ExecResult) => void;
+    let spawns = 0;
+    const client = new XcodebuildClient(
+      async () =>
+        new Promise<ExecResult>((resolve) => {
+          release = resolve;
+        }),
+      timer,
+      () => {
+        spawns++;
+        throw new Error("must not spawn");
+      },
+    );
+    const reason = new Error("startup cancelled");
+    const outcome = client
+      .startStreaming([], { signal: owner.signal, startupSignal: startup.signal })
+      .catch((error: unknown) => error);
+    startup.abort(reason);
+    expect(await outcome).toBe(reason);
+    release(createExecResult("Xcode 26.5", ""));
+    await Promise.resolve();
+    expect(spawns).toBe(0);
+    expect(owner.signal.aborted).toBe(false);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("cancellation at probe completion prevents spawn", async () => {
+    const startup = new AbortController();
+    const owner = new AbortController();
+    let spawns = 0;
+    const reason = new Error("cancelled at probe completion");
+    const client = new XcodebuildClient(
+      async () => {
+        startup.abort(reason);
+        return createExecResult("Xcode 26.5", "");
+      },
+      new FakeTimer(),
+      () => {
+        spawns++;
+        throw new Error("must not spawn");
+      },
+    );
+    await expect(
+      client.startStreaming([], { signal: owner.signal, startupSignal: startup.signal }),
+    ).rejects.toBe(reason);
+    expect(spawns).toBe(0);
   });
 });

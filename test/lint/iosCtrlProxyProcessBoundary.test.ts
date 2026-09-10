@@ -1,3 +1,4 @@
+import ts from "typescript";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -362,16 +363,32 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     // line from either call) must fail loudly instead of just changing runtime
     // behavior silently.
     const manager = readFileSync(join(ROOT, "src/utils/IOSCtrlProxyManager.ts"), "utf8");
-    const callSitePattern = /this\.xcodebuild\.startStreaming\(args,\s*\{/g;
-    const callSiteStarts = [...manager.matchAll(callSitePattern)].map((match) => match.index);
-    expect(callSiteStarts).toHaveLength(2);
-    for (const start of callSiteStarts) {
-      // The options object closes well within 300 characters at both call
-      // sites; slicing a fixed window (rather than brace-matching through the
-      // nested `env: { ...process.env, ...runnerEnv }`) keeps this a plain
-      // source-text assertion, consistent with the rest of this file.
-      const window = manager.slice(start, start + 300);
-      expect(window).toMatch(/signal:\s*this\.runnerAbortController\.signal/);
+    const source = ts.createSourceFile("manager.ts", manager, ts.ScriptTarget.Latest, true);
+    const calls: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.getText(source) === "this.xcodebuild.startStreaming"
+      ) {
+        calls.push(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const options = call.arguments[1];
+      expect(ts.isObjectLiteralExpression(options)).toBe(true);
+      if (!ts.isObjectLiteralExpression(options)) {
+        continue;
+      }
+      const signal = options.properties.find(
+        (property) =>
+          ts.isPropertyAssignment(property) && property.name.getText(source) === "signal",
+      );
+      expect(signal && ts.isPropertyAssignment(signal) && signal.initializer.getText(source)).toBe(
+        "this.runnerAbortController.signal",
+      );
     }
   });
 });

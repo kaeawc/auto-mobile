@@ -3143,8 +3143,26 @@ describe("IOSCtrlProxyManager", function () {
         ambientRequestController.abort();
         expect(spawn.options?.signal?.aborted).toBe(false);
 
-        // Only stop() (or forceRestart(), which calls stop()) may abort it.
+        const tracked = manager as unknown as {
+          xcTestProcessId: number | null;
+          processClient: IOSCtrlProxyProcessClient;
+        };
+        const pid = tracked.xcTestProcessId!;
+        (
+          manager as unknown as { isOwnRunnerProcessAlive: () => Promise<boolean> }
+        ).isOwnRunnerProcessAlive = async () => true;
+        let terminated = false;
+        tracked.processClient.terminateProcessTree = async (target) => {
+          expect(target).toBe(pid);
+          expect(spawn.options?.signal?.aborted).toBe(false);
+          terminated = true;
+        };
+        spawn.options?.signal?.addEventListener("abort", () => {
+          expect(terminated).toBe(true);
+          tracked.xcTestProcessId = null;
+        });
         await manager.stop();
+        expect(terminated).toBe(true);
         expect(spawn.options?.signal?.aborted).toBe(true);
       } finally {
         PortManager.setPortAvailabilityCheckerForTesting(null);

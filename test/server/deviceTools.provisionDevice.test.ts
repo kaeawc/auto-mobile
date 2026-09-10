@@ -27,6 +27,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
+import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -56,6 +57,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
   private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
   failCalls = 0;
+  readonly failCodes: string[] = [];
 
   /** Simulate a "running" row left behind by a crashed/earlier attempt. */
   markInProgress(operationId: string): void {
@@ -122,11 +124,12 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
 
   async fail(
     operationId: string,
-    _errorCode: string,
+    errorCode: string,
     _message: string,
     options?: { clearCreationStarted?: boolean },
   ): Promise<void> {
     this.failCalls++;
+    this.failCodes.push(errorCode);
     if (options?.clearCreationStarted) {
       const operation = this.results.get(operationId);
       if (!operation) {
@@ -2447,6 +2450,35 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionSignal?.aborted).toBe(true);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  // C-6: a readiness failure caused by an exhausted deadline was reported and
+  // persisted as `platform_command_failed`, so a controller that retries on
+  // `timeout` but treats `platform_command_failed` as terminal gave up on a
+  // purely time-based failure.
+  test("reports an exhausted readiness budget as a timeout", async () => {
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw new RunnerReadinessError(
+          "provisionDevice automation runner readiness failed: phase=runner-setup " +
+            "attempts=1 remainingBudgetMs=0: readiness budget exhausted before setup lock",
+          false,
+          true,
+        );
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "readiness-budget-timeout"),
+      timeoutMs: 60_000,
+    });
+
+    expect(JSON.parse((response as any).content[0].text).error.code).toBe("timeout");
+    expect(operationStore.failCodes).toEqual(["timeout"]);
   });
 
   // C-4: boot and automation readiness shared one provision budget, so a slow

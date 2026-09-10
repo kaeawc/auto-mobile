@@ -90,6 +90,7 @@ import {
 } from "./directSessionDeviceRegistry";
 import {
   createDefaultRunnerReadinessService,
+  RunnerReadinessError,
   type RunnerReadinessRequest,
   SystemUiAnrRecoveryRequiredError,
 } from "../utils/RunnerReadinessService";
@@ -4589,8 +4590,14 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceError) {
       return error;
     }
+    // A readiness phase that ran out of budget is a purely time-based failure:
+    // report it as `timeout` so a controller that retries timeouts but treats
+    // `platform_command_failed` as terminal does not give up on it.
+    const isDeadlineFailure =
+      error instanceof DeviceBootTimeoutError ||
+      (error instanceof RunnerReadinessError && error.deadlineExhausted);
     return new ProvisionDeviceError(
-      error instanceof DeviceBootTimeoutError ? "timeout" : "platform_command_failed",
+      isDeadlineFailure ? "timeout" : "platform_command_failed",
       `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
     );
   }

@@ -4937,7 +4937,16 @@ export function registerDeviceTools() {
         signal,
       );
       if (provisioned.created || booted.source === "cold-boot") {
-        await deps.notifyResourcesChanged();
+        // Session and pool ownership are already committed by
+        // `bootExactProvisionedDevice`. A best-effort resource notification is
+        // safe to swallow here: failing it must neither turn that committed
+        // success into destructive rollback nor strand the bound session.
+        void deps.notifyResourcesChanged().catch((error: unknown) => {
+          logger.warn(
+            `[DeviceTools] Failed to notify resource changes after provisioning ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
+            error,
+          );
+        });
       }
       perf.end();
       return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);

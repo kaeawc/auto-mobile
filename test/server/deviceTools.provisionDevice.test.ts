@@ -1076,6 +1076,53 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
 
+  test("keeps a committed provision when the post-commit resource notification fails", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [created.device]);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {},
+      notifyResourcesChanged: async () => {
+        throw new Error("resource notification transport closed");
+      },
+      idGenerator: new FakeIdGenerator(["session-notify-failure", "cleanup-notify-failure"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse(
+      ((await tool.handler(provisionTestArgs("android", "operation-notify-failure"))) as any)
+        .content[0].text,
+    );
+
+    // Session + pool ownership are already committed by the time the
+    // best-effort notification runs, so its failure must neither be reported
+    // as a provisioning failure nor drive destructive rollback.
+    expect(response).toMatchObject({
+      created: true,
+      lifecycleState: "ready",
+      sessionId: "session-notify-failure",
+    });
+    expect(response.success).toBeUndefined();
+    expect(response.error).toBeUndefined();
+    expect(response.cleanup).toBeUndefined();
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toEqual([]);
+    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+  });
+
   test("cleans up a retried operation's adopted device when the original cleanup failed", async () => {
     const adopted = provisionedTestDevice("android", false);
     configureProvisionBootAndTeardown(deviceManager, "android");

@@ -907,15 +907,10 @@ describe("SimCtlClient boot self-verification", () => {
 
     harness.timer.advanceTime(100);
 
-    // This caller's own 100ms deadline elapses; it must reject regardless of
-    // the shared `simctl list devices` invocation's own state (issue #6576 --
-    // the shared fetch is intentionally caller-independent, so it is neither
-    // driven nor aborted by any single waiter's deadline; see the coalescing
-    // tests in simctl.test.ts for that contract).
-    await expect(readiness).rejects.toThrow(
-      "Timed out waiting for iOS simulator listing after 100ms",
-    );
-    expect(metadataSignal?.aborted).toBe(false);
+    // Authoritative readiness metadata uses a fresh, owned read, so the
+    // caller deadline must stop its discovery process and release the lease.
+    await expect(readiness).rejects.toThrow("Command timed out after 100ms");
+    expect(metadataSignal?.aborted).toBe(true);
     await expect(harness.createClient().startSimulator(UDID, 5_000)).resolves.toBeDefined();
     expect(harness.shutdownInvocations()).toBe(0);
   });

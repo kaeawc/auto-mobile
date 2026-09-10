@@ -24,7 +24,7 @@ import {
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
 import { iosVersionStringFromRuntimeId } from "./iosVersion";
-import { getAbortSignal } from "../AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
 
@@ -906,7 +906,11 @@ export class SimCtlClient implements SimCtl {
       }
       if (lease.state.lastBootSucceeded) {
         const simulatorStillBooted = (
-          await this.getBootedSimulatorsChecked(this.remainingBootTimeoutMs(udid, deadlineMs))
+          await this.getBootedSimulatorsChecked(
+            this.remainingBootTimeoutMs(udid, deadlineMs),
+            undefined,
+            { bypassCache: true },
+          )
         ).some((simulator) => simulator.deviceId === udid);
         if (simulatorStillBooted) {
           throw new ActionableError(`iOS simulator ${udid} is already running`);
@@ -1071,7 +1075,11 @@ export class SimCtlClient implements SimCtl {
       }
       if (priorBootSucceeded && adoptPriorSuccess) {
         const simulatorStillBooted = (
-          await this.getBootedSimulatorsChecked(this.remainingBootTimeoutMs(udid, deadlineMs))
+          await this.getBootedSimulatorsChecked(
+            this.remainingBootTimeoutMs(udid, deadlineMs),
+            undefined,
+            { bypassCache: true },
+          )
         ).some((simulator) => simulator.deviceId === udid);
         if (simulatorStillBooted) {
           return await adoptPriorSuccess();
@@ -1678,6 +1686,11 @@ export class SimCtlClient implements SimCtl {
   private async resolveReadySimulator(udid: string, timeoutMs?: number): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("deviceLookup");
+    // findBootedSimulator always issues its own unshared `simctl list
+    // devices` read (never listSimulatorImages()'s TTL cache), and is shared
+    // with resolveRegisteredBootSimulator (issue #6412) so both boot-
+    // completion paths agree on the same booted device and neither trusts a
+    // stale cached snapshot (issue #6576).
     const simulator = await this.findBootedSimulator(udid, timeoutMs);
     perf.endOperation("deviceLookup");
 
@@ -1707,7 +1720,8 @@ export class SimCtlClient implements SimCtl {
     // An already-aborted caller must fail even on a cache hit below -- a cached
     // "success" for a request the caller has already given up on is silently
     // wrong (issue #6576).
-    options.signal?.throwIfAborted();
+    const signal = options.signal ?? getAbortSignal();
+    signal?.throwIfAborted();
 
     // Check cache first
     if (!options.bypassCache && SimCtlClient.deviceListCache) {
@@ -1724,7 +1738,9 @@ export class SimCtlClient implements SimCtl {
     // — that request's failure-fallback behavior is not this caller's to
     // inherit. Run it standalone instead of sharing the coalescing slot below.
     if (options.bypassCache) {
-      return this.runListSimulatorImages(timeoutMs, { bypassCache: true });
+      SimCtlClient.deviceListGeneration++;
+      SimCtlClient.inFlightDeviceList = null;
+      return this.runListSimulatorImages(timeoutMs, { bypassCache: true, signal });
     }
 
     // Concurrent callers racing a cold/expired cache share one `simctl list
@@ -1735,15 +1751,22 @@ export class SimCtlClient implements SimCtl {
     // waiter below races the shared result against its own deadline/signal
     // instead, so aborting/bounding one waiter can never fail or truncate the
     // read for a sibling waiter.
-    const generation = SimCtlClient.deviceListGeneration;
-    SimCtlClient.inFlightDeviceList ??= this.runListSimulatorImages(
-      SimCtlClient.SHARED_DEVICE_LIST_TIMEOUT_MS,
-      { bypassCache: false },
-      generation,
-    ).finally(() => {
-      SimCtlClient.inFlightDeviceList = null;
-    });
-    return this.raceOwnDeadline(SimCtlClient.inFlightDeviceList, timeoutMs, options.signal);
+    if (!SimCtlClient.inFlightDeviceList) {
+      const generation = SimCtlClient.deviceListGeneration;
+      const flight = runWithAbortSignal(undefined, () =>
+        this.runListSimulatorImages(
+          SimCtlClient.SHARED_DEVICE_LIST_TIMEOUT_MS,
+          { bypassCache: false },
+          generation,
+        ),
+      ).finally(() => {
+        if (SimCtlClient.inFlightDeviceList === flight) {
+          SimCtlClient.inFlightDeviceList = null;
+        }
+      });
+      SimCtlClient.inFlightDeviceList = flight;
+    }
+    return this.raceOwnDeadline(SimCtlClient.inFlightDeviceList, timeoutMs, signal);
   }
 
   /**
@@ -1758,6 +1781,7 @@ export class SimCtlClient implements SimCtl {
     timeoutMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
+    signal?.throwIfAborted();
     if (timeoutMs === undefined && !signal) {
       return shared;
     }
@@ -1832,13 +1856,13 @@ export class SimCtlClient implements SimCtl {
 
   private async runListSimulatorImages(
     timeoutMs: number | undefined,
-    options: { bypassCache?: boolean },
+    options: { bypassCache?: boolean; signal?: AbortSignal },
     generation: number = SimCtlClient.deviceListGeneration,
   ): Promise<DeviceInfo[]> {
     logger.debug("Getting list of iOS simulators");
 
     try {
-      const simulatorList = await this.listSimulators(timeoutMs);
+      const simulatorList = await this.listSimulators(timeoutMs, options.signal);
       const devices = SimCtlClient.mapSimulatorListToDeviceInfos(simulatorList);
       // A create/delete (or explicit invalidation) that landed while this fetch
       // was in flight bumps the generation; a snapshot captured under the OLD
@@ -1847,29 +1871,15 @@ export class SimCtlClient implements SimCtl {
       // (issue #6576) -- otherwise it would resurrect pre-mutation data right
       // after the mutation invalidated it.
       const stillCurrent = SimCtlClient.deviceListGeneration === generation;
-      if (devices.length > 0) {
+      if (stillCurrent) {
         const timestamp = this.timer.now();
-        // A bypassCache read is a deliberately un-shared, provably-fresh read
-        // (e.g. boot verification via readSimulatorState); populating the TTL
-        // cache from it would let an unrelated cache-eligible caller silently
-        // consume that read instead of making its own, which the boot
-        // verification tests pin as a fixed invocation count.
-        if (!options.bypassCache && stillCurrent) {
-          SimCtlClient.deviceListCache = { devices, timestamp };
-          SimCtlClient.lastGoodDeviceList = { devices, timestamp };
-        }
-      } else if (!options.bypassCache && stillCurrent) {
-        SimCtlClient.deviceListCache = null;
-        // An authoritative empty listing means no simulators exist right now.
-        // Replace (not merely clear) the last-good snapshot with that same
-        // empty result, so a later failed discovery within the retention
-        // window reports "none" instead of resurrecting devices this read
-        // just proved absent (issue #6576).
-        SimCtlClient.lastGoodDeviceList = { devices: [], timestamp: this.timer.now() };
+        SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
+        SimCtlClient.lastGoodDeviceList = { devices, timestamp };
       }
       return devices;
     } catch (error) {
-      if (!options.bypassCache) {
+      options.signal?.throwIfAborted();
+      if (!options.bypassCache && SimCtlClient.deviceListGeneration === generation) {
         SimCtlClient.deviceListCache = null;
       }
       const detail = errorMessage(error);
@@ -1932,6 +1942,7 @@ export class SimCtlClient implements SimCtl {
     // An already-aborted caller must fail even on a cache hit below -- a cached
     // "success" for a request the caller has already given up on is silently
     // wrong (issue #6576).
+    signal ??= getAbortSignal();
     signal?.throwIfAborted();
     const cached = SimCtlClient.deviceListCache;
     const devices =
@@ -2180,6 +2191,7 @@ export class SimCtlClient implements SimCtl {
   static invalidateDeviceListCache(): void {
     SimCtlClient.deviceListCache = null;
     SimCtlClient.lastGoodDeviceList = null;
+    SimCtlClient.inFlightDeviceList = null;
     SimCtlClient.deviceListGeneration++;
   }
 

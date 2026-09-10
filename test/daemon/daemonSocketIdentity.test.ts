@@ -12,6 +12,44 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("socket-owner daemon preflight", () => {
+  for (const persistentFailure of [false, true]) {
+    test(`identity handoff retries establishment once before dispatch (persistent=${persistentFailure})`, async () => {
+      const manager = new FakeDaemonManager();
+      manager.statusResult = { running: false };
+      const client = new FakeDaemonClient();
+      const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      let probes = 0;
+      const failure = new DaemonUnavailableError("Socket owner exited during identity discovery");
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: manager,
+        clientVersion: "0.0.70",
+        timer: new FakeTimer(),
+        daemonStatusProbe: async () => {
+          probes++;
+          if (probes === 1 || persistentFailure) {
+            throw failure;
+          }
+          return { running: true, version: "0.0.70" };
+        },
+      });
+      try {
+        if (persistentFailure) {
+          await expect(proxy.callTool("provisionDevice", {})).rejects.toMatchObject({
+            cause: failure,
+          });
+        } else {
+          await proxy.callTool("provisionDevice", {});
+        }
+        expect(probes).toBe(2);
+        expect(client.callToolCalls).toHaveLength(persistentFailure ? 0 : 1);
+        expect(manager.restartCallCount).toBe(0);
+      } finally {
+        available.mockRestore();
+        await proxy.close();
+      }
+    });
+  }
   for (const actualIdentity of [
     {},
     { pid: 101, buildId: "unknown", entryScript: "/current" },

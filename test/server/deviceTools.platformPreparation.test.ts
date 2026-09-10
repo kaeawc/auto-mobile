@@ -21,6 +21,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -60,6 +61,33 @@ describe("platform device preparation tools", () => {
     return JSON.parse(
       typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
     );
+  }
+
+  for (const [operation, platform, target] of [
+    ["getAndroid", "android", { avdName: "Pixel" }],
+    ["getApple", "ios", { udid: "sim-udid" }],
+  ] as const) {
+    test(`${operation} attributes boot deadlines to the requested acquisition`, async () => {
+      class SlowDiscovery extends FakeDeviceUtils {
+        override async listDeviceImages(selectedPlatform: "android" | "ios") {
+          const images = await super.listDeviceImages(selectedPlatform);
+          timer.advanceTime(11);
+          return images;
+        }
+      }
+      const slow = new SlowDiscovery();
+      slow.setDeviceImages(platform, [
+        { platform, name: "Pixel", deviceId: "sim-udid", isRunning: false },
+      ]);
+      setDeviceToolsDependencies({ deviceManagerFactory: () => slow });
+      const failure = await callTool(operation, { ...target, bootTimeoutMs: 10 }).catch(
+        (error) => error,
+      );
+      expect(failure).toBeInstanceOf(DeviceBootTimeoutError);
+      expect(failure.operation).toBe(operation);
+      expect(failure.message).toContain(`${operation} timeout exhausted`);
+      expect(failure.budgetMs).toBe(10);
+    });
   }
 
   test("advertises the combined preparation budget including omitted defaults", () => {

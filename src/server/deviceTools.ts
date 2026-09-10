@@ -5478,6 +5478,7 @@ export function registerDeviceTools() {
     state.boot = await bootService.boot(
       {
         ...args,
+        operationName: budgets.operationName,
         timeoutMs: budgets.bootTimeoutMs,
         totalDeadlineMs: bootDeadlineMs,
         signal,

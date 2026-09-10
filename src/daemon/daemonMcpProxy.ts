@@ -69,6 +69,25 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 
+/** A transport failed before dispatch, rather than a reconciliation policy gate. */
+class DaemonPreflightConnectionError extends DaemonUnavailableError {
+  constructor(readonly cause: DaemonUnavailableError) {
+    super(cause.message);
+    this.name = "DaemonPreflightConnectionError";
+  }
+}
+
+async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof DaemonUnavailableError) {
+      throw new DaemonPreflightConnectionError(error);
+    }
+    throw error;
+  }
+}
+
 function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean {
   return uri === `automobile:device-session/${sessionUuid}/screenshot`;
 }
@@ -912,7 +931,7 @@ export class DaemonMcpProxy {
       );
     }
     this.subscribeToClientConnectionClosed(client);
-    await client.connect();
+    await runPreflightTransport(() => client.connect());
     if (this.closing) {
       await client.close();
       throw new DaemonUnavailableError("MCP proxy is closing");
@@ -1228,7 +1247,7 @@ export class DaemonMcpProxy {
 
   private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
     const recorded = await this.daemonManager.status();
-    const actual = await this.daemonStatusProbe!();
+    const actual = await runPreflightTransport(() => this.daemonStatusProbe!());
     // Compatibility allows legacy missing build fields, but missing identity is not
     // evidence that a PID record belongs to this socket. Only enrich a known matching
     // process, build and entry script; never manufacture live build/options from a legacy probe.
@@ -1599,10 +1618,15 @@ export class DaemonMcpProxy {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
     this.throwIfBoundSessionFenced(allowReleasedSession);
-    await this.ensureConnected();
-    this.throwIfBoundSessionFenced(allowReleasedSession);
+    let established = false;
 
     try {
+      // Socket identity discovery can race a daemon handoff before any tool
+      // has been dispatched. Give establishment the same single reconnect
+      // attempt as a recoverable transport failure, preserving the fences.
+      await this.ensureConnected();
+      this.throwIfBoundSessionFenced(allowReleasedSession);
+      established = true;
       return await operation();
     } catch (error) {
       if (this.closing) {
@@ -1624,7 +1648,7 @@ export class DaemonMcpProxy {
         );
         throw this.boundSessionExpiredError();
       }
-      if (!this.isRecoverableDaemonSessionError(error)) {
+      if (!this.isRecoverableDaemonSessionError(error, established)) {
         throw error;
       }
 
@@ -1655,7 +1679,19 @@ export class DaemonMcpProxy {
     }
   }
 
-  private isRecoverableDaemonSessionError(error: unknown): boolean {
+  private isRecoverableDaemonSessionError(error: unknown, established = true): boolean {
+    if (!established) {
+      return error instanceof DaemonPreflightConnectionError;
+    }
+    // Compatibility policy failures cannot be healed by another connection
+    // attempt (and repeating a failed reconciliation could restart twice).
+    if (
+      error instanceof DaemonVersionMismatchError ||
+      error instanceof DaemonBuildMismatchError ||
+      error instanceof DaemonAssetVersionMismatchError
+    ) {
+      return false;
+    }
     // Structured server evidence proves rejection happened before dispatch.
     // Legacy message-only errors remain non-retryable rather than guessing.
     if (error instanceof DaemonHandshakeMismatchError) {

@@ -34,7 +34,7 @@ import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discov
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
@@ -95,6 +95,15 @@ export class DevicePoolError extends Error {
 export type DeviceStatus = "idle" | "busy" | "error";
 type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
+class UnconfirmedRecoveryShutdownError extends ActionableError {
+  constructor(avdName: string, cause: unknown) {
+    super(
+      `Shutdown of Android emulator '${avdName}' is unconfirmed; recovery ownership remains quarantined`,
+      { cause },
+    );
+  }
+}
+
 export type SessionPreservingRecoveryResult =
   | "not-attempted"
   | "deferred"
@@ -2403,6 +2412,10 @@ export class DevicePool {
       finalized = true;
       return "released";
     } catch (error) {
+      if (error instanceof UnconfirmedRecoveryShutdownError) {
+        await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+        return "deferred";
+      }
       try {
         await this.releasePreservedSessionAfterRecoveryFailure(device, session, incidentId);
         finalized = true;
@@ -2596,6 +2609,12 @@ export class DevicePool {
       }
       return recovered ? "recovered" : "released";
     } catch (error) {
+      if (error instanceof UnconfirmedRecoveryShutdownError) {
+        this.adbServerResetQuarantinedSessions.add(session.sessionId);
+        this.recoveringSessionLosses.set(session.sessionId, { deviceId: device.id, incidentId });
+        await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+        return "deferred";
+      }
       try {
         await this.releasePreservedAdbResetSessionIfDetached(device, session, incidentId);
         await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
@@ -2939,10 +2958,13 @@ export class DevicePool {
       for (const device of cohort) {
         if (device.adbServerResetSessionId) {
           const sessionId = device.adbServerResetSessionId;
-          if (this.canReleaseAdbServerResetSessionFence(device, sessionId)) {
-            this.adbServerResetQuarantinedSessions.delete(sessionId);
-            this.recoveringSessionLosses.delete(sessionId);
+          if (!this.canReleaseAdbServerResetSessionFence(device, sessionId)) {
+            // An unsettled owner must retain both its session fence and the
+            // AVD reservation, including after the cohort caller's finally.
+            continue;
           }
+          this.adbServerResetQuarantinedSessions.delete(sessionId);
+          this.recoveringSessionLosses.delete(sessionId);
         }
         if (!device.avdName) {
           continue;
@@ -3181,6 +3203,9 @@ export class DevicePool {
           error,
         );
         await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+        if (error instanceof UnconfirmedRecoveryShutdownError) {
+          throw error;
+        }
         return false;
       }
       if (replacementState === "same-avd") {
@@ -3357,7 +3382,7 @@ export class DevicePool {
     const hadTrackedProcess = this.startedDeviceProcesses.has(device.id);
     await this.stopTrackedEmulatorProcess(device.id, retainLeaseUntil);
     if (!hadTrackedProcess) {
-      await this.stopDiscoveredEmulatorByAvdName(avdName);
+      await this.stopDiscoveredEmulatorByAvdName(avdName, retainLeaseUntil);
     }
     return "stopped";
   }
@@ -3546,24 +3571,87 @@ export class DevicePool {
     this.startedDeviceProcessOutput.delete(deviceId);
   }
 
-  private async stopDiscoveredEmulatorByAvdName(avdName: string): Promise<void> {
-    try {
-      const booted = await this.deviceManager.getBootedDevices("android");
+  private async stopDiscoveredEmulatorByAvdName(
+    avdName: string,
+    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+  ): Promise<void> {
+    const timeoutMs = 30_000;
+    const deadlineMs = this.timer.now() + timeoutMs;
+    const deadlineController = new AbortController();
+    const callerSignal = getAbortSignal();
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, deadlineController.signal])
+      : deadlineController.signal;
+    const timeoutError = new ActionableError(
+      `Android emulator '${avdName}' shutdown was not confirmed within ${timeoutMs}ms; recovery will not relaunch it`,
+    );
+    const timeout = this.timer.setTimeout(() => deadlineController.abort(timeoutError), timeoutMs);
+    let removeAbortListener: (() => void) | undefined;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      if (signal.aborted) {
+        abort();
+      } else {
+        signal.addEventListener("abort", abort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", abort);
+      }
+    });
+    const shutdown = runWithAbortSignal(signal, async () => {
+      const discover = async () => {
+        signal.throwIfAborted();
+        const discovery = await this.deviceManager.getBootedDevicesDetailed("android", {
+          bypassAndroidDeviceListCache: true,
+        });
+        signal.throwIfAborted();
+        if (!discovery.succeededPlatforms.has("android")) {
+          throw new ActionableError(
+            `Android discovery failed while confirming '${avdName}' shutdown; recovery will not relaunch it`,
+          );
+        }
+        if (discovery.devices.some((device) => device.name.startsWith("Unknown ("))) {
+          throw new ActionableError(
+            `Android discovery contains an unresolved emulator identity while stopping '${avdName}'; recovery will not relaunch it`,
+          );
+        }
+        return discovery.devices;
+      };
+      const booted = await discover();
       const matchingAvd = booted.find(
         (device) => device.platform === "android" && device.name === avdName,
       );
       if (!matchingAvd) {
         return;
       }
-      await this.deviceManager.killDevice(matchingAvd);
-      logger.info(`[DevicePool] Stopped untracked Android emulator ${avdName} before recovery`);
+      await this.deviceManager.killDevice(matchingAvd, {
+        timeoutMs: Math.max(1, deadlineMs - this.timer.now()),
+        signal,
+      });
+      signal.throwIfAborted();
+      for (;;) {
+        const devices = await discover();
+        // A same-AVD replacement still holds the image's locks; a different
+        // AVD reusing the old serial must be preserved without another kill.
+        const stillPresent = devices.some((device) => device.name === avdName);
+        if (!stillPresent) {
+          logger.info(
+            `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
+          );
+          return;
+        }
+        await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
+        signal.throwIfAborted();
+      }
+    });
+    try {
+      await Promise.race([shutdown, cancelled]);
     } catch (error) {
-      // ADB may still be rebuilding after a process-wide kill-server. The
-      // bounded launch retries below make another recovery attempt without
-      // ever selecting an emulator by its recycled serial.
-      logger.warn(
-        `[DevicePool] Could not stop untracked Android emulator ${avdName} before recovery: ${error}`,
-      );
+      // A late command must settle before another lifecycle owner may mutate
+      // this AVD. Failure propagates before pool/session detachment or relaunch.
+      retainLeaseUntil(shutdown);
+      throw new UnconfirmedRecoveryShutdownError(avdName, error);
+    } finally {
+      this.timer.clearTimeout(timeout);
+      removeAbortListener?.();
     }
   }
 
@@ -4225,6 +4313,7 @@ export class DevicePool {
     unavailableMessage: string,
     readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<void> {
+    this.assertDeviceCleanupComplete(device.id);
     if (device.status !== "idle" || device.sessionId) {
       return;
     }
@@ -4255,6 +4344,15 @@ export class DevicePool {
       `Unable to verify iOS ${noun} '${device.id}' is still booted before assignment.\n` +
         `iOS ${noun} discovery failed, so AutoMobile did not assign this pooled UDID.`,
     );
+  }
+
+  /** Exact-device acquisition must honor the same cleanup quarantine as allocation. */
+  assertDeviceCleanupComplete(deviceId: string): void {
+    if (this.sessionManager.hasDeviceCleanupInProgress(deviceId)) {
+      throw new ActionableError(
+        `Device '${deviceId}' is still completing session cleanup; retry after cleanup finishes.`,
+      );
+    }
   }
 
   /**
@@ -5337,6 +5435,7 @@ export class DevicePool {
         readinessReservationOwners,
       );
 
+      this.assertDeviceCleanupComplete(deviceId);
       if (device.sessionId) {
         const existingSession = this.sessionManager.getSession(device.sessionId);
         if (
@@ -5359,6 +5458,8 @@ export class DevicePool {
           );
         }
 
+        // Looking up an expired owner may itself start its release.
+        this.assertDeviceCleanupComplete(deviceId);
         device.sessionId = null;
         device.status = "idle";
       }
@@ -5742,6 +5843,7 @@ export class DevicePool {
       return reusedSessionId;
     }
 
+    this.assertDeviceCleanupComplete(deviceId);
     const sessionId = this.idGenerator.next();
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;

@@ -538,6 +538,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     }
 
     const sessionId = options.sessionContext?.sessionId;
+    // Forwarded identity is trusted only on the daemon's internal transport.
+    // Direct callers cannot override their connection's autolock ownership.
+    const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
+    const implicitAutolockMcpSessionId =
+      requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
@@ -556,7 +561,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // #6069: enforce connection ownership on the DEVICE-routing path. If this
     // connection already holds an active device session — whether seeded at
     // construction or acquired mid-connection via getAndroid/getApple (recorded
-    // by `bind()`) — a device tool that names a DIFFERENT `sessionUuid` must be
+    // by `bind()`), or held in the pool by this client through autolock (#6729)
+    // — a device tool that names a DIFFERENT `sessionUuid` must be
     // rejected, not routed. Without this, a later call carrying a fabricated,
     // typo'd, or stale id on a connection that already owns a device was handed
     // off to session admission/creation and auto-assigned a SECOND, foreign
@@ -572,7 +578,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         typeof rawExplicitSessionUuid === "string" && rawExplicitSessionUuid.trim().length > 0
           ? rawExplicitSessionUuid
           : undefined;
-      const boundDeviceSessionUuid = sessionToolBinding.boundDeviceSessionUuid(sessionId);
+      const boundDeviceSessionUuid =
+        sessionToolBinding.boundDeviceSessionUuid(sessionId) ??
+        (explicitSessionUuid && DaemonState.getInstance().isInitialized()
+          ? DaemonState.getInstance()
+              .getDevicePool()
+              .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId)
+          : undefined);
       if (
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
@@ -646,7 +658,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       connectionProfileUuid,
     );
 
-    const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
     // Only ever honor these two when the call is DAEMON-forwarded. Extraction
     // happens on the RAW `toolParams` before schema validation, and a direct
     // (non-daemon, e.g. stdio) caller controls those raw arguments outright --
@@ -668,8 +679,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestLiveDeadlineKey = daemonMode
       ? extractInternalLiveDeadlineKey(toolParams)
       : undefined;
-    const implicitAutolockMcpSessionId =
-      requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     const rawSessionUuid =
       toolParams && typeof toolParams === "object" && "sessionUuid" in toolParams
         ? (toolParams as { sessionUuid?: string }).sessionUuid

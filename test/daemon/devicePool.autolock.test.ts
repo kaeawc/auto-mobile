@@ -489,7 +489,7 @@ describe("DevicePool autolock", () => {
       }
     });
 
-    it("does not release a same-UUID replacement after deferred teardown", async () => {
+    it("quarantines same-UUID reacquisition until deferred teardown settles", async () => {
       let finishRestore!: () => void;
       const restoration = new Promise<void>((resolve) => {
         finishRestore = resolve;
@@ -532,12 +532,13 @@ describe("DevicePool autolock", () => {
         await restoringManager.waitForSessionRelease("reused-session");
         await release;
         await restoringPool.releaseDevice("emulator-5554", "reused-session");
-        await restoringPool.bindOrReuseDeviceSession("reused-session", "emulator-5554", "android");
-
+        await expect(
+          restoringPool.bindOrReuseDeviceSession("reused-session", "emulator-5554", "android"),
+        ).rejects.toThrow("cleanup");
+        const cleanup = restoringManager.getPendingDeviceCleanup("emulator-5554");
         finishRestore();
-        for (let attempt = 0; attempt < 10; attempt++) {
-          await new Promise<void>((resolve) => setImmediate(resolve));
-        }
+        await cleanup;
+        await restoringPool.bindOrReuseDeviceSession("reused-session", "emulator-5554", "android");
 
         expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
           sessionId: "reused-session",

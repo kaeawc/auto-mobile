@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.0.70] - 2026-09-10
+
+### Fixed
+
+- ctrlproxy(ios): shutdown's 1.2s/250ms budget cannot cover terminateProcessTree's TERM+KILL ladder ([#6578](https://github.com/kaeawc/auto-mobile/issues/6578)) (ios)
+- session: teardown preempts only the current lifecycle owner, so a queued start resumes against the destroyed device ([#6549](https://github.com/kaeawc/auto-mobile/issues/6549)) (android, ios)
+- daemon: shutdown watchdog is armed only on the stdin path, so a hung SIGTERM shutdown never self-exits ([#6541](https://github.com/kaeawc/auto-mobile/issues/6541)) (enhancement)
+- setActiveDevice: a device whose session is mid-release reads as free, so the rebind runs concurrently with that session's device teardown ([#6398](https://github.com/kaeawc/auto-mobile/issues/6398)) (enhancement)
+- bug(session): direct device binding bypasses pending cleanup quarantine ([#6365](https://github.com/kaeawc/auto-mobile/issues/6365))
+- sendKeys: required `platform` breaks device-targeting (+ post-execution freshness bound) — untracked residuals from PR #6053 ([#6345](https://github.com/kaeawc/auto-mobile/issues/6345)) (bot-filed, routine:tracker-hygiene)
+
+### Other
+
+- mcpVersion: `npm_package_version` outranks the package manifest, so a 0.0.69 install announces itself as 0.0.68 and is refused by the 0.0.69 daemon ([#6803](https://github.com/kaeawc/auto-mobile/issues/6803)) (bot-filed, routine:dogfood)
+- mcp: two blocking errors name the problem but not the next call (disabled-tool gating, multi-platform ambiguity) ([#6797](https://github.com/kaeawc/auto-mobile/issues/6797)) (bot-filed, routine:dogfood)
+- observe(android): skeleton label takes `text` over `content-desc`, so all four quick-settings tiles read "On"/"Off" and Wi-Fi is unidentifiable ([#6794](https://github.com/kaeawc/auto-mobile/issues/6794)) (bot-filed, routine:dogfood)
+- #6069 foreign-session guard (#6687) does not cover autolock ownership: an autolock-pinned connection still routes a genuinely-issued FOREIGN session to a device it never acquired ([#6729](https://github.com/kaeawc/auto-mobile/issues/6729)) (bot-filed, routine:adversary, needs-human)
+- bug(daemon): recover package-launched clients with unknown version identity ([#6245](https://github.com/kaeawc/auto-mobile/issues/6245))
+
 ## [v0.0.69] - 2026-09-10
 
 ### Changed

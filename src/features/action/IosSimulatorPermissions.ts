@@ -7,6 +7,8 @@ import {
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
+import { getAbortSignal } from "../../utils/AbortContext";
 
 export type IosSimulatorPermissionAction = "grant" | "revoke" | "reset";
 
@@ -160,6 +162,7 @@ export class IosSimulatorPermissions {
     device: BootedDevice,
     simctl: IosSimulatorPrivacyClient | null = null,
     tccReader: TccPermissionReader | null = null,
+    private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
   ) {
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
@@ -211,7 +214,19 @@ export class IosSimulatorPermissions {
       };
     }
 
-    // Serialized (not Promise.all): concurrent `simctl privacy` invocations for
+    return this.withPrivacyLock(
+      `ios-privacy:${this.device.deviceId}`,
+      () => this.applyPermissions(action, normalizedAppId, normalizedPermissions),
+      { signal: getAbortSignal() },
+    );
+  }
+
+  private async applyPermissions(
+    action: IosSimulatorPermissionAction,
+    normalizedAppId: string,
+    normalizedPermissions: string[],
+  ): Promise<IosSimulatorPermissionMutationResult> {
+    // Serialized across instances and batches: concurrent `simctl privacy` invocations for
     // the same device/app race each other against the simulator's shared
     // TCC.db and against simctl's own app-relaunch side effect, producing
     // spurious per-permission failures (issue #6581). One permission's grant

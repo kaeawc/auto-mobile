@@ -171,6 +171,33 @@ describe("GrantIosSimulatorPermissions", () => {
 });
 
 describe("IosSimulatorPermissions", () => {
+  test("serializes separate same-device instances while other devices proceed", async () => {
+    const client = new DeferredPrivacyClient();
+    const first = new IosSimulatorPermissions(simulatorDevice, client);
+    const second = new IosSimulatorPermissions(simulatorDevice, client);
+    const other = new IosSimulatorPermissions(
+      { ...simulatorDevice, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" },
+      client,
+    );
+    const a = first.setPermissions("grant", "com.example.a", ["camera"]);
+    const b = second.setPermissions("grant", "com.example.b", ["contacts"]);
+    const c = other.setPermissions("grant", "com.example.c", ["location"]);
+    await Promise.resolve();
+    expect(client.startedArgs.map((args) => args[4])).toEqual(["com.example.a", "com.example.c"]);
+    client.resolveNext();
+    await a;
+    await Promise.resolve();
+    expect(client.startedArgs.map((args) => args[4])).toEqual([
+      "com.example.a",
+      "com.example.c",
+      "com.example.b",
+    ]);
+    client.resolveNext();
+    client.resolveNext();
+    expect((await b).success).toBe(true);
+    expect((await c).success).toBe(true);
+  });
+
   test("revokes and resets permissions with simctl privacy", async () => {
     const simctl = new FakeSimCtlClient();
     const action = new IosSimulatorPermissions(simulatorDevice, simctl);
@@ -218,6 +245,7 @@ describe("IosSimulatorPermissions", () => {
 
     // Only the first call should have started; the second must not start
     // until the first's promise resolves.
+    await Promise.resolve();
     expect(deferred.startedArgs).toEqual([
       ["privacy", simulatorDevice.deviceId, "grant", "camera", "com.example.app"],
     ]);

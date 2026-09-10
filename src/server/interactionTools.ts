@@ -116,6 +116,7 @@ import {
   resetSystemTrayDependencies,
   getSystemTrayDependencies,
   waitForNotificationMatch,
+  listSystemTrayNotifications,
   resolveSystemTrayAwaitTimeout,
   ensureSystemTrayOpen,
   ensureSystemTrayClosed,
@@ -576,9 +577,13 @@ const systemTrayNotificationSchema = z.object({
 
 const systemTraySchemaBase = z.object({
   action: z
-    .enum(["open", "close", "find", "tap", "dismiss", "clearAll"])
-    .describe("open/close/find/tap/dismiss/clearAll notification"),
-  notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
+    .enum(["open", "close", "list", "find", "tap", "dismiss", "clearAll"])
+    .describe("open/close/list/find/tap/dismiss/clearAll notification"),
+  notification: systemTrayNotificationSchema
+    .optional()
+    .describe(
+      "Notification criteria to match; list requires appId and scans up to three swipes on Android",
+    ),
   awaitTimeout: z
     .number()
     .optional()
@@ -606,10 +611,10 @@ export const systemTraySchema = withAppIdAliases(
       });
     }
 
-    if (value.action === "clearAll" && !notification.appId) {
+    if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "clearAll action requires notification.appId",
+        message: `${value.action} action requires notification.appId`,
       });
     }
 
@@ -1645,6 +1650,25 @@ export function registerInteractionTools() {
         appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
       }
 
+      if (args.action === "list") {
+        if (!notification.appId) {
+          throw new ActionableError("list action requires notification.appId");
+        }
+        const result = await listSystemTrayNotifications(
+          device,
+          notification.appId,
+          appLabel,
+          awaitTimeoutMs,
+          progress,
+        );
+        await captureSystemTrayTerminalEvidence(device, result.observation);
+        return createJSONToolResponse({
+          message: `Listed ${result.notifications.length} notifications for ${notification.appId}`,
+          ...result,
+          success: true,
+        });
+      }
+
       if (args.action === "find") {
         const { observation, match } = await waitForNotificationMatch(
           device,
@@ -2066,7 +2090,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "systemTray",
-    "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
+    "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
     { defaultEnabled: false, supportsProgress: true },

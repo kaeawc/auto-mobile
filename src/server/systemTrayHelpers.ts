@@ -1405,3 +1405,174 @@ export const tapElement = async (device: BootedDevice, element: Element): Promis
 export const swipeElement = async (device: BootedDevice, element: Element): Promise<void> => {
   await getDetector(device).swipeElement(element);
 };
+
+export interface ListedTrayNotification {
+  appId: string;
+  appLabel: string | null;
+  title: string | null;
+  body: string | null;
+  actions: string[];
+  texts: string[];
+  inGroup: boolean;
+}
+
+// Read semantic Android notification fields, preserving custom-layout text as a
+// fallback. A group header must not inherit fields from its sibling child rows.
+const readTrayNotificationFields = (root: any) => {
+  const childRows = new Set(
+    collectNotificationCandidates(createSubHierarchy(root)).map((candidate) => candidate.node),
+  );
+  childRows.delete(root);
+  const fields = {
+    appLabel: null as string | null,
+    title: null as string | null,
+    bodies: [] as string[],
+    actions: [] as string[],
+    texts: [] as string[],
+  };
+  const appendText = (id: string, text: string): void => {
+    fields.texts.push(text);
+    if (["app_name_text", "app_name"].includes(id)) {
+      fields.appLabel = text;
+    }
+    if (["title", "title_big", "conversation_text"].includes(id)) {
+      fields.title = text;
+    }
+    if (["text", "big_text", "text2", "message_text"].includes(id)) {
+      fields.bodies.push(text);
+    }
+    if (["action0", "action1", "action2", "action_text"].includes(id)) {
+      fields.actions.push(text);
+    }
+  };
+  const pending = [root];
+  while (pending.length) {
+    const node = pending.shift();
+    const props = getNodeProperties(node);
+    if (!props) {
+      continue;
+    }
+    const id =
+      String(props["resource-id"] ?? props.resourceId ?? "")
+        .split("/")
+        .pop() ?? "";
+    if (childRows.has(node)) {
+      continue;
+    }
+    const text = extractNodeTextCandidates(node)[0];
+    if (text) {
+      appendText(id, text);
+    }
+    const children = node.node;
+    if (Array.isArray(children)) {
+      pending.push(...children);
+    } else if (children && typeof children === "object") {
+      pending.push(children);
+    }
+  }
+  return fields;
+};
+
+const readAppTrayNotifications = (
+  hierarchy: ViewHierarchyResult,
+  appId: string,
+  appLabel: string | null,
+): ListedTrayNotification[] => {
+  const notifications: ListedTrayNotification[] = [];
+  for (const candidate of collectNotificationCandidates(hierarchy)) {
+    const fields = readTrayNotificationFields(candidate.node);
+    const label =
+      fields.appLabel ||
+      (candidate.groupNode ? readTrayNotificationFields(candidate.groupNode).appLabel : null);
+    // Match the application header exactly; body text mentioning the app is not
+    // ownership evidence. SystemUI's node package identifies the shade itself.
+    if (!label || (label !== appLabel && label !== appId)) {
+      continue;
+    }
+    notifications.push({
+      appId,
+      appLabel: label,
+      title: fields.title,
+      body: [...new Set(fields.bodies)].join("\n") || null,
+      actions: [...new Set(fields.actions)],
+      texts: [...new Set(fields.texts)],
+      inGroup: Boolean(candidate.groupNode),
+    });
+  }
+  return notifications;
+};
+
+// Only adjacent page overlap is a duplicate. Equal contents seen after an
+// intervening page can represent a separate posted notification.
+const trayPageOverlap = (
+  previous: ListedTrayNotification[],
+  current: ListedTrayNotification[],
+): number => {
+  const left = previous.map((notification) => JSON.stringify(notification));
+  const right = current.map((notification) => JSON.stringify(notification));
+  for (let count = Math.min(left.length, right.length); count > 0; count--) {
+    if (left.slice(-count).every((key, index) => key === right[index])) {
+      return count;
+    }
+  }
+  return 0;
+};
+
+/** Bounded UI inventory, in encounter order, with no inferred posting times. */
+export const listSystemTrayNotifications = async (
+  device: BootedDevice,
+  appId: string,
+  appLabel: string | null,
+  awaitTimeoutMs: number,
+  progress?: ProgressCallback,
+): Promise<{
+  notifications: ListedTrayNotification[];
+  observation: ObserveResult;
+  swipes: number;
+  order: "encounter";
+}> => {
+  if (device.platform !== "android") {
+    throw new ActionableError("systemTray list is supported only on Android.");
+  }
+  const detector = getDetector(device);
+  const { adbFactory, observeScreenFactory } = getSystemTrayDependencies();
+  const opened = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress);
+  let observation = opened.observation;
+  const notifications: ListedTrayNotification[] = [];
+  let previousNotifications: ListedTrayNotification[] = [];
+  let previousPage: string | undefined;
+  let swipes = 0;
+  while (true) {
+    if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
+      throw new ActionableError("Notification shade is not open; cannot list notifications.");
+    }
+    const currentPage = JSON.stringify(
+      collectNotificationCandidates(observation.viewHierarchy).map((candidate) => candidate.node),
+    );
+    if (currentPage === previousPage) {
+      break;
+    }
+    previousPage = currentPage;
+    const pageNotifications = readAppTrayNotifications(observation.viewHierarchy, appId, appLabel);
+    notifications.push(
+      ...pageNotifications.slice(trayPageOverlap(previousNotifications, pageNotifications)),
+    );
+    previousNotifications = pageNotifications;
+    if (swipes === 3) {
+      break;
+    }
+    const { width, height } = observation.screenSize;
+    const x = Math.floor(width / 2);
+    const startY = Math.floor((height - observation.systemInsets.bottom) * 0.85);
+    const endY = Math.floor(Math.max(observation.systemInsets.top, height * 0.35));
+    await adbFactory(device).executeCommand(
+      `shell input swipe ${x} ${startY} ${x} ${endY} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`,
+    );
+    swipes++;
+    observation = await observeSystemTray(
+      observeScreenFactory(device),
+      await detector.getObservationTimestamp(),
+    );
+  }
+  return { notifications, observation, swipes, order: "encounter" };
+};

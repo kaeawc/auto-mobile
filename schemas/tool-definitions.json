@@ -9445,18 +9445,18 @@
   },
   {
     "name": "systemTray",
-    "description": "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
+    "description": "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "open/close/find/tap/dismiss/clearAll notification",
+          "description": "open/close/list/find/tap/dismiss/clearAll notification",
           "type": "string",
-          "enum": ["open", "close", "find", "tap", "dismiss", "clearAll"]
+          "enum": ["open", "close", "list", "find", "tap", "dismiss", "clearAll"]
         },
         "notification": {
-          "description": "Notification criteria to match",
+          "description": "Notification criteria to match; list requires appId and scans up to three swipes on Android",
           "type": "object",
           "properties": {
             "title": {

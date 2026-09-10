@@ -304,7 +304,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
     this.xcodebuild = xcodebuild;
-    this.processClient = processClient ?? new IOSCtrlProxyProcessClient();
+    this.processClient = processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer);
     this.signingManager = signingManager;
     this.deviceAppManager = deviceAppManager;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;

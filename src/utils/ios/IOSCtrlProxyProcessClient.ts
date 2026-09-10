@@ -209,8 +209,10 @@ export class IOSCtrlProxyProcessClient {
       // Begin the snapshot while parent relationships still exist, but do
       // not wait for ps before sending the deadline-critical root/group kill.
       const snapshot = this.findDescendantProcessIds(pid, deadline);
-      await this.signalGroup(pid, "KILL", deadline);
-      await this.signalPids([pid], "KILL", deadline);
+      await Promise.all([
+        this.signalGroup(pid, "KILL", deadline),
+        this.signalPids([pid], "KILL", deadline),
+      ]);
       const descendants = await snapshot;
       await this.signalPids([...descendants].reverse(), "KILL", deadline);
       if (!(await this.waitForExit([pid, ...descendants], deadline))) {

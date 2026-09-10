@@ -97,6 +97,10 @@ describe("IOSCtrlProxyProcessClient", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const commandOrder: string[] = [];
+    let releaseGroup!: () => void;
+    const groupWait = new Promise<void>((resolve) => {
+      releaseGroup = resolve;
+    });
     let rootAlive = true;
     let rootKilled!: () => void;
     const rootKill = new Promise<void>((resolve) => {
@@ -123,6 +127,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         }
         commandOrder.push(command);
         if (command === "kill -KILL -- -42") {
+          await groupWait;
           throw new Error("group unavailable");
         }
         if (command === "kill -KILL 42") {
@@ -148,6 +153,7 @@ describe("IOSCtrlProxyProcessClient", () => {
     expect(commandOrder).toContain("kill -KILL -- -42");
     expect(commandOrder).toContain("kill -KILL 42");
 
+    releaseGroup();
     releaseEnumeration?.();
     await expect(pending).resolves.toBeUndefined();
     expect(commandOrder).toContain("kill -KILL 43");

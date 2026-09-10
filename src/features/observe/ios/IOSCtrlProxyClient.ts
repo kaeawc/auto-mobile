@@ -1232,7 +1232,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private syncNetworkMockRulesToDevice(): void {
-    if (!this.hasSdkCapability("network_mocking")) {
+    if (
+      !this.hasSdkCapability("network_mocking") &&
+      !this.isLegacySdkCommandSupported("network_mocking")
+    ) {
       return;
     }
     if (!serverConfig.isNetworkMockableEnabled()) {
@@ -1294,9 +1297,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private hasSdkCapability(capability: IosSdkCapability, bundleId?: string): boolean {
+    const normalizedBundleId = bundleId?.trim();
     return (
       this.sdkCapabilities !== null &&
-      (bundleId === undefined || this.sdkCapabilities.bundleId === bundleId) &&
+      (normalizedBundleId === undefined || this.sdkCapabilities.bundleId === normalizedBundleId) &&
       this.sdkCapabilities.capabilities.has(capability)
     );
   }
@@ -1314,7 +1318,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     const promise = this.requestSdkCapabilities(generation);
-    this.sdkCapabilityRefreshInFlight = { generation, promise };
+    const inFlight = { generation, promise };
+    this.sdkCapabilityRefreshInFlight = inFlight;
+    void promise
+      .finally(() => {
+        if (this.sdkCapabilityRefreshInFlight === inFlight) {
+          this.sdkCapabilityRefreshInFlight = null;
+        }
+      })
+      .catch(() => {
+        // The caller handles the rejection; this branch prevents an unhandled promise rejection.
+      });
     return promise;
   }
 
@@ -1347,6 +1361,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     });
 
     let capabilities: IosSdkCapabilities | null = null;
+    if (!result.success) {
+      return null;
+    }
+
     if (result.success && result.available && result.bundleId) {
       capabilities = {
         bundleId: result.bundleId,
@@ -1377,6 +1395,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private async refreshSdkCapabilitiesAndSync(): Promise<void> {
     const capabilities = await this.refreshSdkCapabilities();
     if (capabilities === null) {
+      if (this.supportedCommands !== null && !this.supportedCommands.has("get_sdk_capabilities")) {
+        this.syncNetworkMockRulesToDevice();
+        this.syncNetworkErrorSimulationToDevice();
+      }
       return;
     }
     this.syncNetworkMockRulesToDevice();
@@ -2581,7 +2603,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.invalidateSdkCapabilities();
     const result = await this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
     if (result.success) {
-      await this.refreshSdkCapabilitiesAndSync();
+      await this.refreshSdkCapabilitiesAndSync().catch((error) => {
+        // A launched app without AutoMobileSDK is normal; the launch itself succeeded.
+        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh after launch failed: ${error}`);
+      });
     }
     return result;
   }

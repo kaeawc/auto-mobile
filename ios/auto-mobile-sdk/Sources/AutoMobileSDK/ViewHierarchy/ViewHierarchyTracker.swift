@@ -14,6 +14,8 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
     private var pollTimer: (any TimerScheduling)?
     private var _latestHierarchy: SdkViewHierarchy?
     private var _latestHash: Int = 0
+    private var applicationIsActive = false
+    private var lifecycleObservers: [NSObjectProtocol] = []
     private let pollIntervalMs: Int = 1000
     #if DEBUG
     private var hierarchyServer: SdkHierarchyServer?
@@ -30,6 +32,7 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         self.pollTimer = timer
         lock.unlock()
 
+        observeApplicationLifecycle()
         timer.schedule(intervalMs: pollIntervalMs) { [weak self] in
             self?.poll()
         }
@@ -50,6 +53,9 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         buffer = nil
         _latestHierarchy = nil
         _latestHash = 0
+        applicationIsActive = false
+        let observers = lifecycleObservers
+        lifecycleObservers = []
         #if DEBUG
         let server = hierarchyServer
         hierarchyServer = nil
@@ -59,6 +65,7 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         #if DEBUG
         server?.stop()
         #endif
+        observers.forEach(NotificationCenter.default.removeObserver)
     }
 
     // MARK: - On-Demand Access
@@ -75,12 +82,9 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
     }
 
     var isApplicationActive: Bool {
-        if Thread.isMainThread {
-            return UIApplication.shared.applicationState == .active
-        }
-        return DispatchQueue.main.sync {
-            UIApplication.shared.applicationState == .active
-        }
+        lock.lock()
+        defer { lock.unlock() }
+        return applicationIsActive
     }
 
     /// Performs a synchronous main-thread walk and returns the result.
@@ -107,8 +111,42 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
         DispatchQueue.main.async { [weak self] in
+            self?.refreshApplicationActiveState()
             self?.walkAndBroadcastIfChanged()
         }
+    }
+
+    private func observeApplicationLifecycle() {
+        guard lifecycleObservers.isEmpty else { return }
+        refreshApplicationActiveState()
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in self?.setApplicationActive(true) },
+            center.addObserver(
+                forName: UIApplication.willResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in self?.setApplicationActive(false) },
+            center.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in self?.setApplicationActive(false) },
+        ]
+    }
+
+    private func refreshApplicationActiveState() {
+        setApplicationActive(UIApplication.shared.applicationState == .active)
+    }
+
+    private func setApplicationActive(_ isActive: Bool) {
+        lock.lock()
+        applicationIsActive = isActive
+        lock.unlock()
     }
 
     private func walkAndBroadcastIfChanged() {

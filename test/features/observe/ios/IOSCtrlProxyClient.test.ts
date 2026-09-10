@@ -409,8 +409,20 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("syncs SDK-backed state after capability detection", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
       state.startSimulation("tlsFailure", 20, 4);
+      state.addMock({
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        remaining: 3,
+        statusCode: 201,
+        responseHeaders: { "X-Test": "yes" },
+        responseBody: '{"ok":true}',
+        contentType: "application/json",
+      });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -443,6 +455,102 @@ describe("IOSCtrlProxyClient", function () {
           limit: 4,
           expiresAtEpochMs: expect.any(Number),
         });
+        expect(sync).toContainEqual({
+          type: "set_network_mock_rules",
+          rules: [
+            {
+              mockId: "mock-1",
+              host: "api\\.example\\.com",
+              path: "/v1/items",
+              method: "GET",
+              limit: 3,
+              remaining: 3,
+              statusCode: 201,
+              responseHeaders: { "X-Test": "yes" },
+              responseBody: '{"ok":true}',
+              contentType: "application/json",
+            },
+          ],
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncs mock rules for legacy runners that advertise the command", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      NetworkState.getInstance().addMock({
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 1,
+        remaining: 1,
+        statusCode: 200,
+        responseHeaders: {},
+        responseBody: "{}",
+        contentType: "application/json",
+      });
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["set_network_mock_rules"],
+          }),
+        );
+
+        await waitForMessageType(socket, "set_network_mock_rules");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("retries an SDK capability query after a transient failure", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities", "add_highlight"],
+          }),
+        );
+        const firstRequest = await waitForMessageType(socket, "get_sdk_capabilities");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "sdk_capabilities_result",
+            requestId: firstRequest.requestId,
+            success: false,
+            available: false,
+            capabilities: [],
+            totalTimeMs: 1,
+          }),
+        );
+        await flushMicrotasks();
+
+        const capabilityPromise = (testClient as any).ensureSdkCapability("highlight");
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk", 2);
+
+        expect(await capabilityPromise).toBe(true);
       } finally {
         await testClient.close();
       }
@@ -628,11 +736,24 @@ describe("IOSCtrlProxyClient", function () {
         );
 
         const resultPromise = testClient.setNetworkErrorSimulation({ enabled: false });
-        const request = await waitForMessageType(socket, "set_network_error_simulation");
+        let explicitRequest: Record<string, unknown> | undefined;
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          explicitRequest = socket.sentMessages
+            .map((message) => JSON.parse(message))
+            .find(
+              (message) =>
+                message.type === "set_network_error_simulation" && message.requestId !== undefined,
+            );
+          if (explicitRequest) {
+            break;
+          }
+          await Promise.resolve();
+        }
+        expect(explicitRequest).toBeDefined();
         socket.simulateMessage(
           JSON.stringify({
             type: "set_network_error_simulation_result",
-            requestId: request.requestId,
+            requestId: explicitRequest?.requestId,
             ok: true,
             totalTimeMs: 2,
           }),

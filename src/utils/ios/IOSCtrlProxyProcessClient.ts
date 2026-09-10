@@ -206,15 +206,12 @@ export class IOSCtrlProxyProcessClient {
     options?: { skipGraceful?: boolean },
   ): Promise<void> {
     if (options?.skipGraceful) {
-      // SIGKILL the known root/process group FIRST, before the best-effort
-      // descendant enumeration below. `ps` enumeration is not bounded tightly
-      // enough to guarantee it finishes inside a short force-stop deadline;
-      // if it were awaited first and ate the whole deadline, the root would
-      // never be signaled and forceStopForShutdown would clear tracking with
-      // an orphaned runner still alive (issue #6578).
+      // Begin the snapshot while parent relationships still exist, but do
+      // not wait for ps before sending the deadline-critical root/group kill.
+      const snapshot = this.findDescendantProcessIds(pid, deadline);
       await this.signalGroup(pid, "KILL", deadline);
       await this.signalPids([pid], "KILL", deadline);
-      const descendants = await this.findDescendantProcessIds(pid, deadline);
+      const descendants = await snapshot;
       await this.signalPids([...descendants].reverse(), "KILL", deadline);
       if (!(await this.waitForExit([pid, ...descendants], deadline))) {
         throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);

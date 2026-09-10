@@ -97,6 +97,11 @@ describe("IOSCtrlProxyProcessClient", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const commandOrder: string[] = [];
+    let rootAlive = true;
+    let rootKilled!: () => void;
+    const rootKill = new Promise<void>((resolve) => {
+      rootKilled = resolve;
+    });
     let releaseEnumeration: (() => void) | undefined;
     let psCalled: ((commandsBeforePs: string[]) => void) | undefined;
     const psCalledPromise = new Promise<string[]>((resolve) => {
@@ -108,14 +113,22 @@ describe("IOSCtrlProxyProcessClient", () => {
         if (file === "ps") {
           // Simulate slow descendant enumeration that would otherwise eat a
           // tight force-stop deadline if it were awaited before signaling.
+          const snapshot = rootAlive ? "42 1\n43 42\n" : "43 1\n";
           psCalled?.([...commandOrder]);
           commandOrder.push(command);
           await new Promise<void>((resolve) => {
             releaseEnumeration = resolve;
           });
-          return result("42 1\n43 42\n");
+          return result(snapshot);
         }
         commandOrder.push(command);
+        if (command === "kill -KILL -- -42") {
+          throw new Error("group unavailable");
+        }
+        if (command === "kill -KILL 42") {
+          rootAlive = false;
+          rootKilled();
+        }
         if (file === "kill" && args[0] === "-0") {
           throw new Error("not running");
         }
@@ -130,7 +143,10 @@ describe("IOSCtrlProxyProcessClient", () => {
     const pending = client.terminateProcessTree(42, undefined, { skipGraceful: true });
     const commandsBeforePs = await psCalledPromise;
 
-    expect(commandsBeforePs).toEqual(["kill -KILL -- -42", "kill -KILL 42"]);
+    expect(commandsBeforePs).toEqual([]);
+    await rootKill;
+    expect(commandOrder).toContain("kill -KILL -- -42");
+    expect(commandOrder).toContain("kill -KILL 42");
 
     releaseEnumeration?.();
     await expect(pending).resolves.toBeUndefined();

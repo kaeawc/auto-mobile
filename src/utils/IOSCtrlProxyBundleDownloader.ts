@@ -1,5 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import AdmZip from "adm-zip";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
@@ -10,63 +12,14 @@ import {
 } from "./ChecksumCalculator";
 import { ensureSecureDir } from "./filesystem/securePermissions";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import type {
+  IosBundleExtractWorkerData,
+  IosBundleExtractWorkerMessage,
+} from "./workers/iosBundleExtractWorker";
 
 export type { Sha256Source };
 
-/**
- * Self-contained CJS source for the extraction worker (issue #6574). adm-zip's
- * `new AdmZip(path)` synchronously reads the whole archive via
- * `fs.readFileSync`, and `extractAllTo` synchronously inflates/writes every
- * entry with no yield point — run entirely on the daemon's main thread, this
- * monopolizes the single event loop for the whole extraction, stalling other
- * devices' WebSocket heartbeats and health-poll timers. Running it inside a
- * `worker_threads` Worker (the same eval-source pattern as
- * `DatabaseHealthProbe`'s SQLITE_PROBE_WORKER_SOURCE) keeps that synchronous
- * cost off the main thread entirely.
- *
- * The zip-slip containment check is duplicated here (rather than reused from
- * `assertZipEntriesContained` below) because an `eval`-sourced worker has no
- * access to this module's TypeScript — it only sees the string passed to
- * `Worker`. Keep the traversal-rejection logic here in sync with
- * `assertZipEntriesContained` if either changes; the containment gate MUST
- * run before any entry is written in both.
- */
-const EXTRACT_BUNDLE_WORKER_SOURCE = `
-  const { parentPort, workerData } = require("node:worker_threads");
-  const AdmZip = require("adm-zip");
-  const path = require("node:path");
-  try {
-    const zip = new AdmZip(workerData.bundlePath);
-    const resolvedRoot = path.resolve(workerData.destination);
-    for (const entry of zip.getEntries()) {
-      const target = path.resolve(resolvedRoot, entry.entryName);
-      const relative = path.relative(resolvedRoot, target);
-      const escapes =
-        relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative);
-      if (escapes) {
-        throw new Error(
-          'Refusing to extract CtrlProxy bundle: entry "' + entry.entryName +
-            '" resolves outside the extraction directory ' + resolvedRoot +
-            ' (zip-slip / path traversal).'
-        );
-      }
-    }
-    zip.extractAllTo(resolvedRoot, true);
-    parentPort.postMessage({ ok: true });
-  } catch (error) {
-    parentPort.postMessage({
-      ok: false,
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-  }
-`;
-
-interface ExtractBundleWorkerMessage {
-  ok: boolean;
-  message?: string;
-  stack?: string;
-}
+type ExtractBundleWorkerMessage = IosBundleExtractWorkerMessage;
 
 /** Narrow surface of `worker_threads.Worker` this module depends on, so tests can inject a fake. */
 export interface ExtractBundleWorker {
@@ -77,12 +30,56 @@ export interface ExtractBundleWorker {
 }
 
 export type ExtractBundleWorkerFactory = (
-  source: string,
-  workerData: { bundlePath: string; destination: string },
+  workerData: IosBundleExtractWorkerData,
 ) => ExtractBundleWorker;
 
-const defaultExtractBundleWorkerFactory: ExtractBundleWorkerFactory = (source, workerData) =>
-  new Worker(source, { eval: true, workerData });
+/**
+ * Real worker entrypoint (issue #6574), NOT an `eval`-sourced string: adm-zip's
+ * `new AdmZip(path)` synchronously reads the whole archive via
+ * `fs.readFileSync`, and `extractAllTo` synchronously inflates/writes every
+ * entry with no yield point — run entirely on the daemon's main thread, this
+ * monopolizes the single event loop for the whole extraction, stalling other
+ * devices' WebSocket heartbeats and health-poll timers. Running it inside a
+ * `worker_threads` Worker keeps that synchronous cost off the main thread.
+ *
+ * This MUST be a real, separately built worker file
+ * (`src/utils/workers/iosBundleExtractWorker.ts`, listed as its own
+ * `build.ts` entrypoint), unlike `DatabaseHealthProbe`'s eval-sourced probe
+ * worker: that probe only `require()`s the built-in `bun:sqlite`, but this
+ * worker needs `adm-zip`, a devDependency absent from a packaged install's
+ * `node_modules`. An eval-sourced `require("adm-zip")` would resolve against
+ * that missing install and throw on the very first extraction. A plain
+ * `new Worker(new URL("./workers/...ts", import.meta.url))` does not fix this
+ * either: Bun's `target: "bun"` build does not auto-discover/bundle workers
+ * referenced that way (verified against issue #6574 — only `src/index.ts`'s
+ * own graph gets bundled), so building the worker as its own entrypoint and
+ * resolving its on-disk path at runtime (see `resolveWorkerScriptPath`) is
+ * required to get `adm-zip` inlined into a file that actually ships.
+ */
+function resolveWorkerScriptPath(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // Dev / `bun test`: this module runs straight from source
+    // (src/utils/IOSCtrlProxyBundleDownloader.ts), so its sibling worker
+    // source is one directory below.
+    path.join(moduleDir, "workers", "iosBundleExtractWorker.ts"),
+    // Packaged dist: this module is bundled into dist/src/index.js
+    // (moduleDir === dist/src), while the worker is build.ts's second
+    // entrypoint, built to dist/src/utils/workers/iosBundleExtractWorker.js.
+    path.join(moduleDir, "utils", "workers", "iosBundleExtractWorker.js"),
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new ActionableError(
+      "Could not locate the CtrlProxy bundle extraction worker script. Tried: " +
+        candidates.join(", "),
+    );
+  }
+  return found;
+}
+
+const defaultExtractBundleWorkerFactory: ExtractBundleWorkerFactory = (workerData) =>
+  new Worker(resolveWorkerScriptPath(), { workerData });
 
 /**
  * Defensive zip-slip containment check (issue #4761). adm-zip >= 0.5.10 already
@@ -155,7 +152,7 @@ export class DefaultIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDo
   }
 
   private extractInWorker(bundlePath: string, destination: string): Promise<void> {
-    const worker = this.workerFactory(EXTRACT_BUNDLE_WORKER_SOURCE, { bundlePath, destination });
+    const worker = this.workerFactory({ bundlePath, destination });
     return new Promise<void>((resolve, reject) => {
       worker.once("message", (message) => {
         void worker.terminate();

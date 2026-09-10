@@ -19,7 +19,12 @@ if (existsSync(distPath)) {
 // Build with Bun - transpile TypeScript to JavaScript
 console.log("Building with Bun...");
 const result = await Bun.build({
-  entrypoints: ["./src/index.ts"],
+  // The CtrlProxy bundle-extraction worker (issue #6574) is a second, real
+  // entrypoint — not auto-discovered from `new Worker(new URL(...))` in
+  // src/index.ts's graph, so `adm-zip` (a devDependency, absent from a
+  // packaged install's node_modules) must be inlined by listing the worker
+  // here explicitly, the same way src/index.ts inlines its dependencies.
+  entrypoints: ["./src/index.ts", "./src/utils/workers/iosBundleExtractWorker.ts"],
   outdir: "./dist/src",
   target: "bun",
   format: "esm",

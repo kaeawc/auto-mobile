@@ -601,7 +601,7 @@ export const systemTraySchema = withAppIdAliases(
     if (!hasCriteria) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `${value.action} action requires at least one notification criteria (title, body, or appId)`,
+        message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
       });
     }
 

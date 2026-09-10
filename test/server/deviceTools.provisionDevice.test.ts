@@ -2449,6 +2449,72 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  // C-2: `reserveDeviceForReadiness` proves ownership through its `autolockClient`
+  // argument before the caller starts readiness side effects ("Acquisition may
+  // reboot a device during readiness recovery"). provisionDevice passed no
+  // autolock client, so it reset the shared per-device CtrlProxy manager and
+  // rewrote device resource settings on another MCP client's live device, only
+  // failing afterwards at the bind.
+  test("does not touch a device autolocked to another MCP client", async () => {
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    try {
+      const booted = {
+        name: "phone-api-36-a",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+      };
+      deviceManager.setBootedDevices("android", [booted]);
+      deviceManager.setDeviceImages("android", [
+        { name: "phone-api-36-a", platform: "android", isRunning: true },
+      ]);
+      await pool.initializeWithDevices([booted]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.autolockDevice(
+        "emulator-5554",
+        "android",
+        "other-mcp-client",
+        undefined,
+        undefined,
+        booted,
+      );
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      const resources = new FakeDeviceResourceController();
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        timer,
+        deviceResourceControllerFactory: () => resources,
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+        },
+      });
+
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("android", "autolocked-elsewhere"),
+        timeoutMs: 60_000,
+        resources: { wallpaperRendering: "disabled" as const },
+        __mcpSessionId: "my-mcp-client",
+      });
+
+      expect({ readinessCalls, resourceRequests: resources.requests.length }).toEqual({
+        readinessCalls: 0,
+        resourceRequests: 0,
+      });
+      expect((response as any).isError).toBe(true);
+    } finally {
+      sessionManager.stopCleanupTimer();
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    }
+  });
+
   // C-1: `reserveProvisionDeviceReadiness` records a stable-name readiness
   // reservation keyed `android:<avd>`. If the pooled entry's incarnation changes
   // while readiness is in flight (a disconnect + rediscovery of the same serial,

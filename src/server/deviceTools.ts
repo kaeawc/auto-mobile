@@ -5073,7 +5073,7 @@ export function registerDeviceTools() {
         operationSignal,
         "reserving device readiness",
         async (reservationSignal) => {
-          const reservation = await reserveProvisionDeviceReadiness(boot!.device);
+          const reservation = await reserveProvisionDeviceReadiness(args, boot!);
           if (reservationSignal.aborted) {
             void reservation?.().catch((error) =>
               logger.warn(`Late provision reservation release failed: ${error}`),
@@ -5202,13 +5202,26 @@ export function registerDeviceTools() {
   }
 
   async function reserveProvisionDeviceReadiness(
-    device: BootedDevice,
+    args: ProvisionDeviceArgs,
+    boot: DeviceBootResult,
   ): Promise<DeviceReadinessReservation | undefined> {
     const daemonState = DaemonState.getInstance();
     if (!daemonState.isInitialized()) {
       return undefined;
     }
-    return await daemonState.getDevicePool().reserveDeviceForReadiness(device.deviceId, device);
+    // Reserving may reboot the device during readiness recovery, and the
+    // readiness that follows resets the shared per-device CtrlProxy manager and
+    // rewrites resource settings. Prove this client owns the device first, the
+    // same way `reserveInitialDeviceForReadiness` does for startDevice.
+    return await daemonState
+      .getDevicePool()
+      .reserveDeviceForReadiness(
+        boot.device.deviceId,
+        boot.device,
+        boot.sourceImage?.name ?? boot.device.name,
+        undefined,
+        isDevicePoolAutolockEnabled() ? { mcpSessionId: args.__mcpSessionId } : undefined,
+      );
   }
 
   async function ensureProvisionDeviceReadiness(

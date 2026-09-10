@@ -476,7 +476,7 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(1);
   });
 
-  test("a miss detects external DDL and the reusable probe closes with the connection", async () => {
+  test("misses avoid probes while the next cache hit detects external DDL", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);
     const owner = Symbol("lease");
@@ -486,7 +486,11 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
 
     db.schemaVersion += 1;
     await state.executeQuery(rawQuery("select * from bar"), owner);
+    expect(cached.finalized).toBe(false);
+    expect(db.calls.filter((call) => call.sql === "PRAGMA schema_version")).toHaveLength(1);
+    await state.executeQuery(rawQuery("select * from foo"), owner);
     expect(cached.finalized).toBe(true);
+    expect(db.calls.filter((call) => call.sql === "PRAGMA schema_version")).toHaveLength(2);
     expect(probe.finalized).toBe(false);
     expect(db.preparedFor("PRAGMA schema_version")).toHaveLength(1);
 

@@ -489,7 +489,11 @@ export class BunSqliteConnectionState {
    * and finalizing an extra statement on each lookup.
    */
   #getStatement(db: BunDatabase, sql: string): BunStatement {
-    this.#invalidateCacheIfSchemaVersionChanged(db);
+    // A miss prepares against current metadata. Establish one initial baseline,
+    // then check only before reusing an existing statement.
+    if (this.#observedSchemaVersion === null || this.#statementCache.has(sql)) {
+      this.#invalidateCacheIfSchemaVersionChanged(db);
+    }
     const cached = this.#statementCache.get(sql);
     if (cached) {
       // Refresh LRU order.

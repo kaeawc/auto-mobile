@@ -143,7 +143,7 @@ class DevicePickerViewModel(
   // guard), nor the rule that the newest generation ends terminal (Content or Error) — a failure is
   // never dropped into a stranded Loading.
   private var loadGeneration: Long = 0
-  private var lastInventory: List<PickerDevice> = emptyList()
+  private var lastInventory: List<PickerDevice>? = null
 
   // Count of load() coroutines currently in flight — ALL of them, not just the newest: overlapping
   // explicit Refreshes are not cancelled, so a newer one can finish while an older read is still
@@ -291,6 +291,7 @@ class DevicePickerViewModel(
           .toSet()
       val retained =
         lastInventory
+          .orEmpty()
           .filter {
             discoverySource(it.platform, it.isVirtual) !in completeSources &&
               (it.platform to it.id) !in present &&
@@ -351,23 +352,18 @@ class DevicePickerViewModel(
    */
   private fun resolveFetchFailure(generation: Long, error: Throwable) {
     if (generation != loadGeneration) return
-    _state.value =
-      when (val current = _state.value) {
-        is DevicePickerUiState.Content ->
-          current.copy(
-            devices = current.devices.map { it.copy(inventoryUncertain = true) },
-            filters = filters,
-            selectedIds = selectedIds,
-            bootingIds = bootingIds,
-            bootErrors = bootErrors,
-            inventoryError = error.message ?: "Device discovery is unavailable",
-          )
-        else -> DevicePickerUiState.Error(error.message ?: "Failed to load devices")
-      }
+    val previous = lastInventory
+    if (previous == null) {
+      _state.value = DevicePickerUiState.Error(error.message ?: "Failed to load devices")
+      return
+    }
+    val retained = previous.map { it.copy(inventoryUncertain = true) }
+    lastInventory = retained
+    emitContent(retained, error.message ?: "Device discovery is unavailable")
   }
 
   /** Rebuild Content from a device list, merging the pruned persistent state. */
-  private fun emitContent(devices: List<PickerDevice>) {
+  private fun emitContent(devices: List<PickerDevice>, inventoryError: String? = null) {
     pruneState(devices)
     _state.value =
       DevicePickerUiState.Content(
@@ -377,9 +373,10 @@ class DevicePickerViewModel(
         bootingIds = bootingIds,
         bootErrors = bootErrors,
         inventoryError =
-          if (devices.any { it.inventoryUncertain })
-            "Some device discovery is incomplete; retained devices cannot be booted"
-          else null,
+          inventoryError
+            ?: if (devices.any { it.inventoryUncertain })
+              "Some device discovery is incomplete; retained devices cannot be booted"
+            else null,
       )
   }
 

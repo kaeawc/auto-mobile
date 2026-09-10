@@ -5898,33 +5898,66 @@ export class DevicePool {
     const signal = getAbortSignal();
     const cancelPublishedSession = async () => {
       // Only this newly minted session may be compensated; never a replacement.
-      if (this.sessionManager.getSession(session.sessionId) === session) {
-        await this.sessionManager.releaseSession(session.sessionId, "session-creation-cancelled");
-      }
-    };
-    const abort = () => {
-      void cancelPublishedSession().catch((error) =>
-        logger.warn(`Cancelled autolock release failed: ${error}`),
+      await this.sessionManager.releaseSessionIfOwned(
+        session.sessionId,
+        session,
+        device.id,
+        "session-creation-cancelled",
       );
     };
-    signal?.addEventListener("abort", abort, { once: true });
+    let abort: (() => void) | undefined;
+    const cancelled = signal
+      ? new Promise<never>((_resolve, reject) => {
+          abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+        })
+      : undefined;
     try {
       signal?.throwIfAborted();
-      await this.deviceSessionRepository.markAutolockSession(session.sessionId, {
+      const persistence = this.deviceSessionRepository.markAutolockSession(session.sessionId, {
         mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.daemonSessionId,
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
+      await Promise.race([persistence, ...(cancelled ? [cancelled] : [])]);
       signal?.throwIfAborted();
     } catch (error) {
-      await cancelPublishedSession();
-      if (this.devices.get(device.id) === device && device.sessionId === session.sessionId) {
-        this.restoreSessionAssignment(device, snapshot);
-      }
+      // Session release fences automation admission synchronously, then may
+      // wait for teardown/durable persistence. Neither that wait nor the late
+      // metadata write may hold the global assignment mutex after cancellation.
+      // The repository's active-row guard prevents the late metadata write from
+      // overwriting a completed terminal release.
+      void cancelPublishedSession().catch((releaseError) =>
+        logger.warn(`Cancelled autolock release failed: ${releaseError}`),
+      );
+      this.restoreCancelledAutolockAssignment(device, session, snapshot);
       throw error;
     } finally {
-      signal?.removeEventListener("abort", abort);
+      if (abort) {
+        signal?.removeEventListener("abort", abort);
+      }
+    }
+  }
+
+  private restoreCancelledAutolockAssignment(
+    device: PooledDevice,
+    session: Session,
+    snapshot: SessionAssignmentSnapshot,
+  ): void {
+    if (
+      session.assignedDevice === device.id &&
+      this.sessionManager.isLatestSessionIdentity(session)
+    ) {
+      this.clearMcpAutolockMappings(session.sessionId);
+    }
+    if (
+      this.devices.get(device.id) === device &&
+      device.sessionId === session.sessionId &&
+      device.assignmentCount === snapshot.assignmentCount + 1 &&
+      this.pooledSessionIdentities.get(device) === session
+    ) {
+      this.restoreSessionAssignment(device, snapshot);
     }
   }
 

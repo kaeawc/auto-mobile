@@ -727,28 +727,67 @@ class DevicePickerViewModelTest {
   // closes the picker, so a boot never accumulates a persistent selection to survive a refresh.
 
   @Test
-  fun `a refresh during boot whose post-boot read fails ends in Error, not stuck Loading`() =
+  fun `a refresh during boot whose post-boot read fails retains uncertain inventory`() =
     testScope.runTest {
       val client =
-        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = TWO_IMAGES_8_6)
+        ScriptableResourceClient(
+          bootedJson = SINGLE_BOOTED_PIXEL8,
+          imagesJson = TWO_IMAGES_8_6,
+        )
       val boot = FakeDeviceBootController().apply { autoComplete = false }
       val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (gated)
 
-      // A Refresh sets Loading and stalls mid-read, so state is Loading when the boot resolves.
+      // A Refresh sets Loading and stalls mid-read, so state is Loading when the boot
+      // resolves.
       val staleGate = CompletableDeferred<Unit>()
       client.imagesGate = staleGate
       v.onAction(DevicePickerAction.Refresh)
       client.imagesGate = null
 
-      // The post-boot reload's booted read now fails: the newest generation must still resolve to a
-      // terminal Error (retryable) — never leave the Refresh's Loading stranded.
+      // The post-boot reload's booted read now fails: the newest generation must still
+      // resolve to a
+      // retained inventory — never leave the Refresh's Loading stranded.
       client.failBooted = true
       boot.complete()
-      assertTrue(v.state.value is DevicePickerUiState.Error)
+      assertTrue(content(v).devices.all { it.inventoryUncertain })
+      assertTrue(content(v).inventoryError != null)
 
-      staleGate.complete(Unit) // stale Refresh resumes; its emission is dropped, Error stands
-      assertTrue(v.state.value is DevicePickerUiState.Error)
+      staleGate.complete(Unit) // stale Refresh cannot replace the uncertain snapshot
+      assertTrue(content(v).devices.all { it.inventoryUncertain })
+      assertTrue(content(v).inventoryError != null)
+    }
+
+  @Test
+  fun `explicit refresh failures retain the grid and selection until recovery`() =
+    testScope.runTest {
+      val client = ScriptableResourceClient(SINGLE_BOOTED_PIXEL8, TWO_IMAGES_8_6)
+      val boot = FakeDeviceBootController()
+      val viewModel = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      val ids = content(viewModel).devices.map { it.uiKey }
+      viewModel.onAction(DevicePickerAction.ToggleSelect("android:emulator-5554"))
+      viewModel.onAction(DevicePickerAction.SetQuery("Pixel"))
+
+      client.failBooted = true
+      viewModel.onAction(DevicePickerAction.Refresh)
+      assertEquals(ids, content(viewModel).devices.map { it.uiKey })
+      assertTrue(content(viewModel).devices.all { it.inventoryUncertain })
+      assertEquals(setOf("android:emulator-5554"), content(viewModel).selectedIds)
+      assertEquals("Pixel", content(viewModel).filters.query)
+      viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertTrue(boot.bootRequests.isEmpty())
+
+      client.failBooted = false
+      client.bootedJson = "{ malformed"
+      viewModel.onAction(DevicePickerAction.Refresh)
+      assertEquals(ids, content(viewModel).devices.map { it.uiKey })
+      assertTrue(content(viewModel).inventoryError != null)
+
+      client.bootedJson = SINGLE_BOOTED_PIXEL8
+      viewModel.onAction(DevicePickerAction.Refresh)
+      assertEquals(ids, content(viewModel).devices.map { it.uiKey })
+      assertTrue(content(viewModel).devices.none { it.inventoryUncertain })
+      assertNull(content(viewModel).inventoryError)
     }
 
   @Test

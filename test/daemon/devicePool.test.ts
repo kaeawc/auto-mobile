@@ -2134,13 +2134,97 @@ describe("DevicePool", () => {
           devicePool.autolockDevice(device.deviceId, "android", "mcp-expired"),
         ).catch((error: unknown) => error);
         await started.promise;
+        const cancelledSessionId = devicePool.getDevice(device.deviceId)!.sessionId!;
         controller.abort(new Error("binding deadline exhausted"));
-        finished.resolve();
         expect(await binding).toBe(controller.signal.reason);
+        await sessionManager.waitForSessionRelease(cancelledSessionId);
         expect(sessionManager.getSessionForDevice(device.deviceId)).toBeNull();
         expect(devicePool.getDevice(device.deviceId)?.sessionId).toBeNull();
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-expired")).toBeUndefined();
+        repository.markAutolockSession = async () => {};
+        const replacement = await devicePool.autolockDevice(device.deviceId, "android", "mcp-new");
+        expect(replacement).not.toBe(cancelledSessionId);
+        finished.resolve();
+        await Promise.resolve();
+        expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe(replacement);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-new")).toBe(replacement);
       } finally {
         finished.resolve();
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
+    });
+
+    test("cancelled metadata and release persistence cannot hold the global assignment mutex", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      const metadataStarted = Promise.withResolvers<void>();
+      const metadataFinished = Promise.withResolvers<void>();
+      const releaseStarted = Promise.withResolvers<void>();
+      const releaseFinished = Promise.withResolvers<void>();
+      const persistence = new FakeDeviceSessionPersistence();
+      persistence.markReleased = async () => {
+        releaseStarted.resolve();
+        await releaseFinished.promise;
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      const repository = new DeviceSessionRepository();
+      let metadataCalls = 0;
+      repository.markAutolockSession = async () => {
+        if (metadataCalls++ === 0) {
+          metadataStarted.resolve();
+          await metadataFinished.promise;
+        }
+      };
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        repository,
+      );
+      const first = createBootedDevice("emulator-5554");
+      const second = createBootedDevice("emulator-5556");
+      fakeDeviceManager.bootedDevices = [first, second];
+      await devicePool.initializeWithDevices([first, second]);
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      const controller = new AbortController();
+      try {
+        const binding = runWithAbortSignal(controller.signal, () =>
+          devicePool.autolockDevice(first.deviceId, "android", "mcp-cancelled"),
+        ).catch((error: unknown) => error);
+        await metadataStarted.promise;
+        const cancelledSessionId = devicePool.getDevice(first.deviceId)!.sessionId!;
+        controller.abort(new Error("binding deadline exhausted"));
+        expect(await binding).toBe(controller.signal.reason);
+        await releaseStarted.promise;
+        expect(devicePool.getDevice(first.deviceId)?.sessionId).toBeNull();
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-cancelled")).toBeUndefined();
+        expect(sessionManager.getSession(cancelledSessionId)).toBeNull();
+        // The first device stays quarantined for cleanup, but an unrelated
+        // reservation and assignment must succeed before either write settles.
+        expect(sessionManager.hasDeviceCleanupInProgress(first.deviceId)).toBe(true);
+        const reservation = await devicePool.reserveDeviceForReadiness(second.deviceId, second);
+        await reservation();
+        const secondSession = await devicePool.autolockDevice(
+          second.deviceId,
+          "android",
+          "mcp-second",
+        );
+        expect(devicePool.getDevice(second.deviceId)?.sessionId).toBe(secondSession);
+        metadataFinished.resolve();
+        releaseFinished.resolve();
+        await sessionManager.waitForSessionRelease(cancelledSessionId);
+        expect(devicePool.getDevice(second.deviceId)?.sessionId).toBe(secondSession);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-second")).toBe(secondSession);
+      } finally {
+        metadataFinished.resolve();
+        releaseFinished.resolve();
         if (originalAutolock === undefined) {
           delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
         } else {

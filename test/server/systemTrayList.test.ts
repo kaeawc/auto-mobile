@@ -38,8 +38,8 @@ const identifiedRow = (title: string, app = "Messages") => {
   Object.assign(result.$, { "unique-id": title });
   return result;
 };
-const positionedRow = (title: string, top: number) => {
-  const result = row(title);
+const positionedRow = (title: string, top: number, app = "Messages") => {
+  const result = row(title, app);
   result.$.bounds = `[0,${top}][1000,${top + 100}]`;
   return result;
 };
@@ -136,6 +136,19 @@ describe("systemTray list", () => {
     expect((await list()).notifications.map((notification) => notification.title)).toEqual([
       "Download 3/10",
       "Neighbor",
+    ]);
+  });
+  test("keeps identical no-ID rows on adjacent pages without an independent anchor", async () => {
+    setup([page(positionedRow("New message", 500)), page(positionedRow("New message", 200))]);
+    expect((await list()).notifications).toHaveLength(2);
+  });
+  test("uses another app's neighbor for alignment but only returns the target app", async () => {
+    setup([
+      page(positionedRow("Download 2/10", 300), positionedRow("Neighbor", 500, "Other")),
+      page(positionedRow("Download 3/10", 200), positionedRow("Neighbor", 400, "Other")),
+    ]);
+    expect((await list()).notifications.map((notification) => notification.title)).toEqual([
+      "Download 3/10",
     ]);
   });
   test("keeps distinct rows revealed at different positions without unique IDs", async () => {
@@ -313,13 +326,13 @@ describe("systemTray list", () => {
     setup([page(first), page(updated)]);
     expect((await list()).notifications).toHaveLength(1);
   });
-  test("ignores changing chronometer text when reconciling adjacent pages", async () => {
+  test("ignores changing chronometer text with an independent neighboring anchor", async () => {
     const first = row("timer");
     first.node.push(node("android:id/chronometer", "00:01"));
     const next = row("timer");
     next.node.push(node("android:id/chronometer", "00:02"));
-    setup([page(first), page(next)]);
-    expect((await list()).notifications).toHaveLength(1);
+    setup([page(first, row("neighbor")), page(next, row("neighbor"))]);
+    expect((await list()).notifications).toHaveLength(2);
   });
   test("retains equal contents seen again after an intervening page", async () => {
     setup([

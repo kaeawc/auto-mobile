@@ -1477,32 +1477,22 @@ const readTrayNotificationFields = (root: any) => {
 };
 
 interface TrayObservedRow {
-  notification: ListedTrayNotification;
+  notification: Omit<ListedTrayNotification, "appId">;
   bounds?: Element["bounds"];
 }
 
-const readAppTrayNotifications = (
-  hierarchy: ViewHierarchyResult,
-  appId: string,
-  appLabel: string | null,
-): TrayObservedRow[] => {
+const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[] => {
   const notifications: TrayObservedRow[] = [];
   for (const candidate of collectNotificationCandidates(hierarchy)) {
     const fields = readTrayNotificationFields(candidate.node);
     const label =
       fields.appLabel ||
       (candidate.groupNode ? readTrayNotificationFields(candidate.groupNode).appLabel : null);
-    // Match the application header exactly; body text mentioning the app is not
-    // ownership evidence. SystemUI's node package identifies the shade itself.
-    if (!label || label !== appLabel) {
-      continue;
-    }
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
       bounds: candidate.element?.bounds,
       notification: {
         id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
-        appId,
         appLabel: label,
         title: fields.title,
         body: [...new Set(fields.bodies)].join("\n") || null,
@@ -1563,7 +1553,12 @@ const trayPageOverlap = (previous: TrayObservedRow[], current: TrayObservedRow[]
     const right = current.slice(0, count);
     const anchor = left.findIndex(
       (row, index) =>
-        row.bounds && right[index].bounds && trayRowAnchor(row) === trayRowAnchor(right[index]),
+        row.bounds &&
+        right[index].bounds &&
+        // A semantic match alone cannot prove that a repeated notification is
+        // the same row. Require another aligned row or a native identity.
+        (count > 1 || row.notification.id !== null) &&
+        trayRowAnchor(row) === trayRowAnchor(right[index]),
     );
     if (anchor < 0) {
       if (
@@ -1606,6 +1601,7 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
   );
 
 /** Bounded UI inventory, in encounter order, with no inferred posting times. */
+// eslint-disable-next-line complexity -- bounded scan coordinates shade state, pagination, and overlap.
 export const listSystemTrayNotifications = async (
   device: BootedDevice,
   appId: string,
@@ -1633,7 +1629,7 @@ export const listSystemTrayNotifications = async (
     await detector.getObservationTimestamp(),
     awaitTimeoutMs,
   );
-  const notifications: ListedTrayNotification[] = [];
+  const rows: TrayObservedRow[] = [];
   let previousNotifications: TrayObservedRow[] = [];
   let previousPage: string | undefined;
   let swipes = 0;
@@ -1648,13 +1644,9 @@ export const listSystemTrayNotifications = async (
       break;
     }
     previousPage = currentPage;
-    const pageNotifications = readAppTrayNotifications(observation.viewHierarchy, appId, appLabel);
+    const pageNotifications = readTrayNotifications(observation.viewHierarchy);
     const overlap = trayPageOverlap(previousNotifications, pageNotifications);
-    notifications.splice(
-      notifications.length - overlap,
-      overlap,
-      ...pageNotifications.map((row) => row.notification),
-    );
+    rows.splice(rows.length - overlap, overlap, ...pageNotifications);
     previousNotifications = pageNotifications;
     if (swipes === 3 || trayAtScrollEnd(observation.viewHierarchy)) {
       break;
@@ -1671,6 +1663,25 @@ export const listSystemTrayNotifications = async (
       observeScreenFactory(device),
       await detector.getObservationTimestamp(),
     );
+  }
+  // Keep every app's rows available to align pages, then expose only rows
+  // attributed by the verified header. Message text is not ownership evidence.
+  const notifications: ListedTrayNotification[] = [];
+  const nativeIds = new Map<string, number>();
+  for (const row of rows) {
+    if (!appLabel || row.notification.appLabel !== appLabel) {
+      continue;
+    }
+    const notification = { ...row.notification, appId };
+    const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
+    if (previousIndex !== undefined) {
+      notifications[previousIndex] = notification;
+    } else {
+      if (notification.id !== null) {
+        nativeIds.set(notification.id, notifications.length);
+      }
+      notifications.push(notification);
+    }
   }
   return { notifications, observation, swipes, order: "encounter" };
 };

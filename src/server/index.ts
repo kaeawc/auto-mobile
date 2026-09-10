@@ -797,7 +797,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         : undefined;
 
     let cleanupAcquisitionRelease: (() => void) | undefined;
+    const releasedAcquisitionSessions = new Set<string>();
     try {
+      if (isDeviceSessionAcquisitionTool(name)) {
+        // A handler can mint and release a session before returning its UUID.
+        // Retain release identities for this call only, through publication.
+        const onSessionReleased = (sessionUuid: string) => {
+          releasedAcquisitionSessions.add(sessionUuid);
+        };
+        const unregister = ToolRegistry.registerSessionBindingReleaseHandler({ onSessionReleased });
+        const unsubscribe = SessionReleaseBroadcaster.subscribe(onSessionReleased);
+        cleanupAcquisitionRelease = () => {
+          unregister();
+          unsubscribe();
+        };
+      }
       if (
         daemonMode &&
         providedSessionUuid &&
@@ -875,20 +889,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
         ? getDeviceSessionIdFromResult(result)
         : undefined;
-      let acquiredSessionReleased = false;
-      if (acquiredSessionUuid) {
-        const onSessionReleased = (releasedSessionUuid: string) => {
-          if (releasedSessionUuid === acquiredSessionUuid) {
-            acquiredSessionReleased = true;
-          }
-        };
-        const unregister = ToolRegistry.registerSessionBindingReleaseHandler({ onSessionReleased });
-        const unsubscribe = SessionReleaseBroadcaster.subscribe(onSessionReleased);
-        cleanupAcquisitionRelease = () => {
-          unregister();
-          unsubscribe();
-        };
-      }
       // Evaluate the returned session directly: a seeded transport may retain
       // its old binding, and a concurrent acquisition may publish another one.
       // Reuse the same route/label union as tools/list without publishing yet.
@@ -985,7 +985,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const response = stripToolResultStructuredContent(result, omissionReason);
       // Publish only after all asynchronous enrichment finishes, so concurrent
       // direct acquisitions bind in response order. Keep this path synchronous.
-      if (acquiredSessionReleased) {
+      if (acquiredSessionUuid && releasedAcquisitionSessions.has(acquiredSessionUuid)) {
         throw new ActionableError(
           `Device session ${acquiredSessionUuid} was released during acquisition. Call ${name} again to acquire a device.`,
         );

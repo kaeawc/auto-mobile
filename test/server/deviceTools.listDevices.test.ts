@@ -5,7 +5,6 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
-import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -127,18 +126,35 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
-  test("does not recommend unreadable resources before acquisition", async () => {
-    const payload = await callListDevices();
-
-    expect(payload.note).toBeDefined();
-    const noteText = JSON.stringify(payload.note);
-    expect(payload.note.resources).toEqual([]);
-    expect(noteText).not.toContain("automobile:devices/");
-    expect(noteText).toContain("getAndroid");
-    expect(noteText).toContain("resources/list");
+  test("does not recommend inventory resources absent from the registry", async () => {
+    const inventory = ResourceRegistry.getAllResources().filter((resource) =>
+      resource.uri.startsWith("automobile:devices/"),
+    );
+    for (const resource of inventory) {
+      ResourceRegistry.unregister(resource.uri);
+    }
+    try {
+      const payload = await callListDevices();
+      expect(payload.note).toBeDefined();
+      const noteText = JSON.stringify(payload.note);
+      expect(payload.note.resources).toEqual([]);
+      expect(noteText).not.toContain("automobile:devices/");
+      expect(noteText).toContain("getAndroid");
+      expect(noteText).toContain("resources/list");
+    } finally {
+      for (const resource of inventory) {
+        ResourceRegistry.register(
+          resource.uri,
+          resource.name,
+          resource.description,
+          resource.mimeType,
+          resource.handler,
+        );
+      }
+    }
   });
 
-  test("only recommends registered resources when a session is bound", async () => {
+  test("recommends registered inventory resources without a device session", async () => {
     const uri = "automobile:devices/booted";
     const previous = ResourceRegistry.getResource(uri);
     ResourceRegistry.register(uri, "booted", "booted devices", "application/json", async () => ({
@@ -146,10 +162,7 @@ describe("listDevices tool (#5870)", () => {
       text: "[]",
     }));
     try {
-      const payload = await runWithToolSelectionContext(
-        { routingSessionUuid: "device-session" },
-        () => callListDevices(),
-      );
+      const payload = await callListDevices();
       expect(payload.note.resources).toContain(uri);
       const listed = ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri);
       for (const recommended of payload.note.resources) {

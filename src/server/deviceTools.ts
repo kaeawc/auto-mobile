@@ -4026,9 +4026,7 @@ async function resolveAndroidStartStableDeviceLifecycleTarget(
 
 function availableDeviceResourceNote() {
   const listedResourceUris = new Set(
-    getToolSelectionContext()?.routingSessionUuid
-      ? ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri)
-      : [],
+    ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri),
   );
   const resourceUris = [
     BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
@@ -4044,7 +4042,7 @@ function availableDeviceResourceNote() {
       "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +
       (availableResourceUris.length > 0
         ? "For available images and richer per-device detail, read these MCP resources:"
-        : "After acquiring a device, refresh resources/list to discover available images and richer per-device detail."),
+        : "Refresh resources/list to discover available images and richer per-device detail."),
     resources: availableResourceUris,
     uriPrefix:
       "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",

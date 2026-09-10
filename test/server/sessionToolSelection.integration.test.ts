@@ -20,71 +20,79 @@ describe("per-session exact-tool selection", () => {
   });
 
   for (const acquisition of ["getAndroid", "getApple"]) {
-    test.each(["broadcast", "plan"])(
-      acquisition + " rejects publication after a %s release during lookup",
-      async (source) => {
-        const lookupStarted = Promise.withResolvers<void>();
-        const releaseLookup = Promise.withResolvers<void>();
-        fixture = new McpTestFixture({
-          sessionToolSelectionService: {
-            isEnabled: async (_sessionUuid, toolName, declaredDefault) => {
-              if (toolName === "inputText") {
-                lookupStarted.resolve();
-                await releaseLookup.promise;
-              }
-              return declaredDefault;
-            },
+    test.each([
+      ["broadcast", "lookup"],
+      ["plan", "lookup"],
+      ["broadcast", "handler"],
+      ["plan", "handler"],
+    ])(acquisition + " rejects publication after a %s release during %s", async (source, stage) => {
+      const lookupStarted = Promise.withResolvers<void>();
+      const releaseLookup = Promise.withResolvers<void>();
+      fixture = new McpTestFixture({
+        sessionToolSelectionService: {
+          isEnabled: async (_sessionUuid, toolName, declaredDefault) => {
+            if (toolName === "inputText" && stage === "lookup") {
+              lookupStarted.resolve();
+              await releaseLookup.promise;
+            }
+            return declaredDefault;
           },
-        });
-        await fixture.setup();
-        ToolRegistry.clearTools();
-        ToolRegistry.register(
-          acquisition,
-          "acquire",
-          z.object({}),
-          async () => ({
+        },
+      });
+      await fixture.setup();
+      ToolRegistry.clearTools();
+      ToolRegistry.register(
+        acquisition,
+        "acquire",
+        z.object({}),
+        async () => {
+          if (stage === "handler") {
+            lookupStarted.resolve();
+            await releaseLookup.promise;
+          }
+          return {
             content: [{ type: "text", text: JSON.stringify({ sessionUuid: "released-session" }) }],
-          }),
-          { defaultEnabled: true },
-        );
-        ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
-          defaultEnabled: false,
-        });
-        ToolRegistry.register(
-          "inspectRouting",
-          "routing",
-          z.object({}),
-          async () => ({
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  sessionUuid: getToolSelectionContext()?.routingSessionUuid,
-                }),
-              },
-            ],
-          }),
-          { defaultEnabled: true },
-        );
-        const pending = fixture.client.request(
-          { method: "tools/call", params: { name: acquisition, arguments: {} } },
-          z.any(),
-        );
-        await lookupStarted.promise;
-        if (source === "broadcast") {
-          SessionReleaseBroadcaster.emit("released-session", "released-during-discovery");
-        } else {
-          ToolRegistry.notifySessionBindingReleased("released-session");
-        }
-        releaseLookup.resolve();
-        await expect(pending).rejects.toThrow(/released during acquisition/);
-        const routed = await fixture.client.request(
-          { method: "tools/call", params: { name: "inspectRouting", arguments: {} } },
-          z.any(),
-        );
-        expect(JSON.parse(routed.content[0].text)).toEqual({});
-      },
-    );
+          };
+        },
+        { defaultEnabled: true },
+      );
+      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: false,
+      });
+      ToolRegistry.register(
+        "inspectRouting",
+        "routing",
+        z.object({}),
+        async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                sessionUuid: getToolSelectionContext()?.routingSessionUuid,
+              }),
+            },
+          ],
+        }),
+        { defaultEnabled: true },
+      );
+      const pending = fixture.client.request(
+        { method: "tools/call", params: { name: acquisition, arguments: {} } },
+        z.any(),
+      );
+      await lookupStarted.promise;
+      if (source === "broadcast") {
+        SessionReleaseBroadcaster.emit("released-session", "released-during-discovery");
+      } else {
+        ToolRegistry.notifySessionBindingReleased("released-session");
+      }
+      releaseLookup.resolve();
+      await expect(pending).rejects.toThrow(/released during acquisition/);
+      const routed = await fixture.client.request(
+        { method: "tools/call", params: { name: "inspectRouting", arguments: {} } },
+        z.any(),
+      );
+      expect(JSON.parse(routed.content[0].text)).toEqual({});
+    });
 
     test(acquisition + " reports the acquired profile on a seeded transport", async () => {
       fixture = new McpTestFixture({

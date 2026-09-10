@@ -1139,4 +1139,36 @@ describe("SimCtlClient boot self-verification", () => {
     expect((error as Error).message).toContain("Shutdown");
     expect(shutdownCalls(harness.calls).length).toBe(0);
   });
+
+  // Issue #6413: the boot deadline elapsing between recovery steps must
+  // surface as a classified `ActionableError` naming the UDID from every
+  // entry point on the boot path, not as a bare `Error` on some of them.
+  test("bootSimulator rejects with an ActionableError naming the UDID when the boot deadline elapses between recovery steps", async () => {
+    // maxAttempts: 2 with an oversized retryBackoffMs so the retry-backoff
+    // sleep is bounded by the boot deadline itself
+    // (`Math.min(retryBackoffMs, remainingBootTimeoutMs(...))`), landing fake
+    // time exactly on the deadline once the sleep resolves. The next recovery
+    // step (attempt 2's `bootstatus`) then discovers the elapsed deadline
+    // before issuing any command.
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 999_999_999 });
+    harness.setStates(["Shutdown"]);
+
+    const boot = harness.simctl.bootSimulator(UDID);
+    await drainMicrotasks();
+    harness.timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+
+    await expect(boot).rejects.toBeInstanceOf(ActionableError);
+    await expect(boot).rejects.toThrow(new RegExp(UDID));
+  });
+
+  test("waitForSimulatorReady with assumeBooted rejects with an ActionableError naming the UDID when the boot deadline elapses", async () => {
+    const harness = createConcurrentStartHarness(() => Promise.resolve(createExecResult("", "")));
+
+    // A timeout budget of 0ms means the deadline has already elapsed by the
+    // time the cold-boot metadata resolution step runs.
+    const readiness = harness.createClient().waitForSimulatorReady(UDID, 0, { assumeBooted: true });
+
+    await expect(readiness).rejects.toBeInstanceOf(ActionableError);
+    await expect(readiness).rejects.toThrow(new RegExp(UDID));
+  });
 });

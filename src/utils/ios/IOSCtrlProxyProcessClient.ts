@@ -198,6 +198,12 @@ export class IOSCtrlProxyProcessClient {
     deadline?: number,
     options: { skipGraceful?: boolean } = {},
   ): Promise<void> {
+    if (options.skipGraceful) {
+      // Discovery can consume the entire force budget. Signal the known group
+      // and root first, including roots that are not process group leaders.
+      await this.signalGroup(pid, "KILL", deadline);
+      await this.signalPids([pid], "KILL", deadline);
+    }
     const descendants = await this.findDescendantProcessIds(pid, deadline);
     const targets = [...descendants].reverse().concat(pid);
     if (!options.skipGraceful) {
@@ -207,8 +213,12 @@ export class IOSCtrlProxyProcessClient {
         return;
       }
     }
-    await this.signalGroup(pid, "KILL", deadline);
-    await this.signalPids(targets, "KILL", deadline);
+    if (options.skipGraceful) {
+      await this.signalPids([...descendants].reverse(), "KILL", deadline);
+    } else {
+      await this.signalGroup(pid, "KILL", deadline);
+      await this.signalPids(targets, "KILL", deadline);
+    }
     if (!(await this.waitForExit([pid, ...descendants], deadline))) {
       throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);
     }

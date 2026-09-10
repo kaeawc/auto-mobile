@@ -18,6 +18,33 @@ function result(stdout = "", stderr = "") {
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
+  test("force termination signals the known group and root before discovery exhausts the deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const commands: string[] = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args, options) {
+        commands.push([file, ...args].join(" "));
+        if (file === "ps") {
+          await timer.sleep(options!.timeoutMs!);
+          throw new Error("process discovery timed out");
+        }
+        if (args.includes("--")) {
+          throw new Error("root is not a process group leader");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
+      "deadline elapsed",
+    );
+
+    expect(commands).toEqual(["kill -KILL -- -42", "kill -KILL 42", "ps -axo pid=,ppid="]);
+    expect(timer.now()).toBe(250);
+  });
+
   test("force termination skips TERM and bounds commands and exit waiting by its deadline", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -37,10 +64,10 @@ describe("IOSCtrlProxyProcessClient", () => {
     );
 
     expect(commands).toEqual([
-      "ps -axo pid=,ppid=",
       "kill -KILL -- -42",
-      "kill -KILL 43",
       "kill -KILL 42",
+      "ps -axo pid=,ppid=",
+      "kill -KILL 43",
       "kill -0 42",
     ]);
     expect(timeouts.every((timeout) => timeout === 250)).toBe(true);

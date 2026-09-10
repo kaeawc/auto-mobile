@@ -5,7 +5,12 @@ import {
   hasAccessibilityAction,
 } from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
-import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./elementProvenance";
+import {
+  ElementProvenance,
+  getElementProvenance,
+  getCapturedKeyboard,
+  isStrictAncestor,
+} from "./elementProvenance";
 
 /**
  * Interactable Skeleton Projection (issue #4388).
@@ -189,7 +194,10 @@ function strictlyContains(
  */
 function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] {
   const byIdentity = new Map<string, SkeletonAccumulator>();
-  for (const el of [...elements.clickable, ...elements.scrollable, ...elements.text]) {
+  const appElements = [...elements.clickable, ...elements.scrollable, ...elements.text].filter(
+    (element) => !getElementProvenance(element)?.keyboardPackage,
+  );
+  for (const el of appElements) {
     const bounds = boundsTuple(el);
     if (!bounds) {
       continue;
@@ -608,6 +616,7 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
 
 /** The `skeleton` (actionable) and `context` (non-actionable) halves of a projection. */
 export interface SkeletonProjectionResult {
+  keyboard?: ObserveResult["keyboard"];
   /** Actionable-only rows (`affordances.length >= 1`); the surface a client should act on. */
   skeleton: SkeletonElement[];
   /**
@@ -645,9 +654,21 @@ export function projectSkeleton(elements: ObserveElements): SkeletonProjectionRe
   assignDuplicateIndexes(actionable);
 
   return {
+    keyboard: getCapturedKeyboard(elements) ?? keyboardSummary(elements),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
   };
+}
+
+/** Report only observed IME identity; missing capture evidence does not mean hidden. */
+function keyboardSummary(elements: ObserveElements): ObserveResult["keyboard"] {
+  for (const element of [...elements.clickable, ...elements.scrollable, ...elements.text]) {
+    const packageName = getElementProvenance(element)?.keyboardPackage;
+    if (packageName) {
+      return { visible: true, package: packageName };
+    }
+  }
+  return undefined;
 }
 
 /**

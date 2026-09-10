@@ -1609,7 +1609,7 @@
           "description": "Maximum time to install, update, start, and verify the automation runner",
           "type": "integer",
           "minimum": 1000,
-          "maximum": 120000
+          "maximum": 890000
         },
         "avdName": {
           "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
@@ -1642,7 +1642,7 @@
           "description": "Maximum time to install, update, start, and verify the automation runner",
           "type": "integer",
           "minimum": 1000,
-          "maximum": 120000
+          "maximum": 890000
         },
         "udid": {
           "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",

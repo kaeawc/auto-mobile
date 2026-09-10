@@ -251,6 +251,7 @@ export async function waitForDeviceReadyOrCancel(
   signal: AbortSignal | undefined = getAbortSignal(),
   timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
   cancelOwnedBoot?: () => void | Promise<void>,
+  createTimeoutError?: () => Error,
 ): Promise<BootedDevice> {
   const timeoutError = new ActionableError(
     `Device readiness timed out after ${timeoutMs}ms for ${device.deviceId ?? device.name}`,
@@ -290,7 +291,7 @@ export async function waitForDeviceReadyOrCancel(
       readinessSignal.addEventListener("abort", abortListener, { once: true });
     });
     timeoutHandle = timer.setTimeout(() => {
-      controller.abort(timeoutError);
+      controller.abort(createTimeoutError?.() ?? timeoutError);
     }, timeoutMs);
     return await Promise.race([readinessPromise, abortPromise]);
   } catch (error) {

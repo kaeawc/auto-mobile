@@ -54,3 +54,8 @@ export const combineWithAmbientAbort = (signal?: AbortSignal): AbortSignal | und
   }
   return combineAbortSignals(signal, ambient);
 };
+
+/** Fence side effects after asynchronous acquisition work returns to its caller. */
+export function throwIfRequestAborted(): void {
+  getAbortSignal()?.throwIfAborted();
+}

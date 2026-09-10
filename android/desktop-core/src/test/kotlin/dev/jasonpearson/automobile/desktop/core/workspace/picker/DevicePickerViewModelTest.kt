@@ -50,6 +50,74 @@ class DevicePickerViewModelTest {
   ) = DevicePickerViewModel(resourceClient, bootController, testScope, UnconfinedTestDispatcher())
 
   @Test
+  fun `an external emulator with unresolved identity does not create shutdown candidates on first load`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse =
+        client.bootedDevicesResponse.replace("Pixel 8 API 35", "Unknown (emulator-5554)")
+      val state = vm(client).state.value
+      assertTrue(state is DevicePickerUiState.Error)
+      assertTrue((state as DevicePickerUiState.Error).message.contains("identity is unavailable"))
+    }
+
+  @Test
+  fun `an unresolved external emulator retains prior inventory and disables new boots`() =
+    testScope.runTest {
+      val client = fake()
+      val bootController = FakeDeviceBootController()
+      val viewModel = vm(client, bootController)
+      val before = content(viewModel).devices
+      client.bootedDevicesResponse =
+        client.bootedDevicesResponse.replace("Pixel 8 API 35", "Unknown (emulator-5554)")
+      viewModel.onAction(DevicePickerAction.SilentRefresh)
+      assertEquals(before, content(viewModel).devices)
+      assertTrue(content(viewModel).inventoryError?.contains("identity is unavailable") == true)
+      viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertTrue(bootController.bootRequests.isEmpty())
+    }
+
+  @Test
+  fun `an incomplete observation retains the previous booted row instead of reporting shutdown`() =
+    testScope.runTest {
+      val client = fake()
+      val bootController = FakeDeviceBootController()
+      val viewModel = vm(client, bootController)
+      val before = content(viewModel).devices
+      client.bootedDevicesResponse =
+        """{"totalCount":0,"androidCount":0,"iosCount":0,"virtualCount":0,"physicalCount":0,"lastUpdated":"x","observationComplete":false,"devices":[]}"""
+      viewModel.onAction(DevicePickerAction.SilentRefresh)
+      assertEquals(before, content(viewModel).devices)
+      assertTrue(content(viewModel).inventoryError != null)
+      viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertTrue(bootController.bootRequests.isEmpty())
+      assertTrue(
+        content(viewModel).devices.any {
+          it.id == "emulator-5554" && it.state == DeviceState.Booted
+        }
+      )
+    }
+
+  @Test
+  fun `a first incomplete observation produces an error rather than bootable shutdown images`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse =
+        """{"totalCount":0,"androidCount":0,"iosCount":0,"virtualCount":0,"physicalCount":0,"lastUpdated":"x","observationComplete":false,"devices":[]}"""
+      assertTrue(vm(client).state.value is DevicePickerUiState.Error)
+    }
+
+  @Test
+  fun `a simulator transitioning between resource reads does not become a shutdown row`() =
+    testScope.runTest {
+      val client = fake()
+      val viewModel = vm(client)
+      val before = content(viewModel).devices
+      client.deviceImagesResponse = client.deviceImagesResponse.replace("Shutdown", "Booting")
+      viewModel.onAction(DevicePickerAction.SilentRefresh)
+      assertEquals(before, content(viewModel).devices)
+    }
+
+  @Test
   fun `loads and unifies booted + images with dedupe and iOS architecture`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())

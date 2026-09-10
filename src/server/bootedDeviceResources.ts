@@ -12,6 +12,7 @@ import type {
   DeviceRecoveryPolicy,
 } from "../daemon/devicePool";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
@@ -21,6 +22,7 @@ import {
   getRequiredIosRunnerFeatureFlags,
 } from "../features/observe/ios/IOSCtrlProxyClient";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
+import { sourcesForPlatform } from "../utils/discoverySource";
 import { defaultTimer } from "../utils/SystemTimer";
 
 // Resource URIs
@@ -493,7 +495,9 @@ async function discoverBootedDevicesForPlatform(
   try {
     const discovery =
       await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
-    const complete = discovery.succeededPlatforms.has(platform);
+    const complete = discovery.succeededSources
+      ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
+      : discovery.succeededPlatforms.has(platform);
     return {
       devices: discovery.devices.map((device) =>
         toBootedDeviceInfo(
@@ -650,9 +654,9 @@ export function readinessFromServiceStatus(
     return { state: "not_ready" };
   }
   if (platform === "android") {
-    // Android's service status only proves the APK is installed and enabled.
-    // Resource reads do not open the CtrlProxy connection, so liveness remains unknown.
-    return { state: "unknown" };
+    // A resource read observes an existing connection without opening one. No connection
+    // is inconclusive; an installed/enabled service can still be usable on its next call.
+    return { state: serviceStatus.running ? "ready" : "unknown" };
   }
   return { state: serviceStatus.running ? "ready" : "not_ready" };
 }
@@ -731,8 +735,8 @@ async function getBootedDevicesForPlatforms(
 }
 
 // Query service status for a single booted device
-async function queryDeviceServiceStatus(
-  device: BootedDeviceInfo,
+export async function queryDeviceServiceStatus(
+  device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
     name: device.name,
@@ -760,7 +764,8 @@ async function queryDeviceServiceStatus(
       return {
         installed,
         enabled,
-        running: installed && enabled,
+        running:
+          AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.isConnected() ?? false,
         installedSha256,
         expectedSha256,
         isCompatible,

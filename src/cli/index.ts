@@ -3,7 +3,12 @@ import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
-import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  DaemonVersionMismatchError,
+  DaemonBuildMismatchError,
+  DaemonAssetVersionMismatchError,
+} from "../daemon/daemonMcpProxy";
 import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
@@ -402,6 +407,15 @@ async function runToolViaDaemon(
     }
     return result;
   } catch (error) {
+    if (
+      error instanceof DaemonVersionMismatchError ||
+      error instanceof DaemonBuildMismatchError ||
+      error instanceof DaemonAssetVersionMismatchError
+    ) {
+      throw new ActionableError(
+        `Daemon preflight failed; no device operation started. ${error.message}`,
+      );
+    }
     if (error instanceof DaemonUnavailableError) {
       throw new ActionableError(
         `Daemon became unavailable during tool execution: ${error.message}. ` +

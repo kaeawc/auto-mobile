@@ -69,7 +69,11 @@ import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
 import type { Session, SessionManager } from "../daemon/sessionManager";
-import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
+import {
+  DeviceBootService,
+  DeviceBootTimeoutError,
+  type DeviceBootResult,
+} from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
@@ -94,7 +98,7 @@ import {
   trackDeviceAcquisitionReadiness,
 } from "../utils/deviceReadinessLock";
 import {
-  DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
+  DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../utils/runnerReadinessConfig";
@@ -102,6 +106,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  DEFAULT_START_DEVICE_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -225,7 +230,7 @@ const devicePreparationTimeoutSchema = z
       .number()
       .int()
       .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
-      .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
+      .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
       .describe("Maximum time to install, update, start, and verify the automation runner"),
   })
@@ -233,7 +238,7 @@ const devicePreparationTimeoutSchema = z
   .superRefine((value, context) => {
     const totalTimeoutMs =
       (value.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS) +
-      (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS);
+      (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS);
     if (totalTimeoutMs > MAX_DEVICE_READY_TIMEOUT_MS) {
       context.addIssue({
         code: "custom",
@@ -3181,7 +3186,7 @@ async function runProvisionDeviceWithinDeadline<T>(
     : controller.signal;
   let timeoutHandle: NodeJS.Timeout | undefined;
   let removeAbortListener: (() => void) | undefined;
-  const operationPromise = operation(signal);
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal));
   void operationPromise.catch(() => {});
 
   try {
@@ -4560,7 +4565,7 @@ export function registerDeviceTools() {
       return error;
     }
     return new ProvisionDeviceError(
-      "platform_command_failed",
+      error instanceof DeviceBootTimeoutError ? "timeout" : "platform_command_failed",
       `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
     );
   }
@@ -5021,6 +5026,7 @@ export function registerDeviceTools() {
       }
       perf.startOperation("bootDevice");
       boot = await bootService.boot({
+        operationName: "provisionDevice",
         platform: args.device.platform,
         deviceId:
           exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
@@ -5036,7 +5042,22 @@ export function registerDeviceTools() {
         );
       }
       validatePooledDeviceMapping(boot.device, requestedIdentity);
-      releaseReadinessReservation = await reserveProvisionDeviceReadiness(boot.device);
+      releaseReadinessReservation = await runProvisionDeviceWithinDeadline(
+        deps.timer,
+        totalDeadlineMs,
+        operationSignal,
+        "reserving device readiness",
+        async (reservationSignal) => {
+          const release = await reserveProvisionDeviceReadiness(boot!.device);
+          if (reservationSignal.aborted) {
+            void release?.().catch((error) =>
+              logger.warn(`Late provision reservation release failed: ${error}`),
+            );
+            reservationSignal.throwIfAborted();
+          }
+          return release;
+        },
+      );
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
       const sessionId = await trackDeviceAcquisitionReadiness(
         deviceReadinessLockKey(boot.device.platform, boot.device.deviceId),
@@ -5062,19 +5083,26 @@ export function registerDeviceTools() {
           operationSignal.throwIfAborted();
           validatePooledDeviceMapping(boot!.device, requestedIdentity);
           publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
-          return await bindBootedDeviceSession(
-            boot!.device,
-            {
-              platform: args.device.platform,
-              name: args.device.name,
-              timeoutMs: args.timeoutMs,
-              __mcpSessionId: args.__mcpSessionId,
-            },
-            provisioned.device,
-            boot!.processHandle,
-            undefined,
-            undefined,
-            resolveProvisionDeviceAchievedReadiness(args.readiness),
+          return await runProvisionDeviceWithinDeadline(
+            deps.timer,
+            totalDeadlineMs,
+            operationSignal,
+            "binding the device session",
+            async () =>
+              await bindBootedDeviceSession(
+                boot!.device,
+                {
+                  platform: args.device.platform,
+                  name: args.device.name,
+                  timeoutMs: args.timeoutMs,
+                  __mcpSessionId: args.__mcpSessionId,
+                },
+                provisioned.device,
+                boot!.processHandle,
+                undefined,
+                undefined,
+                resolveProvisionDeviceAchievedReadiness(args.readiness),
+              ),
           );
         },
       );
@@ -5091,8 +5119,17 @@ export function registerDeviceTools() {
       }
       throw error;
     } finally {
-      await releaseReadinessReservation?.();
+      releaseProvisionReadiness(releaseReadinessReservation);
     }
+  }
+
+  function releaseProvisionReadiness(releaseReservation: (() => Promise<void>) | undefined): void {
+    // Session ownership is already committed on success. A delayed mutex-backed
+    // reservation release must neither turn that success into destructive rollback
+    // nor replace the original failure. Keep the balanced release queued.
+    void releaseReservation?.().catch((error) =>
+      logger.warn(`Provision readiness release failed: ${error}`),
+    );
   }
 
   /**
@@ -5679,7 +5716,7 @@ export function registerDeviceTools() {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
-    const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
     return await prepareDevice(
       args,
       {
@@ -5709,7 +5746,7 @@ export function registerDeviceTools() {
     const args = getAndroidSchema.parse(externalArgs);
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const automationReadyTimeoutMs =
-      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
     const startedAtMs = getDeviceToolsDependencies().timer.now();
     const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
     // Prefer the AVD name (exact virtual-device identity); otherwise target the
@@ -5762,7 +5799,7 @@ export function registerDeviceTools() {
     const udid = args.udid ?? args.deviceId!;
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const automationReadyTimeoutMs =
-      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
     const startedAtMs = getDeviceToolsDependencies().timer.now();
     return await prepareDevice(
       {

@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getAndroidSchema,
@@ -99,7 +100,9 @@ describe("platform device preparation tools", () => {
       simulatorUdid: simulator.deviceId,
       simulatorName: simulator.name,
     });
-    expect(deviceUtils.getExecutedOperations()).toContain(`startDevice:${simulator.name}:120000`);
+    expect(deviceUtils.getExecutedOperations()).toContain(
+      `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
   });
 
   test("uses explicit boot and automation readiness budgets without accepting matcher inputs", async () => {
@@ -300,7 +303,9 @@ describe("platform device preparation tools", () => {
     await Promise.resolve();
 
     expect(settled).toBe(false);
-    expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+    expect(deviceUtils.getExecutedOperations()).not.toContain(
+      `startDevice:${stale.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
 
     await pool.releaseAdbServerResetCohortReservations(detached.devices);
     await expect(preparation).resolves.toMatchObject({
@@ -383,7 +388,9 @@ describe("platform device preparation tools", () => {
     try {
       await Promise.resolve();
       expect(settled).toBe(false);
-      expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+      expect(deviceUtils.getExecutedOperations()).not.toContain(
+        `startDevice:${stale.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+      );
 
       deviceUtils.setBootedDevices("android", [stale]);
       await pool.releaseAdbServerResetCohortReservations(detached.devices);

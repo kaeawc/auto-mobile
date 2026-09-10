@@ -34,7 +34,7 @@ import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discov
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
-import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
@@ -5018,6 +5018,7 @@ export class DevicePool {
     const owner = Symbol("readiness-reservation");
     let trackStableName = false;
     await this.assignmentMutex.runExclusive(async () => {
+      throwIfRequestAborted();
       const pooled = this.devices.get(deviceId);
       if (pooled) {
         // Acquisition may reboot a device during readiness recovery. Prove
@@ -5029,6 +5030,7 @@ export class DevicePool {
           this.assertRuntimeIdentity(pooled, expectedIdentity);
         }
       }
+      throwIfRequestAborted();
       const current = this.devices.get(deviceId);
       trackStableName =
         current?.platform === "android" &&
@@ -5387,6 +5389,7 @@ export class DevicePool {
     expectedExistingSessionDeviceId?: string,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
+      throwIfRequestAborted();
       const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
       const alreadyPooled = this.devices.has(deviceId);
       if (!alreadyPooled) {
@@ -5397,6 +5400,7 @@ export class DevicePool {
         }
       }
 
+      throwIfRequestAborted();
       let device = this.devices.get(deviceId);
       if (!device) {
         throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
@@ -5435,6 +5439,7 @@ export class DevicePool {
         readinessReservationOwners,
       );
 
+      throwIfRequestAborted();
       this.assertDeviceCleanupComplete(deviceId);
       if (device.sessionId) {
         const existingSession = this.sessionManager.getSession(device.sessionId);
@@ -5769,6 +5774,7 @@ export class DevicePool {
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
   ): Promise<string> {
+    throwIfRequestAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // Ensure device is in the pool (it may have been freshly booted)
@@ -5782,6 +5788,7 @@ export class DevicePool {
     }
 
     // Assign the device to the generated session
+    throwIfRequestAborted();
     let device = this.devices.get(deviceId);
     if (!device) {
       throw new ActionableError(
@@ -5834,6 +5841,7 @@ export class DevicePool {
       readinessReservationOwners,
     );
 
+    throwIfRequestAborted();
     const reusedSessionId = await this.reuseOwnedAutolockSession(
       device,
       mcpSessionId,
@@ -5873,16 +5881,51 @@ export class DevicePool {
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
     }
-    await this.deviceSessionRepository.markAutolockSession(sessionId, {
-      mcpSessionId: mcpSessionId ?? null,
-      daemonSessionId: this.daemonSessionId,
-      lastUsedAtMs: session.lastUsedAt,
-      expiresAtMs: session.expiresAt,
-    });
+    await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
+
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  private async persistAcquiredAutolockSession(
+    device: PooledDevice,
+    session: Session,
+    snapshot: SessionAssignmentSnapshot,
+    mcpSessionId?: string,
+  ): Promise<void> {
+    const signal = getAbortSignal();
+    const cancelPublishedSession = async () => {
+      // Only this newly minted session may be compensated; never a replacement.
+      if (this.sessionManager.getSession(session.sessionId) === session) {
+        await this.sessionManager.releaseSession(session.sessionId, "session-creation-cancelled");
+      }
+    };
+    const abort = () => {
+      void cancelPublishedSession().catch((error) =>
+        logger.warn(`Cancelled autolock release failed: ${error}`),
+      );
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      signal?.throwIfAborted();
+      await this.deviceSessionRepository.markAutolockSession(session.sessionId, {
+        mcpSessionId: mcpSessionId ?? null,
+        daemonSessionId: this.daemonSessionId,
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+      });
+      signal?.throwIfAborted();
+    } catch (error) {
+      await cancelPublishedSession();
+      if (this.devices.get(device.id) === device && device.sessionId === session.sessionId) {
+        this.restoreSessionAssignment(device, snapshot);
+      }
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
   }
 
   private assertMcpSessionCanAutolockDevice(

@@ -1,3 +1,4 @@
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
@@ -8,7 +9,10 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  type DeviceSessionPersistence,
+} from "../../src/db/deviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -725,6 +729,49 @@ describe("DevicePool", () => {
       } finally {
         await reservation?.release();
       }
+    });
+
+    test("rejects cancelled binding and readiness reservation after the assignment mutex opens", async () => {
+      const persistence = new DeferredDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      const owner = devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        sourceImage,
+      );
+      await persistence.waitForUpsert();
+      const controller = new AbortController();
+      const lateBinding = runWithAbortSignal(controller.signal, () =>
+        devicePool.bindOrReuseDeviceSession(
+          "expired-session",
+          device.deviceId,
+          "android",
+          sourceImage,
+        ),
+      ).catch((error: unknown) => error);
+      const lateReservation = runWithAbortSignal(controller.signal, () =>
+        devicePool.reserveDeviceForReadiness(device.deviceId, device),
+      ).catch((error: unknown) => error);
+      controller.abort(new Error("provision deadline exhausted"));
+      persistence.finishUpsert();
+      await owner;
+      expect(await lateBinding).toBe(controller.signal.reason);
+      expect(await lateReservation).toBe(controller.signal.reason);
+      expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
+      expect(sessionManager.getSession("expired-session")).toBeNull();
     });
 
     test("captures session identity after an in-flight assignment publishes", async () => {
@@ -2057,6 +2104,49 @@ describe("DevicePool", () => {
       }
 
       expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    test("retires only its new autolock when metadata persistence outlives cancellation", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      const repository = new DeviceSessionRepository();
+      const started = Promise.withResolvers<void>();
+      const finished = Promise.withResolvers<void>();
+      repository.markAutolockSession = async () => {
+        started.resolve();
+        await finished.promise;
+      };
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        repository,
+      );
+      const device = createBootedDevice("emulator-5554");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      const controller = new AbortController();
+      try {
+        const binding = runWithAbortSignal(controller.signal, () =>
+          devicePool.autolockDevice(device.deviceId, "android", "mcp-expired"),
+        ).catch((error: unknown) => error);
+        await started.promise;
+        controller.abort(new Error("binding deadline exhausted"));
+        finished.resolve();
+        expect(await binding).toBe(controller.signal.reason);
+        expect(sessionManager.getSessionForDevice(device.deviceId)).toBeNull();
+        expect(devicePool.getDevice(device.deviceId)?.sessionId).toBeNull();
+      } finally {
+        finished.resolve();
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
     });
 
     test("notifies before autolock validates an existing serial", async () => {

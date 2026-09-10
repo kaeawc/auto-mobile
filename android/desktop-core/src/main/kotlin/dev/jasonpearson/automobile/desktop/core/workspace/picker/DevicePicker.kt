@@ -174,6 +174,13 @@ private fun Content(
     Column(Modifier.weight(1f).fillMaxHeight()) {
       HeaderRow(content, onAction, onClose, canClose)
       ActiveChips(content.filters, onAction)
+      content.inventoryError?.let { message ->
+        Text(
+          text = "Showing previous device status. $message",
+          modifier = Modifier.padding(16.dp),
+          color = MaterialTheme.colorScheme.error,
+        )
+      }
       DeviceGrid(content, onAction, thumbnail)
     }
   }

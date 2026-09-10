@@ -3,6 +3,7 @@ import { shellQuote } from "../utils/shellQuote";
 import {
   DaemonBoundSessionLostError,
   DaemonClient,
+  DaemonHandshakeMismatchError,
   DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
@@ -23,7 +24,12 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
 } from "./constants";
-import { PROGRESS_NOTIFICATION_METHOD, type DaemonNotification, type DaemonOptions } from "./types";
+import {
+  PROGRESS_NOTIFICATION_METHOD,
+  type DaemonNotification,
+  type DaemonOptions,
+  type DaemonStatus,
+} from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
@@ -304,6 +310,8 @@ export interface DaemonMcpProxyConfig {
   connectionTimeoutMs?: number;
   /** Factory for creating daemon clients (for testing) */
   clientFactory?: DaemonClientFactory;
+  /** Socket-owner identity probe; custom client factories inject this separately. */
+  daemonStatusProbe?: () => Promise<DaemonStatus>;
   /** Custom daemon manager (for testing) */
   daemonManager?: DaemonManagerLike;
   /** Options to pass when auto-starting the daemon */
@@ -641,6 +649,8 @@ export class DaemonMcpProxy {
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
+  private readonly daemonStatusProbe?: () => Promise<DaemonStatus>;
+  private reconciliationSnapshot?: Promise<DaemonStatus>;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
   /**
@@ -783,6 +793,7 @@ export class DaemonMcpProxy {
     this.clientFactory =
       config.clientFactory ??
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
+    this.daemonStatusProbe = this.createStatusProbe(config);
     this.timer = config.timer ?? defaultTimer;
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
@@ -858,6 +869,7 @@ export class DaemonMcpProxy {
 
   private async doConnect(): Promise<void> {
     this.throwIfClosing();
+    this.reconciliationSnapshot = undefined;
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     // This is an observation-only probe (issue #6140: isAvailable never touches
@@ -1191,12 +1203,44 @@ export class DaemonMcpProxy {
     }
   }
 
-  /**
-   * Ensure the client never attaches to a daemon running a different package version.
-   * Newer clients may restart older daemons, but every mismatch remains a hard gate.
-   */
+  private createStatusProbe(
+    config: DaemonMcpProxyConfig,
+  ): (() => Promise<DaemonStatus>) | undefined {
+    // Custom transports supply their matching probe separately; constructing a
+    // default socket client here would escape an injected transport/test seam.
+    if (config.daemonStatusProbe) {
+      return config.daemonStatusProbe;
+    }
+    if (config.clientFactory) {
+      return undefined;
+    }
+    return () =>
+      new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs).getDaemonStatus();
+  }
+
+  private reconciliationStatus(): Promise<DaemonStatus> {
+    if (!this.daemonStatusProbe) {
+      return this.daemonManager.status();
+    }
+    this.reconciliationSnapshot ??= this.readSocketReconciliationStatus();
+    return this.reconciliationSnapshot;
+  }
+
+  private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
+    const recorded = await this.daemonManager.status();
+    const actual = await this.daemonStatusProbe!();
+    // PID files are discovery hints, not proof of who serves the socket. Retain
+    // startup configuration only when the record agrees with that live identity.
+    const matchesRecord =
+      recorded.running &&
+      recorded.version === actual.version &&
+      buildIdentitiesMatch(buildIdentityFromStatus(recorded), buildIdentityFromStatus(actual));
+    return matchesRecord ? { ...recorded, ...actual } : actual;
+  }
+
+  /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
   private async ensureVersionMatches(): Promise<void> {
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1287,6 +1331,7 @@ export class DaemonMcpProxy {
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
     await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
+    this.reconciliationSnapshot = undefined;
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1297,7 +1342,7 @@ export class DaemonMcpProxy {
       );
     }
 
-    const restartedStatus = await this.daemonManager.status();
+    const restartedStatus = await this.reconciliationStatus();
     const restartedVersion = restartedStatus.version?.trim() ?? "";
     if (!restartedStatus.running || restartedVersion !== this.clientVersion) {
       throw this.versionMismatchError(
@@ -1334,7 +1379,7 @@ export class DaemonMcpProxy {
     if (!this.clientAssetVersion) {
       return;
     }
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1357,7 +1402,7 @@ export class DaemonMcpProxy {
    * {@link ensureVersionMatches}.
    */
   private async ensureBuildMatches(): Promise<void> {
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1393,6 +1438,7 @@ export class DaemonMcpProxy {
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
     await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
+    this.reconciliationSnapshot = undefined;
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1403,7 +1449,7 @@ export class DaemonMcpProxy {
       );
     }
 
-    const restartedStatus = await this.daemonManager.status();
+    const restartedStatus = await this.reconciliationStatus();
     const restartedIdentity = buildIdentityFromStatus(restartedStatus);
     if (!restartedStatus.running || !buildIdentitiesMatch(this.buildIdentity, restartedIdentity)) {
       throw this.buildMismatchError(
@@ -1430,7 +1476,7 @@ export class DaemonMcpProxy {
   }
 
   private async ensureStartupOptionsMatch(): Promise<void> {
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1454,6 +1500,7 @@ export class DaemonMcpProxy {
     // so the restart gains the missing flag without stripping any the daemon
     // already had (issue #3846).
     await this.daemonManager.restart(mergeDaemonOptions(status.options, requested));
+    this.reconciliationSnapshot = undefined;
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
@@ -1461,7 +1508,7 @@ export class DaemonMcpProxy {
       );
     }
 
-    const restartedStatus = await this.daemonManager.status();
+    const restartedStatus = await this.reconciliationStatus();
     const remaining = startupOptionDeficits(requested, restartedStatus.options);
     if (!restartedStatus.running || remaining.length > 0) {
       throw new DaemonUnavailableError(
@@ -1601,6 +1648,11 @@ export class DaemonMcpProxy {
   }
 
   private isRecoverableDaemonSessionError(error: unknown): boolean {
+    // Structured server evidence proves rejection happened before dispatch.
+    // Legacy message-only errors remain non-retryable rather than guessing.
+    if (error instanceof DaemonHandshakeMismatchError) {
+      return true;
+    }
     if (error instanceof DaemonUnavailableError) {
       return true;
     }

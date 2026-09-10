@@ -9,6 +9,7 @@ import { sendRawSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { DaemonSelfIdentity } from "../../src/daemon/daemonHandshake";
+import { DaemonClient } from "../../src/daemon/client";
 
 function createFakeDaemonState() {
   return {
@@ -68,6 +69,20 @@ describe("UnixSocketServer version/build-identity handshake gate", () => {
     expect(response.success).toBe(true);
   });
 
+  test("identity diagnostics reach a different-build socket owner without executing a tool", async () => {
+    await startServer();
+    const client = new DaemonClient(socketPath);
+    try {
+      const status = await client.getDaemonStatus();
+      expect(status.version).toBe(daemonIdentity.version);
+      expect(status.buildId).toBe(daemonIdentity.build.buildId);
+      expect(status.entryScript).toBe(daemonIdentity.build.entryScript);
+      expect(status.startedAt).toBe(0);
+    } finally {
+      await client.close();
+    }
+  });
+
   test("allows a client whose release version matches (ignoring git stamp)", async () => {
     await startServer();
     const response = await sendRequest(socketPath, { ...PING, clientVersion: "0.0.40" });
@@ -80,6 +95,14 @@ describe("UnixSocketServer version/build-identity handshake gate", () => {
     expect(response.success).toBe(false);
     expect(response.error).toContain("version mismatch");
     expect(response.error).toContain("0.0.39");
+    expect(response.handshakeFailure).toEqual({
+      code: "daemon_identity_mismatch",
+      phase: "daemon-preflight",
+      executionStarted: false,
+      reason: "version",
+      daemon: daemonIdentity,
+      client: { clientVersion: "0.0.39", clientBuildId: undefined, clientEntryScript: undefined },
+    });
   });
 
   test("rejects a same-release client with a different build id", async () => {

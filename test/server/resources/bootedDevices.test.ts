@@ -20,12 +20,15 @@ import {
   BootedDevicesResourceContent,
   DeviceLockStatesResourceContent,
   readinessFromServiceStatus,
+  queryDeviceServiceStatus,
 } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
 import { z } from "zod/v4";
 
 describe("MCP Booted Device Resources", () => {
@@ -87,6 +90,21 @@ describe("MCP Booted Device Resources", () => {
     }
     // Reset to default device manager
     setDeviceManager(null);
+  });
+
+  test("marks iOS physical discovery failure incomplete even when simctl succeeds", async () => {
+    fakeDeviceUtils.failedSources.add("ios-physical");
+    const { client } = fixture.getContext();
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:devices/booted/ios" },
+      },
+      z.object({ contents: z.array(z.object({ text: z.string() })) }),
+    );
+    const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+    expect(data.observationComplete).toBe(false);
+    expect(data.platformObservations.ios?.observationComplete).toBe(false);
   });
 
   describe("Resource Listing", () => {
@@ -1092,8 +1110,44 @@ describe("booted device readiness", () => {
     isCompatible: true,
   };
 
-  test("keeps Android readiness unknown until the live runner is verified", () => {
-    expect(readinessFromServiceStatus("android", compatibleService)).toEqual({ state: "unknown" });
+  test("reports a connected Android runner as ready and an unobserved runner as unknown", () => {
+    expect(readinessFromServiceStatus("android", compatibleService)).toEqual({ state: "ready" });
+    expect(readinessFromServiceStatus("android", { ...compatibleService, running: false })).toEqual(
+      { state: "unknown" },
+    );
+  });
+
+  test("reads Android connection transitions without creating a connection", async () => {
+    let connected = true;
+    const existing = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      isConnected: () => connected,
+    } as AndroidCtrlProxyClient);
+    const create = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("Inventory must not create a client");
+    });
+    const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+      isInstalled: async () => true,
+      isEnabled: async () => true,
+      getInstalledApkSha256: async () => null,
+    } as AndroidCtrlProxyManager);
+    try {
+      const device = {
+        name: "Pixel",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+        source: "local" as const,
+      };
+      expect((await queryDeviceServiceStatus(device))?.running).toBe(true);
+      connected = false;
+      expect((await queryDeviceServiceStatus(device))?.running).toBe(false);
+      existing.mockReturnValue(null);
+      expect((await queryDeviceServiceStatus(device))?.running).toBe(false);
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      existing.mockRestore();
+      create.mockRestore();
+      manager.mockRestore();
+    }
   });
 
   test("reports an unavailable Android service as not ready", () => {

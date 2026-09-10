@@ -38,6 +38,8 @@ sealed interface DevicePickerUiState {
     val bootingIds: Set<String> = emptySet(),
     /** Per-device boot failure message; presence marks a card as retryable. */
     val bootErrors: Map<String, String> = emptyMap(),
+    /** Last discovery failed: these rows are the previous snapshot, not shutdown evidence. */
+    val inventoryError: String? = null,
   ) : DevicePickerUiState
 
   data class Error(val message: String) : DevicePickerUiState
@@ -209,14 +211,52 @@ class DevicePickerViewModel(
   // not empty the picker and prune live boot state — callers retain the prior snapshot.
   private suspend fun fetchDevices(): List<PickerDevice> =
     withContext(ioDispatcher) {
-      buildPickerDevices(readBootedDevices(), readDeviceImages(), bootedImageRuntimeIds)
+      val booted = readBootedDevices()
+      val images = readDeviceImages()
+      // Separate resource reads can straddle a boot. Absence from the earlier booted snapshot
+      // cannot turn an image explicitly observed as Booting/Booted into a bootable Shutdown row.
+      check(
+        images.none { image ->
+          image.platform.equals("ios", ignoreCase = true) &&
+            image.state != null &&
+            !image.state.equals("Shutdown", ignoreCase = true) &&
+            booted.none {
+              it.platform.equals(image.platform, ignoreCase = true) && it.deviceId == image.deviceId
+            }
+        }
+      ) {
+        "Device inventory changed during discovery; refresh to get its current state"
+      }
+      val devices = buildPickerDevices(booted, images, bootedImageRuntimeIds)
+      // A runtime whose AVD name probe failed may be one of these saved images. Neither
+      // row order nor an unknown name proves which image is shut down; preserve the previous
+      // snapshot until discovery resolves the identity or a successful boot supplies attribution.
+      check(
+        devices.none { it.platform == Platform.Android && it.state == DeviceState.Shutdown } ||
+          booted.none {
+            it.platform.equals("android", ignoreCase = true) &&
+              it.isVirtual &&
+              it.knownSourceImageId() == null &&
+              (it.name == it.deviceId || it.name == "Unknown (${it.deviceId})") &&
+              it.deviceId !in bootedImageRuntimeIds.values
+          }
+      ) {
+        "Android emulator identity is unavailable; refresh after its AVD name can be discovered"
+      }
+      devices
     }
 
   private suspend fun readBootedDevices(): List<BootedDeviceInfo> =
     when (val result = resourceClient.readResource(BOOTED_URI)) {
       is ResourceReadResult.Success ->
-        DeviceResourceParser.parseBootedDevices(result.content)?.devices
-          ?: throw IllegalStateException("Malformed booted-devices payload")
+        (DeviceResourceParser.parseBootedDevices(result.content)
+            ?: throw IllegalStateException("Malformed booted-devices payload"))
+          .also {
+            check(it.observationComplete) {
+              "Device discovery is incomplete; retaining the previous inventory"
+            }
+          }
+          .devices
       is ResourceReadResult.Error ->
         throw IllegalStateException("Failed to read booted devices: ${result.message}")
     }
@@ -258,6 +298,7 @@ class DevicePickerViewModel(
             selectedIds = selectedIds,
             bootingIds = bootingIds,
             bootErrors = bootErrors,
+            inventoryError = error.message ?: "Device discovery is unavailable",
           )
         else -> DevicePickerUiState.Error(error.message ?: "Failed to load devices")
       }
@@ -313,6 +354,7 @@ class DevicePickerViewModel(
     // bootingIds empty, so retrying (clicking the same card again) is still allowed.
     if (bootingIds.isNotEmpty()) return
     val content = _state.value as? DevicePickerUiState.Content ?: return
+    if (content.inventoryError != null) return
     val device = content.devices.firstOrNull { it.id == deviceId } ?: return
     if (device.state != DeviceState.Shutdown) return // only shut-down cards boot
     bootingIds = bootingIds + deviceId

@@ -752,7 +752,7 @@ export class RunnerReadinessService {
     }
 
     if (context.skipCtrlProxyDownload) {
-      await this.ensureIosReadyWithoutDownloads(context, manager, client);
+      await this.ensureIosReadyWithoutDownloads(context, manager);
       return;
     }
 
@@ -763,13 +763,15 @@ export class RunnerReadinessService {
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }
+    // Setup can reallocate a busy port or adopt the runner's actual listener.
+    // Resolve the client after launch, just as the force-restart path does.
+    client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     await this.waitForResponsiveClient(context, client);
   }
 
   private async ensureIosReadyWithoutDownloads(
     context: ReadinessAttemptContext,
     manager: ReadinessIosManager,
-    client: ReadinessClient,
   ): Promise<void> {
     const installed = await this.runPhase(context, "runner-setup", 1, () => manager.isInstalled());
     if (!installed) {
@@ -786,6 +788,7 @@ export class RunnerReadinessService {
         minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
       }),
     );
+    const client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     await this.waitForResponsiveClient(context, client);
   }
 

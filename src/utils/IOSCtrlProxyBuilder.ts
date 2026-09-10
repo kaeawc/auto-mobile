@@ -636,7 +636,9 @@ export class IOSCtrlProxyBuilder {
     this.buildInFlight ??= this.doBuild(perf);
     try {
       const shared = await this.buildInFlight;
-      if (!shared.success) {return shared;}
+      if (!shared.success) {
+        return shared;
+      }
       const buildPath = await this.getBuildProductsPath(platform ?? "simulator");
       const xctestrunPath = await this.getXctestrunPath(platform);
       if (!xctestrunPath) {
@@ -654,7 +656,9 @@ export class IOSCtrlProxyBuilder {
         error: errorMessage(error),
       };
     } finally {
-      if (--this.buildWaiters === 0) {this.buildInFlight = null;}
+      if (--this.buildWaiters === 0) {
+        this.buildInFlight = null;
+      }
     }
   }
 

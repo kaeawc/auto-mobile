@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { closeLogStream } from "../../src/utils/logger";
+import { ActionableError } from "../../src/models/ActionableError";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * Models a WriteStream's shutdown the way the runtime actually sequences it:
@@ -117,5 +119,110 @@ describe("closeLogStream (#6149)", () => {
     stream.emitClose();
 
     await expect(closeLogStream(stream)).resolves.toBeUndefined();
+  });
+});
+
+describe("closeLogStream bounded close policy (#6700)", () => {
+  test("clears the timeout when destroy closes synchronously", async () => {
+    class SynchronousCloseStream extends FakeLogStream {
+      destroy(): void {
+        this.emitClose();
+      }
+    }
+    const stream = new SynchronousCloseStream();
+    const timer = new FakeTimer();
+    const error = new Error("close failed");
+    const close = closeLogStream(stream, timer);
+    const concurrentClose = closeLogStream(stream, timer);
+    const outcomes = Promise.allSettled([close, concurrentClose]);
+    stream.failClose(error);
+    expect(await outcomes).toEqual([
+      { status: "rejected", reason: error },
+      { status: "rejected", reason: error },
+    ]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  /**
+   * Emits `error` after `end()` and NEVER emits `close` — models a supported
+   * runtime that breaks the finish/error/close ordering `closeLogStream`
+   * depends on (see its doc comment). Also records every `destroy()` call so
+   * tests can assert the injected policy explicitly tries to force descriptor
+   * release rather than passively waiting on a `close` that never arrives.
+   */
+  class NeverClosesAfterErrorStream extends EventEmitter {
+    closed = false;
+    destroyCalls: Array<Error | undefined> = [];
+
+    end(): void {
+      queueMicrotask(() => this.emit("error", new Error("write failed, fd wedged")));
+    }
+
+    destroy(error?: Error): void {
+      this.destroyCalls.push(error);
+      // Worst case: even an explicit destroy does not release the fd on this
+      // (hypothetical) runtime — `close` still never arrives.
+    }
+  }
+
+  test("rejects with a bounded ActionableError instead of hanging when 'close' never follows an error", async () => {
+    const stream = new NeverClosesAfterErrorStream();
+    const timer = new FakeTimer();
+    const timeoutMs = 5_000;
+    let settled = false;
+    let rejection: unknown;
+    const close = closeLogStream(stream, timer, timeoutMs).catch((error) => {
+      settled = true;
+      rejection = error;
+      throw error;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    // The error alone must not settle the promise — settling here would
+    // recreate the fd race #6149 fixed. It must, however, have already tried
+    // to force the descriptor closed.
+    expect(settled).toBeFalse();
+    expect(stream.destroyCalls).toHaveLength(1);
+    expect(stream.destroyCalls[0]).toBeInstanceOf(Error);
+
+    // Still short of the bound: must remain pending.
+    timer.advanceTime(timeoutMs - 1);
+    await Promise.resolve();
+    expect(settled).toBeFalse();
+
+    // Crossing the bound with no confirming `close` must reject with an
+    // actionable timeout rather than hang forever.
+    timer.advanceTime(1);
+    await expect(close).rejects.toBeInstanceOf(ActionableError);
+    expect(settled).toBeTrue();
+    expect((rejection as Error).message).toContain("close");
+  });
+
+  test("still rejects with the recorded error, not the timeout, when 'close' arrives before the bound", async () => {
+    // A policy that always waits out the full bound (instead of treating
+    // `close` as authoritative) would delay every ordinary error->close
+    // shutdown by the full timeout. Guard against that regression.
+    class ClosesShortlyAfterDestroy extends EventEmitter {
+      closed = false;
+      end(): void {
+        queueMicrotask(() => this.emit("error", new Error("transient")));
+      }
+      destroy(): void {
+        queueMicrotask(() => {
+          this.closed = true;
+          this.emit("close");
+        });
+      }
+    }
+    const stream = new ClosesShortlyAfterDestroy();
+    const timer = new FakeTimer();
+
+    const close = closeLogStream(stream, timer, 5_000);
+
+    await expect(close).rejects.toThrow("transient");
+    // The bounded fallback timer must have been armed and then cleared by
+    // the confirming `close`, not left pending or fired.
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

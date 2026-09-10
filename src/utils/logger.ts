@@ -11,6 +11,8 @@ import {
   resolveAutomobileLogSink,
   writeEmergencyLog,
 } from "./loggingConfig";
+import { Timer, defaultTimer } from "./SystemTimer";
+import { toActionableError } from "../models/ActionableError";
 
 export {
   parseAutomobileLogFormat,
@@ -246,7 +248,22 @@ interface EndableLogStream {
   // Node/Bun WriteStreams expose this once the fd has actually been released.
   // Optional so plain EventEmitter fakes that never set it still type-check.
   readonly closed?: boolean;
+  // Node/Bun WriteStreams (via Writable) expose this. Called only on the
+  // error-without-close path below, to nudge a stalled fd toward release
+  // rather than passively waiting on a `close` that may never come. Optional
+  // so plain EventEmitter fakes that never implement it still type-check.
+  destroy?(error?: Error): void;
 }
+
+// Bounds how long closeLogStream() waits for the confirming `close` once an
+// `error` has been observed during shutdown. `error` does not guarantee the
+// fd was released (see the doc above closeLogStream) -- explicitly destroying
+// the stream nudges a stalled descriptor toward release, but a supported
+// runtime that changes this ordering (or a genuinely wedged descriptor) must
+// not hang the caller -- and therefore log rotation / process shutdown --
+// forever (issue #6700). Chosen generously: rotation and shutdown are not
+// latency-sensitive, so this only ever matters on the already-broken path.
+export const CLOSE_LOG_STREAM_TIMEOUT_MS = 5_000;
 
 /**
  * Resolves once a log stream has ACTUALLY closed (its file descriptor
@@ -272,14 +289,33 @@ interface EndableLogStream {
  *    `logger.close()` / `closeAfterFlush()`) never emits a second `close` —
  *    Node/Bun only fire it once per stream — so waiting for a listener would
  *    hang forever. Check `closed` up front and resolve immediately.
+ *
+ * Bounded close policy (issue #6700): the ordering above is the observed
+ * contract on the runtimes this was verified against, not a guarantee the
+ * platform makes. If a supported runtime (or an already-broken stream) emits
+ * `error` and then never emits `close`, this must not hang the caller
+ * forever. So once an `error` is observed, this (a) explicitly `destroy()`s
+ * the stream if it exposes that method, nudging a stalled fd toward release,
+ * and (b) starts a bounded timer. The `close` listener stays authoritative —
+ * a `close` that arrives before the bound (whether from the normal shutdown
+ * or as a result of the `destroy()` call) still settles exactly as before,
+ * rejecting with the recorded error. Only if `close` never arrives within
+ * `timeoutMs` does this reject with an actionable timeout instead of hanging.
+ * Deliberately does NOT settle immediately on `error` alone — that would
+ * recreate the fd race fixed by #6149.
  */
-export function closeLogStream(stream: EndableLogStream): Promise<void> {
+export function closeLogStream(
+  stream: EndableLogStream,
+  timer: Timer = defaultTimer,
+  timeoutMs: number = CLOSE_LOG_STREAM_TIMEOUT_MS,
+): Promise<void> {
   if (stream.closed) {
     return Promise.resolve();
   }
   return new Promise((resolve, reject) => {
     let settled = false;
     let pendingError: Error | undefined;
+    let timeoutHandle: NodeJS.Timeout | undefined;
     const settle = (run: () => void): void => {
       if (settled) {
         return;
@@ -287,12 +323,34 @@ export function closeLogStream(stream: EndableLogStream): Promise<void> {
       settled = true;
       stream.off("error", onError);
       stream.off("close", onClose);
+      if (timeoutHandle !== undefined) {
+        timer.clearTimeout(timeoutHandle);
+      }
       run();
     };
     // Do NOT settle here — only record the error and keep waiting for the
-    // `close` that confirms the fd is actually released.
+    // `close` that confirms the fd is actually released. Do arm the bounded
+    // fallback below so an error that is never followed by `close` cannot
+    // hang this promise forever.
     const onError = (error: Error): void => {
       pendingError = error;
+      timeoutHandle = timer.setTimeout(() => {
+        settle(() =>
+          reject(
+            toActionableError(
+              error,
+              `Log stream did not emit 'close' within ${timeoutMs}ms of a shutdown error — the file descriptor may still be held`,
+            ),
+          ),
+        );
+      }, timeoutMs);
+      // Let every listener record the error before a synchronous destroy can
+      // emit close (concurrent close callers may share this stream).
+      queueMicrotask(() => {
+        if (!settled) {
+          stream.destroy?.(error);
+        }
+      });
     };
     const onClose = (): void => settle(() => (pendingError ? reject(pendingError) : resolve()));
     stream.once("error", onError);

@@ -1440,7 +1440,7 @@ describe("SimCtlClient boot self-verification", () => {
     // burn a shutdown-and-retry cycle: no shutdown is ever issued.
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(0);
-    expect(harness.timer.getSleepHistory()).toEqual([15]);
+    expect(harness.timer.getSleepHistory()).toEqual([15, 15]);
   });
 
   // Issue #6411: `Booting` must be tolerated the same way as `Shutting Down`.
@@ -1466,5 +1466,60 @@ describe("SimCtlClient boot self-verification", () => {
 
     await expect(harness.simctl.startSimulator(UDID, 5000)).rejects.toBe(error);
     expect(shutdownCalls(harness.calls).length).toBe(1);
+  });
+  test("backs off repeated transition errors even when discovery is already settled", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.queueBootStatusFailures([
+      coreSimulator405ErrorForState("Shutting Down"),
+      coreSimulator405ErrorForState("Shutting Down"),
+    ]);
+    harness.setStates(["Shutdown", "Shutdown", "Booted"]);
+    await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+    expect(bootstatusCalls(harness.calls)).toHaveLength(3);
+    expect(harness.timer.getSleepHistory()).toEqual([250, 250]);
+  });
+
+  test("cancellation during a discovery retry releases the boot lease without more reads", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.failListDevicesWith(new Error("discovery unavailable"), 100);
+    const controller = new AbortController();
+    const outcome = runWithAbortSignal(controller.signal, () =>
+      harness.simctl.startSimulator(UDID, 120000),
+    ).catch((error: unknown) => error);
+    for (let turn = 0; turn < 100; turn++) {
+      await Promise.resolve();
+    }
+    expect(harness.timer.getPendingTimeouts()).toContain(250);
+    const reason = new Error("request cancelled during discovery");
+    controller.abort(reason);
+    expect(await outcome).toBe(reason);
+    expect(harness.timer.getPendingTimeoutCount()).toBe(0);
+    expect(harness.calls.filter((call) => call.includes("list devices"))).toHaveLength(1);
+    expect(shutdownCalls(harness.calls)).toHaveLength(1);
+    expect(harness.timer.now()).toBe(0);
+    harness.failListDevicesWith(new Error("unused"), 0);
+    harness.setStates(["Booted"]);
+    await harness.simctl.startSimulator(UDID, 5000);
+  });
+  test("persistent discovery failures stop at the boot deadline", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.failListDevicesWith(new Error("discovery unavailable"), 100);
+    const outcome = harness.simctl.startSimulator(UDID, 1000).catch((error: unknown) => error);
+    expect(await harness.timer.resolvePromise(outcome)).toBeInstanceOf(Error);
+    expect(harness.timer.now()).toBe(1000);
+    expect(
+      harness.calls.filter((call) => call.includes("list devices")).length,
+    ).toBeLessThanOrEqual(4);
+    expect(shutdownCalls(harness.calls)).toHaveLength(1);
+  });
+
+  test("zero configured backoff still bounds transition polling by the deadline", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.failBootStatusWith(coreSimulator405ErrorForState("Booting"));
+    harness.setStates(["Booting"]);
+    const outcome = harness.simctl.startSimulator(UDID, 1000).catch((error: unknown) => error);
+    expect(await harness.timer.resolvePromise(outcome)).toBeInstanceOf(Error);
+    expect(harness.timer.now()).toBe(1000);
+    expect(harness.timer.getSleepHistory().every((delay) => delay > 0)).toBe(true);
   });
 });

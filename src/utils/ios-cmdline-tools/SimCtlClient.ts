@@ -1372,6 +1372,7 @@ export class SimCtlClient implements SimCtl {
           `polling for settlement before re-issuing bootstatus: ${error}`,
       );
       await this.waitForSimulatorSettled(udid, deadlineMs, retryBackoffMs);
+      await this.waitForBootRetry(udid, retryBackoffMs || STATE_READ_RETRY_BACKOFF_MS, deadlineMs);
       return true;
     }
     if (reportedState !== "Booted") {
@@ -1400,9 +1401,40 @@ export class SimCtlClient implements SimCtl {
       if (state !== "Booting" && state !== "Shutting Down") {
         return;
       }
-      await this.timer.sleep(
-        Math.min(pollIntervalMs, this.remainingBootTimeoutMs(udid, deadlineMs)),
-      );
+      await this.waitForBootRetry(udid, pollIntervalMs || STATE_READ_RETRY_BACKOFF_MS, deadlineMs);
+    }
+  }
+
+  private async waitForBootRetry(udid: string, delayMs: number, deadlineMs: number): Promise<void> {
+    const boundedDelayMs = Math.min(delayMs, this.remainingBootTimeoutMs(udid, deadlineMs));
+    const signal = getAbortSignal();
+    if (!signal) {
+      await this.timer.sleep(boundedDelayMs);
+      return;
+    }
+    let onAbort: (() => void) | undefined;
+    let delayHandle: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          delayHandle = this.timer.setTimeout(resolve, boundedDelayMs);
+        }),
+        new Promise<never>((_resolve, reject) => {
+          onAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) {
+            onAbort();
+          }
+        }),
+      ]);
+      signal.throwIfAborted();
+    } finally {
+      if (delayHandle) {
+        this.timer.clearTimeout(delayHandle);
+      }
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+      }
     }
   }
 
@@ -1420,6 +1452,7 @@ export class SimCtlClient implements SimCtl {
    * either) is waiting on it (issue #6413).
    */
   private remainingBootTimeoutMs(udid: string, deadlineMs: number): number {
+    getAbortSignal()?.throwIfAborted();
     const remainingMs = deadlineMs - this.timer.now();
     if (remainingMs <= 0) {
       throw new ActionableError(
@@ -1559,9 +1592,7 @@ export class SimCtlClient implements SimCtl {
         logger.debug(
           `[iOS] Could not read simulator state for ${udid}; retrying within the boot deadline: ${errorMessage(error)}`,
         );
-        await this.timer.sleep(
-          Math.min(STATE_READ_RETRY_BACKOFF_MS, this.remainingBootTimeoutMs(udid, deadlineMs)),
-        );
+        await this.waitForBootRetry(udid, STATE_READ_RETRY_BACKOFF_MS, deadlineMs);
       }
     }
   }

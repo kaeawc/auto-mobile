@@ -907,7 +907,10 @@ export class SimCtlClient implements SimCtl {
     deadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    const remainingMs = this.remainingBootTimeoutMs(udid, deadlineMs);
+    // Focusing the optional GUI must not consume the boot/readiness budget of
+    // an already booted simulator. A wedged LaunchServices/AppleScript call is
+    // cancelled promptly; automation continues without the window.
+    const remainingMs = Math.min(1_000, this.remainingBootTimeoutMs(udid, deadlineMs));
     if (signal?.aborted) {
       throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
     }

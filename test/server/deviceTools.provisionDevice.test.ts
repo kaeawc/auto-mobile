@@ -2281,6 +2281,121 @@ describe("provisionDevice handler", () => {
     expect(operationStore.failCalls).toBe(0);
   });
 
+  test.each(["android", "ios"] as const)(
+    "preserves %s boot timeout classification",
+    async (platform) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const provisioned = provisionedTestDevice(platform, false);
+      exactProvisioner.provision = async () => provisioned;
+      deviceManager.setDeviceImages(platform, [provisioned.device]);
+      deviceManager.waitForDeviceReady = async (_device, _timeout, _handle, signal) => {
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      };
+      setDeviceToolsDependencies({ timer });
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs(platform, `boot-timeout-${platform}`),
+        timeoutMs: 180_000,
+      });
+      const payload = JSON.parse((response as any).content[0].text);
+      expect(payload.error.code).toBe("timeout");
+      expect(payload.error.message).toContain("provisionDevice timeout exhausted");
+      expect(payload.error.message).toContain("waiting for device boot readiness");
+    },
+  );
+
+  test.each([false, true])(
+    "a delayed reservation release preserves acquisition outcome (failure=%s)",
+    async (failReadiness) => {
+      const timer = new FakeTimer();
+      const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      sessionManager.stopCleanupTimer();
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        undefined,
+        deviceManager,
+      );
+      const booted = {
+        name: "phone-api-36-a",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+      };
+      deviceManager.setBootedDevices("android", [booted]);
+      await pool.initializeWithDevices([booted]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      let releaseRequested = false;
+      const released = Promise.withResolvers<void>();
+      pool.reserveDeviceForReadiness = async () =>
+        Object.assign(
+          async () => {
+            releaseRequested = true;
+            await released.promise;
+          },
+          { owner: Symbol("test-reservation") },
+        );
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: async () => {
+          if (failReadiness) {
+            throw new Error("original readiness failure");
+          }
+        },
+      });
+      try {
+        const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+          ...provisionTestArgs("android", `delayed-release-${failReadiness}`),
+          timeoutMs: 1_000,
+        });
+        const payload = JSON.parse((response as any).content[0].text);
+        expect(releaseRequested).toBe(true);
+        if (failReadiness) {
+          expect(payload.error.message).toContain("original readiness failure");
+          expect(sessionManager.getAllSessionIds()).toEqual([]);
+        } else {
+          expect(payload.sessionUuid).toBeDefined();
+          expect(sessionManager.getSession(payload.sessionUuid)?.assignedDevice).toBe(
+            booted.deviceId,
+          );
+        }
+        expect(deviceManager.wasMethodCalled("killDevice")).toBe(false);
+      } finally {
+        released.resolve();
+      }
+    },
+  );
+
+  test("bounds a pending final session binding by the provision deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const booted = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    deviceManager.setBootedDevices("android", [booted]);
+    await pool.initializeWithDevices([booted]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    pool.bindOrReuseDeviceSession = async () => await new Promise<string>(() => {});
+    setDeviceToolsDependencies({ timer, ensureCtrlProxyReady: async () => {} });
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "pending-final-binding"),
+      timeoutMs: 1_000,
+    });
+    const payload = JSON.parse((response as any).content[0].text);
+    expect(payload.error.code).toBe("timeout");
+    expect(payload.error.message).toContain("binding the device session");
+    expect(sessionManager.getAllSessionIds()).toEqual([]);
+  });
+
   test("enforces timeoutMs across exact provisioning before boot begins", async () => {
     const timer = new FakeTimer();
     let provisionSignal: AbortSignal | undefined;

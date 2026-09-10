@@ -1,3 +1,7 @@
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../../src/utils/deviceTimeouts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getAndroidSchema,
@@ -17,6 +21,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -57,6 +62,67 @@ describe("platform device preparation tools", () => {
       typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
     );
   }
+
+  for (const [operation, platform, target] of [
+    ["getAndroid", "android", { avdName: "Pixel" }],
+    ["getApple", "ios", { udid: "sim-udid" }],
+  ] as const) {
+    test(`${operation} attributes boot deadlines to the requested acquisition`, async () => {
+      class SlowDiscovery extends FakeDeviceUtils {
+        override async listDeviceImages(selectedPlatform: "android" | "ios") {
+          const images = await super.listDeviceImages(selectedPlatform);
+          timer.advanceTime(11);
+          return images;
+        }
+      }
+      const slow = new SlowDiscovery();
+      slow.setDeviceImages(platform, [
+        { platform, name: "Pixel", deviceId: "sim-udid", isRunning: false },
+      ]);
+      setDeviceToolsDependencies({ deviceManagerFactory: () => slow });
+      const failure = await callTool(operation, { ...target, bootTimeoutMs: 10 }).catch(
+        (error) => error,
+      );
+      expect(failure).toBeInstanceOf(DeviceBootTimeoutError);
+      expect(failure.operation).toBe(operation);
+      expect(failure.message).toContain(`${operation} timeout exhausted`);
+      expect(failure.budgetMs).toBe(10);
+    });
+  }
+
+  test("advertises the combined preparation budget including omitted defaults", () => {
+    for (const [name, schema, target] of [
+      ["getAndroid", getAndroidSchema, { avdName: "Pixel" }],
+      ["getApple", getAppleSchema, { udid: "sim-udid" }],
+    ] as const) {
+      const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
+      const properties = definition.inputSchema.properties as Record<
+        string,
+        { description: string }
+      >;
+      for (const field of ["bootTimeoutMs", "automationReadyTimeoutMs"]) {
+        expect(properties[field].description).toContain(
+          `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
+        );
+        expect(properties[field].description).toContain("including defaults for omitted fields");
+      }
+      const maximumWithDefaultBoot = MAX_DEVICE_READY_TIMEOUT_MS - DEFAULT_DEVICE_READY_TIMEOUT_MS;
+      expect(properties.automationReadyTimeoutMs.description).toContain(
+        `when bootTimeoutMs is omitted, this must be <= ${maximumWithDefaultBoot}`,
+      );
+      expect(
+        schema.safeParse({ ...target, automationReadyTimeoutMs: maximumWithDefaultBoot }).success,
+      ).toBe(true);
+      expect(
+        schema.safeParse({ ...target, automationReadyTimeoutMs: maximumWithDefaultBoot + 1 })
+          .success,
+      ).toBe(false);
+      expect(
+        schema.safeParse({ ...target, bootTimeoutMs: 90_000, automationReadyTimeoutMs: 800_000 })
+          .success,
+      ).toBe(true);
+    }
+  });
 
   test("getAndroid returns the AVD to ADB serial and port mapping", async () => {
     const emulator: BootedDevice = {
@@ -99,7 +165,9 @@ describe("platform device preparation tools", () => {
       simulatorUdid: simulator.deviceId,
       simulatorName: simulator.name,
     });
-    expect(deviceUtils.getExecutedOperations()).toContain(`startDevice:${simulator.name}:120000`);
+    expect(deviceUtils.getExecutedOperations()).toContain(
+      `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
   });
 
   test("uses explicit boot and automation readiness budgets without accepting matcher inputs", async () => {
@@ -300,7 +368,9 @@ describe("platform device preparation tools", () => {
     await Promise.resolve();
 
     expect(settled).toBe(false);
-    expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+    expect(deviceUtils.getExecutedOperations()).not.toContain(
+      `startDevice:${stale.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
 
     await pool.releaseAdbServerResetCohortReservations(detached.devices);
     await expect(preparation).resolves.toMatchObject({
@@ -383,7 +453,9 @@ describe("platform device preparation tools", () => {
     try {
       await Promise.resolve();
       expect(settled).toBe(false);
-      expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+      expect(deviceUtils.getExecutedOperations()).not.toContain(
+        `startDevice:${stale.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+      );
 
       deviceUtils.setBootedDevices("android", [stale]);
       await pool.releaseAdbServerResetCohortReservations(detached.devices);

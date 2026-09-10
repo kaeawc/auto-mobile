@@ -715,6 +715,34 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.shutdownInvocations()).toBe(0);
   });
 
+  test("does not spend the cold-boot budget focusing an already booted simulator", async () => {
+    let openSignal: AbortSignal | undefined;
+    const harness = createConcurrentStartHarness(
+      () => Promise.resolve(createExecResult("", "")),
+      bootedSimulatorListResult,
+      {
+        openSimulatorApp: (signal) => {
+          openSignal = signal;
+          return rejectWhenAborted(signal);
+        },
+      },
+    );
+    let completed = false;
+    const start = harness
+      .createClient()
+      .startSimulator(UDID, 180_000)
+      .then(() => {
+        completed = true;
+      });
+    await waitForCondition(() => openSignal !== undefined, "Simulator.app focus");
+    harness.timer.advanceTime(1_000);
+    await drainMicrotasks();
+    expect(completed).toBe(true);
+    expect(openSignal?.aborted).toBe(true);
+    expect(harness.shutdownInvocations()).toBe(0);
+    await start;
+  });
+
   test("does not reuse stale success after an idle start is shut down", async () => {
     const harness = createConcurrentStartHarness(() => Promise.resolve(createExecResult("", "")));
     const firstHandle = await harness.createClient().startSimulator(UDID, 5_000);

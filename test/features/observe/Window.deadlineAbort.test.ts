@@ -86,6 +86,7 @@ describe("Window.getActive deadline + abort plumbing (#6289)", () => {
   });
 
   test("applies the default read deadline when the caller supplies none", async () => {
+    window = new Window(device, new FakeAdbClientFactory(fakeAdb), scriptedClock([0]));
     fakeAdb.setDefaultResponse(
       execResult("imeControlTarget in display# 0 Window{1 u0 com.example.app/.Main}"),
     );

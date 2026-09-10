@@ -20,6 +20,8 @@ import {
   BootedDevicesResourceContent,
   DeviceLockStatesResourceContent,
   readinessFromServiceStatus,
+  queryDeviceServiceStatus,
+  type AndroidServiceStatusLookup,
 } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -87,6 +89,43 @@ describe("MCP Booted Device Resources", () => {
     }
     // Reset to default device manager
     setDeviceManager(null);
+  });
+
+  test("marks iOS physical discovery failure incomplete even when simctl succeeds", async () => {
+    fakeDeviceUtils.failedSources.add("ios-physical");
+    const { client } = fixture.getContext();
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:devices/booted/ios" },
+      },
+      z.object({ contents: z.array(z.object({ text: z.string() })) }),
+    );
+    const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+    expect(data.observationComplete).toBe(false);
+    expect(data.platformObservations.ios?.observationComplete).toBe(false);
+    expect(data.sourceObservations).toEqual({
+      "ios-simulator": { observationComplete: true },
+      "ios-physical": { observationComplete: false },
+    });
+  });
+
+  test("preserves physical iOS completeness when simulator discovery fails", async () => {
+    fakeDeviceUtils.failedSources.add("ios-simulator");
+    const { client } = fixture.getContext();
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:devices/booted/ios" },
+      },
+      z.object({ contents: z.array(z.object({ text: z.string() })) }),
+    );
+    const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+    expect(data.observationComplete).toBe(false);
+    expect(data.sourceObservations).toEqual({
+      "ios-simulator": { observationComplete: false },
+      "ios-physical": { observationComplete: true },
+    });
   });
 
   describe("Resource Listing", () => {
@@ -546,6 +585,48 @@ describe("MCP Booted Device Resources", () => {
         expect(uris).toContain("automobile:devices/lockStates");
       } finally {
         spy.mockRestore();
+      }
+    });
+
+    test("preserves pool counts until every iOS discovery source completes", async () => {
+      const physicalDevice = { ...mockIosDevice2, deviceId: "00008110-001234567890001E" };
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, physicalDevice]);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const pool = new DevicePool(
+        sessions,
+        "test-daemon",
+        timer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      await pool.initializeWithDevices([physicalDevice, mockIosDevice1]);
+      await pool.assignDeviceToSession("physical-session", "ios");
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
+      fakeDeviceUtils.failedSources.add("ios-physical");
+      DaemonState.getInstance().initialize(sessions, pool);
+      const { client } = fixture.getContext();
+      const read = async () => {
+        const response = await client.request(
+          { method: "resources/read", params: { uri: "automobile:devices/booted/ios" } },
+          z.object({ contents: z.array(z.object({ text: z.string() })) }),
+        );
+        return JSON.parse(response.contents[0].text) as BootedDevicesResourceContent;
+      };
+      try {
+        const partial = await read();
+        expect(partial.observationComplete).toBe(false);
+        expect(partial.devices.map((device) => device.deviceId)).toEqual([mockIosDevice1.deviceId]);
+        expect(partial.poolStatus).toMatchObject({ total: 2, idle: 1, assigned: 1 });
+        fakeDeviceUtils.failedSources.clear();
+        const complete = await read();
+        expect(complete.observationComplete).toBe(true);
+        expect(complete.poolStatus?.total).toBe(1);
+      } finally {
+        sessions.stopCleanupTimer();
       }
     });
 
@@ -1092,8 +1173,35 @@ describe("booted device readiness", () => {
     isCompatible: true,
   };
 
-  test("keeps Android readiness unknown until the live runner is verified", () => {
-    expect(readinessFromServiceStatus("android", compatibleService)).toEqual({ state: "unknown" });
+  test("reports a connected Android runner as ready and an unobserved runner as unknown", () => {
+    expect(readinessFromServiceStatus("android", compatibleService)).toEqual({ state: "ready" });
+    expect(readinessFromServiceStatus("android", { ...compatibleService, running: false })).toEqual(
+      { state: "unknown" },
+    );
+  });
+
+  test("reads Android connection transitions without creating a connection", async () => {
+    const connections = new Set(["emulator-5554"]);
+    const lookup: AndroidServiceStatusLookup = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isEnabled: async () => true,
+        getInstalledApkSha256: async () => null,
+      }),
+      isConnected: (deviceId) => connections.has(deviceId),
+    };
+    const device = {
+      name: "Pixel",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+      source: "local" as const,
+    };
+    expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(true);
+    connections.clear();
+    expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(false);
+    expect(
+      (await queryDeviceServiceStatus({ ...device, deviceId: "unseen" }, lookup))?.running,
+    ).toBe(false);
   });
 
   test("reports an unavailable Android service as not ready", () => {

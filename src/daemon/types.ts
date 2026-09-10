@@ -1,5 +1,6 @@
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
 import type { SessionReleaseSnapshot } from "./sessionManager";
+import type { DaemonHandshakeFailure } from "./daemonHandshake";
 
 /**
  * Request sent from CLI client to daemon
@@ -52,6 +53,8 @@ export interface DaemonResponse {
   result?: any;
   /** Error message if unsuccessful */
   error?: string;
+  /** Rejected before any device operation was admitted. */
+  handshakeFailure?: DaemonHandshakeFailure;
   /**
    * Safe, machine-readable details for a loopback device-control transport
    * failure. Optional so older Kotlin, Swift, and TypeScript clients keep using

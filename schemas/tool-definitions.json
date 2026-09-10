@@ -1600,16 +1600,16 @@
       "type": "object",
       "properties": {
         "bootTimeoutMs": {
-          "description": "Maximum time to find, recover, or boot the device operating system",
+          "description": "Maximum time in ms to find, recover, or boot the device operating system (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields.",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
         },
         "automationReadyTimeoutMs": {
-          "description": "Maximum time to install, update, start, and verify the automation runner",
+          "description": "Maximum time in ms to install, update, start, and verify the automation runner (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields; when bootTimeoutMs is omitted, this must be <= 710000.",
           "type": "integer",
           "minimum": 1000,
-          "maximum": 120000
+          "maximum": 890000
         },
         "avdName": {
           "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
@@ -1633,16 +1633,16 @@
       "type": "object",
       "properties": {
         "bootTimeoutMs": {
-          "description": "Maximum time to find, recover, or boot the device operating system",
+          "description": "Maximum time in ms to find, recover, or boot the device operating system (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields.",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
         },
         "automationReadyTimeoutMs": {
-          "description": "Maximum time to install, update, start, and verify the automation runner",
+          "description": "Maximum time in ms to install, update, start, and verify the automation runner (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields; when bootTimeoutMs is omitted, this must be <= 710000.",
           "type": "integer",
           "minimum": 1000,
-          "maximum": 120000
+          "maximum": 890000
         },
         "udid": {
           "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",

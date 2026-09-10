@@ -21,10 +21,7 @@ import {
   clearDirectSessionDevices,
   resolveDirectSessionDevice,
 } from "../../src/server/directSessionDeviceRegistry";
-import {
-  DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  MAX_DEVICE_READY_TIMEOUT_MS,
-} from "../../src/utils/deviceTimeouts";
+import { MAX_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
@@ -647,7 +644,7 @@ describe("startDevice handler", () => {
     expect(result.deviceId).toBe("emulator-5556");
     expect(result.sessionUuid).toBe("owner-session");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Unknown (emulator-5554)");
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:120000");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:360000");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "owner-session",
       status: "busy",
@@ -1501,11 +1498,9 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "ios" });
 
     expect(result.source).toBe("cold-boot");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(`startDevice:iPhone 15:360000`);
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
-      `startDevice:iPhone 15:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
-    );
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
-      `waitForDeviceReady:iPhone 15:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+      `waitForDeviceReady:iPhone 15:360000`,
     );
   });
 

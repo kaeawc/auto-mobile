@@ -1091,6 +1091,45 @@ describe("RunnerReadinessService", () => {
     expect(restartedClient.healthCalls).toBe(1);
   });
 
+  for (const skipCtrlProxyDownload of [false, true]) {
+    test(`uses the final iOS runner port after ${skipCtrlProxyDownload ? "cached start" : "setup"}`, async () => {
+      const iosManager = new FakeIosManager();
+      const staleClient = new FakeReadinessClient();
+      staleClient.connected = false;
+      // The stale port could belong to another healthy runner. Never probe it.
+      const readyClient = new FakeReadinessClient();
+      const requestedPorts: number[] = [];
+      const timer = new FakeTimer();
+      const reallocate = async () => {
+        timer.advanceTime(90_000);
+        iosManager.servicePort = 9_876;
+      };
+      iosManager.onSetup = reallocate;
+      iosManager.onStart = reallocate;
+      const { service } = createService({
+        timer,
+        iosManager,
+        getIosClient: (_device, port) => {
+          requestedPorts.push(port);
+          return port === 9_876 ? readyClient : staleClient;
+        },
+      });
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload,
+      });
+
+      expect(requestedPorts).toEqual([8_765, 9_876]);
+      expect(staleClient.connectionCalls).toBe(0);
+      expect(staleClient.healthCalls).toBe(0);
+      expect(readyClient.healthCalls).toBe(1);
+    });
+  }
+
   test("cancels the iOS force-restart when its readiness budget expires", async () => {
     const timer = new FakeTimer();
     const iosManager = new FakeIosManager();

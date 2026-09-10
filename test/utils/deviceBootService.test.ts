@@ -1,6 +1,10 @@
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
-import { DeviceBootService, type DeviceBootProgress } from "../../src/utils/deviceBootService";
+import {
+  DeviceBootService,
+  DeviceBootTimeoutError,
+  type DeviceBootProgress,
+} from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { pickAndroidSystemImage } from "../../src/utils/deviceProvisioning";
@@ -42,6 +46,57 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it.each([90_000, 180_000])(
+    "preserves the provision budget through a %ims cold boot",
+    async (bootMs) => {
+      const devices = new FakeDeviceUtils();
+      const matcher = new FakeDeviceMatcher();
+      const timer = new FakeTimer();
+      devices.setDeviceImages("android", [image]);
+      matcher.setImageResult(image);
+      const original = devices.waitForDeviceReady.bind(devices);
+      devices.waitForDeviceReady = async (...args) => {
+        timer.advanceTime(bootMs);
+        return original(...args);
+      };
+      const result = await service(devices, matcher, undefined, timer).boot({
+        platform: "android",
+        operationName: "provisionDevice",
+        timeoutMs: 480_000,
+      });
+      expect(result.source).toBe("cold-boot");
+      expect(timer.now()).toBe(bootMs);
+    },
+  );
+
+  it("reports the provision operation and boot phase on its absolute deadline", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.waitForDeviceReady = async (_device, _timeout, _handle, signal) => {
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const error = await service(devices, matcher, undefined, timer)
+      .boot({
+        platform: "android",
+        operationName: "provisionDevice",
+        timeoutMs: 180_000,
+      })
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(DeviceBootTimeoutError);
+    expect(error).toMatchObject({
+      code: "timeout",
+      operation: "provisionDevice",
+      phase: "waiting for device boot readiness",
+      budgetMs: 180_000,
+    });
+  });
+
   it("cold-boots and awaits readiness without MCP-only side effects", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
@@ -817,7 +872,7 @@ describe("DeviceBootService", () => {
     expect(result.sourceImage).toBeUndefined();
     expect(result.processHandle).toBeUndefined();
     expect(result.processId).toBeUndefined();
-    expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:120000");
+    expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:180000");
   });
 
   it("cancels a failed cold boot through its launch handle", async () => {

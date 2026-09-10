@@ -1,4 +1,10 @@
-export const DEFAULT_DEVICE_READY_TIMEOUT_MS = 120000;
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "./runnerReadinessConfig";
+
+// Cold virtual devices can legitimately need three minutes before OS readiness.
+export const DEFAULT_DEVICE_READY_TIMEOUT_MS = 180_000;
+// Legacy startDevice shares one budget across boot and automation readiness.
+export const DEFAULT_START_DEVICE_TIMEOUT_MS =
+  DEFAULT_DEVICE_READY_TIMEOUT_MS + DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
 // A full resource request may verify dozens of native services sequentially.
 export const DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS = 300_000;
 export const DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS = 60_000;

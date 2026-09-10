@@ -99,6 +99,8 @@ class DevicePickerViewModelTest {
       val viewModel = vm(client, boot)
       assertTrue(content(viewModel).devices.isNotEmpty())
       assertTrue(content(viewModel).devices.all { it.platform == Platform.Android })
+      assertTrue(content(viewModel).devices.none { it.inventoryUncertain })
+      assertTrue(content(viewModel).inventoryError?.contains("incomplete") == true)
       viewModel.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       assertEquals(1, boot.bootRequests.size)
     }
@@ -644,6 +646,36 @@ class DevicePickerViewModelTest {
       assertEquals(setOf("android:Pixel_6_API_33"), content(v).bootingIds)
       boot.complete() // release so runTest can finish
     }
+
+  @Test
+  fun `observation warnings belong to the winning refresh generation`() = testScope.runTest {
+    val partial =
+      SINGLE_BOOTED_PIXEL8.replace(
+        "\"lastUpdated\":\"x\"",
+        "\"lastUpdated\":\"x\",\"observationComplete\":false,\"platformObservations\":{\"android\":{\"observationComplete\":true},\"ios\":{\"observationComplete\":false}}",
+      )
+    for (staleIncomplete in listOf(true, false)) {
+      val client = ScriptableResourceClient(SINGLE_BOOTED_PIXEL8, THREE_IMAGES)
+      val viewModel =
+        DevicePickerViewModel(
+          client,
+          FakeDeviceBootController(),
+          testScope,
+          UnconfinedTestDispatcher(),
+        )
+      val staleGate = CompletableDeferred<Unit>()
+      client.bootedJson = if (staleIncomplete) partial else SINGLE_BOOTED_PIXEL8
+      client.imagesGate = staleGate
+      viewModel.onAction(DevicePickerAction.Refresh)
+      client.imagesGate = null
+      client.bootedJson = if (staleIncomplete) SINGLE_BOOTED_PIXEL8 else partial
+      viewModel.onAction(DevicePickerAction.Refresh)
+      val winningWarning = content(viewModel).inventoryError
+      assertEquals(!staleIncomplete, winningWarning != null)
+      staleGate.complete(Unit)
+      assertEquals(winningWarning, content(viewModel).inventoryError)
+    }
+  }
 
   @Test
   fun `a stale load resuming after a boot completion cannot clobber the fresh state`() =

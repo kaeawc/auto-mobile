@@ -387,7 +387,7 @@ export class DevicePool {
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
   private readonly retryExecutor: RetryExecutor;
-  private readonly deviceSessionRepository: DeviceSessionRepository;
+  private readonly deviceSessionRepository: Pick<DeviceSessionRepository, "markAutolockSession">;
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
@@ -490,7 +490,10 @@ export class DevicePool {
     installedAppsRepository?: InstalledAppsStore,
     deviceManager: PlatformDeviceManager = new MultiPlatformDeviceManager(),
     retryExecutor: RetryExecutor = defaultRetryExecutor,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
+    deviceSessionRepository: Pick<
+      DeviceSessionRepository,
+      "markAutolockSession"
+    > = new DeviceSessionRepository(),
     criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher(),
     releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser,
     onDeviceReady?: DeviceReadyListener,

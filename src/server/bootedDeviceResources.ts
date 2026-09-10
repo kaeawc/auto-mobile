@@ -509,7 +509,7 @@ async function discoverBootedDevicesForPlatform(
           resolveDeviceSessionUuid(device.deviceId),
         ),
       ),
-      succeededPlatforms: discovery.succeededPlatforms,
+      succeededPlatforms: complete ? new Set([platform]) : new Set(),
       sourceObservations: Object.fromEntries(
         sourcesForPlatform(platform).map((source) => [
           source,
@@ -752,9 +752,23 @@ async function getBootedDevicesForPlatforms(
   };
 }
 
+export interface AndroidServiceStatusLookup {
+  getManager(
+    device: BootedDevice,
+  ): Pick<AndroidCtrlProxyManager, "isInstalled" | "isEnabled" | "getInstalledApkSha256">;
+  isConnected(deviceId: string): boolean;
+}
+
+const defaultAndroidServiceStatusLookup: AndroidServiceStatusLookup = {
+  getManager: (device) => AndroidCtrlProxyManager.getInstance(device),
+  isConnected: (deviceId) =>
+    AndroidCtrlProxyClient.getExistingInstance(deviceId)?.isConnected() ?? false,
+};
+
 // Query service status for a single booted device
 export async function queryDeviceServiceStatus(
   device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
+  androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
     name: device.name,
@@ -765,7 +779,7 @@ export async function queryDeviceServiceStatus(
 
   try {
     if (device.platform === "android") {
-      const manager = AndroidCtrlProxyManager.getInstance(bootedDevice);
+      const manager = androidLookup.getManager(bootedDevice);
       const [installed, enabled, installedSha256] = await Promise.all([
         manager.isInstalled(),
         manager.isEnabled(),
@@ -782,8 +796,7 @@ export async function queryDeviceServiceStatus(
       return {
         installed,
         enabled,
-        running:
-          AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.isConnected() ?? false,
+        running: androidLookup.isConnected(device.deviceId),
         installedSha256,
         expectedSha256,
         isCompatible,

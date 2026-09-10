@@ -21,14 +21,13 @@ import {
   DeviceLockStatesResourceContent,
   readinessFromServiceStatus,
   queryDeviceServiceStatus,
+  type AndroidServiceStatusLookup,
 } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
 import { z } from "zod/v4";
 
 describe("MCP Booted Device Resources", () => {
@@ -589,6 +588,48 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
+    test("preserves pool counts until every iOS discovery source completes", async () => {
+      const physicalDevice = { ...mockIosDevice2, deviceId: "00008110-001234567890001E" };
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, physicalDevice]);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const pool = new DevicePool(
+        sessions,
+        "test-daemon",
+        timer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      await pool.initializeWithDevices([physicalDevice, mockIosDevice1]);
+      await pool.assignDeviceToSession("physical-session", "ios");
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
+      fakeDeviceUtils.failedSources.add("ios-physical");
+      DaemonState.getInstance().initialize(sessions, pool);
+      const { client } = fixture.getContext();
+      const read = async () => {
+        const response = await client.request(
+          { method: "resources/read", params: { uri: "automobile:devices/booted/ios" } },
+          z.object({ contents: z.array(z.object({ text: z.string() })) }),
+        );
+        return JSON.parse(response.contents[0].text) as BootedDevicesResourceContent;
+      };
+      try {
+        const partial = await read();
+        expect(partial.observationComplete).toBe(false);
+        expect(partial.devices.map((device) => device.deviceId)).toEqual([mockIosDevice1.deviceId]);
+        expect(partial.poolStatus).toMatchObject({ total: 2, idle: 1, assigned: 1 });
+        fakeDeviceUtils.failedSources.clear();
+        const complete = await read();
+        expect(complete.observationComplete).toBe(true);
+        expect(complete.poolStatus?.total).toBe(1);
+      } finally {
+        sessions.stopCleanupTimer();
+      }
+    });
+
     test("should include pool status when daemon is initialized", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
 
@@ -1140,36 +1181,27 @@ describe("booted device readiness", () => {
   });
 
   test("reads Android connection transitions without creating a connection", async () => {
-    let connected = true;
-    const existing = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue({
-      isConnected: () => connected,
-    } as AndroidCtrlProxyClient);
-    const create = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
-      throw new Error("Inventory must not create a client");
-    });
-    const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isInstalled: async () => true,
-      isEnabled: async () => true,
-      getInstalledApkSha256: async () => null,
-    } as AndroidCtrlProxyManager);
-    try {
-      const device = {
-        name: "Pixel",
-        platform: "android" as const,
-        deviceId: "emulator-5554",
-        source: "local" as const,
-      };
-      expect((await queryDeviceServiceStatus(device))?.running).toBe(true);
-      connected = false;
-      expect((await queryDeviceServiceStatus(device))?.running).toBe(false);
-      existing.mockReturnValue(null);
-      expect((await queryDeviceServiceStatus(device))?.running).toBe(false);
-      expect(create).not.toHaveBeenCalled();
-    } finally {
-      existing.mockRestore();
-      create.mockRestore();
-      manager.mockRestore();
-    }
+    const connections = new Set(["emulator-5554"]);
+    const lookup: AndroidServiceStatusLookup = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isEnabled: async () => true,
+        getInstalledApkSha256: async () => null,
+      }),
+      isConnected: (deviceId) => connections.has(deviceId),
+    };
+    const device = {
+      name: "Pixel",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+      source: "local" as const,
+    };
+    expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(true);
+    connections.clear();
+    expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(false);
+    expect(
+      (await queryDeviceServiceStatus({ ...device, deviceId: "unseen" }, lookup))?.running,
+    ).toBe(false);
   });
 
   test("reports an unavailable Android service as not ready", () => {

@@ -25,6 +25,8 @@ private val LOG = LoggerFactory.getLogger("DevicePickerViewModel")
 private const val BOOTED_URI = "automobile:devices/booted"
 private const val IMAGES_URI = "automobile:devices/images"
 
+private data class PickerInventory(val devices: List<PickerDevice>, val warning: String?)
+
 private fun discoverySource(platform: Platform, isVirtual: Boolean): String =
   when {
     platform == Platform.Android -> "android"
@@ -45,7 +47,7 @@ sealed interface DevicePickerUiState {
     val bootingIds: Set<String> = emptySet(),
     /** Per-device boot failure message; presence marks a card as retryable. */
     val bootErrors: Map<String, String> = emptyMap(),
-    /** Last discovery failed: these rows are the previous snapshot, not shutdown evidence. */
+    /** Nonblocking discovery warning: devices may be missing or retained from an older snapshot. */
     val inventoryError: String? = null,
   ) : DevicePickerUiState
 
@@ -199,8 +201,8 @@ class DevicePickerViewModel(
     activeLoads++
     scope.launch {
       try {
-        val devices = fetchDevices()
-        emitIfCurrent(generation, devices)
+        val inventory = fetchDevices()
+        emitIfCurrent(generation, inventory)
       } catch (c: CancellationException) {
         throw c // don't turn cancellation into a load error
       } catch (e: Exception) {
@@ -217,16 +219,18 @@ class DevicePickerViewModel(
   // throws rather than degrading to an empty list: a partial/garbled read must NOT reconstruct a
   // just-booted device as Shutdown (which would permit a duplicate start), and a total failure must
   // not empty the picker and prune live boot state — callers retain the prior snapshot.
-  private suspend fun fetchDevices(): List<PickerDevice> =
+  private suspend fun fetchDevices(): PickerInventory =
     withContext(ioDispatcher) {
       val observation = readBootedDevices()
       val booted = observation.devices
-      val completeSources =
+      val sourcePlatforms =
         mapOf(
-            "android" to Platform.Android,
-            "ios-simulator" to Platform.Ios,
-            "ios-physical" to Platform.Ios,
-          )
+          "android" to Platform.Android,
+          "ios-simulator" to Platform.Ios,
+          "ios-physical" to Platform.Ios,
+        )
+      val completeSources =
+        sourcePlatforms
           .filter { (source, platform) ->
             observation.sourceObservations[source]?.observationComplete
               ?: observation.platformObservations[platform.name.lowercase()]?.observationComplete
@@ -301,7 +305,12 @@ class DevicePickerViewModel(
       check(devices.isNotEmpty() || retained.isNotEmpty() || completeSources.isNotEmpty()) {
         "Device discovery is incomplete; no authoritative inventory is available"
       }
-      devices + retained
+      PickerInventory(
+        devices + retained,
+        if (completeSources.size < sourcePlatforms.size)
+          "Some device discovery is incomplete; devices may be missing or show previous status"
+        else null,
+      )
     }
 
   private suspend fun readBootedDevices(): BootedDevicesResponse =
@@ -336,11 +345,11 @@ class DevicePickerViewModel(
    * still the newest. A stale success is dropped: its persistent selection/boot state was already
    * recorded and a newer emission carries it, so dropping the stale LIST cannot lose it.
    */
-  private fun emitIfCurrent(generation: Long, devices: List<PickerDevice>) {
+  private fun emitIfCurrent(generation: Long, inventory: PickerInventory) {
     if (generation != loadGeneration) return
-    lastInventory = devices
-    LOG.info("Picker loaded ${devices.size} devices")
-    emitContent(devices)
+    lastInventory = inventory.devices
+    LOG.info("Picker loaded ${inventory.devices.size} devices")
+    emitContent(inventory.devices, inventory.warning)
   }
 
   /**
@@ -468,7 +477,7 @@ class DevicePickerViewModel(
           (bootedImageRuntimeIds[bootedDevice.platform].orEmpty() +
             (bootedDevice.id to runtimeDeviceId)))
     val generation = ++loadGeneration
-    val devices =
+    val inventory =
       try {
         fetchDevices()
       } catch (c: CancellationException) {
@@ -480,6 +489,7 @@ class DevicePickerViewModel(
         resolveFetchFailure(generation, e)
         return
       }
+    val devices = inventory.devices
     val bootedRuntime = devices.firstOrNull {
       it.id == runtimeDeviceId &&
         it.platform == bootedDevice.platform &&
@@ -501,7 +511,7 @@ class DevicePickerViewModel(
     // as
     // stale below.
     syncState()
-    emitIfCurrent(generation, devices)
+    emitIfCurrent(generation, inventory)
     // Boot then auto-observe — but observe from the CURRENT (winning) state, not this reload's own
     // (possibly stale) list. If a newer refresh superseded this stalled reload, emitIfCurrent
     // dropped

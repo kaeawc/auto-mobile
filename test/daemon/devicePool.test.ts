@@ -9,10 +9,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import {
-  DeviceSessionRepository,
-  type DeviceSessionPersistence,
-} from "../../src/db/deviceSessionRepository";
+import { type DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -2108,12 +2105,13 @@ describe("DevicePool", () => {
 
     test("retires only its new autolock when metadata persistence outlives cancellation", async () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-      const repository = new DeviceSessionRepository();
       const started = Promise.withResolvers<void>();
       const finished = Promise.withResolvers<void>();
-      repository.markAutolockSession = async () => {
-        started.resolve();
-        await finished.promise;
+      const repository = {
+        markAutolockSession: async () => {
+          started.resolve();
+          await finished.promise;
+        },
       };
       devicePool = new DevicePool(
         sessionManager,
@@ -2171,13 +2169,14 @@ describe("DevicePool", () => {
       };
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
-      const repository = new DeviceSessionRepository();
       let metadataCalls = 0;
-      repository.markAutolockSession = async () => {
-        if (metadataCalls++ === 0) {
-          metadataStarted.resolve();
-          await metadataFinished.promise;
-        }
+      const repository = {
+        markAutolockSession: async () => {
+          if (metadataCalls++ === 0) {
+            metadataStarted.resolve();
+            await metadataFinished.promise;
+          }
+        },
       };
       devicePool = new DevicePool(
         sessionManager,

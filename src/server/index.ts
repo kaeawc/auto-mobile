@@ -3,6 +3,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprot
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
+import { stringifyToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { executionTracker } from "./executionTracker";
@@ -37,6 +38,32 @@ import {
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
+
+async function awaitWithCancellation<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+  if (signal.aborted) {
+    promise.catch(() => undefined);
+    throw new ActionableError("MCP request was cancelled during acquisition.");
+  }
+  let onAbort: (() => void) | undefined;
+  const cancellation = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new ActionableError("MCP request was cancelled during acquisition."));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  promise.catch(() => undefined);
+  try {
+    return await Promise.race([promise, cancellation]);
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
 
 // Import all tool registration functions
 import { registerObserveTools } from "./observeTools";
@@ -420,9 +447,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   };
 
   // Register tool definitions using the lower-level interface
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const listSessionTools = async (
+    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
+  ) => {
     const sessionId = options.sessionContext?.sessionId;
-    const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId);
     const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const selectionSessionManager =
       options.toolSelectionSessionManager ??
@@ -486,7 +514,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         (definition): definition is (typeof definitions)[number] => definition !== undefined,
       ),
     };
-  });
+  };
+  server.server.setRequestHandler(ListToolsRequestSchema, () => listSessionTools());
 
   // Add ping handler as per MCP specification
   // Note: Using runtime access since TypeScript import has issues
@@ -793,7 +822,22 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           }
         : undefined;
 
+    let cleanupAcquisitionRelease: (() => void) | undefined;
+    const releasedAcquisitionSessions = new Set<string>();
     try {
+      if (isDeviceSessionAcquisitionTool(name)) {
+        // A handler can mint and release a session before returning its UUID.
+        // Retain release identities for this call only, through publication.
+        const onSessionReleased = (sessionUuid: string) => {
+          releasedAcquisitionSessions.add(sessionUuid);
+        };
+        const unregister = ToolRegistry.registerSessionBindingReleaseHandler({ onSessionReleased });
+        const unsubscribe = SessionReleaseBroadcaster.subscribe(onSessionReleased);
+        cleanupAcquisitionRelease = () => {
+          unregister();
+          unsubscribe();
+        };
+      }
       if (
         daemonMode &&
         providedSessionUuid &&
@@ -844,7 +888,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             startTime: execution.startTime,
           });
       }
-      const result = await runWithAbortSignal(requestSignal, () =>
+      let result = await runWithAbortSignal(requestSignal, () =>
         runWithToolSelectionContext(
           {
             // A bound derived session may still target a sibling label. Resolve
@@ -868,11 +912,56 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           () => tool.handler(handlerParams, progressCallback, requestSignal),
         ),
       );
+      const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
+        ? getDeviceSessionIdFromResult(result)
+        : undefined;
+      let acquisitionEnrichmentCancelled = false;
+      // Evaluate the returned session directly: a seeded transport may retain
+      // its old binding, and a concurrent acquisition may publish another one.
+      // Reuse the same route/label union as tools/list without publishing yet.
       if (
-        isDeviceSessionAcquisitionTool(name) &&
-        sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
+        (name === "getAndroid" || name === "getApple") &&
+        !result?.isError &&
+        acquiredSessionUuid
       ) {
-        ToolRegistry.notifyToolListChanged();
+        try {
+          const listed = new Set(
+            (
+              await awaitWithCancellation(listSessionTools(acquiredSessionUuid), requestSignal)
+            ).tools.map((tool) => tool.name),
+          );
+          const gatedTools = ToolRegistry.getAllTools()
+            .filter(
+              (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
+            )
+            .map((tool) => tool.name)
+            .sort();
+          let enriched = false;
+          result = {
+            ...result,
+            content: result.content.map((item: { type: string; text?: string }) => {
+              if (enriched || item.type !== "text" || typeof item.text !== "string") {
+                return item;
+              }
+              enriched = true;
+              return {
+                ...item,
+                text: stringifyToolResponse({ ...JSON.parse(item.text), gatedTools }),
+              };
+            }),
+            ...(result.structuredContent
+              ? { structuredContent: { ...result.structuredContent, gatedTools } }
+              : {}),
+          };
+        } catch (error) {
+          acquisitionEnrichmentCancelled ||= Boolean(requestSignal?.aborted);
+          // Acquisition already succeeded. Preserve its session handle so the
+          // proxy can bind and heartbeat it even if optional discovery fails.
+          logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
+        }
+      }
+      if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
+        throw new ActionableError("MCP request was cancelled during acquisition.");
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&
@@ -926,7 +1015,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (omissionReason !== null && responseCarriesStructuredContent(result)) {
         logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
       }
-      return stripToolResultStructuredContent(result, omissionReason);
+      const response = stripToolResultStructuredContent(result, omissionReason);
+      // Publish only after all asynchronous enrichment finishes, so concurrent
+      // direct acquisitions bind in response order. Keep this path synchronous.
+      if (acquiredSessionUuid && releasedAcquisitionSessions.has(acquiredSessionUuid)) {
+        throw new ActionableError(
+          `Device session ${acquiredSessionUuid} was released during acquisition. Call ${name} again to acquire a device.`,
+        );
+      }
+      if (acquiredSessionUuid && sessionToolBinding.bind(sessionId, acquiredSessionUuid)) {
+        ToolRegistry.notifyToolListChanged();
+      }
+      return response;
     } catch (error) {
       if (error instanceof TerminalSessionError) {
         const sessionOwnershipLost = {
@@ -974,6 +1074,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     } finally {
+      cleanupAcquisitionRelease?.();
       executionTracker.endExecution(execution.id);
     }
   });

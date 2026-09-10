@@ -103,6 +103,52 @@ describe("XctestrunPlist", function () {
       const reparsed = expectDict(await parsePlist(xml));
       expect(reparsed.get("weird")).toBe('a & b < c > d "q"');
     });
+
+    test("round-trips a <data> value as a Buffer, not a <string> (issue #6372)", async function () {
+      const payload = Buffer.from("binary xctestrun payload", "utf-8");
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>SomeHash</key>
+\t<data>${payload.toString("base64")}</data>
+</dict>
+</plist>`;
+
+      const root = expectDict(await parsePlist(xml));
+      const parsedValue = root.get("SomeHash");
+      expect(Buffer.isBuffer(parsedValue)).toBe(true);
+      expect((parsedValue as Buffer).equals(payload)).toBe(true);
+
+      const rebuilt = buildPlist(root);
+      expect(rebuilt).toContain(`<data>${payload.toString("base64")}</data>`);
+      expect(rebuilt).not.toContain("<string>");
+
+      const reparsed = expectDict(await parsePlist(rebuilt));
+      const reparsedValue = reparsed.get("SomeHash");
+      expect(Buffer.isBuffer(reparsedValue)).toBe(true);
+      expect((reparsedValue as Buffer).equals(payload)).toBe(true);
+    });
+
+    test("round-trips an integral <real> value as <real>, not <integer> (issue #6372)", async function () {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>TestTimeoutSeconds</key>
+\t<real>30</real>
+</dict>
+</plist>`;
+
+      const root = expectDict(await parsePlist(xml));
+      const rebuilt = buildPlist(root);
+      expect(rebuilt).toContain("<real>30</real>");
+      expect(rebuilt).not.toContain("<integer>30</integer>");
+
+      const reparsed = expectDict(await parsePlist(rebuilt));
+      const reparsedXml = buildPlist(reparsed);
+      expect(reparsedXml).toContain("<real>30</real>");
+    });
   });
 
   describe("injectUITestEnvironment (EC1)", function () {

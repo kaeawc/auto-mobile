@@ -193,13 +193,19 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  async terminateProcessTree(pid: number, deadline?: number): Promise<void> {
+  async terminateProcessTree(
+    pid: number,
+    deadline?: number,
+    options: { skipGraceful?: boolean } = {},
+  ): Promise<void> {
     const descendants = await this.findDescendantProcessIds(pid, deadline);
     const targets = [...descendants].reverse().concat(pid);
-    await this.signalGroup(pid, "TERM", deadline);
-    await this.signalPids(targets, "TERM", deadline);
-    if (await this.waitForExit([pid, ...descendants], deadline)) {
-      return;
+    if (!options.skipGraceful) {
+      await this.signalGroup(pid, "TERM", deadline);
+      await this.signalPids(targets, "TERM", deadline);
+      if (await this.waitForExit([pid, ...descendants], deadline)) {
+        return;
+      }
     }
     await this.signalGroup(pid, "KILL", deadline);
     await this.signalPids(targets, "KILL", deadline);

@@ -286,6 +286,77 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("shutdownAll", function () {
+    test("awaits in-flight force termination when the original stop settles", async () => {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const stop = deferred();
+      const force = deferred();
+      spyOn(manager, "stop").mockReturnValue(stop.promise);
+      spyOn(manager as any, "forceStopForShutdown").mockReturnValue(force.promise);
+      let settled = false;
+      const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer).then(() => {
+        settled = true;
+      });
+      fakeTimer.advanceTime(1_200);
+      stop.resolve();
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      expect(settled).toBe(false);
+      force.resolve();
+      await shutdown;
+      expect(settled).toBe(true);
+    });
+
+    for (const ignoreTerm of [true, false]) {
+      test(`signals a shutdown runner tree within budget (ignoreTerm=${ignoreTerm})`, async () => {
+        const executor = new FakeProcessExecutor();
+        const processes: FakeListeningProcess[] = [42, 43].map((pid) => ({
+          pid,
+          ppid: pid === 42 ? 1 : 42,
+          port: 8765,
+          command: `xcodebuild CtrlProxy -destination id=${testDevice.deviceId}`,
+          alive: true,
+          ignoreTerm,
+        }));
+        installListeningProcessFakes(executor, processes);
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          createFakeBuilder(),
+          executor,
+        );
+        (manager as any).xcTestProcessId = 42;
+        (IOSCtrlProxyManager as any).instances.set(testDevice.deviceId, manager);
+        let settled = false;
+        const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer).then(() => {
+          settled = true;
+        });
+        // Flush process discovery and signaling without advancing the grace sleeps.
+        for (let i = 0; i < 100; i++) {
+          await Promise.resolve();
+        }
+        if (ignoreTerm) {
+          expect(settled).toBe(false);
+          fakeTimer.advanceTime(1_200);
+          for (let i = 0; i < 100; i++) {
+            await Promise.resolve();
+          }
+          fakeTimer.advanceTime(250);
+          for (let i = 0; i < 100; i++) {
+            await Promise.resolve();
+          }
+        }
+        expect(settled).toBe(true);
+        expect(processes.every((process) => !process.alive)).toBe(true);
+        const kills = executor
+          .getExecutedCommands()
+          .filter((command) => command.includes("kill -KILL"));
+        expect(kills.length > 0).toBe(ignoreTerm);
+        expect(fakeTimer.now()).toBeLessThanOrEqual(1_500);
+        await shutdown;
+      });
+    }
+
     test("stops every instance and clears them when one stop fails", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       const otherDevice = {

@@ -7,7 +7,9 @@ import {
   DefaultIOSCtrlProxyBundleDownloader,
   assertZipEntriesContained,
 } from "../../src/utils/IOSCtrlProxyBundleDownloader";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { EventEmitter } from "node:events";
+import { FakeTimer } from "../fakes/FakeTimer";
+import type { ExtractBundleWorker } from "../../src/utils/IOSCtrlProxyBundleDownloader";
 
 describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function () {
   let tempDir: string;
@@ -92,34 +94,69 @@ describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function (
       await expect(fs.access(path.join(tempDir, "escapee.txt"))).rejects.toThrow();
     });
 
-    test("does not block the event loop during extraction (#6574)", async function () {
-      const zip = new AdmZip();
-      for (let i = 0; i < 30; i++) {
-        zip.addFile(`Build/Products/file-${i}.bin`, Buffer.from("x".repeat(20_000)));
+    test("dispatches extraction and waits for worker completion independently of the main timer", async function () {
+      const timer = new FakeTimer();
+      class FakeWorker extends EventEmitter {
+        terminated = false;
+        async terminate(): Promise<number> {
+          this.terminated = true;
+          return 0;
+        }
       }
-      const bundlePath = path.join(tempDir, "bundle.zip");
-      await fs.writeFile(bundlePath, zip.toBuffer());
-
+      const worker = new FakeWorker();
+      let dispatched!: () => void;
+      const dispatch = new Promise<void>((resolve) => {
+        dispatched = resolve;
+      });
       const destination = path.join(tempDir, "extract");
-      const downloader = new DefaultIOSCtrlProxyBundleDownloader();
-
-      // Real wall-clock timer (not a fake): this test proves actual OS-thread
-      // yielding, which a logical/fake clock cannot observe.
-      let ticks = 0;
-      const interval = defaultTimer.setInterval(() => {
-        ticks++;
+      const bundlePath = path.join(tempDir, "bundle.zip");
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader(undefined, undefined, (data) => {
+        expect(data).toEqual({ bundlePath, destination });
+        dispatched();
+        return worker as ExtractBundleWorker;
+      });
+      let completed = false;
+      const extraction = downloader.extractBundle(bundlePath, destination).then(() => {
+        completed = true;
+      });
+      await dispatch;
+      let ticked = false;
+      timer.setTimeout(() => {
+        ticked = true;
       }, 1);
+      timer.advanceTime(1);
+      expect(ticked).toBe(true);
+      expect(completed).toBe(false);
+      worker.emit("message", { ok: true });
+      await extraction;
+      expect(completed).toBe(true);
+      expect(worker.terminated).toBe(true);
+    });
 
-      try {
-        await downloader.extractBundle(bundlePath, destination);
-      } finally {
-        defaultTimer.clearInterval(interval);
-      }
+    test.each([0, 1])("rejects worker exit without a result (code %s)", async function (code) {
+      const worker = new EventEmitter() as EventEmitter & ExtractBundleWorker;
+      worker.terminate = async () => 0;
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader(undefined, undefined, () => {
+        queueMicrotask(() => worker.emit("exit", code));
+        return worker;
+      });
+      await expect(
+        downloader.extractBundle("unused.zip", path.join(tempDir, "out")),
+      ).rejects.toThrow("without a result");
+    });
 
-      // A macrotask timer scheduled before extractBundle must get a chance to
-      // run WHILE extraction is in flight, proving the main event loop was
-      // never monopolized by synchronous decompress/write work (issue #6574).
-      expect(ticks).toBeGreaterThan(0);
+    test("handles worker termination rejection", async function () {
+      const worker = new EventEmitter() as EventEmitter & ExtractBundleWorker;
+      worker.terminate = async () => {
+        throw new Error("termination failed");
+      };
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader(undefined, undefined, () => {
+        queueMicrotask(() => worker.emit("message", { ok: true }));
+        return worker;
+      });
+      await expect(
+        downloader.extractBundle("unused.zip", path.join(tempDir, "out")),
+      ).rejects.toThrow("termination failed");
     });
   });
 });

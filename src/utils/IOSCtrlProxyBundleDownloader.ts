@@ -3,7 +3,6 @@ import * as path from "path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
-import AdmZip from "adm-zip";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import {
   type ChecksumCalculator,
@@ -81,29 +80,7 @@ function resolveWorkerScriptPath(): string {
 const defaultExtractBundleWorkerFactory: ExtractBundleWorkerFactory = (workerData) =>
   new Worker(resolveWorkerScriptPath(), { workerData });
 
-/**
- * Defensive zip-slip containment check (issue #4761). adm-zip >= 0.5.10 already
- * sanitizes entry names in `extractAllTo` (`canonical` + `sanitize`), but this
- * bundle only reaches extraction on the unverified fallback/override paths, so a
- * malicious archive is worth a second, explicit gate: reject any entry that
- * resolves outside the destination BEFORE writing a single file. Belt-and-braces
- * on top of the library guard, independent of the installed adm-zip version.
- */
-export function assertZipEntriesContained(zip: AdmZip, destination: string): void {
-  const resolvedRoot = path.resolve(destination);
-  for (const entry of zip.getEntries()) {
-    const target = path.resolve(resolvedRoot, entry.entryName);
-    const relative = path.relative(resolvedRoot, target);
-    const escapes =
-      relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-    if (escapes) {
-      throw new ActionableError(
-        `Refusing to extract CtrlProxy bundle: entry "${entry.entryName}" resolves outside the ` +
-          `extraction directory ${resolvedRoot} (zip-slip / path traversal).`,
-      );
-    }
-  }
-}
+export { assertZipEntriesContained } from "./workers/assertZipEntriesContained";
 
 export interface CtrlProxyIosBundleDownloader {
   download(url: string, destination: string): Promise<void>;
@@ -154,26 +131,39 @@ export class DefaultIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDo
   private extractInWorker(bundlePath: string, destination: string): Promise<void> {
     const worker = this.workerFactory({ bundlePath, destination });
     return new Promise<void>((resolve, reject) => {
+      let finishing = false;
+      const finish = (error?: unknown): void => {
+        if (finishing) {
+          return;
+        }
+        finishing = true;
+        void worker.terminate().then(
+          () => (error === undefined ? resolve() : reject(error)),
+          (terminationError: unknown) =>
+            reject(toActionableError(terminationError, "Failed to stop extraction worker")),
+        );
+      };
       worker.once("message", (message) => {
-        void worker.terminate();
         if (message.ok) {
-          resolve();
+          finish();
           return;
         }
         const error = new ActionableError(message.message ?? "Failed to extract CtrlProxy bundle");
         if (message.stack) {
           error.stack = message.stack;
         }
-        reject(error);
+        finish(error);
       });
       worker.once("error", (error) => {
-        void worker.terminate();
-        reject(toActionableError(error, "Failed to extract CtrlProxy bundle"));
+        finish(toActionableError(error, "Failed to extract CtrlProxy bundle"));
       });
       worker.once("exit", (code) => {
-        if (code !== 0) {
+        if (!finishing) {
+          finishing = true;
           reject(
-            new ActionableError(`CtrlProxy bundle extraction worker exited with code ${code}`),
+            new ActionableError(
+              `CtrlProxy bundle extraction worker exited with code ${code} without a result`,
+            ),
           );
         }
       });

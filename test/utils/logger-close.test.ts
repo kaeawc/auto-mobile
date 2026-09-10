@@ -123,6 +123,26 @@ describe("closeLogStream (#6149)", () => {
 });
 
 describe("closeLogStream bounded close policy (#6700)", () => {
+  test("clears the timeout when destroy closes synchronously", async () => {
+    class SynchronousCloseStream extends FakeLogStream {
+      destroy(): void {
+        this.emitClose();
+      }
+    }
+    const stream = new SynchronousCloseStream();
+    const timer = new FakeTimer();
+    const error = new Error("close failed");
+    const close = closeLogStream(stream, timer);
+    const concurrentClose = closeLogStream(stream, timer);
+    const outcomes = Promise.allSettled([close, concurrentClose]);
+    stream.failClose(error);
+    expect(await outcomes).toEqual([
+      { status: "rejected", reason: error },
+      { status: "rejected", reason: error },
+    ]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   /**
    * Emits `error` after `end()` and NEVER emits `close` — models a supported
    * runtime that breaks the finish/error/close ordering `closeLogStream`

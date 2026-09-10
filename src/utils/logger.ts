@@ -334,7 +334,6 @@ export function closeLogStream(
     // hang this promise forever.
     const onError = (error: Error): void => {
       pendingError = error;
-      stream.destroy?.(error);
       timeoutHandle = timer.setTimeout(() => {
         settle(() =>
           reject(
@@ -345,6 +344,13 @@ export function closeLogStream(
           ),
         );
       }, timeoutMs);
+      // Let every listener record the error before a synchronous destroy can
+      // emit close (concurrent close callers may share this stream).
+      queueMicrotask(() => {
+        if (!settled) {
+          stream.destroy?.(error);
+        }
+      });
     };
     const onClose = (): void => settle(() => (pendingError ? reject(pendingError) : resolve()));
     stream.once("error", onError);

@@ -1285,37 +1285,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // Stop iproxy tunnel if running
     await this.stopIproxyTunnel({ clearDevicePort: true });
 
-    const retiringPid =
-      this.runnerAbortController === retiringController ? this.xcTestProcessId : null;
-    const retiringChild = this.xcTestProcess;
-    let runnerTerminationError: unknown;
-    if (retiringPid) {
-      try {
-        if (await this.isOwnRunnerProcessAlive(retiringPid)) {
-          await this.processClient.terminateProcessTree(retiringPid, deadline);
-        } else {
-          logger.debug(
-            `[IOSCtrlProxy] Tracked runner PID ${retiringPid} is not an owned CtrlProxy runner; ` +
-              `clearing without terminating`,
-          );
-        }
-      } catch (error) {
-        runnerTerminationError = error;
-        logger.warn(
-          `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${retiringPid}: ` +
-            `${errorMessage(error)}`,
-        );
-      }
-      if (
-        runnerTerminationError === undefined &&
-        this.xcTestProcessId === retiringPid &&
-        this.xcTestProcess === retiringChild &&
-        this.runnerAbortController === retiringController
-      ) {
-        this.xcTestProcessId = null;
-        this.xcTestProcess = null;
-      }
-    }
+    const runnerTerminationError = await this.terminateTrackedRunner(retiringController, deadline);
 
     this.clearCaches();
     this.isStopping = false;
@@ -1332,6 +1302,53 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     PortManager.release(this.device.deviceId);
     logger.info("[IOSCtrlProxy] Service stopped");
+  }
+
+  /**
+   * Terminate the local runner tracked at the time {@link stop} began, using a
+   * single runner identity captured in `retiringController`. Returns the
+   * termination error (or `undefined` on success) so the caller decides whether
+   * to surface it. The tracking fields are cleared only when they still point at
+   * the same runner we set out to retire — an overlapping forceRestart() may have
+   * swapped in a newer runner in the meantime, which we must not clobber.
+   */
+  private async terminateTrackedRunner(
+    retiringController: AbortController | null,
+    deadline?: number,
+  ): Promise<unknown> {
+    const retiringPid =
+      this.runnerAbortController === retiringController ? this.xcTestProcessId : null;
+    const retiringChild = this.xcTestProcess;
+    if (!retiringPid) {
+      return undefined;
+    }
+    let runnerTerminationError: unknown;
+    try {
+      if (await this.isOwnRunnerProcessAlive(retiringPid)) {
+        await this.processClient.terminateProcessTree(retiringPid, deadline);
+      } else {
+        logger.debug(
+          `[IOSCtrlProxy] Tracked runner PID ${retiringPid} is not an owned CtrlProxy runner; ` +
+            `clearing without terminating`,
+        );
+      }
+    } catch (error) {
+      runnerTerminationError = error;
+      logger.warn(
+        `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${retiringPid}: ` +
+          `${errorMessage(error)}`,
+      );
+    }
+    if (
+      runnerTerminationError === undefined &&
+      this.xcTestProcessId === retiringPid &&
+      this.xcTestProcess === retiringChild &&
+      this.runnerAbortController === retiringController
+    ) {
+      this.xcTestProcessId = null;
+      this.xcTestProcess = null;
+    }
+    return runnerTerminationError;
   }
 
   /**

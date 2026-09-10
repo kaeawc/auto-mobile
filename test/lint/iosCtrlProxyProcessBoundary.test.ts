@@ -11,11 +11,60 @@ const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = join(ROOT, "src/utils/ios/IOSCtrlProxyProcessClient.ts");
 const CHECK = join(ROOT, "scripts/check-ios-ctrl-proxy-process-boundary.ts");
 
+// Raw-source regex guards below match against the whole file, so commented-out
+// code would otherwise satisfy (or falsely trip) them (issue #6410 review). Use
+// the TypeScript scanner rather than a comment-stripping regex: the scanner
+// tokenizes strings correctly, so `"http://x"` is never mistaken for a comment.
+function stripComments(source: string): string {
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    /* skipTrivia */ false,
+    ts.LanguageVariant.Standard,
+    source,
+  );
+  let result = "";
+  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+    if (
+      token === ts.SyntaxKind.SingleLineCommentTrivia ||
+      token === ts.SyntaxKind.MultiLineCommentTrivia
+    ) {
+      continue;
+    }
+    result += scanner.getTokenText();
+  }
+  return result;
+}
+
 describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   test("keeps ps, pgrep, and kill ownership in the lifecycle client", () => {
-    const manager = readFileSync(join(ROOT, "src/utils/IOSCtrlProxyManager.ts"), "utf8");
+    const manager = stripComments(
+      readFileSync(join(ROOT, "src/utils/IOSCtrlProxyManager.ts"), "utf8"),
+    );
     expect(manager).not.toMatch(/processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/);
-    expect(readFileSync(OWNER, "utf8")).toMatch(/executeCommand\(\s*"pgrep"/);
+    expect(stripComments(readFileSync(OWNER, "utf8"))).toMatch(/executeCommand\(\s*"pgrep"/);
+  });
+
+  test("ownership guard ignores commented-out process tooling (issue #6410 review)", () => {
+    // A raw-source regex over the whole file fires on commented-out code even
+    // though it is not a real call site; stripping comments first must silence
+    // the false positive while still catching a genuine (uncommented) call.
+    const lineComment = '// processExecutor.exec("kill", ["-9", "42"]);\nconst x = 1;';
+    const blockComment = '/* processExecutor.exec("ps", ["-p", "42"]); */\nconst y = 2;';
+    const realCall = 'processExecutor.exec("kill", ["-9", "42"]);';
+    expect(stripComments(lineComment)).not.toMatch(
+      /processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/,
+    );
+    expect(stripComments(blockComment)).not.toMatch(
+      /processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/,
+    );
+    expect(stripComments(realCall)).toMatch(/processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/);
+    // A comment mentioning the owner API must not satisfy the positive presence
+    // check that pins pgrep ownership inside the lifecycle client.
+    expect(stripComments('/* executeCommand("pgrep") */')).not.toMatch(
+      /executeCommand\(\s*"pgrep"/,
+    );
+    // A `//` inside a string literal is not a comment and must survive.
+    expect(stripComments('const url = "http://example.com";')).toMatch(/http:\/\/example\.com/);
   });
 
   test("rejects direct and wrapped process APIs for lifecycle tools", () => {

@@ -22,13 +22,14 @@ function withDaemonLaunchCwd<T>(launchDirectory: string, run: () => T): T {
 describe("normalizeCoreSimulatorDeviceSetPathEnv", () => {
   test("resolves a relative CORESIMULATOR_DEVICE_SET_PATH against the daemon launch directory", () => {
     const launchDirectory = resolve("launch-project");
-    withDaemonLaunchCwd(launchDirectory, () => {
-      const env = { CORESIMULATOR_DEVICE_SET_PATH: "custom-devices" };
+    const env = {
+      CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
+      AUTOMOBILE_DAEMON_LAUNCH_CWD: launchDirectory,
+    };
 
-      normalizeCoreSimulatorDeviceSetPathEnv(env);
+    normalizeCoreSimulatorDeviceSetPathEnv(env);
 
-      expect(env.CORESIMULATOR_DEVICE_SET_PATH).toBe(join(launchDirectory, "custom-devices"));
-    });
+    expect(env.CORESIMULATOR_DEVICE_SET_PATH).toBe(join(launchDirectory, "custom-devices"));
   });
 
   test("leaves an already-absolute CORESIMULATOR_DEVICE_SET_PATH untouched", () => {
@@ -52,6 +53,23 @@ describe("normalizeCoreSimulatorDeviceSetPathEnv", () => {
     expect(blank.CORESIMULATOR_DEVICE_SET_PATH).toBe("   ");
   });
 
+  test("anchors a relative device set to the launch cwd carried by the injected env, not ambient", () => {
+    // The injected env is the single source of truth for BOTH the device-set
+    // path and the launch directory it resolves against; an ambient
+    // AUTOMOBILE_DAEMON_LAUNCH_CWD must not override the injected one.
+    const injectedLaunch = resolve("/injected/launch/dir");
+    withDaemonLaunchCwd(resolve("/ambient/unused/dir"), () => {
+      const env = {
+        CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
+        AUTOMOBILE_DAEMON_LAUNCH_CWD: injectedLaunch,
+      };
+
+      normalizeCoreSimulatorDeviceSetPathEnv(env);
+
+      expect(env.CORESIMULATOR_DEVICE_SET_PATH).toBe(join(injectedLaunch, "custom-devices"));
+    });
+  });
+
   test("normalizing before a chdir keeps a relative device set resolvable from any later cwd", () => {
     // Regression for issue #6582: SimCtlClient spawns `xcrun simctl` inheriting
     // `process.env` verbatim, so CoreSimulator would resolve a relative
@@ -62,11 +80,12 @@ describe("normalizeCoreSimulatorDeviceSetPathEnv", () => {
     // Those two resolutions diverge unless the value is made absolute — and
     // therefore chdir-invariant — before anything reads it.
     const launchDirectory = resolve("launch-project");
-    const resolvedForEveryConsumer = withDaemonLaunchCwd(launchDirectory, () => {
-      const env = { CORESIMULATOR_DEVICE_SET_PATH: "custom-devices" };
-      normalizeCoreSimulatorDeviceSetPathEnv(env);
-      return env.CORESIMULATOR_DEVICE_SET_PATH;
-    });
+    const env = {
+      CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
+      AUTOMOBILE_DAEMON_LAUNCH_CWD: launchDirectory,
+    };
+    normalizeCoreSimulatorDeviceSetPathEnv(env);
+    const resolvedForEveryConsumer = env.CORESIMULATOR_DEVICE_SET_PATH;
 
     // Simulate reads from two different "current working directories" after a
     // daemon chdir — an already-absolute value ignores cwd entirely, so both

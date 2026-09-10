@@ -28,12 +28,15 @@ export function resolveDaemonLaunchWorkingDirectory(
   return launchCwd && path.isAbsolute(launchCwd) ? launchCwd : currentWorkingDirectory;
 }
 
-export function resolvePathFromDaemonLaunchWorkingDirectory(filePath: string): string {
+export function resolvePathFromDaemonLaunchWorkingDirectory(
+  filePath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   if (path.isAbsolute(filePath)) {
     return filePath;
   }
 
-  return path.resolve(resolveDaemonLaunchWorkingDirectory(), filePath);
+  return path.resolve(resolveDaemonLaunchWorkingDirectory(undefined, env), filePath);
 }
 
 /**
@@ -56,6 +59,11 @@ export function resolvePathFromDaemonLaunchWorkingDirectory(filePath: string): s
 export function normalizeCoreSimulatorDeviceSetPathEnv(env: NodeJS.ProcessEnv = process.env): void {
   const deviceSetPath = env.CORESIMULATOR_DEVICE_SET_PATH?.trim();
   if (deviceSetPath) {
-    env.CORESIMULATOR_DEVICE_SET_PATH = resolvePathFromDaemonLaunchWorkingDirectory(deviceSetPath);
+    // Resolve the anchor against the SAME env the path came from, so an injected
+    // env is the single source of truth for both the path and its launch cwd.
+    env.CORESIMULATOR_DEVICE_SET_PATH = resolvePathFromDaemonLaunchWorkingDirectory(
+      deviceSetPath,
+      env,
+    );
   }
 }

@@ -87,6 +87,35 @@ describe("SimulatorHighlights", () => {
     expect(JSON.parse(executor.args[3])).toMatchObject({ id: "a", shape });
     child.emit("exit", 0);
   });
+  for (const invalid of ["not json\n", '{"requestId":1,"success":true}\n', "x".repeat(65537)]) {
+    test(`terminates invalid acknowledgement hosts (${invalid.length} bytes)`, async () => {
+      const { client, executor } = setup();
+      const first = client.requestAddHighlight("first", shape);
+      const second = client.requestAddHighlight("second", shape);
+      await spawned();
+      const child = executor.children[0];
+      child.stdout.emit("data", Buffer.from(invalid));
+      expect((await first).success).toBe(false);
+      expect((await second).success).toBe(false);
+      expect(child.killed).toBe(true);
+      const replacement = client.requestAddHighlight("replacement", shape);
+      await spawned();
+      expect(executor.children).toHaveLength(2);
+      // A delayed exit from the failed host must not evict its replacement.
+      child.emit("exit", 1);
+      executor.children[1].stdout.emit(
+        "data",
+        Buffer.from(
+          JSON.stringify({
+            requestId: JSON.parse(executor.args[3]).requestId,
+            success: true,
+          }) + "\n",
+        ),
+      );
+      expect(await replacement).toEqual({ success: true });
+      executor.children[1].emit("exit", 0);
+    });
+  }
   test("reports a native permission failure without success", async () => {
     const { client, executor } = setup();
     const pending = client.requestAddHighlight("b", shape);

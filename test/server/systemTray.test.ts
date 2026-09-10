@@ -163,7 +163,7 @@ describe("systemTray post-tap observation", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
-      const before = createObservation(createTrayHierarchy("Reply"));
+      const before = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 2000 });
       const intermediate = createObservation(createTrayHierarchy("Opening reply"));
       const after = createObservation(createTrayHierarchy("Reply"));
       after.viewHierarchy!.hierarchy.node.node[0].$["resource-id"] =
@@ -211,21 +211,27 @@ describe("systemTray post-tap observation", () => {
     });
   }
 
-  test("settles iOS effects when the device clock trails the host", async () => {
-    const timer = new FakeTimer();
-    timer.advanceTime(100000);
-    timer.enableAutoAdvance();
-    const baseline = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 900 });
-    const observer = new FakeObserveScreen();
-    observer.setObserveResult(
-      createObservation({ ...createTrayHierarchy("Send"), updatedAt: 1000 }),
-    );
-    setSystemTrayDependencies({ timer, observeScreenFactory: () => observer });
-    const result = await observeSystemTrayAfterTap({ ...device, platform: "ios" }, baseline);
-    expect(result.settled).toBe(true);
-    expect(observer.getExecuteOptions()[0].minTimestamp).toBe(901);
-    expect(timer.now()).toBe(101050);
-  });
+  for (const platform of ["android", "ios"] as const) {
+    test(`settles ${platform} effects when the device clock trails host fallback time`, async () => {
+      const timer = new FakeTimer();
+      timer.advanceTime(100000);
+      timer.enableAutoAdvance();
+      const baseline = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 900 });
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(
+        createObservation({ ...createTrayHierarchy("Send"), updatedAt: 1000 }),
+      );
+      setSystemTrayDependencies({
+        timer,
+        adbFactory: () => new SequencedFakeAdbExecutor([100000]),
+        observeScreenFactory: () => observer,
+      });
+      const result = await observeSystemTrayAfterTap({ ...device, platform }, baseline);
+      expect(result.settled).toBe(true);
+      expect(observer.getExecuteOptions()[0].minTimestamp).toBe(901);
+      expect(timer.now()).toBe(101050);
+    });
+  }
 
   for (const alternating of [false, true]) {
     test(`${alternating ? "does not settle alternating" : "settles a new"} window with the same tree`, async () => {

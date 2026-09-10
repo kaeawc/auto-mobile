@@ -251,10 +251,9 @@ export const observeSystemTrayAfterTap = async (
   baseline: ObserveResult,
 ): Promise<{ observation?: ObserveResult; settled: boolean }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
-  const minTimestamp =
-    device.platform === "ios"
-      ? hierarchyUpdatedAtToMillis(baseline.viewHierarchy)
-      : await getDetector(device).getObservationTimestamp();
+  // ADB clock probes can fall back to host time. Only hierarchy timestamps
+  // are guaranteed to share the poller's device clock domain on both platforms.
+  const minTimestamp = hierarchyUpdatedAtToMillis(baseline.viewHierarchy);
   let quietSinceMs: number | undefined;
   const outcome = await pollObserveUntil(
     observeScreenFactory(device),

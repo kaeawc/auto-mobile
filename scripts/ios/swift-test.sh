@@ -71,6 +71,7 @@ TESTABLE_PACKAGES=(
     "control-proxy"
     "XCTestRunner"
     "screen-capture"
+    "network-filter"
 )
 
 # Total tests executed in a `swift test` transcript.

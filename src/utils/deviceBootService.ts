@@ -266,7 +266,12 @@ export class DeviceBootService {
           `Available images: ${images.map((device) => device.name).join(", ") || "none"}.`,
       );
     }
-    return this.bootImage(image, context, progress, false);
+    // `deviceId` also accepts an AVD/image name (see getAndroidSchema), so the
+    // serial lookup above cannot see an already-running image named this way.
+    // Route through the same reuse-before-cold-boot path as the name matcher so
+    // both spellings of the same target resolve identically (#3334): booting a
+    // live image is rejected by the platform, or spawns a doomed second child.
+    return this.bootMatchedImage(image, context, progress);
   }
 
   private async bootMatchingDevice(

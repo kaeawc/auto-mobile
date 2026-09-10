@@ -715,6 +715,74 @@ describe("startDevice handler", () => {
     expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
   });
 
+  // #6227 round 7 (continued): with autolock ON the recording above must NOT
+  // run — `bindBootedDeviceSession` -> `autolockDevice` records readiness
+  // itself, and the session it returns need not be the preserved one. Recording
+  // the preserved id anyway bumps an unrelated session's expiry, or logs
+  // "Cannot update cache for session ...: not found" on every recovery.
+  it("does not record readiness on a preserved session the autolock path did not return", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    const preservedSessionId = await pool.autolockDevice(
+      unknownRuntimeDevice.deviceId,
+      "android",
+      "mcp-client",
+      recoveryImage,
+    );
+    expect(preservedSessionId).toBeDefined();
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    const recordedReadinessSessions: string[] = [];
+    const originalSetDeviceReadiness =
+      daemonSessionManager.setDeviceReadiness.bind(daemonSessionManager);
+    daemonSessionManager.setDeviceReadiness = (sessionId, readiness) => {
+      recordedReadinessSessions.push(sessionId);
+      return originalSetDeviceReadiness(sessionId, readiness);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      idGenerator: new CountingIdGenerator("session"),
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    const result = await callStartDevice({ platform: "android", __mcpSessionId: "mcp-client" });
+
+    expect(recordedReadinessSessions.length).toBeGreaterThan(0);
+    expect([...new Set(recordedReadinessSessions)]).toEqual([result.sessionUuid as string]);
+  });
+
   it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1315,6 +1383,62 @@ describe("startDevice handler", () => {
     expect(acquired).toBe(false);
 
     childProcess.emit("exit", 0, null);
+    const lease = await teardownLease;
+    lease.release();
+  });
+
+  it("releases a stranded cold boot lease once the settlement grace elapses", async () => {
+    // An emulator that ignores SIGTERM never emits "exit"; the lease release
+    // deferred onto that settlement must still happen, or the AVD's stable
+    // identity stays reserved for the life of the daemon.
+    class StuckChildProcess extends FakeExitChildProcess {
+      readonly signals: (NodeJS.Signals | undefined)[] = [];
+
+      override kill(signal?: NodeJS.Signals): boolean {
+        this.signals.push(signal);
+        this.killed = true;
+        return true;
+      }
+    }
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(bootTimer);
+    const childProcess = new StuckChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    setDeviceToolsDependencies({
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android", name: androidImage.name })).rejects.toThrow(
+      "runner unavailable",
+    );
+
+    const teardownLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: androidImage.name },
+      { operation: "teardown", deadlineMs: 1_000_000 },
+    );
+    let acquired = false;
+    void teardownLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    bootTimer.advanceTime(1_000);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(acquired).toBe(true);
+    expect(childProcess.signals).toContain("SIGKILL");
     const lease = await teardownLease;
     lease.release();
   });

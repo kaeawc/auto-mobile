@@ -118,6 +118,8 @@ import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerToolSelectionTools, SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionTools";
 import {
+  DEVICE_SESSION_RECOVERY_PROMPT,
+  DEVICE_SESSION_RECOVERY_TOOLS,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "./deviceSessionResult";
@@ -1069,13 +1071,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             code: "session_ownership_lost",
             message:
               `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}. ` +
-              "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+              DEVICE_SESSION_RECOVERY_PROMPT,
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
             retryable: true,
             recovery: {
               action: "acquire_replacement_session",
-              tools: ["getAndroid", "getApple", "startDevice"],
+              tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
             },
             release: error.release,
           },

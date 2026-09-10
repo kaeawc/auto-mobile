@@ -6,6 +6,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { isIosSimulatorUdid } from "./iosDeviceType";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 
 const DEFAULT_TCC_QUERY_TIMEOUT_MS = 5_000;
 const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
@@ -57,6 +58,8 @@ export interface SimulatorTccSqliteClientDependencies {
    * (e.g. CI runners that isolate simulator state per job).
    */
   deviceSetRoot?: string;
+  /** Device-set selection only; launch-directory ownership remains with the daemon. */
+  environment?: Pick<NodeJS.ProcessEnv, "CORESIMULATOR_DEVICE_SET_PATH">;
   timer?: Timer;
   timeoutMs?: number;
 }
@@ -68,10 +71,16 @@ const nodeFileSystem: TccDatabaseFileSystem = { stat };
  * when set, otherwise the default `~/Library/Developer/CoreSimulator/Devices`
  * layout. Shared by every reader that needs a simulator's per-device data
  * root (issue #6583) so the "honor a custom device set" fix lives in one
- * place instead of being re-derived per call site.
+ * place instead of being re-derived per call site. `environment` defaults to
+ * `process.env` so existing single-argument callers (e.g.
+ * `IosNotificationAuthorizationReader`) are unaffected; `SimulatorTccSqliteClient`
+ * passes an injected environment explicitly to keep the seam deterministic.
  */
-export function defaultDeviceSetRoot(homeDirectory: string): string {
-  const configured = process.env.CORESIMULATOR_DEVICE_SET_PATH?.trim();
+export function defaultDeviceSetRoot(
+  homeDirectory: string,
+  environment: { CORESIMULATOR_DEVICE_SET_PATH?: string } = process.env,
+): string {
+  const configured = environment.CORESIMULATOR_DEVICE_SET_PATH?.trim();
   return configured
     ? configured
     : join(homeDirectory, "Library", "Developer", "CoreSimulator", "Devices");
@@ -202,7 +211,10 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     this.executor = dependencies.executor ?? new DefaultHostCommandExecutor();
     this.fileSystem = dependencies.fileSystem ?? nodeFileSystem;
     this.homeDirectory = dependencies.homeDirectory ?? homedir();
-    this.deviceSetRoot = dependencies.deviceSetRoot ?? defaultDeviceSetRoot(this.homeDirectory);
+    this.deviceSetRoot = resolvePathFromDaemonLaunchWorkingDirectory(
+      dependencies.deviceSetRoot ??
+        defaultDeviceSetRoot(this.homeDirectory, dependencies.environment ?? process.env),
+    );
     this.timer = dependencies.timer ?? defaultTimer;
     this.timeoutMs = dependencies.timeoutMs ?? DEFAULT_TCC_QUERY_TIMEOUT_MS;
   }

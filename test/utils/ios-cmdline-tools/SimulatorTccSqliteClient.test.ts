@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { ExecResult } from "../../../src/models";
 import type {
   HostCommandExecutor,
@@ -92,6 +92,33 @@ describe("SimulatorTccSqliteClient", () => {
     expect(permissionForTccService("kTCCServiceUnknown")).toBe("kTCCServiceUnknown");
   });
 
+  test("resolves a relative device set from the daemon launch directory", async () => {
+    const previous = process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD;
+    const launchDirectory = resolve("launch-project");
+    process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD = launchDirectory;
+    try {
+      const fileSystem = new FakeTccFileSystem();
+      fileSystem.error = Object.assign(new Error("absent"), { code: "ENOENT" });
+      const client = new SimulatorTccSqliteClient({
+        executor: new FakeSqliteExecutor(),
+        fileSystem,
+        environment: { CORESIMULATOR_DEVICE_SET_PATH: "custom-devices" },
+      });
+      await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+        "unavailable",
+      );
+      expect(fileSystem.paths).toEqual([
+        join(launchDirectory, "custom-devices", DEVICE_ID, "data/Library/TCC/TCC.db"),
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD = previous;
+      }
+    }
+  });
+
   test("owns TCC path resolution and issues parameterized sqlite argv queries", async () => {
     const executor = new FakeSqliteExecutor();
     const fileSystem = new FakeTccFileSystem();
@@ -121,6 +148,7 @@ describe("SimulatorTccSqliteClient", () => {
       executor,
       fileSystem,
       homeDirectory: "/Users/test user",
+      environment: {},
     });
     const databasePath = join(
       "/Users/test user",

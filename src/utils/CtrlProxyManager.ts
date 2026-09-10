@@ -237,6 +237,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * `AndroidCtrlProxyManager` holds no `PortManager` reservation, so deleting
    * the map entry is the entire eviction.
    */
+  public static getExistingInstance(deviceId: string): AndroidCtrlProxyManager | undefined {
+    return AndroidCtrlProxyManager.instances.get(deviceId);
+  }
+
+  public static evictInstance(instance: AndroidCtrlProxyManager): void {
+    if (AndroidCtrlProxyManager.instances.get(instance.device.deviceId) === instance) {
+      AndroidCtrlProxyManager.instances.delete(instance.device.deviceId);
+    }
+  }
+
   public static evict(deviceId: string, avdName?: string): void {
     if (!avdName) AndroidCtrlProxyManager.instances.delete(deviceId);
     if (avdName) {

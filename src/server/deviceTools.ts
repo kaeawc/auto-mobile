@@ -2649,7 +2649,12 @@ async function readTeardownInventory(
 async function evictTeardownManagers(context: TeardownContext, runtimeId?: string): Promise<void> {
   const { platform, stableId } = context.args.target;
   if (platform === "ios") {
-    await IOSCtrlProxyManager.evict(runtimeId ?? stableId, context.dependencies.timer);
+    if (runtimeId) {
+      await IOSCtrlProxyManager.evict(runtimeId, context.dependencies.timer);
+    } else {
+      await IOSCtrlProxyManager.evict(stableId, context.dependencies.timer);
+      await IOSCtrlProxyManager.evictSimulatorByName(stableId, context.dependencies.timer);
+    }
   } else {
     AndroidCtrlProxyManager.evict(runtimeId ?? stableId, stableId);
   }
@@ -6939,6 +6944,7 @@ export function registerDeviceTools() {
     type TeardownState = {
       context: TeardownContext;
       target: TeardownResolvedTarget;
+      androidManager?: AndroidCtrlProxyManager;
       earlyResponse?: TeardownToolResponse;
     };
     try {
@@ -6971,7 +6977,14 @@ export function registerDeviceTools() {
             if ("response" in resolution) {
               return { response: resolution.response };
             }
-            return { target: { context, target: resolution.target } };
+            const runtime = resolution.target.wasBooted
+              ? resolution.target.bootedDevice
+              : undefined;
+            const androidManager =
+              runtime?.platform === "android"
+                ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
+                : undefined;
+            return { target: { context, target: resolution.target, androidManager } };
           },
           stop: async (state, requestAbortSignal, retainLeaseUntil) => {
             const { context, target } = state;
@@ -7011,7 +7024,11 @@ export function registerDeviceTools() {
                 ? target.device.name
                 : (target.device.deviceId ?? args.target.stableId),
             );
-            await evictTeardownManagers(context, target.device.deviceId);
+            if (state.androidManager) {
+              AndroidCtrlProxyManager.evictInstance(state.androidManager);
+            } else {
+              await evictTeardownManagers(context, target.device.deviceId);
+            }
           },
           verify: async (state, stop) => {
             if (state.earlyResponse) {

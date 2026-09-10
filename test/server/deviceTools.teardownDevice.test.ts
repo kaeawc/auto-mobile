@@ -764,7 +764,7 @@ describe("deleteDevice handler", () => {
     expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
   });
 
-  test("evicts a cached iOS manager after complete discovery proves absence", async () => {
+  test.each([false, true])("evicts an absent cached iOS manager by name: %s", async (byName) => {
     const device = {
       platform: "ios" as const,
       name: "Absent Simulator",
@@ -776,7 +776,9 @@ describe("deleteDevice handler", () => {
       "forceStopForShutdown",
     ).mockResolvedValue();
     try {
-      const response = await teardownTool().handler(request("ios", device.deviceId, device.name));
+      const response = await teardownTool().handler(
+        request("ios", byName ? device.name : device.deviceId, device.name),
+      );
       expect(responseBody(response).state).toBe("already_absent");
       expect(stop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId)).toBeUndefined();
@@ -1037,10 +1039,13 @@ describe("deleteDevice handler", () => {
     manager.setBootedDevices("android", [booted]);
     manager.setDeviceImages("android", [image]);
 
+    const oldManager = AndroidCtrlProxyManager.getInstance(booted);
     const response = await teardownTool().handler(request("android", stableAvdName, stableAvdName));
     const body = responseBody(response);
 
     expect(body.state).toBe("destroyed");
+    expect(AndroidCtrlProxyManager.getInstance(booted)).not.toBe(oldManager);
+    AndroidCtrlProxyManager.resetInstances();
     expect(manager.wasMethodCalled("killDevice")).toBe(true);
     expect(manager.destroyRequests).toEqual([
       expect.objectContaining({

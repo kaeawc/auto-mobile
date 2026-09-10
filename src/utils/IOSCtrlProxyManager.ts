@@ -463,6 +463,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Safe to call for a device that was never constructed via `getInstance` —
    * `PortManager.release` is a no-op when nothing is allocated for the id.
    */
+  public static async evictSimulatorByName(
+    name: string,
+    timer: Timer = defaultTimer,
+  ): Promise<void> {
+    const matching = [...IOSCtrlProxyManager.instances.entries()].filter(
+      ([, instance]) => instance.device.name === name && instance.isSimulator(),
+    );
+    await Promise.all(
+      matching.map(([deviceId, instance]) => {
+        if (IOSCtrlProxyManager.instances.get(deviceId) === instance) {
+          return IOSCtrlProxyManager.evict(deviceId, timer);
+        }
+        return Promise.resolve();
+      }),
+    );
+  }
+
   public static async evict(deviceId: string, timer: Timer = defaultTimer): Promise<void> {
     const instance = IOSCtrlProxyManager.instances.get(deviceId);
     if (instance) {

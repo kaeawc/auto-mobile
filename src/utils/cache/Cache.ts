@@ -333,6 +333,9 @@ export class TTLCache<K, V> implements Cache<K, V> {
    */
   private sweepExpiredPrefix(now: number): number {
     let evicted = 0;
+    const fullScan = this.expiryOrderMayBeOutOfOrder;
+    let previousLiveTimestamp = Number.NEGATIVE_INFINITY;
+    let survivingDisorder = false;
 
     for (const key of this.expiryOrder) {
       this.evictionScanWork++;
@@ -343,9 +346,9 @@ export class TTLCache<K, V> implements Cache<K, V> {
         continue;
       }
       if (now - entry.createdAt < this.ttlMs) {
-        if (!this.expiryOrderMayBeOutOfOrder) {
-          break;
-        }
+        if (!fullScan) break;
+        if (entry.createdAt < previousLiveTimestamp) survivingDisorder = true;
+        previousLiveTimestamp = Math.max(previousLiveTimestamp, entry.createdAt);
         continue;
       }
       this.removeEntry(key);
@@ -353,6 +356,10 @@ export class TTLCache<K, V> implements Cache<K, V> {
       evicted++;
     }
 
+    if (fullScan) {
+      this.expiryOrderMayBeOutOfOrder = survivingDisorder;
+      this.newestCreatedAt = previousLiveTimestamp;
+    }
     if (evicted > 0) {
       this.updateSizeStats();
     }

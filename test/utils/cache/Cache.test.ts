@@ -412,6 +412,7 @@ describe("TTLCache", () => {
       };
       const cacheWithWallClock = new TTLCache<string, string>(wallClock, { ttlMs: 1_000 });
 
+      for (let i = 0; i < 1000; i++) cacheWithWallClock.set(`live-${i}`, "live");
       cacheWithWallClock.set("live-first", "live");
       wallTime = 500; // a backwards Date.now() step before the next insert
       cacheWithWallClock.set("expired-second", "expired");
@@ -420,6 +421,9 @@ describe("TTLCache", () => {
       expect(cacheWithWallClock.cleanup()).toBe(1);
       expect(cacheWithWallClock.get("live-first")).toBe("live");
       expect(cacheWithWallClock.get("expired-second")).toBeUndefined();
+      const work = cacheWithWallClock.evictionScanWorkUnits;
+      cacheWithWallClock.set("after-recovery", "live");
+      expect(cacheWithWallClock.evictionScanWorkUnits - work).toBe(1);
     });
   });
 

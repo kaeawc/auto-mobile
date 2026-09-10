@@ -1,3 +1,4 @@
+import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
@@ -619,13 +620,23 @@ function handleToolResult(result: any, toolName: string): void {
   }
 }
 
-// Main CLI command runner
-export async function runCliCommand(args: string[], daemonOptions?: DaemonOptions): Promise<void> {
+/** Output boundary for CLI help; defaults to the process console. */
+export interface CliOutput {
+  log(message: string): void;
+  error(message: string): void;
+}
+
+/** Run a CLI command, with injectable help output for isolated callers. */
+export async function runCliCommand(
+  args: string[],
+  daemonOptions?: DaemonOptions,
+  helpOutput: CliOutput = console,
+): Promise<void> {
   try {
     if (args.length === 0) {
       // Show help with available tools
       initializeCliTools();
-      showHelp();
+      showHelp(helpOutput);
       return;
     }
 
@@ -633,9 +644,9 @@ export async function runCliCommand(args: string[], daemonOptions?: DaemonOption
     if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
       initializeCliTools();
       if (args.length > 1) {
-        showToolHelp(args[1]);
+        showToolHelp(args[1], helpOutput);
       } else {
-        showHelp();
+        showHelp(helpOutput);
       }
       return;
     }
@@ -675,13 +686,13 @@ export async function runCliCommand(args: string[], daemonOptions?: DaemonOption
 }
 
 // Show general help
-function showHelp(): void {
+function showHelp(output: CliOutput): void {
   const tools = ToolRegistry.getAllTools();
   // Concrete pinned specifier (honors AUTOMOBILE_VERSION), never the floating
   // @latest tag — help output should be reproducible (#2746).
   const installSpecifier = resolveDaemonInstallSpecifier();
 
-  console.log(`
+  output.log(`
 AutoMobile CLI - Android Device Automation
 
 Usage:
@@ -691,11 +702,11 @@ Usage:
 Examples:
   bunx ${installSpecifier} --cli listDeviceImages
   bunx ${installSpecifier} --cli observe
-  bunx ${installSpecifier} --cli tapOn --text "Submit"
+  bunx ${installSpecifier} --cli tapOn --selector '{"text":"Submit"}'
   bunx ${installSpecifier} --cli getAndroid --avd-name "pixel_7_api_34"
   bunx ${installSpecifier} --cli getApple --udid "SIMULATOR-UDID"
   bunx ${installSpecifier} --cli --session-uuid abc-123-uuid observe
-  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
+  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --selector '{"text":"Submit"}'
 
 Options:
   help [tool-name]              Show help for a specific tool
@@ -755,65 +766,66 @@ Session-based Execution:
     categories.get(category)!.push(tool);
   });
 
-  console.log("\nAvailable Tools:");
-  console.log("================");
+  output.log("\nAvailable Tools:");
+  output.log("================");
 
   // Display tools by category
   categories.forEach((toolList, category) => {
-    console.log(`\n${category}:`);
+    output.log(`\n${category}:`);
     toolList.forEach((tool) => {
-      console.log(`  ${tool.name.padEnd(25)} - ${tool.description}`);
+      output.log(`  ${tool.name.padEnd(25)} - ${tool.description}`);
     });
   });
 
-  console.log(`\nTotal: ${tools.length} tools available`);
-  console.log(
+  output.log(`\nTotal: ${tools.length} tools available`);
+  output.log(
     `\nUse 'bunx ${installSpecifier} --cli help <tool-name>' for detailed information about a specific tool.`,
   );
 }
 
 // Show help for a specific tool
-function showToolHelp(toolName: string): void {
+function showToolHelp(toolName: string, output: CliOutput): void {
   const installSpecifier = resolveDaemonInstallSpecifier();
   const tool = ToolRegistry.getTool(toolName);
   if (!tool) {
-    console.error(`Unknown tool: ${toolName}`);
-    console.log(`\nUse 'bunx ${installSpecifier} --cli help' to see available tools.`);
+    output.error(`Unknown tool: ${toolName}`);
+    output.log(`\nUse 'bunx ${installSpecifier} --cli help' to see available tools.`);
     return;
   }
 
-  console.log(`\nTool: ${tool.name}`);
-  console.log("=".repeat(tool.name.length + 6));
-  console.log(`Description: ${tool.description}`);
+  output.log(`\nTool: ${tool.name}`);
+  output.log("=".repeat(tool.name.length + 6));
+  output.log(`Description: ${tool.description}`);
 
   if (tool.supportsProgress) {
-    console.log("Supports: Progress notifications");
+    output.log("Supports: Progress notifications");
   }
 
   // Show schema information
-  console.log("\nParameters:");
+  output.log("\nParameters:");
+  output.log('  Pass objects and arrays as JSON, e.g. --selector \'{"text":"Submit"}\'.');
   try {
     const shape = getCliHelpSchemaShape(tool.schema);
     if (shape) {
       Object.entries(shape).forEach(([key, value]: [string, any]) => {
         const parameter = getCliHelpParameterInfo(value);
 
-        console.log(`  --${key} ${parameter.isOptional ? "(optional)" : "(required)"}`);
-        console.log(`    Type: ${parameter.typeName}`);
+        output.log(`  --${key} ${parameter.isOptional ? "(optional)" : "(required)"}`);
+        output.log(`    Type: ${parameter.typeName}`);
 
         if (parameter.description) {
-          console.log(`    Description: ${parameter.description}`);
+          output.log(`    Description: ${parameter.description}`);
         }
       });
     } else {
-      console.log("  No parameters required");
+      output.log("  No parameters required");
     }
   } catch (error) {
-    console.log("  Could not parse parameter schema");
+    output.log("  Could not parse parameter schema");
   }
 
-  console.log(`\nExample usage:`);
-  console.log(`  bunx ${installSpecifier} --cli ${toolName} [parameters...]`);
+  output.log(`\nExample usage:`);
+  output.log(`  bunx ${installSpecifier} --cli ${toolName} [parameters...]`);
 }
 
 export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
@@ -833,6 +845,7 @@ export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
   return undefined;
 }
 
+/** Describe accepted input values, including nested fields and schema alternatives. */
 export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
   const isOptional =
     typeof schema?.isOptional === "function"
@@ -840,11 +853,71 @@ export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
       : schema?._def?.typeName === "ZodOptional";
   const actualType = isOptional ? (schema?._def?.innerType ?? schema) : schema;
   const rawTypeName = actualType?._def?.typeName ?? actualType?._def?.type ?? "unknown";
-  const typeName = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+  const normalizedType = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+  const typeName = [
+    "union",
+    "intersection",
+    "object",
+    "record",
+    "array",
+    "enum",
+    "literal",
+    "nullable",
+  ].includes(normalizedType)
+    ? formatCliHelpJsonSchema(toJSONSchema(actualType, { io: "input" }))
+    : normalizedType;
 
   return {
     isOptional,
     typeName,
     description: schema?.description ?? actualType?.description ?? actualType?._def?.description,
   };
+}
+
+/** Render JSON schema structure without losing union alternatives or nested keys. */
+function formatCliHelpJsonSchema(schema: any): string {
+  if (schema.not && Object.keys(schema.not).length === 0) {
+    return "never";
+  }
+  if (schema.allOf) {
+    return schema.allOf
+      .map((member: any) => "(" + formatCliHelpJsonSchema(member) + ")")
+      .join(" & ");
+  }
+  const alternatives = schema.anyOf ?? schema.oneOf;
+  if (alternatives) {
+    return alternatives.map((member: any) => formatCliHelpJsonSchema(member)).join(" | ");
+  }
+  if ("const" in schema) {
+    return JSON.stringify(schema.const);
+  }
+  if (schema.enum) {
+    return schema.enum.map((value: unknown) => JSON.stringify(value)).join(" | ");
+  }
+  if (schema.type === "object") {
+    return formatCliHelpObjectSchema(schema);
+  }
+  if (schema.type === "array") {
+    return "(" + formatCliHelpJsonSchema(schema.items ?? {}) + ")[] (JSON)";
+  }
+  return schema.type ?? "any";
+}
+
+/** Describe fixed fields and open record entries in an object input schema. */
+function formatCliHelpObjectSchema(schema: any): string {
+  const fields = Object.entries(schema.properties ?? {}).map(
+    ([key, value]) =>
+      JSON.stringify(key) +
+      (schema.required?.includes(key) ? "" : "?") +
+      ": " +
+      formatCliHelpJsonSchema(value),
+  );
+  if (schema.additionalProperties) {
+    const valueType =
+      schema.additionalProperties === true
+        ? "any"
+        : formatCliHelpJsonSchema(schema.additionalProperties);
+    fields.push("[key: string]: " + valueType);
+  }
+  return "JSON { " + fields.join(", ") + " }";
 }

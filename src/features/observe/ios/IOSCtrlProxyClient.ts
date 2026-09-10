@@ -559,6 +559,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private supportedFeatures: Set<string> | null = null;
   private sdkCapabilities: IosSdkCapabilities | null = null;
   private sdkCapabilitiesKnown = false;
+  private sdkCapabilitiesKnownAt = 0;
   private sdkCapabilityGeneration = 0;
   private sdkCapabilityRefreshInFlight: {
     generation: number;
@@ -643,6 +644,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private sdkEventPollConsecutiveEmpty = 0;
   private static readonly SDK_IDENTITY_REFRESH_TIMEOUT_MS = 100;
   private static readonly SDK_IDENTITY_REFRESH_RETRY_MS = 10;
+  private static readonly SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS = 5000;
 
   private constructor(
     device: BootedDevice,
@@ -1253,7 +1255,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private syncNetworkErrorSimulationToDevice(): void {
-    if (!this.hasSdkCapability("network_error_simulation")) {
+    if (
+      !this.hasSdkCapability("network_error_simulation") &&
+      !this.isLegacySdkCommandSupported("network_error_simulation")
+    ) {
       return;
     }
     if (!this.isCommandSupported("set_network_error_simulation")) {
@@ -1293,6 +1298,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.sdkCapabilityGeneration++;
     this.sdkCapabilities = null;
     this.sdkCapabilitiesKnown = false;
+    this.sdkCapabilitiesKnownAt = 0;
     this.sdkCapabilityRefreshInFlight = null;
   }
 
@@ -1385,9 +1391,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (generation === this.sdkCapabilityGeneration) {
       this.sdkCapabilities = capabilities;
       this.sdkCapabilitiesKnown = true;
-      if (this.sdkCapabilityRefreshInFlight?.generation === generation) {
-        this.sdkCapabilityRefreshInFlight = null;
-      }
+      this.sdkCapabilitiesKnownAt = this.timer.now();
     }
     return generation === this.sdkCapabilityGeneration ? capabilities : null;
   }
@@ -1421,7 +1425,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return this.isLegacySdkCommandSupported(capability);
     }
     if (this.sdkCapabilitiesKnown) {
-      return this.hasSdkCapability(capability, bundleId);
+      if (
+        this.sdkCapabilities === null &&
+        this.timer.now() - this.sdkCapabilitiesKnownAt >=
+          IOSCtrlProxyClient.SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS
+      ) {
+        this.sdkCapabilitiesKnown = false;
+      } else {
+        return this.hasSdkCapability(capability, bundleId);
+      }
     }
     await this.refreshSdkCapabilities();
     return this.hasSdkCapability(capability, bundleId);

@@ -479,7 +479,8 @@ describe("IOSCtrlProxyClient", function () {
 
     test("syncs mock rules for legacy runners that advertise the command", async function () {
       serverConfig.setNetworkMockableEnabled(true);
-      NetworkState.getInstance().addMock({
+      const state = NetworkState.getInstance();
+      state.addMock({
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
@@ -490,6 +491,7 @@ describe("IOSCtrlProxyClient", function () {
         responseBody: "{}",
         contentType: "application/json",
       });
+      state.startSimulation("timeout", 10, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -505,11 +507,17 @@ describe("IOSCtrlProxyClient", function () {
         socket.simulateMessage(
           JSON.stringify({
             type: "connected",
-            supportedCommands: ["set_network_mock_rules"],
+            supportedCommands: ["set_network_mock_rules", "set_network_error_simulation"],
           }),
         );
 
         await waitForMessageType(socket, "set_network_mock_rules");
+        const errorSimulation = await waitForMessageType(socket, "set_network_error_simulation");
+        expect(errorSimulation).toMatchObject({
+          enabled: true,
+          errorType: "timeout",
+          limit: 2,
+        });
       } finally {
         await testClient.close();
       }
@@ -551,6 +559,37 @@ describe("IOSCtrlProxyClient", function () {
         await respondToSdkCapabilityQuery(socket, true, "com.example.sdk", 2);
 
         expect(await capabilityPromise).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rechecks an unavailable SDK after the negative capability cache expires", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities"],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, false);
+        fakeTimer.advanceTime(5000);
+
+        const capabilityPromise = (testClient as any).ensureSdkCapability("highlight");
+        await respondToSdkCapabilityQuery(socket, false, undefined, 2);
+
+        expect(await capabilityPromise).toBe(false);
       } finally {
         await testClient.close();
       }

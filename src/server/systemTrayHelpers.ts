@@ -1407,6 +1407,7 @@ export const swipeElement = async (device: BootedDevice, element: Element): Prom
 };
 
 export interface ListedTrayNotification {
+  id: string | null;
   appId: string;
   appLabel: string | null;
   title: string | null;
@@ -1489,7 +1490,9 @@ const readAppTrayNotifications = (
     if (!label || (label !== appLabel && label !== appId)) {
       continue;
     }
+    const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
+      id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
       appId,
       appLabel: label,
       title: fields.title,
@@ -1508,8 +1511,17 @@ const trayPageOverlap = (
   previous: ListedTrayNotification[],
   current: ListedTrayNotification[],
 ): number => {
-  const left = previous.map((notification) => JSON.stringify(notification));
-  const right = current.map((notification) => JSON.stringify(notification));
+  const identity = (notification: ListedTrayNotification) =>
+    notification.id ??
+    JSON.stringify([
+      notification.appId,
+      notification.title,
+      notification.body,
+      notification.actions,
+      notification.inGroup,
+    ]);
+  const left = previous.map(identity);
+  const right = current.map(identity);
   for (let count = Math.min(left.length, right.length); count > 0; count--) {
     if (left.slice(-count).every((key, index) => key === right[index])) {
       return count;
@@ -1524,7 +1536,7 @@ export const listSystemTrayNotifications = async (
   appId: string,
   appLabel: string | null,
   awaitTimeoutMs: number,
-  progress?: ProgressCallback,
+  _progress?: ProgressCallback,
 ): Promise<{
   notifications: ListedTrayNotification[];
   observation: ObserveResult;
@@ -1536,8 +1548,16 @@ export const listSystemTrayNotifications = async (
   }
   const detector = getDetector(device);
   const { adbFactory, observeScreenFactory } = getSystemTrayDependencies();
-  const opened = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress);
-  let observation = opened.observation;
+  // Collapsing resets SystemUI's scroll position; every bounded scan starts at
+  // the top even when a previous list left the shade open at its tail.
+  await detector.collapseTray();
+  await detector.expandTray();
+  let observation = await waitForSystemTrayOpen(
+    detector,
+    observeScreenFactory(device),
+    await detector.getObservationTimestamp(),
+    awaitTimeoutMs,
+  );
   const notifications: ListedTrayNotification[] = [];
   let previousNotifications: ListedTrayNotification[] = [];
   let previousPage: string | undefined;
@@ -1554,9 +1574,8 @@ export const listSystemTrayNotifications = async (
     }
     previousPage = currentPage;
     const pageNotifications = readAppTrayNotifications(observation.viewHierarchy, appId, appLabel);
-    notifications.push(
-      ...pageNotifications.slice(trayPageOverlap(previousNotifications, pageNotifications)),
-    );
+    const overlap = trayPageOverlap(previousNotifications, pageNotifications);
+    notifications.splice(notifications.length - overlap, overlap, ...pageNotifications);
     previousNotifications = pageNotifications;
     if (swipes === 3) {
       break;
@@ -1575,4 +1594,30 @@ export const listSystemTrayNotifications = async (
     );
   }
   return { notifications, observation, swipes, order: "encounter" };
+};
+
+/** Verify label ownership against a successful, fresh installed-package inventory. */
+export const resolveUniqueTrayAppLabel = async (
+  device: BootedDevice,
+  appId: string,
+  appIds: string[],
+): Promise<string> => {
+  const label = await resolveAppLabel(device, appId);
+  if (!label) {throw new ActionableError(`Cannot verify the notification label for ${appId}.`);}
+  const others = [...new Set(appIds)].filter((id) => id !== appId);
+  // Bound concurrent PackageManager requests instead of flooding the device.
+  for (let offset = 0; offset < others.length; offset += 8) {
+    const labels = await Promise.all(
+      others.slice(offset, offset + 8).map((id) => resolveAppLabel(device, id)),
+    );
+    if (labels.includes(label))
+      {throw new ActionableError(
+        `Notification app label "${label}" belongs to multiple installed apps; the shade cannot distinguish ${appId}.`,
+      );}
+    if (labels.includes(null))
+      {throw new ActionableError(
+        "Cannot verify notification app ownership because some installed app labels are unavailable.",
+      );}
+  }
+  return label;
 };

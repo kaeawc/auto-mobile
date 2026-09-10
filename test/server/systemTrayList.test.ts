@@ -4,6 +4,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
+  resolveUniqueTrayAppLabel,
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
 } from "../../src/server/systemTrayHelpers";
@@ -57,11 +58,72 @@ afterEach(() => {
 });
 
 describe("systemTray list", () => {
+  test("rejects ambiguous installed app labels before scanning", async () => {
+    const { adb } = setup([page(row("private"))]);
+    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPackageInfo: async () => ({ success: true, applicationLabel: "Messages" }),
+    } as unknown as AndroidCtrlProxyClient);
+    try {
+      await expect(
+        resolveUniqueTrayAppLabel(device, "com.example.messages", [
+          "com.example.messages",
+          "com.other.messages",
+        ]),
+      ).rejects.toThrow("multiple installed apps");
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      client.mockRestore();
+    }
+  });
+  test("rejects missing app-label metadata instead of claiming unique ownership", async () => {
+    setup([page()]);
+    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPackageInfo: async (appId: string) => ({
+        success: true,
+        applicationLabel: appId === "com.example.messages" ? "Messages" : undefined,
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+    try {
+      await expect(
+        resolveUniqueTrayAppLabel(device, "com.example.messages", [
+          "com.example.messages",
+          "com.other.app",
+        ]),
+      ).rejects.toThrow("unavailable");
+    } finally {
+      client.mockRestore();
+    }
+  });
+  test("accepts a unique app label after checking other installed packages", async () => {
+    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPackageInfo: async (appId: string) => ({
+        success: true,
+        applicationLabel: appId === "com.example.messages" ? "Messages" : "Other",
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+    try {
+      expect(
+        await resolveUniqueTrayAppLabel(device, "com.example.messages", [
+          "com.example.messages",
+          "com.other.app",
+        ]),
+      ).toBe("Messages");
+    } finally {
+      client.mockRestore();
+    }
+  });
+
   test("registered handler returns notification data to the client", async () => {
     setup([page(row("read me"))]);
-    const apps = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      "com.example.messages",
-    ]);
+    const apps = spyOn(ListInstalledApps.prototype, "executeDetailedResult").mockResolvedValue({
+      successful: true,
+      apps: {
+        profiles: {},
+        system: [
+          { packageName: "com.example.messages", userIds: [0], foreground: false, recent: false },
+        ],
+      },
+    });
     const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       requestPackageInfo: async () => ({ success: true, applicationLabel: "Messages" }),
     } as unknown as AndroidCtrlProxyClient);
@@ -156,6 +218,22 @@ describe("systemTray list", () => {
       actions: ["Reply"],
     });
   });
+  test("uses stable row identity when notification text changes", async () => {
+    const first = row("progress");
+    Object.assign(first.$, { "unique-id": "notification-1" });
+    const updated = row("updated progress");
+    Object.assign(updated.$, { "unique-id": "notification-1" });
+    setup([page(first), page(updated)]);
+    expect((await list()).notifications).toHaveLength(1);
+  });
+  test("ignores changing chronometer text when reconciling adjacent pages", async () => {
+    const first = row("timer");
+    first.node.push(node("android:id/chronometer", "00:01"));
+    const next = row("timer");
+    next.node.push(node("android:id/chronometer", "00:02"));
+    setup([page(first), page(next)]);
+    expect((await list()).notifications).toHaveLength(1);
+  });
   test("retains equal contents seen again after an intervening page", async () => {
     setup([page(row("same")), page(row("middle")), page(row("same"))]);
     expect((await list()).notifications.map((notification) => notification.title)).toEqual([
@@ -190,11 +268,12 @@ describe("systemTray list", () => {
     ]);
   });
   test("opens the shade before listing", async () => {
-    const closed = page();
-    closed.viewHierarchy = { hierarchy: { node: node("launcher") } };
-    const { adb } = setup([closed, page(row("opened"))]);
+    const { adb } = setup([page(row("opened"))]);
     expect((await list()).notifications[0].title).toBe("opened");
-    expect(adb.getExecutedCommands()).toContain("shell cmd statusbar expand-notifications");
+    expect(adb.getExecutedCommands().slice(0, 2)).toEqual([
+      "shell cmd statusbar collapse",
+      "shell cmd statusbar expand-notifications",
+    ]);
   });
   test("rejects unsupported platforms before interaction", async () => {
     const { adb } = setup([page()]);

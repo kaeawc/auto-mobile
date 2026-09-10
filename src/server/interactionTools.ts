@@ -117,6 +117,7 @@ import {
   getSystemTrayDependencies,
   waitForNotificationMatch,
   listSystemTrayNotifications,
+  resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
   ensureSystemTrayOpen,
   ensureSystemTrayClosed,
@@ -1635,6 +1636,42 @@ export function registerInteractionTools() {
         });
       }
 
+      if (args.action === "list") {
+        if (device.platform !== "android")
+          {throw new ActionableError("systemTray list is supported only on Android.");}
+        const appId = args.notification?.appId;
+        if (!appId) {throw new ActionableError("list action requires notification.appId");}
+        const inventory = await new ListInstalledApps(device, undefined, null, {
+          cacheEnabled: false,
+        }).executeDetailedResult();
+        if (!inventory.successful)
+          {throw new ActionableError(
+            "Cannot verify notification ownership because the installed-app inventory is incomplete.",
+          );}
+        const appIds = [
+          ...new Set(
+            [...Object.values(inventory.apps.profiles).flat(), ...inventory.apps.system].map(
+              (app) => app.packageName,
+            ),
+          ),
+        ];
+        if (!appIds.includes(appId)) {throw new ActionableError(`App ${appId} is not installed.`);}
+        const label = await resolveUniqueTrayAppLabel(device, appId, appIds);
+        const result = await listSystemTrayNotifications(
+          device,
+          appId,
+          label,
+          awaitTimeoutMs,
+          progress,
+        );
+        await captureSystemTrayTerminalEvidence(device, result.observation);
+        return createJSONToolResponse({
+          message: `Listed ${result.notifications.length} notifications for ${appId}`,
+          ...result,
+          success: true,
+        });
+      }
+
       const notification = args.notification ?? {};
       let appLabel: string | null = null;
       let appMatchTexts: string[] = [];
@@ -1648,25 +1685,6 @@ export function registerInteractionTools() {
 
         appLabel = await resolveAppLabel(device, notification.appId);
         appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
-      }
-
-      if (args.action === "list") {
-        if (!notification.appId) {
-          throw new ActionableError("list action requires notification.appId");
-        }
-        const result = await listSystemTrayNotifications(
-          device,
-          notification.appId,
-          appLabel,
-          awaitTimeoutMs,
-          progress,
-        );
-        await captureSystemTrayTerminalEvidence(device, result.observation);
-        return createJSONToolResponse({
-          message: `Listed ${result.notifications.length} notifications for ${notification.appId}`,
-          ...result,
-          success: true,
-        });
       }
 
       if (args.action === "find") {

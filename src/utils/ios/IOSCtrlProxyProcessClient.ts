@@ -161,7 +161,11 @@ export class IOSCtrlProxyProcessClient {
     );
   }
 
-  async findDescendantProcessIds(rootPid: number, deadline?: number): Promise<number[]> {
+  async findDescendantProcessIds(
+    rootPid: number,
+    deadline?: number,
+    options: { throwOnError?: boolean } = {},
+  ): Promise<number[]> {
     try {
       const { stdout } = await this.executeCommand("ps", ["-axo", "pid=,ppid="], deadline);
       const children = new Map<number, number[]>();
@@ -189,6 +193,9 @@ export class IOSCtrlProxyProcessClient {
       return descendants;
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to enumerate descendants of PID ${rootPid}: ${error}`);
+      if (options.throwOnError) {
+        throw error;
+      }
       return [];
     }
   }
@@ -198,7 +205,32 @@ export class IOSCtrlProxyProcessClient {
     deadline?: number,
     options: { skipGraceful?: boolean } = {},
   ): Promise<void> {
-    const descendants = await this.findDescendantProcessIds(pid, deadline);
+    let descendants: number[];
+    if (options.skipGraceful) {
+      // Snapshot before root exit can reparent children, but reserve at least
+      // half the remaining budget for signals. Never spend over 50ms discovering.
+      const discoveryBudgetMs = Math.min(50, (this.remainingTimeoutMs(deadline) ?? 100) / 2);
+      let discoveryError: unknown;
+      try {
+        descendants = await this.findDescendantProcessIds(
+          pid,
+          this.timer.now() + discoveryBudgetMs,
+          { throwOnError: true },
+        );
+      } catch (error) {
+        descendants = [];
+        discoveryError = error;
+      }
+      await this.signalGroup(pid, "KILL", deadline);
+      await this.signalPids([pid], "KILL", deadline);
+      if (discoveryError !== undefined) {
+        throw new Error(`CtrlProxy descendant discovery failed for PID ${pid}`, {
+          cause: discoveryError,
+        });
+      }
+    } else {
+      descendants = await this.findDescendantProcessIds(pid, deadline);
+    }
     const targets = [...descendants].reverse().concat(pid);
     if (!options.skipGraceful) {
       await this.signalGroup(pid, "TERM", deadline);
@@ -207,8 +239,12 @@ export class IOSCtrlProxyProcessClient {
         return;
       }
     }
-    await this.signalGroup(pid, "KILL", deadline);
-    await this.signalPids(targets, "KILL", deadline);
+    if (options.skipGraceful) {
+      await this.signalPids([...descendants].reverse(), "KILL", deadline);
+    } else {
+      await this.signalGroup(pid, "KILL", deadline);
+      await this.signalPids(targets, "KILL", deadline);
+    }
     if (!(await this.waitForExit([pid, ...descendants], deadline))) {
       throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);
     }

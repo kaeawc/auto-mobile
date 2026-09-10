@@ -676,6 +676,25 @@ interface StableDeviceTarget {
 
 type StableDeviceLifecycleTimeoutFactory = (detail: string) => Error;
 
+/**
+ * Shared deadline mapping for every lifecycle reservation, stable or selector:
+ * a coordinator rejection at or after the deadline is contention, so it must
+ * carry the caller's structured timeout error rather than surfacing as an
+ * opaque platform failure. Kept synchronous so callers add no extra await hop.
+ */
+function rethrowDeviceLifecycleReservationFailure(
+  error: unknown,
+  timer: Timer,
+  deadlineMs: number,
+  timeoutError: StableDeviceLifecycleTimeoutFactory,
+  timeoutDetail: string,
+): never {
+  if (timer.now() >= deadlineMs) {
+    throw timeoutError(timeoutDetail);
+  }
+  throw error;
+}
+
 async function reserveStableDeviceLifecycle(
   target: StableDeviceTarget,
   deadlineDevice: BootedDevice,
@@ -701,10 +720,13 @@ async function reserveStableDeviceLifecycle(
       },
     );
   } catch (error) {
-    if (timer.now() >= deadlineMs) {
-      throw timeoutError("waiting for stable device lifecycle reservation");
-    }
-    throw error;
+    rethrowDeviceLifecycleReservationFailure(
+      error,
+      timer,
+      deadlineMs,
+      timeoutError,
+      "waiting for stable device lifecycle reservation",
+    );
   }
 }
 
@@ -4667,14 +4689,23 @@ export function registerDeviceTools() {
     }
   }
 
+  /**
+   * Creation ownership accumulates across the attempts of one operation. The
+   * first attempt's `created` must survive a rebind that merely re-adopts the
+   * device it created, and a rebind that genuinely re-created a device that
+   * disappeared between attempts must claim ownership instead of inheriting the
+   * first attempt's `adopted` — a caller that only deletes what AutoMobile
+   * created would otherwise leak it.
+   */
   function preserveProvisionDeviceOwnership(
     persisted: Record<string, unknown>,
     refreshed: Record<string, unknown>,
   ): Record<string, unknown> {
+    const created = persisted.created === true || refreshed.created === true;
     return {
       ...refreshed,
-      created: persisted.created,
-      adopted: persisted.adopted,
+      created,
+      adopted: !created,
     };
   }
 
@@ -4860,21 +4891,80 @@ export function registerDeviceTools() {
     }
   }
 
+  /**
+   * The exact-identity filter shared by iOS lifecycle reservation and rollback:
+   * a simulator only matches when its name, runtime and device type all match
+   * the request, preferring an available one over an unavailable duplicate.
+   */
+  function findExactIosProvisionDeviceCandidate(
+    args: ProvisionDeviceArgs,
+    devices: DeviceInfo[],
+  ): DeviceInfo | undefined {
+    const spec = args.device.spec;
+    const candidates = devices.filter(
+      (device) =>
+        device.platform === "ios" &&
+        device.name === args.device.name &&
+        device.deviceId &&
+        device.runtime === spec.runtime &&
+        device.deviceType === spec.deviceType,
+    );
+    return candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+  }
+
+  /**
+   * Rollback target for an iOS simulator created before provisioning failed.
+   * `onBeforeCreate` only fires once the provisioner has established that no
+   * matching simulator existed, so a match found now is the one this operation
+   * created — the iOS equivalent of Android's name-keyed fallback target.
+   */
+  async function resolveCreatedIosProvisionDeviceRollbackTarget(
+    args: ProvisionDeviceArgs,
+    deviceManager: PlatformDeviceManager,
+  ): Promise<DeviceInfo | undefined> {
+    try {
+      const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
+        bypassIosDeviceListCache: true,
+      });
+      if (!discovery.succeededPlatforms.has("ios")) {
+        logger.warn(
+          `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': identity discovery did not complete.`,
+        );
+        return undefined;
+      }
+      return findExactIosProvisionDeviceCandidate(args, discovery.devices);
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Failed to resolve the iOS rollback target for '${args.device.name}': ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   async function rethrowFailedProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
+    deviceManager: PlatformDeviceManager,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
     creationStarted: boolean,
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
     unownedColdBootSettlement: Promise<void> | undefined,
   ): Promise<never> {
+    if (error instanceof McpSessionRecoveryInProgressError) {
+      // A transport routing conflict does not invalidate the healthy device
+      // session, so it must reach `executeProvisionDevice`'s guard with its
+      // identity intact instead of being wrapped into a rollback error after
+      // destroying the device it never invalidated.
+      throw error;
+    }
     const createdDevice =
       provisioned?.created || creationStarted
         ? (provisioned?.device ??
           (args.device.platform === "android"
             ? { name: args.device.name, platform: "android", isRunning: false }
-            : undefined))
+            : await resolveCreatedIosProvisionDeviceRollbackTarget(args, deviceManager)))
         : undefined;
     if (!createdDevice) {
       throw error;
@@ -4914,16 +5004,7 @@ export function registerDeviceTools() {
         `Cannot provision iOS device '${args.device.name}' because simulator identity discovery did not complete.`,
       );
     }
-    const spec = args.device.spec;
-    const candidates = discovery.devices.filter(
-      (device) =>
-        device.platform === "ios" &&
-        device.name === args.device.name &&
-        device.deviceId &&
-        device.runtime === spec.runtime &&
-        device.deviceType === spec.deviceType,
-    );
-    const existing = candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+    const existing = findExactIosProvisionDeviceCandidate(args, discovery.devices);
     if (!existing?.deviceId) {
       return undefined;
     }
@@ -5007,10 +5088,26 @@ export function registerDeviceTools() {
           totalDeadlineMs,
           signal,
         );
-        lifecycleLease ??= await deps.lifecycleCoordinator.reserve(
-          { kind: "selector", platform: "ios", selector: args.device.name },
-          { operation: "provision", deadlineMs: totalDeadlineMs, signal },
-        );
+        if (!lifecycleLease) {
+          try {
+            lifecycleLease = await deps.lifecycleCoordinator.reserve(
+              { kind: "selector", platform: "ios", selector: args.device.name },
+              { operation: "provision", deadlineMs: totalDeadlineMs, signal },
+            );
+          } catch (error) {
+            rethrowDeviceLifecycleReservationFailure(
+              error,
+              deps.timer,
+              totalDeadlineMs,
+              (detail) =>
+                new ProvisionDeviceError(
+                  "timeout",
+                  `Timed out provisioning ios device '${args.device.name}': ${detail}.`,
+                ),
+              "waiting for the device lifecycle reservation",
+            );
+          }
+        }
       }
       const deviceCreationGate = deps.deviceCreationGateFactory();
       provisioned = await provisionExactDevice(
@@ -5048,7 +5145,16 @@ export function registerDeviceTools() {
         bootState,
       );
       if (provisioned.created || booted.source === "cold-boot") {
-        await deps.notifyResourcesChanged();
+        // Session and pool ownership are already committed by
+        // `bootExactProvisionedDevice`. A best-effort resource notification is
+        // safe to swallow here: failing it must neither turn that committed
+        // success into destructive rollback nor strand the bound session.
+        void deps.notifyResourcesChanged().catch((error: unknown) => {
+          logger.warn(
+            `[DeviceTools] Failed to notify resource changes after provisioning ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
+            error,
+          );
+        });
       }
       perf.end();
       return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);
@@ -5057,6 +5163,7 @@ export function registerDeviceTools() {
       return await rethrowFailedProvisionDeviceLifecycle(
         args,
         deps,
+        deviceManager,
         provisioned,
         creationStarted,
         () => {

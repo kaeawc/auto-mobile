@@ -23,7 +23,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, McpSessionRecoveryInProgressError } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
@@ -1079,6 +1079,125 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
 
+  test("keeps a committed provision when the post-commit resource notification fails", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [created.device]);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {},
+      notifyResourcesChanged: async () => {
+        throw new Error("resource notification transport closed");
+      },
+      idGenerator: new FakeIdGenerator(["session-notify-failure", "cleanup-notify-failure"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse(
+      ((await tool.handler(provisionTestArgs("android", "operation-notify-failure"))) as any)
+        .content[0].text,
+    );
+
+    // Session + pool ownership are already committed by the time the
+    // best-effort notification runs, so its failure must neither be reported
+    // as a provisioning failure nor drive destructive rollback.
+    expect(response).toMatchObject({
+      created: true,
+      lifecycleState: "ready",
+      sessionId: "session-notify-failure",
+    });
+    expect(response.success).toBeUndefined();
+    expect(response.error).toBeUndefined();
+    expect(response.cleanup).toBeUndefined();
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toEqual([]);
+    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+  });
+
+  test("cleans up an iOS simulator created before exact provisioning fails", async () => {
+    const created = provisionedTestDevice("ios", true);
+    configureProvisionBootAndTeardown(deviceManager, "ios");
+    deviceManager.setDeviceImages("ios", []);
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          // simctl created the simulator, but its UDID never reached us.
+          deviceManager.setDeviceImages("ios", [created.device]);
+          throw new Error("reading the created simulator UDID failed");
+        },
+      }),
+      idGenerator: new FakeIdGenerator(["cleanup-partial-ios"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse(
+      ((await tool.handler(provisionTestArgs("ios", "operation-partial-create-ios"))) as any)
+        .content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", operationId: "cleanup-partial-ios" },
+    });
+    expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
+  });
+
+  test("does not roll back a fresh provision when MCP session recovery is in progress", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [created.device]);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new McpSessionRecoveryInProgressError("mcp-session-recovering");
+      },
+      idGenerator: new FakeIdGenerator(["session-recovery", "cleanup-recovery"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = await tool.handler(
+      provisionTestArgs("android", "operation-recovery-fresh-android"),
+    );
+
+    // A transport routing conflict does not invalidate the healthy device, so
+    // the recovery error must keep its identity instead of being wrapped by
+    // the rollback and costing a full create + cold boot on retry.
+    expect(JSON.stringify(response)).toContain("recovering a device");
+    expect(JSON.stringify(response)).not.toContain("cleanup");
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toEqual([]);
+    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+  });
+
   test("cleans up a retried operation's adopted device when the original cleanup failed", async () => {
     const adopted = provisionedTestDevice("android", false);
     configureProvisionBootAndTeardown(deviceManager, "android");
@@ -1320,6 +1439,47 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.getExecutedOperations()).toContainEqual(
       expect.stringContaining("startDevice:phone-api-36-a"),
     );
+  });
+
+  test("reports a contended iOS selector reservation as a timeout", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const blocker = await coordinator.reserve(
+      { kind: "selector", platform: "ios", selector: "iPhone 17" },
+      { operation: "provision", deadlineMs: 10_000_000 },
+    );
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: coordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () => {
+          throw new Error("provisioning must not start without a reservation");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const pending = tool.handler({
+      ...provisionTestArgs("ios", "operation-ios-selector-contended"),
+      boot: false,
+      readiness: "none",
+      timeoutMs: 60_000,
+    });
+    for (let index = 0; index < 30; index++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(60_001);
+    const response = JSON.parse(((await pending) as any).content[0].text);
+    blocker.release();
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "timeout" },
+    });
   });
 
   test("fails closed when iOS lifecycle-reservation discovery is incomplete", async () => {
@@ -2072,6 +2232,69 @@ describe("provisionDevice handler", () => {
 
     expect(calls).toBe(2);
     expect(first).toMatchObject({ created: true, adopted: false });
+    expect(second).toMatchObject({ created: true, adopted: false });
+  });
+
+  test("takes creation ownership when a rebind re-creates a device the first attempt adopted", async () => {
+    let calls = 0;
+    const replayProvisioner: ExactDeviceProvisioner = {
+      provision: async (request) => {
+        calls++;
+        // The adopted device disappeared between attempts, so the rebind
+        // genuinely creates it.
+        if (calls > 1) {
+          await request.onBeforeCreate?.();
+        }
+        return {
+          created: calls > 1,
+          device: {
+            name: request.name,
+            platform: "android",
+            isRunning: false,
+          },
+          resolvedSpec: {
+            ...request.spec,
+            displayCutout: classifyDisplayCutout(request.platform, request.spec.deviceType),
+          },
+        };
+      },
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => replayProvisioner,
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-rebind-recreated",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "none" as const,
+    };
+
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(calls).toBe(2);
+    expect(first).toMatchObject({ created: false, adopted: true });
+    // A caller that only deletes what AutoMobile created must not be told this
+    // device was adopted.
     expect(second).toMatchObject({ created: true, adopted: false });
   });
 

@@ -4755,9 +4755,61 @@ export function registerDeviceTools() {
     }
   }
 
+  /**
+   * The exact-identity filter shared by iOS lifecycle reservation and rollback:
+   * a simulator only matches when its name, runtime and device type all match
+   * the request, preferring an available one over an unavailable duplicate.
+   */
+  function findExactIosProvisionDeviceCandidate(
+    args: ProvisionDeviceArgs,
+    devices: DeviceInfo[],
+  ): DeviceInfo | undefined {
+    const spec = args.device.spec;
+    const candidates = devices.filter(
+      (device) =>
+        device.platform === "ios" &&
+        device.name === args.device.name &&
+        device.deviceId &&
+        device.runtime === spec.runtime &&
+        device.deviceType === spec.deviceType,
+    );
+    return candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+  }
+
+  /**
+   * Rollback target for an iOS simulator created before provisioning failed.
+   * `onBeforeCreate` only fires once the provisioner has established that no
+   * matching simulator existed, so a match found now is the one this operation
+   * created — the iOS equivalent of Android's name-keyed fallback target.
+   */
+  async function resolveCreatedIosProvisionDeviceRollbackTarget(
+    args: ProvisionDeviceArgs,
+    deviceManager: PlatformDeviceManager,
+  ): Promise<DeviceInfo | undefined> {
+    try {
+      const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
+        bypassIosDeviceListCache: true,
+      });
+      if (!discovery.succeededPlatforms.has("ios")) {
+        logger.warn(
+          `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': identity discovery did not complete.`,
+        );
+        return undefined;
+      }
+      return findExactIosProvisionDeviceCandidate(args, discovery.devices);
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Failed to resolve the iOS rollback target for '${args.device.name}': ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   async function rethrowFailedProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
+    deviceManager: PlatformDeviceManager,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
     creationStarted: boolean,
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
@@ -4775,7 +4827,7 @@ export function registerDeviceTools() {
         ? (provisioned?.device ??
           (args.device.platform === "android"
             ? { name: args.device.name, platform: "android", isRunning: false }
-            : undefined))
+            : await resolveCreatedIosProvisionDeviceRollbackTarget(args, deviceManager)))
         : undefined;
     if (!createdDevice) {
       throw error;
@@ -4812,16 +4864,7 @@ export function registerDeviceTools() {
         `Cannot provision iOS device '${args.device.name}' because simulator identity discovery did not complete.`,
       );
     }
-    const spec = args.device.spec;
-    const candidates = discovery.devices.filter(
-      (device) =>
-        device.platform === "ios" &&
-        device.name === args.device.name &&
-        device.deviceId &&
-        device.runtime === spec.runtime &&
-        device.deviceType === spec.deviceType,
-    );
-    const existing = candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+    const existing = findExactIosProvisionDeviceCandidate(args, discovery.devices);
     if (!existing?.deviceId) {
       return undefined;
     }
@@ -4962,6 +5005,7 @@ export function registerDeviceTools() {
       return await rethrowFailedProvisionDeviceLifecycle(
         args,
         deps,
+        deviceManager,
         provisioned,
         creationStarted,
         () => {

@@ -1123,6 +1123,39 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
   });
 
+  test("cleans up an iOS simulator created before exact provisioning fails", async () => {
+    const created = provisionedTestDevice("ios", true);
+    configureProvisionBootAndTeardown(deviceManager, "ios");
+    deviceManager.setDeviceImages("ios", []);
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          // simctl created the simulator, but its UDID never reached us.
+          deviceManager.setDeviceImages("ios", [created.device]);
+          throw new Error("reading the created simulator UDID failed");
+        },
+      }),
+      idGenerator: new FakeIdGenerator(["cleanup-partial-ios"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse(
+      ((await tool.handler(provisionTestArgs("ios", "operation-partial-create-ios"))) as any)
+        .content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", operationId: "cleanup-partial-ios" },
+    });
+    expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
+  });
+
   test("does not roll back a fresh provision when MCP session recovery is in progress", async () => {
     const created = provisionedTestDevice("android", true);
     configureProvisionBootAndTeardown(deviceManager, "android");

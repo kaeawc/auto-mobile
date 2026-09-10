@@ -1615,7 +1615,15 @@ describe("IOSCtrlProxyManager", function () {
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912345;
+      // Startup may publish its PID while tunnel shutdown yields.
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        stopIproxyTunnel: () => Promise<void>;
+      };
+      internal.stopIproxyTunnel = async () => {
+        await Promise.resolve();
+        internal.xcTestProcessId = 912345;
+      };
 
       const ownedRunner = ownRunnerProcess(912345);
       const otherDeviceRunner: FakeListeningProcess = {

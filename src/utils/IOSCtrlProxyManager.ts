@@ -1256,7 +1256,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.processSupervisor.stop();
 
     const retiringController = this.runnerAbortController;
-    const retiringPid = this.xcTestProcessId;
 
     if (this.useRemoteRunner()) {
       try {
@@ -1286,25 +1285,33 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // Stop iproxy tunnel if running
     await this.stopIproxyTunnel({ clearDevicePort: true });
 
+    const retiringPid =
+      this.runnerAbortController === retiringController ? this.xcTestProcessId : null;
+    const retiringChild = this.xcTestProcess;
     let runnerTerminationError: unknown;
-    if (this.xcTestProcessId) {
+    if (retiringPid) {
       try {
-        if (await this.isOwnRunnerProcessAlive()) {
-          await this.processClient.terminateProcessTree(retiringPid!, deadline);
+        if (await this.isOwnRunnerProcessAlive(retiringPid)) {
+          await this.processClient.terminateProcessTree(retiringPid, deadline);
         } else {
           logger.debug(
-            `[IOSCtrlProxy] Tracked runner PID ${this.xcTestProcessId} is not an owned CtrlProxy runner; ` +
+            `[IOSCtrlProxy] Tracked runner PID ${retiringPid} is not an owned CtrlProxy runner; ` +
               `clearing without terminating`,
           );
         }
       } catch (error) {
         runnerTerminationError = error;
         logger.warn(
-          `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${this.xcTestProcessId}: ` +
+          `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${retiringPid}: ` +
             `${errorMessage(error)}`,
         );
       }
-      if (runnerTerminationError === undefined) {
+      if (
+        runnerTerminationError === undefined &&
+        this.xcTestProcessId === retiringPid &&
+        this.xcTestProcess === retiringChild &&
+        this.runnerAbortController === retiringController
+      ) {
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
       }
@@ -1997,25 +2004,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * this does NOT require a health response, so a runner still initializing counts
    * as alive — used to avoid killing+respawning our own still-starting runner (#2834).
    */
-  private async isOwnRunnerProcessAlive(): Promise<boolean> {
-    if (!this.xcTestProcessId) {
+  private async isOwnRunnerProcessAlive(
+    pid: number | null = this.xcTestProcessId,
+  ): Promise<boolean> {
+    if (!pid) {
       return false;
     }
     if (this.useRemoteRunner()) {
       try {
         const status = await this.remoteRunner.status({
           deviceId: this.device.deviceId,
-          pid: this.xcTestProcessId,
+          pid: pid,
         });
         // PID-strict: the remote daemon resolves status by deviceId BEFORE pid,
         // so running=true alone is not proof the TRACKED pid is alive — a newer runner
         // for the same device aliases it, and treating it as "ours" would make us wait
         // on (and eventually stop) that newer runner (#2834 review).
-        return (
-          status.success &&
-          (status.data?.running ?? false) &&
-          status.data?.pid === this.xcTestProcessId
-        );
+        return status.success && (status.data?.running ?? false) && status.data?.pid === pid;
       } catch (error) {
         // A failed remote status call (network/daemon error) is treated the same as
         // "not our tracked runner": returning false here is safe because the caller
@@ -2024,7 +2029,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return false;
       }
     }
-    if (!(await this.isProcessRunning(this.xcTestProcessId))) {
+    if (!(await this.isProcessRunning(pid))) {
       return false;
     }
     // Guard against PID reuse (#2834 review): a bare `kill -0` only proves *some*
@@ -2032,7 +2037,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // for THIS device before treating it as "still starting" — otherwise a recycled
     // PID (our runner exited, its PID reassigned to an unrelated process) would make
     // us defer to a health endpoint that never comes.
-    const info = await this.processClient.getProcessInfo(this.xcTestProcessId);
+    const info = await this.processClient.getProcessInfo(pid);
     if (!info) {
       return false;
     }
@@ -2044,7 +2049,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // canonical isOwnedCtrlProxyRunnerProcess predicate (also used by the port-reclaim
     // path) distinguishes it.
     return this.isOwnedCtrlProxyRunnerProcess({
-      pid: this.xcTestProcessId,
+      pid: pid,
       port: this.servicePort,
       command: info.command,
       environment: info.environment,

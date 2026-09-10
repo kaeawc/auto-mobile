@@ -2232,6 +2232,69 @@ describe("provisionDevice handler", () => {
     expect(second).toMatchObject({ created: true, adopted: false });
   });
 
+  test("takes creation ownership when a rebind re-creates a device the first attempt adopted", async () => {
+    let calls = 0;
+    const replayProvisioner: ExactDeviceProvisioner = {
+      provision: async (request) => {
+        calls++;
+        // The adopted device disappeared between attempts, so the rebind
+        // genuinely creates it.
+        if (calls > 1) {
+          await request.onBeforeCreate?.();
+        }
+        return {
+          created: calls > 1,
+          device: {
+            name: request.name,
+            platform: "android",
+            isRunning: false,
+          },
+          resolvedSpec: {
+            ...request.spec,
+            displayCutout: classifyDisplayCutout(request.platform, request.spec.deviceType),
+          },
+        };
+      },
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => replayProvisioner,
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-rebind-recreated",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "none" as const,
+    };
+
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(calls).toBe(2);
+    expect(first).toMatchObject({ created: false, adopted: true });
+    // A caller that only deletes what AutoMobile created must not be told this
+    // device was adopted.
+    expect(second).toMatchObject({ created: true, adopted: false });
+  });
+
   test("clears creation ownership after a successful lifecycle rollback", async () => {
     let calls = 0;
     const retryingProvisioner: ExactDeviceProvisioner = {

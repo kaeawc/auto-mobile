@@ -4596,14 +4596,23 @@ export function registerDeviceTools() {
     }
   }
 
+  /**
+   * Creation ownership accumulates across the attempts of one operation. The
+   * first attempt's `created` must survive a rebind that merely re-adopts the
+   * device it created, and a rebind that genuinely re-created a device that
+   * disappeared between attempts must claim ownership instead of inheriting the
+   * first attempt's `adopted` — a caller that only deletes what AutoMobile
+   * created would otherwise leak it.
+   */
   function preserveProvisionDeviceOwnership(
     persisted: Record<string, unknown>,
     refreshed: Record<string, unknown>,
   ): Record<string, unknown> {
+    const created = persisted.created === true || refreshed.created === true;
     return {
       ...refreshed,
-      created: persisted.created,
-      adopted: persisted.adopted,
+      created,
+      adopted: !created,
     };
   }
 

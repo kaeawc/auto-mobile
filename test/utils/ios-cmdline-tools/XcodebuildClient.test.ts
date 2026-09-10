@@ -277,6 +277,23 @@ describe("XcodebuildClient streaming runner", () => {
     expect(capturedSpawnOptions?.signal).toBeUndefined();
   });
 
+  test("kills a child if startup cancellation wins while spawn settles", async () => {
+    const child = new FakeChildProcess();
+    const startup = new AbortController();
+    const reason = new Error("startup canceled while spawning");
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      () => {
+        startup.abort(reason);
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+    await expect(client.startStreaming([], { startupSignal: startup.signal })).rejects.toBe(reason);
+    expect(child.killed).toBe(true);
+  });
+
   test("forwards an explicitly supplied process signal to the resident spawn", async () => {
     // A caller that explicitly opts in to a process-lifecycle signal (rather than
     // relying on the ambient request signal) must still have it reach spawn.

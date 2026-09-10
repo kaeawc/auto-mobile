@@ -236,6 +236,11 @@ export class XcodebuildClient implements Xcodebuild {
       throw new ActionableError(`xcodebuild failed to start: ${String(error)}`);
     }
 
+    if (startupSignal?.aborted) {
+      child.kill("SIGKILL");
+      startupSignal.throwIfAborted();
+    }
+
     if (!child.pid) {
       child.kill();
       throw new ActionableError("xcodebuild failed to start: no process ID was assigned.");

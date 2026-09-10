@@ -29,6 +29,7 @@ import {
 import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadinessService";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -654,6 +655,85 @@ describe("startDevice handler", () => {
     expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe("emulator-5556");
   });
 
+  // Recovery already resolved the ANR'd AVD's image by exact name, so the
+  // replacement boot must reuse that resolution. `DeviceMatcher.matchesName` is
+  // a case-insensitive *substring* test under the LATEST strategy, so a fuzzy
+  // re-match would kill `Pixel_7` and cold-boot `Pixel_7_API_35` instead.
+  it("reboots the exact ANR'd AVD rather than a substring-matching sibling", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const anrDevice: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7",
+      deviceId: "emulator-5554",
+      osVersion: "14",
+    };
+    const anrImage: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_7",
+      isRunning: false,
+      osVersion: "14",
+      source: "local",
+    };
+    const siblingImage: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_7_API_35",
+      isRunning: false,
+      osVersion: "15",
+      source: "local",
+    };
+
+    fakeDeviceUtils.setBootedDevices("android", [anrDevice]);
+    await pool.initializeWithDevices([anrDevice]);
+    await pool.bindOrReuseDeviceSession("owner-session", anrDevice.deviceId, "android", anrImage);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [anrImage, siblingImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      siblingImage.name,
+      new FakeExitChildProcess() as unknown as ChildProcess,
+    );
+    fakeDeviceUtils.setMockChildProcess(
+      anrImage.name,
+      new FakeExitChildProcess() as unknown as ChildProcess,
+    );
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      // The real matcher is required here: FakeDeviceMatcher cannot express the
+      // substring relation this regression is about.
+      deviceMatcherFactory: () => new DefaultDeviceMatcher(),
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    await callStartDevice({ platform: "android" });
+
+    const started = fakeDeviceUtils
+      .getExecutedOperations()
+      .filter((operation) => operation.startsWith("startDevice:"));
+    expect(started.some((operation) => operation.startsWith("startDevice:Pixel_7_API_35"))).toBe(
+      false,
+    );
+    expect(started.some((operation) => operation.startsWith("startDevice:Pixel_7:"))).toBe(true);
+  });
+
   // #6227 round 7: `bootAndPrepareDevice` bypasses `bindBootedDeviceSession`
   // (and its `recordAcquiredSessionReadiness` call) entirely when a preserved
   // session comes back from System UI ANR recovery. By this point
@@ -893,6 +973,84 @@ describe("startDevice handler", () => {
     expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
     expect(pool.getIdleDevices()).toEqual([]);
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
+  });
+
+  // Mirrors "retains a preempted cold boot lease until its emulator process
+  // exits": the recovery path signals the retired replacement but must not hand
+  // the AVD's stable lifecycle key to the next request until it has exited, or a
+  // second instance of the same AVD can be cold-booted over a live qemu process.
+  it("holds the AVD lifecycle lease until the retired ANR replacement process exits", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "System UI ANR persisted after Wait",
+    );
+
+    // The replacement emulator was signalled but has not exited yet.
+    expect(replacementProcess.killed).toBe(true);
+
+    const nextLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: androidImage.name },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let acquired = false;
+    void nextLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    replacementProcess.emit("exit", 0, null);
+    (await nextLease).release();
   });
 
   it("retires an adopted replacement when its recovered readiness reservation fails", async () => {
@@ -1269,6 +1427,65 @@ describe("startDevice handler", () => {
 
     expect(readinessAttempts).toBe(1);
     expect(fakeDeviceUtils.wasMethodCalled("killDevice")).toBe(false);
+  });
+
+  // The recovery phases run under the whole startDevice budget, not the 30s
+  // device-shutdown budget, and they are not waiting for a device to disappear.
+  // The failure must name the phase that stalled and the budget that elapsed.
+  it("reports the recovery phase and the elapsed budget when the AVD image lookup stalls", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+    const listDeviceImages = fakeDeviceUtils.listDeviceImages.bind(fakeDeviceUtils);
+    let imageListings = 0;
+    fakeDeviceUtils.listDeviceImages = async (platform) => {
+      imageListings++;
+      if (imageListings === 1) {
+        return await listDeviceImages(platform);
+      }
+      // Recovery's image lookup never completes, so its deadline must expire.
+      return await new Promise<DeviceInfo[]>(() => {});
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    const start = callStartDevice({ platform: "android", timeoutMs: 90_000 });
+    let failure: unknown;
+    start.catch((error: unknown) => {
+      failure = error;
+    });
+    for (let attempt = 0; attempt < 500 && imageListings < 2; attempt++) {
+      await Promise.resolve();
+    }
+    expect(imageListings).toBe(2);
+
+    timer.advanceTime(90_000);
+    for (let attempt = 0; attempt < 500 && failure === undefined; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect((failure as Error | undefined)?.message).toBe(
+      "Timed out waiting for android device 'Pixel_7_API_34' (emulator-5554) " +
+        "to resolve its AVD image for System UI ANR recovery after 90000ms: " +
+        "System UI recovery image lookup did not complete. " +
+        "Verify the platform shutdown state and retry.",
+    );
   });
 
   it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {

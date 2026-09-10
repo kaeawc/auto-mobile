@@ -4763,6 +4763,13 @@ export function registerDeviceTools() {
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
   ): Promise<never> {
+    if (error instanceof McpSessionRecoveryInProgressError) {
+      // A transport routing conflict does not invalidate the healthy device
+      // session, so it must reach `executeProvisionDevice`'s guard with its
+      // identity intact instead of being wrapped into a rollback error after
+      // destroying the device it never invalidated.
+      throw error;
+    }
     const createdDevice =
       provisioned?.created || creationStarted
         ? (provisioned?.device ??

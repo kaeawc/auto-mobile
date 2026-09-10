@@ -23,7 +23,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, McpSessionRecoveryInProgressError } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
@@ -1115,6 +1115,45 @@ describe("provisionDevice handler", () => {
     expect(response.success).toBeUndefined();
     expect(response.error).toBeUndefined();
     expect(response.cleanup).toBeUndefined();
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toEqual([]);
+    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+  });
+
+  test("does not roll back a fresh provision when MCP session recovery is in progress", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [created.device]);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new McpSessionRecoveryInProgressError("mcp-session-recovering");
+      },
+      idGenerator: new FakeIdGenerator(["session-recovery", "cleanup-recovery"]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = await tool.handler(
+      provisionTestArgs("android", "operation-recovery-fresh-android"),
+    );
+
+    // A transport routing conflict does not invalidate the healthy device, so
+    // the recovery error must keep its identity instead of being wrapped by
+    // the rollback and costing a full create + cold boot on retry.
+    expect(JSON.stringify(response)).toContain("recovering a device");
+    expect(JSON.stringify(response)).not.toContain("cleanup");
     expect(
       deviceManager
         .getExecutedOperations()

@@ -225,28 +225,39 @@ const devicePreparationTimeoutSchema = z
       .positive()
       .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
-      .describe("Maximum time to find, recover, or boot the device operating system"),
+      .describe(
+        `Maximum time in ms to find, recover, or boot the device operating system (default ${DEFAULT_DEVICE_READY_TIMEOUT_MS}). ` +
+          `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}, including defaults for omitted fields.`,
+      ),
     automationReadyTimeoutMs: z
       .number()
       .int()
       .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
       .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
-      .describe("Maximum time to install, update, start, and verify the automation runner"),
+      .describe(
+        `Maximum time in ms to install, update, start, and verify the automation runner (default ${DEFAULT_RUNNER_PROVISION_TIMEOUT_MS}). ` +
+          `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}, including defaults for omitted fields; ` +
+          `when bootTimeoutMs is omitted, this must be <= ${MAX_DEVICE_READY_TIMEOUT_MS - DEFAULT_DEVICE_READY_TIMEOUT_MS}.`,
+      ),
   })
-  .strict()
-  .superRefine((value, context) => {
-    const totalTimeoutMs =
-      (value.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS) +
-      (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS);
-    if (totalTimeoutMs > MAX_DEVICE_READY_TIMEOUT_MS) {
-      context.addIssue({
-        code: "custom",
-        message: `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
-        path: ["bootTimeoutMs"],
-      });
-    }
-  });
+  .strict();
+
+function validateDevicePreparationTimeout(
+  value: { bootTimeoutMs?: number; automationReadyTimeoutMs?: number },
+  context: z.RefinementCtx,
+): void {
+  const totalTimeoutMs =
+    (value.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS) +
+    (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS);
+  if (totalTimeoutMs > MAX_DEVICE_READY_TIMEOUT_MS) {
+    context.addIssue({
+      code: "custom",
+      message: `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
+      path: ["bootTimeoutMs"],
+    });
+  }
+}
 
 // #5870: `deviceId` — the identifier every device resource leads with — is
 // accepted alongside the platform-native identifier. Either is sufficient; the
@@ -273,6 +284,7 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
         "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
       ),
   })
+  .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
     if (!value.avdName && !value.deviceId) {
       ctx.addIssue({
@@ -301,6 +313,7 @@ export const getAppleSchema = devicePreparationTimeoutSchema
         "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
       ),
   })
+  .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
     if (!value.udid && !value.deviceId) {
       ctx.addIssue({

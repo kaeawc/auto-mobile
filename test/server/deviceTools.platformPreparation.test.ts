@@ -1,4 +1,7 @@
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../../src/utils/deviceTimeouts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getAndroidSchema,
@@ -58,6 +61,40 @@ describe("platform device preparation tools", () => {
       typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
     );
   }
+
+  test("advertises the combined preparation budget including omitted defaults", () => {
+    for (const [name, schema, target] of [
+      ["getAndroid", getAndroidSchema, { avdName: "Pixel" }],
+      ["getApple", getAppleSchema, { udid: "sim-udid" }],
+    ] as const) {
+      const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
+      const properties = definition.inputSchema.properties as Record<
+        string,
+        { description: string }
+      >;
+      for (const field of ["bootTimeoutMs", "automationReadyTimeoutMs"]) {
+        expect(properties[field].description).toContain(
+          `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
+        );
+        expect(properties[field].description).toContain("including defaults for omitted fields");
+      }
+      const maximumWithDefaultBoot = MAX_DEVICE_READY_TIMEOUT_MS - DEFAULT_DEVICE_READY_TIMEOUT_MS;
+      expect(properties.automationReadyTimeoutMs.description).toContain(
+        `when bootTimeoutMs is omitted, this must be <= ${maximumWithDefaultBoot}`,
+      );
+      expect(
+        schema.safeParse({ ...target, automationReadyTimeoutMs: maximumWithDefaultBoot }).success,
+      ).toBe(true);
+      expect(
+        schema.safeParse({ ...target, automationReadyTimeoutMs: maximumWithDefaultBoot + 1 })
+          .success,
+      ).toBe(false);
+      expect(
+        schema.safeParse({ ...target, bootTimeoutMs: 90_000, automationReadyTimeoutMs: 800_000 })
+          .success,
+      ).toBe(true);
+    }
+  });
 
   test("getAndroid returns the AVD to ADB serial and port mapping", async () => {
     const emulator: BootedDevice = {

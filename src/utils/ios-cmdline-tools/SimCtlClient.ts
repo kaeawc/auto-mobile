@@ -1978,6 +1978,23 @@ export class SimCtlClient implements SimCtl {
       }
     }
 
+    // The last LCD section in `simctl io enumerate` output is not always
+    // followed by a trailing "Port:" line, so a complete in-progress section
+    // (both pixel size and UI scale collected) must also be finalized here at
+    // EOF rather than only ever being finalized by the "Port:" sentinel above.
+    if (
+      inLCDScreen &&
+      sectionWidth > 0 &&
+      sectionHeight > 0 &&
+      sectionUiScale !== null &&
+      sectionUiScale > 0
+    ) {
+      return {
+        width: Math.round(sectionWidth / sectionUiScale),
+        height: Math.round(sectionHeight / sectionUiScale),
+      } as ScreenSize;
+    }
+
     throw new ActionableError("Unable to determine screen size from provided data.");
   }
 

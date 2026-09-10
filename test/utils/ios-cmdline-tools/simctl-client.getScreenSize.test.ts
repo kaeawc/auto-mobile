@@ -86,4 +86,25 @@ describe("SimCtlClient getScreenSize", () => {
 
     expect(size).toEqual({ width: 393, height: 852 });
   });
+
+  test("returns the completed size when the final LCD block has no trailing Port: line", async () => {
+    // Regression test: `simctl io <udid> enumerate` output does not always end
+    // with a trailing "Port:" line after the last section. The parser must
+    // finalize a complete in-progress section at EOF rather than only ever
+    // finalizing on a subsequent "Port:" sentinel.
+    const stdout = [
+      "Class: Display",
+      "Screen Type: Integrated",
+      "LCD:",
+      "  Pixel Size: {1179, 2556}",
+      "  Preferred UI Scale: 3",
+    ].join("\n");
+
+    const execAsync = async () => createExecResult(stdout, "");
+    const simctl = new SimCtlClient(device, execAsync);
+
+    const size = await simctl.getScreenSize();
+
+    expect(size).toEqual({ width: 393, height: 852 });
+  });
 });

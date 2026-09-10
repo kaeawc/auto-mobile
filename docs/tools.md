@@ -241,6 +241,14 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description. |
 | 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
 
+On Android, compact observations fold captured soft-keyboard keys into a single
+`keyboard: { visible: true, package: "…" }` summary. Use `sendKeys` for text input
+and semantic keys, or `keyboard` to open or close it. `observe` with
+`project: "full"` or `raw: true` retains the individual keys. Folding requires
+a control-proxy build that supplies IME window identity; older builds retain
+their existing key output. An absent summary means no IME identity was captured,
+not a confirmed hidden keyboard.
+
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public
 tool selection, see [Dynamic Tools](using/dynamic-tools.md).

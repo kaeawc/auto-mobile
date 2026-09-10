@@ -170,10 +170,15 @@ export function sanitizeObserveResult(
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
-  const { skeleton, context } = source.elements
+  const { skeleton, context, keyboard } = source.elements
     ? projectSkeleton(source.elements)
-    : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[] };
+    : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;
+  if (keyboard) {
+    out.keyboard = keyboard;
+  } else {
+    delete out.keyboard;
+  }
   if (context.length > 0) {
     out.context = context;
   } else {
@@ -594,6 +599,7 @@ export interface ObserveDiffNodeChange {
  * current state text).
  */
 export interface ObserveDiff {
+  keyboard?: ObserveResult["keyboard"];
   isDiff: true;
   /**
    * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
@@ -638,6 +644,8 @@ export interface ObserveDiff {
 }
 
 export interface DiffObserveConfig {
+  /** Compact output suppresses captured IME subtrees; full/raw diffs retain them. */
+  collapseKeyboard?: boolean;
   /**
    * Top-level scalar ObserveResult fields to diff. Defaults to
    * `DIFF_SCALAR_FIELDS`. `updatedAt` is deliberately excluded from the default
@@ -806,7 +814,7 @@ function platformClassNameForDiff(node: Record<string, unknown>): string {
  * key is globally unique by position and identical cells in sibling subtrees do
  * not collide.
  */
-function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
+function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObserveNode[] {
   const out: FlatObserveNode[] = [];
   const walk = (
     node: ViewHierarchyNode | undefined,
@@ -818,6 +826,9 @@ function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
       return;
     }
     const rec = node as unknown as Record<string, unknown>;
+    if (collapseKeyboard && node.extras?.["automobile:imePackage"]) {
+      return;
+    }
     const localKey = nodeKey(rec, siblingIndex);
     const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
     out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec), ancestorClasses });
@@ -1396,8 +1407,8 @@ export function diffObserveResult(
   next: ObserveResult,
   cfg?: DiffObserveConfig,
 ): ObserveDiff {
-  const nextFlatNodes = flattenForDiff(next);
-  const baseByKey = groupByKey(flattenForDiff(baseline));
+  const nextFlatNodes = flattenForDiff(next, cfg?.collapseKeyboard);
+  const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard));
   const nextByKey = groupByKey(nextFlatNodes);
   // Occurrence-index map for ambiguous elementIds among `next`'s nodes (PR #6242
   // review PRRT_kwDOP-GF5M6fq3iI) — see computeElementIdOccurrenceIndexes' doc.

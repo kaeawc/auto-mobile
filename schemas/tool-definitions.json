@@ -3260,6 +3260,20 @@
       },
       "type": "object",
       "properties": {
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "visible": {
+              "type": "boolean",
+              "const": true
+            },
+            "package": {
+              "type": "string"
+            }
+          },
+          "required": ["visible", "package"],
+          "additionalProperties": false
+        },
         "screenSize": {
           "type": "object",
           "properties": {
@@ -10108,6 +10122,20 @@
             {
               "type": "object",
               "properties": {
+                "keyboard": {
+                  "type": "object",
+                  "properties": {
+                    "visible": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "package": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["visible", "package"],
+                  "additionalProperties": false
+                },
                 "isDiff": {
                   "type": "boolean",
                   "const": true

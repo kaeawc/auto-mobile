@@ -336,7 +336,7 @@ describe("IOSCtrlProxyManager", function () {
       "retains one force stage when graceful stop expires (early by %sms)",
       async function (earlyBy) {
         const timer = new FakeTimer();
-        const manager = IOSCtrlProxyManager.getInstance(testDevice);
+        const manager = IOSCtrlProxyManager.getInstance(testDevice, timer);
         spyOn(manager, "stop").mockImplementation(async (deadline) => {
           await new Promise<void>((_resolve, reject) =>
             timer.setTimeout(

@@ -462,7 +462,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // Threaded into stop()'s own terminateProcessTree call so its sleeps/execs
     // degrade predictably against this stage's budget instead of running
     // unbounded (#6578).
-    const stopDeadline = timer.now() + SHUTDOWN_STOP_TIMEOUT_MS;
+    const stopDeadline = instance.timer.now() + SHUTDOWN_STOP_TIMEOUT_MS;
     const settled = instance.stop(stopDeadline).then(
       () => null,
       (error) => error,
@@ -498,7 +498,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     let timeout: NodeJS.Timeout | undefined;
     // Computed here (not at the start of the overall shutdown stage) since
     // this stage's budget only starts once stop()'s own attempt has timed out.
-    const forceStopDeadline = timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS;
+    const forceStopDeadline = instance.timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS;
     const deadline = new Promise<void>((resolve) => {
       timeout = timer.setTimeout(resolve, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
     });

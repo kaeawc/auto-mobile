@@ -212,9 +212,11 @@ export class IOSCtrlProxyProcessClient {
       await Promise.all([
         this.signalGroup(pid, "KILL", deadline),
         this.signalPids([pid], "KILL", deadline),
+        snapshot.then((descendants) =>
+          this.signalPids([...descendants].reverse(), "KILL", deadline),
+        ),
       ]);
       const descendants = await snapshot;
-      await this.signalPids([...descendants].reverse(), "KILL", deadline);
       if (!(await this.waitForExit([pid, ...descendants], deadline))) {
         throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);
       }

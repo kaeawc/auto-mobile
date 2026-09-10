@@ -101,6 +101,10 @@ describe("IOSCtrlProxyProcessClient", () => {
     const groupWait = new Promise<void>((resolve) => {
       releaseGroup = resolve;
     });
+    let descendantKilled!: () => void;
+    const descendantKill = new Promise<void>((resolve) => {
+      descendantKilled = resolve;
+    });
     let rootAlive = true;
     let rootKilled!: () => void;
     const rootKill = new Promise<void>((resolve) => {
@@ -134,6 +138,7 @@ describe("IOSCtrlProxyProcessClient", () => {
           rootAlive = false;
           rootKilled();
         }
+        if (command === "kill -KILL 43") descendantKilled();
         if (file === "kill" && args[0] === "-0") {
           throw new Error("not running");
         }
@@ -153,8 +158,9 @@ describe("IOSCtrlProxyProcessClient", () => {
     expect(commandOrder).toContain("kill -KILL -- -42");
     expect(commandOrder).toContain("kill -KILL 42");
 
-    releaseGroup();
     releaseEnumeration?.();
+    await descendantKill;
+    releaseGroup();
     await expect(pending).resolves.toBeUndefined();
     expect(commandOrder).toContain("kill -KILL 43");
   });

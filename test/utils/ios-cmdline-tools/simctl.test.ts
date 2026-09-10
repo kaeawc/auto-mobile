@@ -971,6 +971,201 @@ describe("Simctl", function () {
       expect(listCalls).toBe(2);
       expect(fallbackDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
     });
+
+    test("an authoritative empty listing also clears the last-good snapshot", async function () {
+      const timer = new FakeTimer();
+      let listCalls = 0;
+      const withDevice = simulatorListPayload([
+        { udid: "test-ios-device-id", name: "iPhone 17", state: "Booted", isAvailable: true },
+      ]);
+      const empty = simulatorListPayload([]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          if (listCalls === 1) {
+            return createExecResult(withDevice, "");
+          }
+          if (listCalls === 2) {
+            return createExecResult(empty, "");
+          }
+          throw new Error("simctl list devices exploded");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      expect(await simctl.listSimulatorImages()).toHaveLength(1);
+
+      // Expire the TTL cache so the next call re-invokes simctl with an
+      // authoritative empty result.
+      timer.advanceTime(6_000);
+      expect(await simctl.listSimulatorImages()).toEqual([]);
+
+      // Expire the TTL cache again so the third call fails and falls back to
+      // the last-good snapshot -- which must now be empty, not the stale
+      // one-device snapshot from before the authoritative empty listing.
+      timer.advanceTime(6_000);
+      const fallbackDevices = await simctl.listSimulatorImages();
+      expect(listCalls).toBe(3);
+      expect(fallbackDevices).toEqual([]);
+    });
+
+    test("an in-flight listing started before an invalidation must not repopulate the cache", async function () {
+      let listCalls = 0;
+      let resolveList!: (payload: string) => void;
+      const payload = bootedListPayload("test-ios-device-id");
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return await new Promise<ExecResult>((resolve) => {
+            resolveList = (stdout: string) => resolve(createExecResult(stdout, ""));
+          });
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      const inFlight = simctl.listSimulatorImages();
+      await waitForCondition(() => resolveList !== undefined, "in-flight simctl listing");
+
+      // A create/delete (or an explicit reset) invalidates the cache while the
+      // above listing -- captured under the OLD generation -- is still pending.
+      Simctl.invalidateDeviceListCache();
+      resolveList(payload);
+
+      await expect(inFlight).resolves.toHaveLength(1);
+      expect(listCalls).toBe(1);
+
+      const simctlClass = Simctl as unknown as {
+        deviceListCache: { devices: unknown[]; timestamp: number } | null;
+        lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
+      };
+      expect(simctlClass.deviceListCache).toBeNull();
+      expect(simctlClass.lastGoodDeviceList).toBeNull();
+
+      // The stale-generation resolution must not have satisfied the cache: the
+      // next call re-invokes simctl instead of trusting a phantom cache entry.
+      let resolveNext!: (payload: string) => void;
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return await new Promise<ExecResult>((resolve) => {
+            resolveNext = (stdout: string) => resolve(createExecResult(stdout, ""));
+          });
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(null, mockExecAsync);
+      const next = simctl.listSimulatorImages();
+      await waitForCondition(() => resolveNext !== undefined, "post-invalidation simctl listing");
+      resolveNext(payload);
+      await expect(next).resolves.toHaveLength(1);
+      expect(listCalls).toBe(2);
+    });
+
+    test("coalesces concurrent callers but bounds each to its own deadline", async function () {
+      let listCalls = 0;
+      let resolveList!: (payload: string) => void;
+      const payload = bootedListPayload("test-ios-device-id");
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return await new Promise<ExecResult>((resolve) => {
+            resolveList = (stdout: string) => resolve(createExecResult(stdout, ""));
+          });
+        }
+        return createExecResult("", "");
+      };
+
+      const timer = new FakeTimer();
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      // Caller A is unbounded; caller B bounds itself to 100ms. Both must
+      // collapse onto the same shared `simctl list devices` invocation.
+      const callerA = simctl.listSimulatorImages();
+      const callerB = simctl.listSimulatorImages(100).catch((error: unknown) => error);
+      await waitForCondition(() => resolveList !== undefined, "shared simctl invocation");
+      expect(listCalls).toBe(1);
+
+      // Caller B's own deadline elapses while the shared fetch is still
+      // pending; this must reject ONLY caller B, not the shared fetch.
+      timer.advanceTime(100);
+      const callerBOutcome = await callerB;
+      expect(callerBOutcome).toBeInstanceOf(Error);
+      expect((callerBOutcome as Error).message).toContain("Timed out waiting for iOS simulator");
+
+      // The shared fetch is unaffected by caller B's timeout: resolving it now
+      // still satisfies caller A.
+      resolveList(payload);
+      const callerADevices = await callerA;
+      expect(callerADevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+      expect(listCalls).toBe(1);
+    });
+
+    test("aborting one coalesced caller does not reject the others", async function () {
+      let listCalls = 0;
+      let resolveList!: (payload: string) => void;
+      const payload = bootedListPayload("test-ios-device-id");
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return await new Promise<ExecResult>((resolve) => {
+            resolveList = (stdout: string) => resolve(createExecResult(stdout, ""));
+          });
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      const controllerA = new AbortController();
+      const callerA = simctl
+        .listSimulatorImages(undefined, { signal: controllerA.signal })
+        .catch((error: unknown) => error);
+      const callerB = simctl.listSimulatorImages();
+      await waitForCondition(() => resolveList !== undefined, "shared simctl invocation");
+      expect(listCalls).toBe(1);
+
+      controllerA.abort(new Error("caller A cancelled"));
+      const callerAOutcome = await callerA;
+      expect(callerAOutcome).toBeInstanceOf(Error);
+      expect((callerAOutcome as Error).message).toBe("caller A cancelled");
+
+      // Caller B must still resolve from the shared fetch, unaffected by A's
+      // abort.
+      resolveList(payload);
+      const callerBDevices = await callerB;
+      expect(callerBDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+      expect(listCalls).toBe(1);
+    });
+
+    test("getBootedSimulatorsChecked throws on an already-aborted signal even on a fresh cache hit", async function () {
+      const payload = bootedListPayload("test-ios-device-id");
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(payload, "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      // Populate a fresh (within-TTL) cache entry.
+      expect(await simctl.listSimulatorImages()).toHaveLength(1);
+
+      const controller = new AbortController();
+      controller.abort(new Error("caller aborted"));
+
+      await expect(simctl.getBootedSimulatorsChecked(undefined, controller.signal)).rejects.toThrow(
+        "caller aborted",
+      );
+    });
   });
 
   describe("getRuntimes uses dedicated simctl command", function () {

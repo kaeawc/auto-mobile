@@ -11,7 +11,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -22,6 +22,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
+import type { VirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -89,6 +90,32 @@ describe("platform device preparation tools", () => {
       expect(failure.budgetMs).toBe(10);
     });
   }
+
+  test("reports a start lifecycle-reservation timeout against the acquisition budget", async () => {
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_9_API_36", isRunning: false, source: "local" },
+    ]);
+    const stalledCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => {
+        timer.advanceTime(10_000);
+        throw new Error("lifecycle reservation aborted");
+      },
+    };
+    setDeviceToolsDependencies({ lifecycleCoordinator: stalledCoordinator });
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Pixel_9_API_36",
+      bootTimeoutMs: 5_000,
+      automationReadyTimeoutMs: 1_000,
+    }).catch((error: Error) => error);
+
+    // This is the acquisition path: the killDevice-shaped default reported a
+    // shutdown timeout against an unrelated 30s budget.
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("to disappear after");
+    expect((failure as Error).message).toContain("getAndroid timeout exhausted");
+    expect((failure as Error).message).toContain("budgetMs=6000");
+  });
 
   test("advertises the combined preparation budget including omitted defaults", () => {
     for (const [name, schema, target] of [
@@ -199,9 +226,10 @@ describe("platform device preparation tools", () => {
       totalDeadlineMs: 60_000,
     });
     // #5870: `deviceId` — the identifier every device resource leads with — is
-    // now an accepted target on getAndroid alongside `avdName`.
+    // now an accepted target on getAndroid alongside `avdName`, but only when
+    // both spellings name the same AVD.
     expect(() =>
-      getAndroidSchema.parse({ avdName: image.name, deviceId: "emulator-5554" }),
+      getAndroidSchema.parse({ avdName: image.name, deviceId: image.name }),
     ).not.toThrow();
     // `platform` remains an unrecognized key on getApple (strict schema).
     expect(() => getAppleSchema.parse({ udid: "sim-udid", platform: "ios" })).toThrow();
@@ -220,6 +248,39 @@ describe("platform device preparation tools", () => {
 
     expect(result.sessionUuid).toBeDefined();
     expect(result.deviceIdentity).toMatchObject({ adbSerial: "emulator-5554" });
+  });
+
+  test("getAndroid reuses an already-running AVD named through deviceId (#5870)", async () => {
+    // Mirrors MultiPlatformDeviceManager.startDevice's production guard
+    // (src/utils/deviceUtils.ts) which the plain fake omits: cold-booting a
+    // second copy of a live AVD is rejected by the platform.
+    class GuardedDeviceUtils extends FakeDeviceUtils {
+      override async startDevice(device: DeviceInfo, timeoutMs?: number) {
+        if (await this.isDeviceImageRunning(device)) {
+          throw new ActionableError(
+            `${device.platform} device '${device.name}' is already running`,
+          );
+        }
+        return await super.startDevice(device, timeoutMs);
+      }
+    }
+    const guarded = new GuardedDeviceUtils();
+    const running: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    guarded.setBootedDevices("android", [running]);
+    guarded.setDeviceImages("android", [
+      { platform: "android", name: running.name, isRunning: true, source: "local" },
+    ]);
+    setDeviceToolsDependencies({ deviceManagerFactory: () => guarded });
+    matcher.setBootedResult(running);
+
+    const result = await callTool("getAndroid", { deviceId: running.name });
+
+    expect(result.deviceIdentity).toMatchObject({ adbSerial: running.deviceId });
+    expect(guarded.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
   test("getApple accepts a deviceId target alongside udid (#5870)", async () => {
@@ -253,6 +314,19 @@ describe("platform device preparation tools", () => {
     });
 
     expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
+  });
+
+  test("getAndroid rejects contradictory avdName and deviceId instead of silently preferring one", () => {
+    expect(() => getAndroidSchema.parse({ avdName: "Pixel_A", deviceId: "emulator-5556" })).toThrow(
+      /identifier_conflict/,
+    );
+  });
+
+  test("getApple rejects contradictory udid and deviceId instead of silently preferring one", () => {
+    expect(() => getAppleSchema.parse({ udid: "UDID-A", deviceId: "UDID-B" })).toThrow(
+      /identifier_conflict/,
+    );
+    expect(() => getAppleSchema.parse({ udid: "UDID-A", deviceId: "UDID-A" })).not.toThrow();
   });
 
   test("getAndroid rejects a call with neither avdName nor deviceId, naming the source (#5870)", () => {
@@ -331,6 +405,41 @@ describe("platform device preparation tools", () => {
     expect(pool.getDevice(emulator.deviceId)).toMatchObject({
       avdName: emulator.name,
       androidImage: { name: emulator.name, platform: "android" },
+    });
+  });
+
+  test("still returns the bound session when post-boot resource notification fails", async () => {
+    const image: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      isRunning: false,
+      source: "local",
+    };
+    deviceUtils.setDeviceImages("android", [image]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        throw new Error("resource sync failed");
+      },
+    });
+
+    const result = await callTool("getAndroid", { avdName: image.name });
+
+    // The acquisition is already committed by the time the notification runs;
+    // failing it would strand a busy device under a session UUID the caller
+    // never receives.
+    expect(result.sessionUuid).toBeDefined();
+    expect(pool.getDevice(`mock-${image.name}`)).toMatchObject({
+      sessionId: result.sessionUuid,
     });
   });
 

@@ -295,6 +295,19 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
         path: ["avdName"],
       });
     }
+    // Both spellings are accepted together only when they name the same AVD
+    // (`deviceId` also takes an image name). Anything else contradicts itself,
+    // and silently preferring `avdName` would prepare a device the caller did
+    // not name — the worst failure mode for a device-identity API.
+    if (value.avdName && value.deviceId && value.avdName !== value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `identifier_conflict: avdName '${value.avdName}' and deviceId '${value.deviceId}' ` +
+          "name different devices. Pass only the identifier you mean.",
+        path: ["deviceId"],
+      });
+    }
   });
 
 export const getAppleSchema = devicePreparationTimeoutSchema
@@ -321,6 +334,18 @@ export const getAppleSchema = devicePreparationTimeoutSchema
         code: "custom",
         message: "Provide udid or deviceId (the `deviceId` field of automobile:devices/booted/ios)",
         path: ["udid"],
+      });
+    }
+    // `deviceId` is an alias for `udid` on iOS, so two different values name
+    // two different simulators; resolving that to `udid` alone would prepare a
+    // device the caller did not name.
+    if (value.udid && value.deviceId && value.udid !== value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `identifier_conflict: udid '${value.udid}' and deviceId '${value.deviceId}' are ` +
+          "different simulator UDIDs. Pass only the identifier you mean.",
+        path: ["deviceId"],
       });
     }
   });
@@ -3291,6 +3316,26 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
   };
 }
 
+/**
+ * True when the running device resolved for `args.deviceId` is not the device
+ * the caller named. On Android `deviceId` doubles as an AVD image name (see
+ * `getAndroidSchema`), so a serial that necessarily differs from the requested
+ * string is still the requested device when the AVD name matches.
+ */
+function isMismatchedBootedDeviceId(
+  args: StartDeviceArgs,
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): boolean {
+  if (!args.deviceId || device.deviceId === args.deviceId) {
+    return false;
+  }
+  return !(
+    device.platform === "android" &&
+    (device.name === args.deviceId || sourceImage?.name === args.deviceId)
+  );
+}
+
 function validateBootIdentity(
   args: StartDeviceArgs,
   device: BootedDevice,
@@ -3305,7 +3350,7 @@ function validateBootIdentity(
         "phase=pool-match: resolved platform differs from requested platform",
     );
   }
-  if (source === "booted" && args.deviceId && device.deviceId !== args.deviceId) {
+  if (source === "booted" && isMismatchedBootedDeviceId(args, device, sourceImage)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
         "phase=pool-match: running device ID differs from the requested device ID",
@@ -3349,6 +3394,8 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
   }
 }
 
+const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
+
 function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
@@ -3363,23 +3410,68 @@ function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void
     );
     return undefined;
   }
-  const processSettlement =
-    typeof boot.processHandle.once !== "function" ||
-    boot.processHandle.exitCode !== null ||
-    boot.processHandle.signalCode !== null
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          boot.processHandle?.once("exit", () => resolve());
-        });
+  const processHandle = boot.processHandle;
+  const alreadySettled =
+    typeof processHandle.once !== "function" ||
+    processHandle.exitCode !== null ||
+    processHandle.signalCode !== null;
+  const processSettlement = alreadySettled
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        processHandle.once("exit", () => resolve());
+      });
   try {
-    boot.processHandle.kill();
+    processHandle.kill();
   } catch (error) {
     logger.warn(
       `[DeviceTools] Failed to cancel unowned cold boot ${boot.device.deviceId}: ${error}`,
       error,
     );
   }
-  return processSettlement;
+  if (alreadySettled) {
+    return processSettlement;
+  }
+  return awaitColdBootSettlement(processSettlement, processHandle, boot.device.deviceId);
+}
+
+/**
+ * An emulator that ignores SIGTERM never emits `exit`, so an unbounded wait on
+ * its settlement strands every resource whose release is deferred onto it (the
+ * lifecycle lease above all). Bound the wait with the injected timer, escalate
+ * to SIGKILL, and let the caller proceed either way.
+ */
+async function awaitColdBootSettlement(
+  processSettlement: Promise<void>,
+  processHandle: NonNullable<DeviceBootResult["processHandle"]>,
+  deviceId: string,
+): Promise<void> {
+  const timer = getDeviceToolsDependencies().timer;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      processSettlement,
+      new Promise<void>((resolve) => {
+        timeoutHandle = timer.setTimeout(() => {
+          logger.warn(
+            `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
+              `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms; escalating to SIGKILL`,
+          );
+          try {
+            processHandle.kill("SIGKILL");
+          } catch (error) {
+            // Best effort: the child may have died between the race and here,
+            // and the caller must not stay blocked on the escalation either.
+            logger.debug(`[DeviceTools] SIGKILL for cold boot ${deviceId} failed: ${error}`);
+          }
+          resolve();
+        }, COLD_BOOT_SETTLEMENT_GRACE_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 function clearColdBootShutdownMarker(source: "booted" | "cold-boot", deviceId: string): void {
@@ -5343,8 +5435,27 @@ export function registerDeviceTools() {
     stableTarget?: StableDeviceTarget;
   };
 
+  /**
+   * Acquisition-phase timeout. `reserveStableDeviceLifecycle` defaults to the
+   * killDevice-shaped `shutdownTimeoutError`, which on a start path reports the
+   * device as failing to *disappear*, quotes `DEVICE_SHUTDOWN_TIMEOUT_MS`
+   * instead of the caller's budget, and tells the user to verify the shutdown
+   * state. Mirror the phase-labeled style `DeviceBootService` already emits.
+   */
+  const acquisitionLifecycleTimeoutError = (
+    budgets: DevicePreparationBudgets,
+    describedTarget: string,
+    detail: string,
+  ): ActionableError =>
+    new ActionableError(
+      `${budgets.operationName} timeout exhausted while ${detail}; ` +
+        `budgetMs=${budgets.bootTimeoutMs + budgets.automationReadyTimeoutMs}; ` +
+        `target=${describedTarget}; origin=virtualDeviceLifecycleCoordinator`,
+    );
+
   const reserveStartStableDeviceLifecycle = async (
     stableTarget: StableDeviceTarget | undefined,
+    budgets: DevicePreparationBudgets,
     timer: Timer,
     deadlineMs: number,
     signal: AbortSignal | undefined,
@@ -5363,7 +5474,12 @@ export function registerDeviceTools() {
       timer,
       deadlineMs,
       signal,
-      undefined,
+      (detail) =>
+        acquisitionLifecycleTimeoutError(
+          budgets,
+          `${stableTarget.platform}:${stableTarget.stableId}`,
+          detail,
+        ),
       "start",
       coordinator,
     );
@@ -5429,6 +5545,39 @@ export function registerDeviceTools() {
     return { platform: "ios", stableId: match.deviceId };
   };
 
+  const reserveStartSelectorDeviceLifecycle = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> => {
+    const selector = stableStringify({
+      deviceId: args.deviceId,
+      name: args.name,
+      minOsVersion: args.minOsVersion,
+      maxOsVersion: args.maxOsVersion,
+      formFactor: args.formFactor,
+      screenSize: args.screenSize,
+    });
+    try {
+      return await deps.lifecycleCoordinator.reserve(
+        { kind: "selector", platform: args.platform, selector },
+        { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
+      );
+    } catch (error) {
+      // Same acquisition-phase labeling as the stable-identity path above; the
+      // selector fallback had no deadline attribution at all.
+      if (deps.timer.now() >= budgets.automationDeadlineMs) {
+        throw acquisitionLifecycleTimeoutError(
+          budgets,
+          `${args.platform}:${selector}`,
+          "waiting for selector device lifecycle reservation",
+        );
+      }
+      throw error;
+    }
+  };
+
   const reserveStartDeviceLifecycleReservations = async (
     args: StartDeviceArgs,
     budgets: DevicePreparationBudgets,
@@ -5462,26 +5611,12 @@ export function registerDeviceTools() {
       lifecycleLease =
         (await reserveStartStableDeviceLifecycle(
           stableTarget,
+          budgets,
           deps.timer,
           budgets.automationDeadlineMs,
           signal,
           deps.lifecycleCoordinator,
-        )) ??
-        (await deps.lifecycleCoordinator.reserve(
-          {
-            kind: "selector",
-            platform: args.platform,
-            selector: stableStringify({
-              deviceId: args.deviceId,
-              name: args.name,
-              minOsVersion: args.minOsVersion,
-              maxOsVersion: args.maxOsVersion,
-              formFactor: args.formFactor,
-              screenSize: args.screenSize,
-            }),
-          },
-          { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
-        ));
+        )) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
       if (stableTarget?.platform === "ios" && args.name && !args.deviceId) {
         const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
           args,
@@ -5637,8 +5772,11 @@ export function registerDeviceTools() {
         );
         // Recovery must revalidate the caller through the same autolock path;
         // a preserved UUID alone is not proof that this client owns the session.
+        // Read the flag once so the reuse decision below cannot disagree with
+        // the readiness recording that follows it.
+        const autolockEnabled = isDevicePoolAutolockEnabled();
         const boundSessionId =
-          readinessResult.preservedSessionId && !isDevicePoolAutolockEnabled()
+          readinessResult.preservedSessionId && !autolockEnabled
             ? readinessResult.preservedSessionId
             : await bindBootedDeviceSession(
                 state.boot.device,
@@ -5651,7 +5789,7 @@ export function registerDeviceTools() {
                 new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
                 verifiedWarmAndroidAvdIdentity,
               );
-        if (readinessResult.preservedSessionId) {
+        if (readinessResult.preservedSessionId && !autolockEnabled) {
           // #6227 round 7: without autolock, System UI ANR recovery bypasses
           // `bindBootedDeviceSession` (and therefore its own
           // `recordAcquiredSessionReadiness` call) entirely when a preserved
@@ -5665,6 +5803,10 @@ export function registerDeviceTools() {
           // freshly-bound branch. Recording it here closes the gap where a
           // recovered session's readiness cache stayed `undefined` and the first
           // `automationReady` tool after recovery redundantly re-ran setup.
+          // WITH autolock the branch above went through `bindBootedDeviceSession`
+          // instead, and `autolockDevice` already recorded readiness for the
+          // session it returned — which need not be `preservedSessionId`, so
+          // recording it here would bump an unrelated session's expiry.
           recordAcquiredSessionReadiness(
             daemonState,
             readinessResult.preservedSessionId,
@@ -5678,7 +5820,18 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
-    await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    try {
+      await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    } catch (error) {
+      // Best-effort: the acquisition is already committed (session bound, pooled
+      // device busy), so failing on an advisory resource notification would
+      // strand a session UUID the caller never receives. The shutdown path
+      // treats the same notification as fire-and-forget.
+      logger.warn(
+        `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
     return await buildBootedResponse(
       state.boot.device,
       state.boot.source,
@@ -5758,7 +5911,17 @@ export function registerDeviceTools() {
         await releaseReservation();
       }
       if (unownedColdBootSettlement) {
-        void unownedColdBootSettlement.then(() => lifecycleReservations?.lifecycleLease.release());
+        // Release exactly once whatever the settlement does — the bounded wait
+        // in `cancelUnownedColdBoot` guarantees it completes, and `finally`
+        // guarantees the lease is not stranded if it completes by rejecting.
+        void unownedColdBootSettlement
+          .finally(() => lifecycleReservations?.lifecycleLease.release())
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
       } else {
         lifecycleReservations?.lifecycleLease.release();
       }

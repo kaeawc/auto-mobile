@@ -22,7 +22,7 @@ import {
   getRequiredIosRunnerFeatureFlags,
 } from "../features/observe/ios/IOSCtrlProxyClient";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
-import { sourcesForPlatform } from "../utils/discoverySource";
+import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { defaultTimer } from "../utils/SystemTimer";
 
 // Resource URIs
@@ -129,6 +129,7 @@ export interface BootedDevicesResourceContent {
   lastUpdated: string; // ISO 8601
   observationComplete: boolean;
   platformObservations: Partial<Record<Platform, PlatformObservation>>;
+  sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
   poolStatus?: PoolStatusSummary;
   devices: BootedDeviceInfo[];
 }
@@ -484,6 +485,7 @@ interface PlatformDiscoveryResult {
   devices: BootedDeviceInfo[];
   succeededPlatforms: Set<Platform>;
   observation: PlatformObservation;
+  sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
 }
 
 async function discoverBootedDevicesForPlatform(
@@ -508,6 +510,16 @@ async function discoverBootedDevicesForPlatform(
         ),
       ),
       succeededPlatforms: discovery.succeededPlatforms,
+      sourceObservations: Object.fromEntries(
+        sourcesForPlatform(platform).map((source) => [
+          source,
+          {
+            observationComplete: discovery.succeededSources
+              ? discovery.succeededSources.has(source)
+              : discovery.succeededPlatforms.has(platform),
+          },
+        ]),
+      ),
       observation: complete
         ? { observationComplete: true }
         : {
@@ -524,6 +536,9 @@ async function discoverBootedDevicesForPlatform(
     return {
       devices: [],
       succeededPlatforms: new Set(),
+      sourceObservations: Object.fromEntries(
+        sourcesForPlatform(platform).map((source) => [source, { observationComplete: false }]),
+      ),
       observation: {
         observationComplete: false,
         discoveryError: {
@@ -693,6 +708,7 @@ async function getBootedDevicesForPlatforms(
 
   const succeededPlatforms = new Set<Platform>();
   const platformObservations: Partial<Record<Platform, PlatformObservation>> = {};
+  const sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>> = {};
 
   for (const platform of platforms) {
     const discovery = await discoverBootedDevicesForPlatform(
@@ -703,6 +719,7 @@ async function getBootedDevicesForPlatforms(
     );
     devices.push(...discovery.devices);
     platformObservations[platform] = discovery.observation;
+    Object.assign(sourceObservations, discovery.sourceObservations);
     for (const discoveredPlatform of discovery.succeededPlatforms) {
       succeededPlatforms.add(discoveredPlatform);
     }
@@ -729,6 +746,7 @@ async function getBootedDevicesForPlatforms(
       (platform) => platformObservations[platform]?.observationComplete === true,
     ),
     platformObservations,
+    sourceObservations,
     poolStatus,
     devices,
   };

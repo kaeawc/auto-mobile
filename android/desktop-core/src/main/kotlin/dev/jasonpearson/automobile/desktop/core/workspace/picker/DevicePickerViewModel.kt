@@ -25,6 +25,13 @@ private val LOG = LoggerFactory.getLogger("DevicePickerViewModel")
 private const val BOOTED_URI = "automobile:devices/booted"
 private const val IMAGES_URI = "automobile:devices/images"
 
+private fun discoverySource(platform: Platform, isVirtual: Boolean): String =
+  when {
+    platform == Platform.Android -> "android"
+    isVirtual -> "ios-simulator"
+    else -> "ios-physical"
+  }
+
 sealed interface DevicePickerUiState {
   data object Loading : DevicePickerUiState
 
@@ -214,16 +221,24 @@ class DevicePickerViewModel(
     withContext(ioDispatcher) {
       val observation = readBootedDevices()
       val booted = observation.devices
-      val completePlatforms =
-        Platform.entries
-          .filter { platform ->
-            observation.platformObservations[platform.name.lowercase()]?.observationComplete
+      val completeSources =
+        mapOf(
+            "android" to Platform.Android,
+            "ios-simulator" to Platform.Ios,
+            "ios-physical" to Platform.Ios,
+          )
+          .filter { (source, platform) ->
+            observation.sourceObservations[source]?.observationComplete
+              ?: observation.platformObservations[platform.name.lowercase()]?.observationComplete
               ?: observation.observationComplete
           }
-          .toSet()
-      // Positive observations stay usable even if a sibling platform cannot be queried.
-      // Only complete platforms may infer Shutdown from absence in this snapshot.
-      val images = readDeviceImages().filter { platformOf(it.platform) in completePlatforms }
+          .keys
+      // Simulator definitions depend only on simctl, not the independent devicectl sweep.
+      // Older daemons fall back to their platform-level completeness contract.
+      val images =
+        readDeviceImages().filter {
+          discoverySource(platformOf(it.platform), isVirtual = true) in completeSources
+        }
       // Separate resource reads can straddle a boot. Absence from the earlier booted snapshot
       // cannot turn an image explicitly observed as Booting/Booted into a bootable Shutdown row.
       check(
@@ -239,13 +254,19 @@ class DevicePickerViewModel(
         "Device inventory changed during discovery; refresh to get its current state"
       }
       val devices =
-        Platform.entries.flatMap { platform ->
-          buildPickerDevices(
-            booted.filter { platformOf(it.platform) == platform },
-            images.filter { platformOf(it.platform) == platform },
-            bootedImageRuntimeIds[platform].orEmpty(),
-          )
-        }
+        Platform.entries
+          .flatMap { platform ->
+            buildPickerDevices(
+              booted.filter { platformOf(it.platform) == platform },
+              images.filter { platformOf(it.platform) == platform },
+              bootedImageRuntimeIds[platform].orEmpty(),
+            )
+          }
+          .map {
+            it.copy(
+              inventoryUncertain = discoverySource(it.platform, it.isVirtual) !in completeSources
+            )
+          }
       // A runtime whose AVD name probe failed may be one of these saved images. Neither
       // row order nor an unknown name proves which image is shut down; preserve the previous
       // snapshot until discovery resolves the identity or a successful boot supplies attribution.
@@ -271,12 +292,12 @@ class DevicePickerViewModel(
       val retained =
         lastInventory
           .filter {
-            it.platform !in completePlatforms &&
+            discoverySource(it.platform, it.isVirtual) !in completeSources &&
               (it.platform to it.id) !in present &&
               (it.platform to it.id) !in sourceIds
           }
           .map { it.copy(inventoryUncertain = true) }
-      check(devices.isNotEmpty() || retained.isNotEmpty() || completePlatforms.isNotEmpty()) {
+      check(devices.isNotEmpty() || retained.isNotEmpty() || completeSources.isNotEmpty()) {
         "Device discovery is incomplete; no authoritative inventory is available"
       }
       devices + retained
@@ -288,7 +309,11 @@ class DevicePickerViewModel(
         (DeviceResourceParser.parseBootedDevices(result.content)
             ?: throw IllegalStateException("Malformed booted-devices payload"))
           .also {
-            check(it.observationComplete || it.platformObservations.isNotEmpty()) {
+            check(
+              it.observationComplete ||
+                it.platformObservations.isNotEmpty() ||
+                it.sourceObservations.isNotEmpty()
+            ) {
               "Device discovery is incomplete; retaining the previous inventory"
             }
           }

@@ -104,6 +104,49 @@ class DevicePickerViewModelTest {
     }
 
   @Test
+  fun `failed physical discovery still permits a simulator boot on first load`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse =
+        client.bootedDevicesResponse.replace(
+          "\"lastUpdated\":\"x\"",
+          "\"lastUpdated\":\"x\",\"observationComplete\":false,\"platformObservations\":{\"android\":{\"observationComplete\":true},\"ios\":{\"observationComplete\":false}},\"sourceObservations\":{\"android\":{\"observationComplete\":true},\"ios-simulator\":{\"observationComplete\":true},\"ios-physical\":{\"observationComplete\":false}}",
+        )
+      val boot = FakeDeviceBootController()
+      val viewModel = vm(client, boot)
+      assertTrue(content(viewModel).devices.any { it.id == "iphone-15" && !it.inventoryUncertain })
+      viewModel.onAction(DevicePickerAction.BootDevice("ios:iphone-15"))
+      assertEquals(Platform.Ios, boot.bootRequests.single().platform)
+      assertEquals("iphone-15", boot.bootRequests.single().id)
+    }
+
+  @Test
+  fun `source failure retains only affected physical rows and keeps simulator images current`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse =
+        """{"totalCount":1,"androidCount":0,"iosCount":1,"virtualCount":0,"physicalCount":1,"lastUpdated":"x","devices":[{"name":"USB iPhone","platform":"ios","deviceId":"physical-ios","source":"local","isVirtual":false,"status":"booted"}]}"""
+      val viewModel = vm(client)
+      client.bootedDevicesResponse =
+        """{"totalCount":0,"androidCount":0,"iosCount":0,"virtualCount":0,"physicalCount":0,"lastUpdated":"x","observationComplete":false,"platformObservations":{"android":{"observationComplete":true},"ios":{"observationComplete":false}},"sourceObservations":{"ios-simulator":{"observationComplete":true},"ios-physical":{"observationComplete":false}},"devices":[]}"""
+      viewModel.onAction(DevicePickerAction.SilentRefresh)
+      assertTrue(
+        content(viewModel).devices.any { it.id == "physical-ios" && it.inventoryUncertain }
+      )
+      assertTrue(content(viewModel).devices.any { it.id == "iphone-15" && !it.inventoryUncertain })
+      // Reversing the failed source authoritatively removes the physical device, but cannot
+      // reinterpret the retained simulator definition as a newly bootable shutdown device.
+      client.bootedDevicesResponse =
+        client.bootedDevicesResponse.replace(
+          "\"ios-simulator\":{\"observationComplete\":true},\"ios-physical\":{\"observationComplete\":false}",
+          "\"ios-simulator\":{\"observationComplete\":false},\"ios-physical\":{\"observationComplete\":true}",
+        )
+      viewModel.onAction(DevicePickerAction.SilentRefresh)
+      assertTrue(content(viewModel).devices.none { it.id == "physical-ios" })
+      assertTrue(content(viewModel).devices.any { it.id == "iphone-15" && it.inventoryUncertain })
+    }
+
+  @Test
   fun `partial iOS discovery retains only missing iOS rows while accepting fresh Android inventory`() =
     testScope.runTest {
       val client = fake()
@@ -114,7 +157,7 @@ class DevicePickerViewModelTest {
       viewModel.onAction(DevicePickerAction.SilentRefresh)
       val devices = content(viewModel).devices
       assertTrue(devices.none { it.id == "emulator-5554" })
-      assertTrue(devices.any { it.id == "fresh-ios" && !it.inventoryUncertain })
+      assertTrue(devices.any { it.id == "fresh-ios" && it.state == DeviceState.Booted })
       assertTrue(devices.any { it.id == "iphone-15" && it.inventoryUncertain })
       viewModel.onAction(DevicePickerAction.BootDevice("iphone-15"))
       assertTrue(boot.bootRequests.isEmpty())

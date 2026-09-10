@@ -105,6 +105,28 @@ describe("MCP Booted Device Resources", () => {
     const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
     expect(data.observationComplete).toBe(false);
     expect(data.platformObservations.ios?.observationComplete).toBe(false);
+    expect(data.sourceObservations).toEqual({
+      "ios-simulator": { observationComplete: true },
+      "ios-physical": { observationComplete: false },
+    });
+  });
+
+  test("preserves physical iOS completeness when simulator discovery fails", async () => {
+    fakeDeviceUtils.failedSources.add("ios-simulator");
+    const { client } = fixture.getContext();
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:devices/booted/ios" },
+      },
+      z.object({ contents: z.array(z.object({ text: z.string() })) }),
+    );
+    const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+    expect(data.observationComplete).toBe(false);
+    expect(data.sourceObservations).toEqual({
+      "ios-simulator": { observationComplete: false },
+      "ios-physical": { observationComplete: true },
+    });
   });
 
   describe("Resource Listing", () => {

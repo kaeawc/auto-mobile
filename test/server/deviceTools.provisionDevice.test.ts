@@ -1438,6 +1438,47 @@ describe("provisionDevice handler", () => {
     );
   });
 
+  test("reports a contended iOS selector reservation as a timeout", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const blocker = await coordinator.reserve(
+      { kind: "selector", platform: "ios", selector: "iPhone 17" },
+      { operation: "provision", deadlineMs: 10_000_000 },
+    );
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: coordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () => {
+          throw new Error("provisioning must not start without a reservation");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const pending = tool.handler({
+      ...provisionTestArgs("ios", "operation-ios-selector-contended"),
+      boot: false,
+      readiness: "none",
+      timeoutMs: 60_000,
+    });
+    for (let index = 0; index < 30; index++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(60_001);
+    const response = JSON.parse(((await pending) as any).content[0].text);
+    blocker.release();
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "timeout" },
+    });
+  });
+
   test("fails closed when iOS lifecycle-reservation discovery is incomplete", async () => {
     deviceManager.failedPlatforms.add("ios");
     const tool = ToolRegistry.getTool("provisionDevice");

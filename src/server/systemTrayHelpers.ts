@@ -1487,7 +1487,7 @@ const readAppTrayNotifications = (
       (candidate.groupNode ? readTrayNotificationFields(candidate.groupNode).appLabel : null);
     // Match the application header exactly; body text mentioning the app is not
     // ownership evidence. SystemUI's node package identifies the shade itself.
-    if (!label || (label !== appLabel && label !== appId)) {
+    if (!label || label !== appLabel) {
       continue;
     }
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
@@ -1603,21 +1603,25 @@ export const resolveUniqueTrayAppLabel = async (
   appIds: string[],
 ): Promise<string> => {
   const label = await resolveAppLabel(device, appId);
-  if (!label) {throw new ActionableError(`Cannot verify the notification label for ${appId}.`);}
+  if (!label) {
+    throw new ActionableError(`Cannot verify the notification label for ${appId}.`);
+  }
   const others = [...new Set(appIds)].filter((id) => id !== appId);
   // Bound concurrent PackageManager requests instead of flooding the device.
   for (let offset = 0; offset < others.length; offset += 8) {
     const labels = await Promise.all(
       others.slice(offset, offset + 8).map((id) => resolveAppLabel(device, id)),
     );
-    if (labels.includes(label))
-      {throw new ActionableError(
+    if (labels.includes(label)) {
+      throw new ActionableError(
         `Notification app label "${label}" belongs to multiple installed apps; the shade cannot distinguish ${appId}.`,
-      );}
-    if (labels.includes(null))
-      {throw new ActionableError(
+      );
+    }
+    if (labels.includes(null)) {
+      throw new ActionableError(
         "Cannot verify notification app ownership because some installed app labels are unavailable.",
-      );}
+      );
+    }
   }
   return label;
 };

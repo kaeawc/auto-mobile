@@ -1637,17 +1637,21 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "list") {
-        if (device.platform !== "android")
-          {throw new ActionableError("systemTray list is supported only on Android.");}
+        if (device.platform !== "android") {
+          throw new ActionableError("systemTray list is supported only on Android.");
+        }
         const appId = args.notification?.appId;
-        if (!appId) {throw new ActionableError("list action requires notification.appId");}
+        if (!appId) {
+          throw new ActionableError("list action requires notification.appId");
+        }
         const inventory = await new ListInstalledApps(device, undefined, null, {
           cacheEnabled: false,
         }).executeDetailedResult();
-        if (!inventory.successful)
-          {throw new ActionableError(
+        if (!inventory.successful) {
+          throw new ActionableError(
             "Cannot verify notification ownership because the installed-app inventory is incomplete.",
-          );}
+          );
+        }
         const appIds = [
           ...new Set(
             [...Object.values(inventory.apps.profiles).flat(), ...inventory.apps.system].map(
@@ -1655,7 +1659,9 @@ export function registerInteractionTools() {
             ),
           ),
         ];
-        if (!appIds.includes(appId)) {throw new ActionableError(`App ${appId} is not installed.`);}
+        if (!appIds.includes(appId)) {
+          throw new ActionableError(`App ${appId} is not installed.`);
+        }
         const label = await resolveUniqueTrayAppLabel(device, appId, appIds);
         const result = await listSystemTrayNotifications(
           device,

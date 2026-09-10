@@ -3306,6 +3306,26 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
   };
 }
 
+/**
+ * True when the running device resolved for `args.deviceId` is not the device
+ * the caller named. On Android `deviceId` doubles as an AVD image name (see
+ * `getAndroidSchema`), so a serial that necessarily differs from the requested
+ * string is still the requested device when the AVD name matches.
+ */
+function isMismatchedBootedDeviceId(
+  args: StartDeviceArgs,
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): boolean {
+  if (!args.deviceId || device.deviceId === args.deviceId) {
+    return false;
+  }
+  return !(
+    device.platform === "android" &&
+    (device.name === args.deviceId || sourceImage?.name === args.deviceId)
+  );
+}
+
 function validateBootIdentity(
   args: StartDeviceArgs,
   device: BootedDevice,
@@ -3320,18 +3340,7 @@ function validateBootIdentity(
         "phase=pool-match: resolved platform differs from requested platform",
     );
   }
-  // On Android `deviceId` doubles as an AVD image name (see getAndroidSchema),
-  // so a running device resolved through that spelling IS the requested device
-  // even though its serial necessarily differs from the requested string.
-  const requestedByAndroidAvdName =
-    device.platform === "android" &&
-    (device.name === args.deviceId || sourceImage?.name === args.deviceId);
-  if (
-    source === "booted" &&
-    args.deviceId &&
-    device.deviceId !== args.deviceId &&
-    !requestedByAndroidAvdName
-  ) {
+  if (source === "booted" && isMismatchedBootedDeviceId(args, device, sourceImage)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
         "phase=pool-match: running device ID differs from the requested device ID",

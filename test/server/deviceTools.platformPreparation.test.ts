@@ -228,7 +228,9 @@ describe("platform device preparation tools", () => {
     // #5870: `deviceId` — the identifier every device resource leads with — is
     // now an accepted target on getAndroid alongside `avdName`, but only when
     // both spellings name the same AVD.
-    expect(() => getAndroidSchema.parse({ avdName: image.name, deviceId: image.name })).not.toThrow();
+    expect(() =>
+      getAndroidSchema.parse({ avdName: image.name, deviceId: image.name }),
+    ).not.toThrow();
     // `platform` remains an unrecognized key on getApple (strict schema).
     expect(() => getAppleSchema.parse({ udid: "sim-udid", platform: "ios" })).toThrow();
   });
@@ -315,9 +317,9 @@ describe("platform device preparation tools", () => {
   });
 
   test("getAndroid rejects contradictory avdName and deviceId instead of silently preferring one", () => {
-    expect(() =>
-      getAndroidSchema.parse({ avdName: "Pixel_A", deviceId: "emulator-5556" }),
-    ).toThrow(/identifier_conflict/);
+    expect(() => getAndroidSchema.parse({ avdName: "Pixel_A", deviceId: "emulator-5556" })).toThrow(
+      /identifier_conflict/,
+    );
   });
 
   test("getApple rejects contradictory udid and deviceId instead of silently preferring one", () => {

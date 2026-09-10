@@ -61,15 +61,15 @@ tests.
     ![Install Demo](img/install.gif)
 
     <div class="desktop-install-options">
-      <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.70/AutoMobile-0.0.70-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
+      <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.71/AutoMobile-0.0.71-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
         <strong>macOS</strong>
         <span>x86_64 · DMG</span>
       </a>
-      <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.70/AutoMobile-0.0.70-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
+      <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.71/AutoMobile-0.0.71-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
         <strong>Linux</strong>
         <span>x86_64 · DEB</span>
       </a>
-      <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.70/AutoMobile-0.0.70-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
+      <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.71/AutoMobile-0.0.71-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
         <strong>Windows</strong>
         <span>x86_64 · MSI</span>
       </a>

@@ -24,6 +24,7 @@ import {
 export function createNotificationUIDetector(
   device: BootedDevice,
   getDependencies: () => SystemTrayDependencies,
+  signal?: AbortSignal,
 ): NotificationUIDetector {
   if (device.platform === "ios") {
     const deps: IosNotificationUIDetectorDeps = {
@@ -37,7 +38,16 @@ export function createNotificationUIDetector(
   }
 
   const deps: AndroidNotificationUIDetectorDeps = {
-    executeAdbCommand: (command) => getAdb(device, getDependencies).executeCommand(command),
+    executeAdbCommand: (command) => {
+      signal?.throwIfAborted();
+      return getAdb(device, getDependencies).executeCommand(
+        command,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+    },
     getDeviceTimestampMs: () => getAdb(device, getDependencies).getDeviceTimestampMs(),
   };
   return new AndroidNotificationUIDetector(device, deps);

@@ -21,6 +21,7 @@ import {
 } from "../models";
 import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
@@ -83,6 +84,12 @@ export interface SystemTrayIosClient {
 }
 
 export interface SystemTrayDependencies {
+  appInventoryFactory: (device: BootedDevice) => Pick<ListInstalledApps, "executeDetailedResult">;
+  appLabelResolver: (
+    device: BootedDevice,
+    appId: string,
+    signal?: AbortSignal,
+  ) => Promise<string | null>;
   observeScreenFactory: (device: BootedDevice) => SystemTrayObserver;
   adbFactory: (device: BootedDevice) => SystemTrayAdb;
   iosClientFactory?: (device: BootedDevice) => SystemTrayIosClient;
@@ -116,6 +123,9 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
       adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
       timer: defaultTimer,
+      appInventoryFactory: (device) =>
+        new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
+      appLabelResolver: resolveAppLabel,
     };
   }
   return systemTrayDependencies;
@@ -128,6 +138,8 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     adbFactory: overrides.adbFactory ?? current.adbFactory,
     iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
     timer: overrides.timer ?? current.timer,
+    appInventoryFactory: overrides.appInventoryFactory ?? current.appInventoryFactory,
+    appLabelResolver: overrides.appLabelResolver ?? current.appLabelResolver,
   };
 };
 
@@ -240,12 +252,14 @@ export const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => 
 const observeSystemTray = (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
+  signal?: AbortSignal,
 ): Promise<ObserveResult> =>
   observeScreen.execute({
     skipWaitForFresh: false,
     minTimestamp,
     skipScreenshot: true,
     skipAccessibilityAudit: true,
+    signal,
   });
 
 export const observeSystemTrayAfterTap = async (
@@ -378,7 +392,9 @@ const parseAppLabelFromDumpsys = (stdout: string): string | null => {
 export const resolveAppLabel = async (
   device: BootedDevice,
   appId: string,
+  signal?: AbortSignal,
 ): Promise<string | null> => {
+  signal?.throwIfAborted();
   if (device.platform !== "android") {
     return null;
   }
@@ -389,11 +405,13 @@ export const resolveAppLabel = async (
   try {
     const a11y = AndroidCtrlProxyClient.getInstance(device);
     const info = await a11y.requestPackageInfo(appId, { includePermissions: false }, 3000);
+    signal?.throwIfAborted();
     if (info.success && info.applicationLabel) {
       return info.applicationLabel;
     }
   } catch (error) {
     // CtrlProxy package info is a fast path; dumpsys below is the fallback.
+    signal?.throwIfAborted();
     logger.debug(`CtrlProxy app label lookup failed for ${appId}: ${error}`, error);
   }
 
@@ -405,12 +423,14 @@ export const resolveAppLabel = async (
       undefined,
       undefined,
       true,
+      signal,
     );
     return parseAppLabelFromDumpsys(result.stdout);
   } catch (error) {
     // Both the CtrlProxy fast path and this dumpsys fallback failed (e.g. app
     // uninstalled mid-check); null lets the caller fall back to the package name.
     logger.debug(`src/server/systemTrayHelpers.ts dumpsys label lookup failed: ${error}`, error);
+    signal?.throwIfAborted();
     return null;
   }
 };
@@ -1071,17 +1091,21 @@ const waitForSystemTrayOpen = async (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
   awaitTimeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeSystemTray(observeScreen, minTimestamp);
+  signal?.throwIfAborted();
+  let observation = await observeSystemTray(observeScreen, minTimestamp, signal);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
+    signal?.throwIfAborted();
     if (detector.isTrayOpen(observation.viewHierarchy)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeSystemTray(observeScreen, minTimestamp);
+    signal?.throwIfAborted();
+    observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   }
 
   return observation;
@@ -1621,6 +1645,7 @@ export const listSystemTrayNotifications = async (
   appLabel: string | null,
   awaitTimeoutMs: number,
   _progress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{
   notifications: ListedTrayNotification[];
   observation: ObserveResult;
@@ -1630,23 +1655,27 @@ export const listSystemTrayNotifications = async (
   if (device.platform !== "android") {
     throw new ActionableError("systemTray list is supported only on Android.");
   }
-  const detector = getDetector(device);
+  signal?.throwIfAborted();
+  const detector = createNotificationUIDetector(device, getSystemTrayDependencies, signal);
   const { adbFactory, observeScreenFactory } = getSystemTrayDependencies();
   // Collapsing resets SystemUI's scroll position; every bounded scan starts at
   // the top even when a previous list left the shade open at its tail.
   await detector.collapseTray();
+  signal?.throwIfAborted();
   await detector.expandTray();
   let observation = await waitForSystemTrayOpen(
     detector,
     observeScreenFactory(device),
     await detector.getObservationTimestamp(),
     awaitTimeoutMs,
+    signal,
   );
   const rows: TrayObservedRow[] = [];
   let previousNotifications: TrayObservedRow[] = [];
   let previousPage: string | undefined;
   let swipes = 0;
   while (true) {
+    signal?.throwIfAborted();
     if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
       throw new ActionableError("Notification shade is not open; cannot list notifications.");
     }
@@ -1670,11 +1699,16 @@ export const listSystemTrayNotifications = async (
     const endY = Math.floor(Math.max(observation.systemInsets.top, height * 0.35));
     await adbFactory(device).executeCommand(
       `shell input swipe ${x} ${startY} ${x} ${endY} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
     );
     swipes++;
     observation = await observeSystemTray(
       observeScreenFactory(device),
       await detector.getObservationTimestamp(),
+      signal,
     );
   }
   // Keep every app's rows available to align pages, then expose only rows
@@ -1696,6 +1730,14 @@ export const listSystemTrayNotifications = async (
       notifications.push(notification);
     }
   }
+  signal?.throwIfAborted();
+  await detector.collapseTray();
+  signal?.throwIfAborted();
+  observation = await observeSystemTray(
+    observeScreenFactory(device),
+    await detector.getObservationTimestamp(),
+    signal,
+  );
   return { notifications, observation, swipes, order: "encounter" };
 };
 
@@ -1704,17 +1746,23 @@ export const resolveUniqueTrayAppLabel = async (
   device: BootedDevice,
   appId: string,
   appIds: string[],
+  signal?: AbortSignal,
 ): Promise<string> => {
-  const label = await resolveAppLabel(device, appId);
+  signal?.throwIfAborted();
+  const { appLabelResolver } = getSystemTrayDependencies();
+  const label = await appLabelResolver(device, appId, signal);
+  signal?.throwIfAborted();
   if (!label) {
     throw new ActionableError(`Cannot verify the notification label for ${appId}.`);
   }
   const others = [...new Set(appIds)].filter((id) => id !== appId);
   // Bound concurrent PackageManager requests instead of flooding the device.
   for (let offset = 0; offset < others.length; offset += 8) {
+    signal?.throwIfAborted();
     const labels = await Promise.all(
-      others.slice(offset, offset + 8).map((id) => resolveAppLabel(device, id)),
+      others.slice(offset, offset + 8).map((id) => appLabelResolver(device, id, signal)),
     );
+    signal?.throwIfAborted();
     if (labels.includes(label)) {
       throw new ActionableError(
         `Notification app label "${label}" belongs to multiple installed apps; the shade cannot distinguish ${appId}.`,

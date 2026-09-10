@@ -1659,9 +1659,11 @@ export function registerInteractionTools() {
         if (!appId) {
           throw new ActionableError("list action requires notification.appId");
         }
-        const inventory = await new ListInstalledApps(device, undefined, null, {
-          cacheEnabled: false,
-        }).executeDetailedResult();
+        signal?.throwIfAborted();
+        const inventory = await getSystemTrayDependencies()
+          .appInventoryFactory(device)
+          .executeDetailedResult();
+        signal?.throwIfAborted();
         if (!inventory.successful) {
           throw new ActionableError(
             "Cannot verify notification ownership because the installed-app inventory is incomplete.",
@@ -1677,13 +1679,14 @@ export function registerInteractionTools() {
         if (!appIds.includes(appId)) {
           throw new ActionableError(`App ${appId} is not installed.`);
         }
-        const label = await resolveUniqueTrayAppLabel(device, appId, appIds);
+        const label = await resolveUniqueTrayAppLabel(device, appId, appIds, signal);
         const result = await listSystemTrayNotifications(
           device,
           appId,
           label,
           awaitTimeoutMs,
           progress,
+          signal,
         );
         await captureSystemTrayTerminalEvidence(device, result.observation);
         return createJSONToolResponse({

@@ -1,14 +1,13 @@
-import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import Ajv2020 from "ajv/dist/2020";
 import generatedDefinitions from "../../schemas/tool-definitions.json";
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   listSystemTrayNotifications,
   resolveUniqueTrayAppLabel,
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
+  type SystemTrayDependencies,
 } from "../../src/server/systemTrayHelpers";
 import { registerInteractionTools, systemTraySchema } from "../../src/server/interactionTools";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -64,6 +63,34 @@ function setup(pages: ObserveResult[]) {
   return { adb, observer };
 }
 const list = () => listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000);
+class FakeTrayApps {
+  labels = new Map<string, string | null>([["com.example.messages", "Messages"]]);
+  calls: string[] = [];
+  resolve: SystemTrayDependencies["appLabelResolver"] = async (_device, appId) => {
+    this.calls.push(appId);
+    return this.labels.get(appId) ?? null;
+  };
+  inventory: SystemTrayDependencies["appInventoryFactory"] = () => ({
+    executeDetailedResult: async () => ({
+      successful: true,
+      apps: {
+        profiles: {},
+        system: [...this.labels.keys()].map((packageName) => ({
+          packageName,
+          userIds: [0],
+          foreground: false,
+          recent: false,
+        })),
+      },
+    }),
+  });
+  install() {
+    setSystemTrayDependencies({
+      appLabelResolver: this.resolve,
+      appInventoryFactory: this.inventory,
+    });
+  }
+}
 let validateAdvertised: ReturnType<Ajv2020["compile"]>;
 let validateGenerated: ReturnType<Ajv2020["compile"]>;
 beforeAll(() => {
@@ -83,6 +110,71 @@ afterEach(() => {
 });
 
 describe("systemTray list", () => {
+  test("closes the shade after scanning so follow-up actions reopen at the top", async () => {
+    const { adb } = setup([page(identifiedRow("first")), page(identifiedRow("next"))]);
+    await list();
+    expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+  });
+  test("does no device work for an already cancelled list", async () => {
+    const { adb } = setup([page(row("first"))]);
+    const signal = AbortSignal.abort(new Error("cancelled"));
+    await expect(
+      listSystemTrayNotifications(
+        device,
+        "com.example.messages",
+        "Messages",
+        5000,
+        undefined,
+        signal,
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+  test("stops swiping and cleanup when cancellation arrives during observation", async () => {
+    const { adb, observer } = setup([page(row("first"))]);
+    const controller = new AbortController();
+    observer.setObserveResult(() => {
+      controller.abort(new Error("cancelled"));
+      return page(row("first"));
+    });
+    await expect(
+      listSystemTrayNotifications(
+        device,
+        "com.example.messages",
+        "Messages",
+        5000,
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd statusbar collapse",
+      "shell cmd statusbar expand-notifications",
+    ]);
+  });
+  test("stops label resolution before another package batch after cancellation", async () => {
+    const apps = new FakeTrayApps();
+    const controller = new AbortController();
+    apps.install();
+    setSystemTrayDependencies({
+      appLabelResolver: async (device, id, signal) => {
+        const result = await apps.resolve(device, id, signal);
+        if (id !== "com.example.messages") {
+          controller.abort(new Error("cancelled"));
+        }
+        return result;
+      },
+    });
+    await expect(
+      resolveUniqueTrayAppLabel(
+        device,
+        "com.example.messages",
+        Array.from({ length: 20 }, (_, i) => `com.other.${i}`),
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(apps.calls).toHaveLength(9);
+  });
   test("advertised schema requires appId for list without constraining open and close", () => {
     for (const validate of [validateAdvertised, validateGenerated]) {
       for (const notification of [undefined, {}, { title: "Only a title" }, { appId: "" }]) {
@@ -160,86 +252,50 @@ describe("systemTray list", () => {
   });
   test("rejects ambiguous installed app labels before scanning", async () => {
     const { adb } = setup([page(row("private"))]);
-    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestPackageInfo: async () => ({ success: true, applicationLabel: "Messages" }),
-    } as unknown as AndroidCtrlProxyClient);
-    try {
-      await expect(
-        resolveUniqueTrayAppLabel(device, "com.example.messages", [
-          "com.example.messages",
-          "com.other.messages",
-        ]),
-      ).rejects.toThrow("multiple installed apps");
-      expect(adb.getExecutedCommands()).toEqual([]);
-    } finally {
-      client.mockRestore();
-    }
+    const apps = new FakeTrayApps();
+    apps.labels.set("com.other.messages", "Messages");
+    apps.install();
+    await expect(
+      resolveUniqueTrayAppLabel(device, "com.example.messages", [
+        "com.example.messages",
+        "com.other.messages",
+      ]),
+    ).rejects.toThrow("multiple installed apps");
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
   test("rejects missing app-label metadata instead of claiming unique ownership", async () => {
     setup([page()]);
-    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestPackageInfo: async (appId: string) => ({
-        success: true,
-        applicationLabel: appId === "com.example.messages" ? "Messages" : undefined,
-      }),
-    } as unknown as AndroidCtrlProxyClient);
-    try {
-      await expect(
-        resolveUniqueTrayAppLabel(device, "com.example.messages", [
-          "com.example.messages",
-          "com.other.app",
-        ]),
-      ).rejects.toThrow("unavailable");
-    } finally {
-      client.mockRestore();
-    }
+    new FakeTrayApps().install();
+    await expect(
+      resolveUniqueTrayAppLabel(device, "com.example.messages", [
+        "com.example.messages",
+        "com.other.app",
+      ]),
+    ).rejects.toThrow("unavailable");
   });
   test("accepts a unique app label after checking other installed packages", async () => {
-    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestPackageInfo: async (appId: string) => ({
-        success: true,
-        applicationLabel: appId === "com.example.messages" ? "Messages" : "Other",
-      }),
-    } as unknown as AndroidCtrlProxyClient);
-    try {
-      expect(
-        await resolveUniqueTrayAppLabel(device, "com.example.messages", [
-          "com.example.messages",
-          "com.other.app",
-        ]),
-      ).toBe("Messages");
-    } finally {
-      client.mockRestore();
-    }
+    const apps = new FakeTrayApps();
+    apps.labels.set("com.other.app", "Other");
+    apps.install();
+    expect(
+      await resolveUniqueTrayAppLabel(device, "com.example.messages", [
+        "com.example.messages",
+        "com.other.app",
+      ]),
+    ).toBe("Messages");
   });
 
   test("registered handler returns notification data to the client", async () => {
     setup([page(row("read me"))]);
-    const apps = spyOn(ListInstalledApps.prototype, "executeDetailedResult").mockResolvedValue({
-      successful: true,
-      apps: {
-        profiles: {},
-        system: [
-          { packageName: "com.example.messages", userIds: [0], foreground: false, recent: false },
-        ],
-      },
+    new FakeTrayApps().install();
+    registerInteractionTools();
+    const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "list",
+      notification: { appId: "com.example.messages" },
     });
-    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestPackageInfo: async () => ({ success: true, applicationLabel: "Messages" }),
-    } as unknown as AndroidCtrlProxyClient);
-    try {
-      registerInteractionTools();
-      const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
-        action: "list",
-        notification: { appId: "com.example.messages" },
-      });
-      const payload = JSON.parse(result.content[0].text);
-      expect(payload.notifications[0]).toMatchObject({ title: "read me", body: "Body of read me" });
-      expect(payload.success).toBe(true);
-    } finally {
-      apps.mockRestore();
-      client.mockRestore();
-    }
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.notifications[0]).toMatchObject({ title: "read me", body: "Body of read me" });
+    expect(payload.success).toBe(true);
   });
 
   test("requires appId without relaxing find or destructive actions", () => {

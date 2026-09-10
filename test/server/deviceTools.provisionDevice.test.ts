@@ -2252,6 +2252,101 @@ describe("provisionDevice handler", () => {
     expect(calls).toBe(2);
   });
 
+  test("cancels the lifecycle and reports request_cancelled when the last waiter aborts", async () => {
+    let provisionSignal: AbortSignal | undefined;
+    let observedAbort = false;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionSignal = request.signal;
+          await new Promise<void>((resolve) => {
+            if (request.signal?.aborted) {
+              resolve();
+              return;
+            }
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          observedAbort = true;
+          throw request.signal?.reason ?? new Error("aborted");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-sole-caller-abort"),
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await Promise.resolve();
+    caller.abort(new Error("client went away"));
+    const response = await call;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+
+    // Nothing is waiting for the result any more, so the provisioning work
+    // must be cancelled rather than left to boot a device and bind a session
+    // no client owns.
+    expect(provisionSignal?.aborted).toBe(true);
+    expect(observedAbort).toBe(true);
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      success: false,
+      error: { code: "request_cancelled" },
+      operationId: args.operationId,
+      operationContinues: false,
+    });
+    expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+  });
+
+  test("tells a detaching joiner that the shared operation continues", async () => {
+    let resolveProvision!: (result: ExactProvisionedDevice) => void;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () =>
+          await new Promise<ExactProvisionedDevice>((resolve) => {
+            resolveProvision = resolve;
+          }),
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-joiner-abort"),
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const initiator = tool.handler(args);
+    await Promise.resolve();
+    const joinerController = new AbortController();
+    const joiner = tool.handler(args, undefined, joinerController.signal);
+    await Promise.resolve();
+    joinerController.abort(new Error("joiner disconnected"));
+    const joinerResponse = await joiner;
+
+    expect(JSON.parse((joinerResponse as any).content[0].text)).toMatchObject({
+      success: false,
+      error: { code: "request_cancelled" },
+      operationId: args.operationId,
+      operationContinues: true,
+    });
+
+    resolveProvision(provisionedTestDevice("android", true));
+    expect(JSON.parse(((await initiator) as any).content[0].text)).toMatchObject({
+      operationId: args.operationId,
+    });
+  });
+
   test("keeps a shared operation running when its initiating caller aborts", async () => {
     let resolveProvision!: (result: ExactProvisionedDevice) => void;
     let provisionSignal: AbortSignal | undefined;

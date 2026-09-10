@@ -738,10 +738,48 @@ export interface DeviceToolsDependencies {
   lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
 }
 
-const activeProvisionDeviceOperations = new Map<
-  string,
-  { fingerprint: string; promise: Promise<Record<string, unknown>> }
->();
+/**
+ * In-flight provisionDevice operations, keyed by idempotency key, so several
+ * callers of the same operationId share one lifecycle. `waiters` counts the
+ * callers still listening for the result: the shared `controller` is aborted
+ * when the LAST of them detaches, because past that point the lifecycle would
+ * otherwise keep booting a device and binding a session that no client owns.
+ * A caller that detaches while others are still waiting only detaches itself.
+ */
+interface ActiveProvisionDeviceOperation {
+  fingerprint: string;
+  promise: Promise<Record<string, unknown>>;
+  controller: AbortController;
+  waiters: number;
+}
+
+const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();
+
+/**
+ * Detach one caller from a shared operation. Returns true when this was the
+ * last waiter and the still-running lifecycle was therefore cancelled.
+ */
+function releaseProvisionDeviceWaiter(
+  operationId: string,
+  operation: ActiveProvisionDeviceOperation,
+): boolean {
+  operation.waiters -= 1;
+  if (operation.waiters > 0) {
+    return false;
+  }
+  if (activeProvisionDeviceOperations.get(operationId) !== operation) {
+    // Already settled: its result is persisted and replayable, so there is
+    // nothing left to cancel.
+    return false;
+  }
+  operation.controller.abort(
+    new ActionableError(
+      `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
+        "disconnected",
+    ),
+  );
+  return true;
+}
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
@@ -3267,6 +3305,18 @@ async function waitForSharedOperation<T>(
   }
 }
 
+/**
+ * Distinguish "the caller went away" from a provisioning failure.
+ * `waitForSharedOperation` rejects with the caller signal's own reason, which
+ * is a `DOMException(AbortError)` unless the caller supplied one.
+ */
+function isProvisionDeviceCallerAbort(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted && error === signal.reason) {
+    return true;
+  }
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function createProvisionDeviceResponse(result: Record<string, unknown>) {
   const device = result.device as { name: string; platform: string };
   const resources = result.resources as DeviceResourceConfigurationResult | undefined;
@@ -4192,16 +4242,19 @@ export function registerDeviceTools() {
           `operationId '${args.operationId}' is already running with a different provisionDevice request.`,
         );
       }
-      try {
-        return createProvisionDeviceResponse(await waitForSharedOperation(active.promise, signal));
-      } catch (error) {
-        return provisionDeviceErrorResponse(error);
-      }
+      active.waiters += 1;
+      return await awaitSharedProvisionDeviceOperation(args, active, signal);
     }
 
     const sharedController = new AbortController();
     const promise = executeProvisionDevice(args, fingerprint, sharedController.signal);
-    activeProvisionDeviceOperations.set(args.operationId, { fingerprint, promise });
+    const operation: ActiveProvisionDeviceOperation = {
+      fingerprint,
+      promise,
+      controller: sharedController,
+      waiters: 1,
+    };
+    activeProvisionDeviceOperations.set(args.operationId, operation);
     void promise.then(
       () => {
         if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
@@ -4214,12 +4267,49 @@ export function registerDeviceTools() {
         }
       },
     );
+    return await awaitSharedProvisionDeviceOperation(args, operation, signal);
+  };
+
+  async function awaitSharedProvisionDeviceOperation(
+    args: ProvisionDeviceArgs,
+    operation: ActiveProvisionDeviceOperation,
+    signal: AbortSignal | undefined,
+  ) {
     try {
-      return createProvisionDeviceResponse(await waitForSharedOperation(promise, signal));
+      const result = await waitForSharedOperation(operation.promise, signal);
+      releaseProvisionDeviceWaiter(args.operationId, operation);
+      return createProvisionDeviceResponse(result);
     } catch (error) {
+      const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation);
+      if (isProvisionDeviceCallerAbort(error, signal)) {
+        // The caller went away, which is not a provisioning failure: report it
+        // with a code of its own, and say whether the operation is still
+        // running (so the caller can collect the result by re-issuing the same
+        // operationId) or was cancelled with it.
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} caller cancelled the request ` +
+            `(operation ${cancelledOperation ? "cancelled" : "still running"}): ` +
+            `${errorMessage(error)}`,
+          error,
+        );
+        return createToolErrorResponse(
+          "request_cancelled",
+          cancelledOperation
+            ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
+                "the caller; no other caller was waiting, so the operation was cancelled too."
+            : `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
+                "the caller; the operation is still running and its result can be collected by " +
+                "re-issuing the same operationId.",
+          { operationId: args.operationId, operationContinues: !cancelledOperation },
+        );
+      }
+      logger.warn(
+        `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,
+        error,
+      );
       return provisionDeviceErrorResponse(error);
     }
-  };
+  }
 
   async function executeProvisionDevice(
     args: ProvisionDeviceArgs,

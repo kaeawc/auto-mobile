@@ -295,6 +295,19 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
         path: ["avdName"],
       });
     }
+    // Both spellings are accepted together only when they name the same AVD
+    // (`deviceId` also takes an image name). Anything else contradicts itself,
+    // and silently preferring `avdName` would prepare a device the caller did
+    // not name — the worst failure mode for a device-identity API.
+    if (value.avdName && value.deviceId && value.avdName !== value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `identifier_conflict: avdName '${value.avdName}' and deviceId '${value.deviceId}' ` +
+          "name different devices. Pass only the identifier you mean.",
+        path: ["deviceId"],
+      });
+    }
   });
 
 export const getAppleSchema = devicePreparationTimeoutSchema
@@ -321,6 +334,18 @@ export const getAppleSchema = devicePreparationTimeoutSchema
         code: "custom",
         message: "Provide udid or deviceId (the `deviceId` field of automobile:devices/booted/ios)",
         path: ["udid"],
+      });
+    }
+    // `deviceId` is an alias for `udid` on iOS, so two different values name
+    // two different simulators; resolving that to `udid` alone would prepare a
+    // device the caller did not name.
+    if (value.udid && value.deviceId && value.udid !== value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `identifier_conflict: udid '${value.udid}' and deviceId '${value.deviceId}' are ` +
+          "different simulator UDIDs. Pass only the identifier you mean.",
+        path: ["deviceId"],
       });
     }
   });

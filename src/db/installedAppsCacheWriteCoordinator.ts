@@ -21,7 +21,7 @@ export interface InstalledAppsCacheWriteCoordinator {
    * while this call was waiting on the device's write tail. Safe to call from
    * a hot path that reuses device ids: a reused id simply starts clean.
    */
-  releaseDevice(deviceId: string): Promise<void>;
+  releaseDevice(deviceId: string, expectedGeneration?: number): Promise<void>;
 }
 
 export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledAppsCacheWriteCoordinator {
@@ -92,7 +92,10 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
     return generation;
   }
 
-  async releaseDevice(deviceId: string): Promise<void> {
+  async releaseDevice(deviceId: string, expectedGeneration?: number): Promise<void> {
+    if (expectedGeneration !== undefined && this.generations.get(deviceId) !== expectedGeneration) {
+      return;
+    }
     // Fence: bump the generation the same way invalidate() does, so a rebuild
     // that already captured an older generation cannot later commit against
     // this device id even if it is reused before cleanup below runs.

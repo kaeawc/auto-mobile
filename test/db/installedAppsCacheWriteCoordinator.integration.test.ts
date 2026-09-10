@@ -150,6 +150,21 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     expect(coordinator.isDirty(deviceId)).toBe(false);
   });
 
+  test("late release cannot discard a replacement invalidation fence", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    await coordinator.invalidate("reused", async () => {});
+    const retired = coordinator.beginRebuild("reused");
+    await expect(
+      coordinator.invalidate("reused", async () => {
+        throw new Error("replacement invalidation failed");
+      }),
+    ).rejects.toThrow("replacement invalidation failed");
+    const replacement = coordinator.beginRebuild("reused");
+    await coordinator.releaseDevice("reused", retired);
+    expect(coordinator.isDirty("reused")).toBe(true);
+    expect(await coordinator.commitRebuild("reused", replacement, async () => {})).toBe(true);
+  });
+
   test("releaseDevice returns the tracked-device count to zero across many unique ids (#6704)", async () => {
     const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
     const deviceIds = Array.from({ length: 50 }, (_, index) => `released-device-${index}`);

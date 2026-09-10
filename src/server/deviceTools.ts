@@ -2230,10 +2230,12 @@ async function shutdownDevice(
 
       const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
       const notification = cleanup.then(async (cacheCleared) => {
+        const coordinator = getInstalledAppsCacheWriteCoordinator();
+        const generation = cacheCleared ? coordinator.beginRebuild(device.deviceId) : undefined;
         await notifyResourcesAfterShutdown(dependencies);
         // Failed persistence must keep the dirty fence across device-ID reuse.
         if (cacheCleared) {
-          await getInstalledAppsCacheWriteCoordinator().releaseDevice(device.deviceId);
+          await coordinator.releaseDevice(device.deviceId, generation);
         }
       });
       // Keep late cleanup visible to DB shutdown without blocking a later

@@ -26,11 +26,7 @@ export const DEVICE_SESSION_ACQUISITION_TOOLS = [
  * (`src/daemon/daemonMcpProxy.ts`). Pinned to the registry by
  * `test/server/deviceSessionRecoveryTools.test.ts`.
  */
-export const DEVICE_SESSION_RECOVERY_TOOLS = [
-  "getAndroid",
-  "getApple",
-  "provisionDevice",
-] as const;
+export const DEVICE_SESSION_RECOVERY_TOOLS = ["getAndroid", "getApple", "provisionDevice"] as const;
 
 /** The prose form of {@link DEVICE_SESSION_RECOVERY_TOOLS} for error messages. */
 export const DEVICE_SESSION_RECOVERY_PROMPT =

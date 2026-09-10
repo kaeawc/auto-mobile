@@ -807,7 +807,9 @@ describe("post-handler cancellation guard scope", () => {
         // Model transport/session teardown landing while the handler is
         // finishing, after it already produced a complete, correct result.
         await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
-        return { content: [{ type: "text" as const, text: JSON.stringify({ value: "finished" }) }] };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ value: "finished" }) }],
+        };
       },
       { defaultEnabled: true },
     );
@@ -831,7 +833,13 @@ describe("post-handler cancellation guard scope", () => {
         releases.push(uuid);
         return await releaseSession(uuid, reason, allowExpired);
       };
-      const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, new FakeDeviceUtils());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-test",
+        timer,
+        undefined,
+        new FakeDeviceUtils(),
+      );
       DaemonState.getInstance().initialize(sessionManager, pool);
 
       fixture = new McpTestFixture({ sessionContext: { sessionId } });
@@ -844,7 +852,9 @@ describe("post-handler cancellation guard scope", () => {
         async () => {
           await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
           return {
-            content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: "minted-session" }) }],
+            content: [
+              { type: "text" as const, text: JSON.stringify({ sessionUuid: "minted-session" }) },
+            ],
           };
         },
         { defaultEnabled: true },

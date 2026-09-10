@@ -250,6 +250,7 @@ export class IOSCtrlProxyBuilder {
    * below, but scoped per-instance since `build()` is an instance method.
    */
   private buildInFlight: Promise<CtrlProxyIosBuildResult> | null = null;
+  private buildWaiters = 0;
 
   private constructor(
     config: Partial<CtrlProxyIosBuildConfig> = {},
@@ -629,25 +630,35 @@ export class IOSCtrlProxyBuilder {
     platform?: IOSCtrlProxyPlatform,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<CtrlProxyIosBuildResult> {
-    // Single-flight: a caller that arrives while a build is already running
-    // joins that build instead of starting its own independent
-    // download-then-extract against the same shared derived-data tree
-    // (issue #6417). Cleared in `finally` so the next genuinely-new build
-    // (after this one settles) starts its own flight.
-    if (this.buildInFlight !== null) {
-      return this.buildInFlight;
+    // Keep the shared artifact flight alive until every waiter has resolved
+    // its platform paths, so another extraction cannot race those reads.
+    this.buildWaiters++;
+    this.buildInFlight ??= this.doBuild(perf);
+    try {
+      const shared = await this.buildInFlight;
+      if (!shared.success) {return shared;}
+      const buildPath = await this.getBuildProductsPath(platform ?? "simulator");
+      const xctestrunPath = await this.getXctestrunPath(platform);
+      if (!xctestrunPath) {
+        return {
+          success: false,
+          message: "Downloaded CtrlProxy bundle missing xctestrun",
+          error: "No .xctestrun file found after extraction",
+        };
+      }
+      return { ...shared, buildPath: buildPath || undefined, xctestrunPath };
+    } catch (error) {
+      return {
+        success: false,
+        message: "CtrlProxy artifact discovery failed",
+        error: errorMessage(error),
+      };
+    } finally {
+      if (--this.buildWaiters === 0) {this.buildInFlight = null;}
     }
-
-    this.buildInFlight = this.doBuild(platform, perf).finally(() => {
-      this.buildInFlight = null;
-    });
-    return this.buildInFlight;
   }
 
-  private async doBuild(
-    platform?: IOSCtrlProxyPlatform,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<CtrlProxyIosBuildResult> {
+  private async doBuild(perf: PerformanceTracker): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
     if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
@@ -674,24 +685,10 @@ export class IOSCtrlProxyBuilder {
 
       await this.cleanStaleXctestrunFiles();
 
-      const buildPath = await this.getBuildProductsPath(platform ?? "simulator");
-      const xctestrunPath = await this.getXctestrunPath(platform);
-
-      if (!xctestrunPath) {
-        perf.end();
-        return {
-          success: false,
-          message: "Downloaded CtrlProxy bundle missing xctestrun",
-          error: "No .xctestrun file found after extraction",
-        };
-      }
-
       perf.end();
       return {
         success: true,
         message: "CtrlProxy downloaded and extracted successfully",
-        buildPath: buildPath || undefined,
-        xctestrunPath: xctestrunPath || undefined,
       };
     } catch (error) {
       const errorMsg = errorMessage(error);

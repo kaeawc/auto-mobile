@@ -581,9 +581,16 @@ async function ensureAccessibilityServiceReady(
       logger.info(`[A11yRetry] Setup succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
     }
 
-    const connected = await perf.track("waitForConnection", () =>
-      awaitReadinessWork(readinessDriver.waitForConnection(), signal),
-    );
+    const connected = await perf.track("waitForConnection", async () => {
+      const ready = await awaitReadinessWork(readinessDriver.waitForConnection(), signal);
+      if (!ready) {
+        throw new ActionableError(
+          `CtrlProxy connection failed for device ${deviceId} (session ${sessionId}). ` +
+            "Retry the operation after the accessibility service is connected.",
+        );
+      }
+      return ready;
+    });
 
     perf.end();
     const timings = perf.getTimings();

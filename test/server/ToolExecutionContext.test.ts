@@ -111,6 +111,46 @@ describe("ToolExecutionContext", () => {
     expect(passed.platform).toBe("android");
   });
 
+  test.each(["new", "persisted"])(
+    "rejects a failed proxy connection for a %s session and allows retry",
+    async (entrypoint) => {
+      let connected = false;
+      let setupCalls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls++;
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => connected,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      if (entrypoint === "persisted") {
+        await sessionManager.createSession("connection-failure", "device-1", "android");
+        sessionManager.setDeviceReadiness("connection-failure", "booted");
+      }
+      await expect(
+        createToolExecutionContext(
+          "connection-failure",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+        ),
+      ).rejects.toThrow("CtrlProxy connection");
+      expect(sessionManager.getDeviceReadiness("connection-failure")).not.toBe("automationReady");
+      connected = true;
+      await createToolExecutionContext(
+        "connection-failure",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(sessionManager.getDeviceReadiness("connection-failure")).toBe("automationReady");
+      expect(setupCalls).toBe(2);
+    },
+  );
+
   test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();
     const stalePool = new DevicePool(

@@ -167,19 +167,27 @@ export class SimulatorHighlights {
   private watchHost(key: string, host: OverlayHost): void {
     let stdout = "";
     let stderr = "";
+    let failed = false;
     const fail = (error: string) => {
+      if (failed) {
+        return;
+      }
+      failed = true;
       if (this.hosts.get(key) === host) {
         this.hosts.delete(key);
       }
       for (const finish of host.pending.values()) {
         finish({ success: false, error });
       }
+      host.child.kill();
     };
     host.child.stdout?.on("data", (chunk: Buffer) => {
+      if (failed) {
+        return;
+      }
       stdout += chunk.toString();
       if (stdout.length > 65536) {
         fail("Invalid highlight acknowledgement");
-        host.child.kill();
         return;
       }
       let newline: number;
@@ -194,6 +202,7 @@ export class SimulatorHighlights {
           });
         } catch (error) {
           fail(`Invalid highlight acknowledgement: ${error}`);
+          return;
         }
       }
     });

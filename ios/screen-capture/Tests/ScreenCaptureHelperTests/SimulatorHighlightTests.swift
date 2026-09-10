@@ -89,6 +89,64 @@ final class SimulatorHighlightHostTests: XCTestCase {
         }
     }
 
+    @MainActor
+    private final class FrameClock {
+        var waits = 0
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            waits += 1
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func advance() {
+            let pending = continuation
+            continuation = nil
+            pending?.resume()
+        }
+    }
+
+    func testRefreshLoopParksAfterExpiryAndRestartsForNextHighlight() async {
+        let clock = FrameClock()
+        var now: TimeInterval = 0
+        var created: [FakeOverlay] = []
+        let host = SimulatorHighlightHost(deviceName: "iPhone", now: { now }, makeOverlay: { _ in
+            let overlay = FakeOverlay()
+            created.append(overlay)
+            return overlay
+        }, waitForFrame: { await clock.wait() }, replySink: { _ in })
+        let command = Data(
+            #"{"requestId":"1","id":"same","shape":{"type":"circle","bounds":{"x":0,"y":0,"width":10,"height":10}}}"#
+                .utf8
+        )
+        XCTAssertEqual(clock.waits, 0)
+        await host.receive(command)
+        for _ in 0 ..< 100 where clock.waits == 0 {
+            await Task.yield()
+        }
+        XCTAssertEqual(clock.waits, 1)
+        now = 2
+        clock.advance()
+        for _ in 0 ..< 100 {
+            await Task.yield()
+        }
+        XCTAssertTrue(created[0].closed)
+        XCTAssertEqual(clock.waits, 1, "Expired overlays must not schedule further frames")
+        await host.receive(command)
+        for _ in 0 ..< 100 where clock.waits == 1 {
+            await Task.yield()
+        }
+        XCTAssertEqual(clock.waits, 2)
+        XCTAssertFalse(created[1].closed)
+        host.close()
+        clock.advance()
+        for _ in 0 ..< 100 {
+            await Task.yield()
+        }
+        XCTAssertTrue(created[1].closed)
+        XCTAssertEqual(clock.waits, 2, "Shutdown must stop refreshing")
+    }
+
     func testReplacementGetsItsOwnDeadlineAndHostAcceptsMoreCommandsAfterExpiry() async {
         var now: TimeInterval = 0
         var created: [FakeOverlay] = []

@@ -200,17 +200,21 @@ final class SimulatorHighlightHost {
     private let makeOverlay: OverlayFactory
     private let replySink: (SimulatorHighlightReply) -> Void
     private var inputTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
+    private let waitForFrame: () async throws -> Void
 
     init(
         deviceName: String,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         makeOverlay: OverlayFactory? = nil,
+        waitForFrame: @escaping () async throws -> Void = { try await Task.sleep(nanoseconds: 16_666_667) },
         replySink: @escaping (SimulatorHighlightReply) -> Void = { reply in
             if let data = try? JSONEncoder().encode(reply) {
                 FileHandle.standardOutput.write(data + Data([10]))
             }
         }
     ) {
+        self.waitForFrame = waitForFrame
         self.now = now
         self.replySink = replySink
         self.makeOverlay = makeOverlay ?? { request in
@@ -226,6 +230,7 @@ final class SimulatorHighlightHost {
                 let overlay = try await makeOverlay(request)
                 overlays.removeValue(forKey: request.id)?.overlay.close()
                 overlays[request.id] = (overlay, now() + HandDrawnCircle.duration)
+                startRefreshing()
                 reply(requestId: request.requestId, error: nil)
             } catch { reply(requestId: request.requestId, error: String(describing: error)) }
         } catch {
@@ -252,6 +257,19 @@ final class SimulatorHighlightHost {
         }
     }
 
+    private func startRefreshing() {
+        guard refreshTask == nil else { return }
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer { refreshTask = nil }
+            while !overlays.isEmpty, !Task.isCancelled {
+                do { try await waitForFrame() } catch { return }
+                guard !Task.isCancelled else { return }
+                await refresh()
+            }
+        }
+    }
+
     func refresh() async {
         for (id, entry) in overlays {
             if now() >= entry.deadline {
@@ -271,6 +289,7 @@ final class SimulatorHighlightHost {
 
     func close() {
         inputTask?.cancel()
+        refreshTask?.cancel()
         for entry in overlays.values {
             entry.overlay.close()
         }

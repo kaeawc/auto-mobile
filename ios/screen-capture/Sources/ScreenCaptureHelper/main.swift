@@ -172,10 +172,6 @@ case let .highlightSimulator(deviceName, json):
             }
             Task { @MainActor in host.enqueue(data) }
         }
-        while true {
-            try? await Task.sleep(nanoseconds: 16_666_667)
-            await host.refresh()
-        }
     }
     NSApplication.shared.run()
 

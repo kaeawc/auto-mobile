@@ -3247,10 +3247,15 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
   const device = result.device as { name: string; platform: string };
   const resources = result.resources as DeviceResourceConfigurationResult | undefined;
   const resourceFailure = resources?.success === false;
+  const sessionId = typeof result.sessionId === "string" ? result.sessionId : undefined;
   return {
     ...createJSONToolResponse({
       message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})${resourceFailure ? "; requested resource configuration was not fully applied" : ""}`,
       ...result,
+      // `sessionId` remains the persisted daemon-internal handle for replay and
+      // recovery. Public preparation APIs use `sessionUuid`; retain sessionId
+      // as a compatibility alias for provisionDevice's existing consumers.
+      ...(sessionId ? { sessionUuid: sessionId, sessionId } : {}),
       ...(resources ? { success: resources.success } : {}),
     }),
     ...(resourceFailure ? { isError: true } : {}),

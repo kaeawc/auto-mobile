@@ -142,6 +142,12 @@ export interface AndroidRunnerConnectDiagnostic {
   primaryUserStartState?: string;
 }
 
+export interface AndroidFrameworkReadinessResult {
+  ready: boolean;
+  unavailableResources?: string[];
+  diagnostic?: string;
+}
+
 interface SystemUiAnrReadinessClient {
   getAccessibilityHierarchy: NonNullable<ReadinessClient["getAccessibilityHierarchy"]>;
   requestTapCoordinates: NonNullable<ReadinessClient["requestTapCoordinates"]>;
@@ -149,6 +155,11 @@ interface SystemUiAnrReadinessClient {
 
 export interface RunnerReadinessDependencies {
   timer: Timer;
+  getAndroidFrameworkReadiness?(
+    device: BootedDevice,
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<AndroidFrameworkReadinessResult>;
   getAndroidManager(device: BootedDevice): ReadinessAndroidManager;
   getAndroidClient(device: BootedDevice): ReadinessClient;
   getIosManager(device: BootedDevice): ReadinessIosManager;
@@ -234,6 +245,7 @@ export class RunnerReadinessService {
   }
 
   private async ensureAndroidReady(context: ReadinessAttemptContext): Promise<void> {
+    this.inspectAndroidFrameworkBestEffort(context);
     const manager = this.dependencies.getAndroidManager(context.device);
     const client = this.dependencies.getAndroidClient(context.device);
     if (context.skipCtrlProxyDownload) {
@@ -266,6 +278,38 @@ export class RunnerReadinessService {
     await this.setupAndroidRunner(context, manager);
     await this.waitForResponsiveClient(context, client);
     await this.recoverSystemUiAnrIfPresent(context, client);
+  }
+
+  private inspectAndroidFrameworkBestEffort(context: ReadinessAttemptContext): void {
+    const probe = this.dependencies.getAndroidFrameworkReadiness;
+    if (!probe) {
+      return;
+    }
+    const remainingMs = Math.max(0, context.totalDeadlineMs - this.dependencies.timer.now());
+    if (remainingMs <= 0) {
+      return;
+    }
+    const inspectionSignal = context.signal ?? new AbortController().signal;
+    void probe(
+      context.device,
+      inspectionSignal,
+      Math.min(READINESS_PROBE_TIMEOUT_MS, remainingMs),
+    ).then(
+      (result) => {
+        if (!result.ready) {
+          logger.debug(
+            `Android framework inspection is not ready yet: ${
+              result.unavailableResources?.join(", ") ?? "unknown resources"
+            }`,
+          );
+        }
+      },
+      (error: unknown) => {
+        // Framework inspection is diagnostic only; required runner readiness
+        // below owns the request outcome and cancellation.
+        logger.debug(`Android framework inspection failed: ${errorMessage(error)}`);
+      },
+    );
   }
 
   private async ensureAndroidReadyWithoutDownloads(
@@ -926,11 +970,60 @@ function normalizeDiagnostic(error: unknown): string {
   return `${redacted.slice(0, half)}\n...[diagnostic truncated]...\n${redacted.slice(-half)}`;
 }
 
+async function getDefaultAndroidFrameworkReadiness(
+  device: BootedDevice,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<AndroidFrameworkReadinessResult> {
+  const adb = defaultAdbClientFactory.create(device);
+  const [packageLookup, settingsLookup] = await Promise.allSettled([
+    adb.execute(["shell", "cmd", "package", "path", "android"], {
+      timeoutMs,
+      noRetry: true,
+      signal,
+    }),
+    adb.execute(["shell", "settings", "get", "secure", "accessibility_enabled"], {
+      timeoutMs,
+      noRetry: true,
+      signal,
+    }),
+  ]);
+  signal.throwIfAborted();
+
+  const unavailableResources: string[] = [];
+  const diagnostics: string[] = [];
+  if (packageLookup.status === "rejected" || !packageLookup.value.stdout.includes("package:")) {
+    unavailableResources.push("package");
+    diagnostics.push(
+      packageLookup.status === "rejected"
+        ? `package: ${normalizeDiagnostic(packageLookup.reason)}`
+        : `package: ${normalizeDiagnostic(packageLookup.value.stdout || packageLookup.value.stderr)}`,
+    );
+  }
+  if (
+    settingsLookup.status === "rejected" ||
+    settingsLookup.value.stdout.includes("Can't find service")
+  ) {
+    unavailableResources.push("settings");
+    diagnostics.push(
+      settingsLookup.status === "rejected"
+        ? `settings: ${normalizeDiagnostic(settingsLookup.reason)}`
+        : `settings: ${normalizeDiagnostic(settingsLookup.value.stdout || settingsLookup.value.stderr)}`,
+    );
+  }
+  return {
+    ready: unavailableResources.length === 0,
+    ...(unavailableResources.length > 0 ? { unavailableResources } : {}),
+    ...(diagnostics.length > 0 ? { diagnostic: diagnostics.join("; ") } : {}),
+  };
+}
+
 export function createDefaultRunnerReadinessService(
   timer: Timer = defaultTimer,
 ): RunnerReadinessService {
   return new RunnerReadinessService({
     timer,
+    getAndroidFrameworkReadiness: getDefaultAndroidFrameworkReadiness,
     getAndroidManager: (device) => AndroidCtrlProxyManager.getInstance(device),
     getAndroidClient: (device) => AndroidCtrlProxyClient.getInstance(device),
     getIosManager: (device) => IOSCtrlProxyManager.getInstance(device),

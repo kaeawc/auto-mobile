@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../src/models";
 import {
   RunnerReadinessService,
   SystemUiAnrRecoveryRequiredError,
+  type AndroidFrameworkReadinessResult,
   type ReadinessAndroidManager,
   type ReadinessClient,
   type ReadinessIosManager,
@@ -187,6 +188,11 @@ function createService(
     getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
     awaitIosStartupMaintenance?: () => Promise<void>;
+    getAndroidFrameworkReadiness?: (
+      device: BootedDevice,
+      signal: AbortSignal,
+      timeoutMs: number,
+    ) => Promise<AndroidFrameworkReadinessResult>;
     getAndroidRunnerConnectDiagnostic?: () => Promise<{
       deviceLock: { locked: boolean; keyguardShowing: boolean; secure?: boolean } | null;
       primaryUserStartState?: string;
@@ -209,6 +215,7 @@ function createService(
     iosClient,
     service: new RunnerReadinessService({
       timer,
+      getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
       getAndroidManager: () => androidManager,
       getAndroidClient: () => androidClient,
       getIosManager: () => iosManager,
@@ -294,6 +301,52 @@ function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
 }
 
 describe("RunnerReadinessService", () => {
+  test("does not let Android framework inspection block runner setup", async () => {
+    const inspectionStarted = Promise.withResolvers<void>();
+    const androidClient = new FakeReadinessClient();
+    androidClient.connected = false;
+    const { service, androidManager } = createService({
+      androidClient,
+      getAndroidFrameworkReadiness: async () => {
+        inspectionStarted.resolve();
+        return {
+          ready: false,
+          unavailableResources: ["package", "settings"],
+          diagnostic: "cmd: Can't find service: package",
+        };
+      },
+    });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+    });
+    await inspectionStarted.promise;
+    expect(androidManager.setupCalls).toBe(1);
+  });
+
+  test("does not let a permanent framework inspection failure prevent readiness", async () => {
+    const controller = new AbortController();
+    const { service } = createService({
+      getAndroidFrameworkReadiness: async () => ({
+        ready: false,
+        unavailableResources: ["package", "settings"],
+      }),
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   test("keeps an already-ready Android device on the fast path", async () => {
     const { service, androidManager, androidClient } = createService();
 

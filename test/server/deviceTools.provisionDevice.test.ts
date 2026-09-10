@@ -706,8 +706,49 @@ describe("provisionDevice handler", () => {
     expect(result).toMatchObject({
       lifecycleState: "ready",
       readiness: { mode: "automation", status: "automation_ready" },
+      sessionUuid: expect.any(String),
       sessionId: expect.any(String),
     });
+  });
+
+  test.each(["android", "ios"] as const)(
+    "exposes sessionUuid for fresh booted %s provisioning while retaining sessionId",
+    async (platform) => {
+      exactProvisioner.provision = async () => provisionedTestDevice(platform, false);
+      deviceManager.setBootedDevices(platform, [
+        {
+          name: provisionTestArgs(platform, "unused").device.name,
+          platform,
+          deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
+        },
+      ]);
+
+      const response = JSON.parse(
+        (
+          (await ToolRegistry.getTool("provisionDevice")!.handler({
+            ...provisionTestArgs(platform, `operation-public-session-${platform}`),
+            readiness: "none",
+          })) as any
+        ).content[0].text,
+      );
+
+      expect(response.sessionUuid).toEqual(expect.any(String));
+    },
+  );
+
+  test("does not expose a session for boot:false provisioning", async () => {
+    const response = JSON.parse(
+      (
+        (await ToolRegistry.getTool("provisionDevice")!.handler({
+          ...provisionTestArgs("android", "operation-no-session"),
+          boot: false,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
+
+    expect(response.sessionUuid).toBeUndefined();
+    expect(response.sessionId).toBeUndefined();
   });
 
   for (const platform of ["android", "ios"] as const) {
@@ -1568,8 +1609,9 @@ describe("provisionDevice handler", () => {
     );
 
     expect(readinessCalls).toBe(0);
+    expect(response.sessionUuid).toEqual(expect.any(String));
     expect(response.sessionId).toEqual(expect.any(String));
-    expect(sessionManager.getDeviceReadiness(response.sessionId)).toBe("booted");
+    expect(sessionManager.getDeviceReadiness(response.sessionUuid)).toBe("booted");
     sessionManager.stopCleanupTimer();
   });
 
@@ -1624,7 +1666,8 @@ describe("provisionDevice handler", () => {
           })) as any
         ).content[0].text,
       );
-      const sessionUuid = response.sessionId as string;
+      const sessionUuid = response.sessionUuid as string;
+      expect(response.sessionId).toEqual(expect.any(String));
       expect(sessionManager.getDeviceReadiness(sessionUuid)).toBe("booted");
 
       ToolRegistry.registerDeviceAware(

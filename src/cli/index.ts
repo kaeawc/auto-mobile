@@ -1,3 +1,4 @@
+import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
@@ -691,11 +692,11 @@ Usage:
 Examples:
   bunx ${installSpecifier} --cli listDeviceImages
   bunx ${installSpecifier} --cli observe
-  bunx ${installSpecifier} --cli tapOn --text "Submit"
+  bunx ${installSpecifier} --cli tapOn --selector '{"text":"Submit"}'
   bunx ${installSpecifier} --cli getAndroid --avd-name "pixel_7_api_34"
   bunx ${installSpecifier} --cli getApple --udid "SIMULATOR-UDID"
   bunx ${installSpecifier} --cli --session-uuid abc-123-uuid observe
-  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
+  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --selector '{"text":"Submit"}'
 
 Options:
   help [tool-name]              Show help for a specific tool
@@ -792,6 +793,7 @@ function showToolHelp(toolName: string): void {
 
   // Show schema information
   console.log("\nParameters:");
+  console.log('  Pass objects and arrays as JSON, e.g. --selector \'{"text":"Submit"}\'.');
   try {
     const shape = getCliHelpSchemaShape(tool.schema);
     if (shape) {
@@ -840,11 +842,44 @@ export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
       : schema?._def?.typeName === "ZodOptional";
   const actualType = isOptional ? (schema?._def?.innerType ?? schema) : schema;
   const rawTypeName = actualType?._def?.typeName ?? actualType?._def?.type ?? "unknown";
-  const typeName = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+  const normalizedType = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+  const typeName = ["union", "object", "array", "enum", "literal", "nullable"].includes(
+    normalizedType,
+  )
+    ? formatCliHelpJsonSchema(toJSONSchema(actualType, { io: "input" }))
+    : normalizedType;
 
   return {
     isOptional,
     typeName,
     description: schema?.description ?? actualType?.description ?? actualType?._def?.description,
   };
+}
+
+/** Render JSON schema structure without losing union alternatives or nested keys. */
+function formatCliHelpJsonSchema(schema: any): string {
+  const alternatives = schema.anyOf ?? schema.oneOf;
+  if (alternatives) {
+    return alternatives.map((member: any) => formatCliHelpJsonSchema(member)).join(" | ");
+  }
+  if ("const" in schema) {
+    return JSON.stringify(schema.const);
+  }
+  if (schema.enum) {
+    return schema.enum.map((value: unknown) => JSON.stringify(value)).join(" | ");
+  }
+  if (schema.type === "object") {
+    const fields = Object.entries(schema.properties ?? {}).map(
+      ([key, value]) =>
+        JSON.stringify(key) +
+        (schema.required?.includes(key) ? "" : "?") +
+        ": " +
+        formatCliHelpJsonSchema(value),
+    );
+    return "JSON { " + fields.join(", ") + " }";
+  }
+  if (schema.type === "array") {
+    return "(" + formatCliHelpJsonSchema(schema.items ?? {}) + ")[] (JSON)";
+  }
+  return schema.type ?? "unknown";
 }

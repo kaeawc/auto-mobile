@@ -671,6 +671,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess | null> {
+    // Validate the UDID before any simctl running-state probe: a slow/hung
+    // 'simctl list' would otherwise burn the boot budget, and an already-booted
+    // same-named simulator would make isDeviceImageRunning() return true and
+    // mask this guard behind an "already running" error (#6414).
+    if (device.platform === "ios" && !device.deviceId) {
+      throw new ActionableError(
+        `Cannot boot iOS simulator '${device.name}' without a simulator UDID: ` +
+          `a name-only target cannot be verified against 'simctl' state after boot`,
+      );
+    }
+
     const isRunning = await this.isDeviceImageRunning(device);
     if (isRunning) {
       throw new ActionableError(`${device.platform} device '${device.name}' is already running`);

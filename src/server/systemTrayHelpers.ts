@@ -2,6 +2,13 @@
  * System tray helper functions for notification handling.
  * Extracted from interactionTools.ts for maintainability.
  */
+import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
+import { pollObserveUntil } from "../features/observe/ObservePoll";
+import {
+  diffObserveResult,
+  isSameObservationScreen,
+} from "../features/observe/output/ObserveResultOutput";
+import { isStabilityDiffEmpty } from "../features/observe/SettleObserve";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
@@ -165,6 +172,10 @@ export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS =
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS;
 export const EXPAND_GROUP_SETTLE_MS = 500;
+// Match TapOnElement's post-action polling budget and hierarchy quiet period.
+const SYSTEM_TRAY_POST_TAP_TIMEOUT_MS = 2500;
+const SYSTEM_TRAY_POST_TAP_POLL_MS = 150;
+const SYSTEM_TRAY_POST_TAP_QUIET_MS = 1000;
 
 // ============================================================================
 // Internal Types
@@ -234,6 +245,49 @@ const observeSystemTray = (
     skipScreenshot: true,
     skipAccessibilityAudit: true,
   });
+
+export const observeSystemTrayAfterTap = async (
+  device: BootedDevice,
+  baseline: ObserveResult,
+): Promise<{ observation?: ObserveResult; settled: boolean }> => {
+  const { observeScreenFactory, timer } = getSystemTrayDependencies();
+  const minTimestamp =
+    device.platform === "ios"
+      ? hierarchyUpdatedAtToMillis(baseline.viewHierarchy)
+      : await getDetector(device).getObservationTimestamp();
+  let quietSinceMs: number | undefined;
+  const outcome = await pollObserveUntil(
+    observeScreenFactory(device),
+    timer,
+    {
+      timeoutMs: SYSTEM_TRAY_POST_TAP_TIMEOUT_MS,
+      pollMs: SYSTEM_TRAY_POST_TAP_POLL_MS,
+      initialMinTimestampMs: minTimestamp,
+    },
+    (observation, previous) => {
+      // A freshly captured source screen still does not prove a tap effect.
+      if (
+        isSameObservationScreen(baseline, observation) &&
+        isStabilityDiffEmpty(diffObserveResult(baseline, observation))
+      ) {
+        quietSinceMs = undefined;
+        return false;
+      }
+      if (
+        !previous ||
+        !isSameObservationScreen(previous, observation) ||
+        !isStabilityDiffEmpty(diffObserveResult(previous, observation))
+      ) {
+        quietSinceMs = timer.now();
+        return false;
+      }
+      quietSinceMs ??= timer.now();
+      return timer.now() - quietSinceMs >= SYSTEM_TRAY_POST_TAP_QUIET_MS;
+    },
+  );
+  // Never label an unsettled/expired sample as the tap's observed effect.
+  return outcome.stopped ? { observation: outcome.observation, settled: true } : { settled: false };
+};
 
 export const captureSystemTrayTerminalEvidence = async (
   device: BootedDevice,

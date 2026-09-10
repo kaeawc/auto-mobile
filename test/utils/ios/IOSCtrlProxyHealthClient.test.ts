@@ -87,7 +87,12 @@ describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
   // never route through the strict check without regressing older runners.
   test("checkHealthEndpointOnPortForDevice accepts an 'ok' body reporting no deviceId (compat)", async function () {
     const { client } = makeClient(() => execResult('{"status":"ok"}'));
-    expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(true);
+    expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
+    expect(
+      await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+        requireDeviceId: false,
+      }),
+    ).toBe(true);
   });
 
   // #6415 follow-up: ownership/forced-teardown decisions must fail closed on a

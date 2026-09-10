@@ -56,13 +56,13 @@ export class IOSCtrlProxyHealthClient {
    * `status === "ok"` and its reported `deviceId` is compatible with the
    * requested `deviceId`, per `options.requireDeviceId`:
    *
-   * - **compat (default, `requireDeviceId` unset/false)** — a MISSING `deviceId`
+   * - **compat (`requireDeviceId: false`)** — a MISSING `deviceId`
    *   still counts as a match (an older runner build, or the env-injection
    *   fallback #2731 that can drop the device-id var along with the port).
    *   Used by the primary liveness gate (`isRunning`/`waitForHealthEndpoint`
    *   in {@link IOSCtrlProxyManager}) so those older/degraded runners are not
    *   spuriously treated as down.
-   * - **strict (`requireDeviceId: true`)** — a MISSING `deviceId` is rejected;
+   * - **strict (default)** — a MISSING `deviceId` is rejected;
    *   only an exact match counts. Used by ownership/forced-teardown decisions
    *   (issue #6415 follow-up) where adopting a foreign responder that omits
    *   `deviceId` — a sibling simulator's runner, or another process entirely —
@@ -90,7 +90,7 @@ export class IOSCtrlProxyHealthClient {
       if (health.status !== "ok") {
         return false;
       }
-      if (options?.requireDeviceId) {
+      if (options?.requireDeviceId !== false) {
         return health.deviceId === deviceId;
       }
       return health.deviceId === undefined || health.deviceId === deviceId;

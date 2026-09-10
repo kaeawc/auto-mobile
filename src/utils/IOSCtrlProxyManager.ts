@@ -2927,6 +2927,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.healthClient.checkHealthEndpointOnPortForDevice(
       this.servicePort,
       this.device.deviceId,
+      undefined,
+      { requireDeviceId: false },
     );
   }
 

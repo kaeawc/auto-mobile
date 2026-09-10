@@ -2522,42 +2522,45 @@ describe("IOSCtrlProxyManager", function () {
       }
     });
 
-    test("start() does not adopt the default CtrlProxy port for another simulator", async function () {
-      PortManager.setPortAvailabilityCheckerForTesting({
-        isPortAvailable: (port: number) => port !== 8765,
-      });
-      try {
-        const fakeBuilder = {
-          getXctestrunPath: async () => "/tmp/test.xctestrun",
-          getRunnerBinaryPath: async () => null,
-          verifyRunnerBinaryBeforeLaunch: async () => {},
-          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          fakeBuilder,
-          fakeExecutor,
-        );
-        expect(manager.getServicePort()).toBe(8767);
+    test.each(["OTHER-SIMULATOR", undefined])(
+      "start() rejects ambiguous default-port identity: %s",
+      async function (deviceId) {
+        PortManager.setPortAvailabilityCheckerForTesting({
+          isPortAvailable: (port: number) => port !== 8765,
+        });
+        try {
+          const fakeBuilder = {
+            getXctestrunPath: async () => "/tmp/test.xctestrun",
+            getRunnerBinaryPath: async () => null,
+            verifyRunnerBinaryBeforeLaunch: async () => {},
+            writeRunnerEnvironment: fakeWriteRunnerEnvironment,
+          } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+          const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+            testDevice,
+            fakeTimer,
+            fakeBuilder,
+            fakeExecutor,
+          );
+          expect(manager.getServicePort()).toBe(8767);
 
-        fakeExecutor.setCommandResponse("http://localhost:8767/health", createExecResult("", ""));
-        fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
-        fakeExecutor.setCommandResponse(
-          "http://localhost:8765/health",
-          createExecResult(JSON.stringify({ status: "ok", deviceId: "OTHER-SIMULATOR" }), ""),
-        );
-        fakeTimer.enableAutoAdvance();
+          fakeExecutor.setCommandResponse("http://localhost:8767/health", createExecResult("", ""));
+          fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+          fakeExecutor.setCommandResponse(
+            "http://localhost:8765/health",
+            createExecResult(JSON.stringify({ status: "ok", deviceId }), ""),
+          );
+          fakeTimer.enableAutoAdvance();
 
-        await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
+          await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
 
-        expect(manager.getServicePort()).toBe(8767);
-        expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
-        expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
-      } finally {
-        PortManager.setPortAvailabilityCheckerForTesting(null);
-      }
-    });
+          expect(manager.getServicePort()).toBe(8767);
+          expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+          expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+        } finally {
+          PortManager.setPortAvailabilityCheckerForTesting(null);
+        }
+      },
+    );
 
     test("start() spawns when default hot-reload port is not healthy", async function () {
       PortManager.setPortAvailabilityCheckerForTesting({

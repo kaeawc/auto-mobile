@@ -52,11 +52,17 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
 class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore {
   private readonly results = new Map<
     string,
-    { fingerprint: string; result?: Record<string, unknown>; creationStarted: boolean }
+    {
+      fingerprint: string;
+      attemptId: string;
+      result?: Record<string, unknown>;
+      creationStarted: boolean;
+    }
   >();
   private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
   failCalls = 0;
+  readonly failures: { operationId: string; errorCode: string }[] = [];
   readonly failCodes: string[] = [];
 
   /** Simulate a "running" row left behind by a crashed/earlier attempt. */
@@ -64,7 +70,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     this.forcedInProgress.add(operationId);
   }
 
-  async begin(operationId: string, requestFingerprint: string) {
+  async begin(operationId: string, requestFingerprint: string, attemptId: string) {
     if (this.forcedInProgress.has(operationId)) {
       return { started: false as const, inProgress: true as const };
     }
@@ -72,6 +78,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (!existing) {
       this.results.set(operationId, {
         fingerprint: requestFingerprint,
+        attemptId,
         creationStarted: false,
       });
       return { started: true, reconcileExistingConfiguration: false } as const;
@@ -79,6 +86,9 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (existing.fingerprint !== requestFingerprint) {
       throw new ProvisionDeviceOperationConflictError(operationId);
     }
+    // Admission (and a replay) takes the fence, exactly as the repository's
+    // compare-and-set does.
+    existing.attemptId = attemptId;
     return existing.result
       ? {
           started: false as const,
@@ -91,15 +101,23 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         };
   }
 
-  async markDeviceCreationStarted(operationId: string): Promise<void> {
+  async markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean> {
     const operation = this.results.get(operationId);
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
     }
+    if (operation.attemptId !== attemptId) {
+      return false;
+    }
     operation.creationStarted = true;
+    return true;
   }
 
-  async complete(operationId: string, result: Record<string, unknown>): Promise<void> {
+  async complete(
+    operationId: string,
+    attemptId: string,
+    result: Record<string, unknown>,
+  ): Promise<boolean> {
     if (this.completeError) {
       throw this.completeError;
     }
@@ -107,7 +125,11 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
     }
+    if (operation.attemptId !== attemptId) {
+      return false;
+    }
     operation.result = result;
+    return true;
   }
 
   setStoredResult(operationId: string, result: Record<string, unknown>): void {
@@ -124,19 +146,25 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
 
   async fail(
     operationId: string,
+    attemptId: string,
     errorCode: string,
     _message: string,
     options?: { clearCreationStarted?: boolean },
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const operation = this.results.get(operationId);
+    if (operation && operation.attemptId !== attemptId) {
+      return false;
+    }
     this.failCalls++;
+    this.failures.push({ operationId, errorCode });
     this.failCodes.push(errorCode);
     if (options?.clearCreationStarted) {
-      const operation = this.results.get(operationId);
       if (!operation) {
         throw new Error(`missing operation ${operationId}`);
       }
       operation.creationStarted = false;
     }
+    return true;
   }
 }
 
@@ -671,6 +699,53 @@ describe("provisionDevice handler", () => {
     expect(exactProvisioner.requests).toHaveLength(1);
   });
 
+  test("slices one absolute deadline across a replay instead of re-granting timeoutMs", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const readinessBudgets: number[] = [];
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
+        readinessBudgets.push(totalDeadlineMs - timer.now());
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-replay-budget"),
+      timeoutMs: 60_000,
+    };
+
+    await tool.handler(args);
+    await Promise.resolve();
+    expect(readinessBudgets).toEqual([60_000]);
+
+    // A competing teardown holds the stable lease for almost the whole
+    // request budget. The replay's readiness must run inside what is LEFT of
+    // that budget, not a freshly re-granted timeoutMs.
+    const teardownLease = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: args.device.name },
+      { operation: "teardown", deadlineMs: 10_000_000 },
+    );
+    const replay = tool.handler(args);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(59_000);
+    teardownLease.release();
+    await replay;
+
+    expect(readinessBudgets).toHaveLength(2);
+    expect(readinessBudgets[1]).toBeLessThanOrEqual(1_000);
+  });
+
   test("boots the exact device and runs automation readiness when requested", async () => {
     deviceManager.setDeviceImages("android", [
       {
@@ -789,7 +864,7 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: async () => {
           throw new Error("runner readiness failed");
         },
-        idGenerator: new FakeIdGenerator([`cleanup-${platform}`]),
+        idGenerator: new FakeIdGenerator([`attempt-${platform}`, `cleanup-${platform}`]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -880,7 +955,10 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: async () => {
           throw new Error("runner readiness failed");
         },
-        idGenerator: new FakeIdGenerator([`cleanup-failure-${platform}`]),
+        idGenerator: new FakeIdGenerator([
+          `attempt-failure-${platform}`,
+          `cleanup-failure-${platform}`,
+        ]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -950,7 +1028,10 @@ describe("provisionDevice handler", () => {
             throw new Error("first readiness attempt failed");
           }
         },
-        idGenerator: new FakeIdGenerator([`cleanup-retry-${platform}`]),
+        idGenerator: new FakeIdGenerator([
+          `attempt-retry-${platform}`,
+          `cleanup-retry-${platform}`,
+        ]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -1009,7 +1090,7 @@ describe("provisionDevice handler", () => {
           throw new Error("first readiness attempt failed");
         }
       },
-      idGenerator: new FakeIdGenerator(["cleanup-queued-provision"]),
+      idGenerator: new FakeIdGenerator(["attempt-queued-provision", "cleanup-queued-provision"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1056,7 +1137,7 @@ describe("provisionDevice handler", () => {
           throw new Error("writing AVD memory configuration failed");
         },
       }),
-      idGenerator: new FakeIdGenerator(["cleanup-partial-android"]),
+      idGenerator: new FakeIdGenerator(["attempt-partial-android", "cleanup-partial-android"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1227,7 +1308,9 @@ describe("provisionDevice handler", () => {
         throw new Error("retry readiness failed");
       },
       idGenerator: new FakeIdGenerator([
+        "attempt-partial-first-android",
         "cleanup-partial-first-android",
+        "attempt-partial-retry-android",
         "cleanup-partial-retry-android",
       ]),
     });
@@ -1272,7 +1355,7 @@ describe("provisionDevice handler", () => {
       ensureCtrlProxyReady: async () => {
         throw new Error("replacement readiness failed");
       },
-      idGenerator: new FakeIdGenerator(["cleanup-original-android"]),
+      idGenerator: new FakeIdGenerator(["attempt-original-android", "cleanup-original-android"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1901,6 +1984,37 @@ describe("provisionDevice handler", () => {
     }
   });
 
+  test("marks the operation row terminal when a fresh attempt hits MCP session recovery", async () => {
+    // McpSessionRecoveryInProgressError is explicitly transient ("cannot remap
+    // until recovery finishes"), so the caller is expected to retry. Leaving
+    // the freshly admitted "running" row untouched would brick the
+    // operationId for the whole PROVISION_DEVICE_OPERATION_TTL_MS (~30m) with
+    // nothing actually running.
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () => {
+          throw new McpSessionRecoveryInProgressError("mcp-session-recovering");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = await tool.handler({
+      ...provisionTestArgs("android", "operation-recovery-terminal"),
+      boot: false,
+      readiness: "none",
+    });
+
+    expect(JSON.stringify(response)).toContain("recovering a device");
+    expect(operationStore.failures).toEqual([
+      { operationId: "operation-recovery-terminal", errorCode: "session_recovery_in_progress" },
+    ]);
+  });
+
   test("reconnecting during recovery preserves the live session and completed operation", async () => {
     const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
@@ -2364,6 +2478,101 @@ describe("provisionDevice handler", () => {
     expect(calls).toBe(2);
   });
 
+  test("cancels the lifecycle and reports request_cancelled when the last waiter aborts", async () => {
+    let provisionSignal: AbortSignal | undefined;
+    let observedAbort = false;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionSignal = request.signal;
+          await new Promise<void>((resolve) => {
+            if (request.signal?.aborted) {
+              resolve();
+              return;
+            }
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          observedAbort = true;
+          throw request.signal?.reason ?? new Error("aborted");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-sole-caller-abort"),
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await Promise.resolve();
+    caller.abort(new Error("client went away"));
+    const response = await call;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+
+    // Nothing is waiting for the result any more, so the provisioning work
+    // must be cancelled rather than left to boot a device and bind a session
+    // no client owns.
+    expect(provisionSignal?.aborted).toBe(true);
+    expect(observedAbort).toBe(true);
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      success: false,
+      error: { code: "request_cancelled" },
+      operationId: args.operationId,
+      operationContinues: false,
+    });
+    expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+  });
+
+  test("tells a detaching joiner that the shared operation continues", async () => {
+    let resolveProvision!: (result: ExactProvisionedDevice) => void;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () =>
+          await new Promise<ExactProvisionedDevice>((resolve) => {
+            resolveProvision = resolve;
+          }),
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-joiner-abort"),
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const initiator = tool.handler(args);
+    await Promise.resolve();
+    const joinerController = new AbortController();
+    const joiner = tool.handler(args, undefined, joinerController.signal);
+    await Promise.resolve();
+    joinerController.abort(new Error("joiner disconnected"));
+    const joinerResponse = await joiner;
+
+    expect(JSON.parse((joinerResponse as any).content[0].text)).toMatchObject({
+      success: false,
+      error: { code: "request_cancelled" },
+      operationId: args.operationId,
+      operationContinues: true,
+    });
+
+    resolveProvision(provisionedTestDevice("android", true));
+    expect(JSON.parse(((await initiator) as any).content[0].text)).toMatchObject({
+      operationId: args.operationId,
+    });
+  });
+
   test("keeps a shared operation running when its initiating caller aborts", async () => {
     let resolveProvision!: (result: ExactProvisionedDevice) => void;
     let provisionSignal: AbortSignal | undefined;
@@ -2673,6 +2882,56 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionSignal?.aborted).toBe(true);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test.each([
+    ["__mcpSessionId", "mcp-session-1"],
+    ["__executionId", "execution-1"],
+    ["__executionStartTime", 1_000],
+    ["__mcpRequestTimeoutMs", 120_000],
+    // Absolute deadline on the shared timer clock, so it must be far-future.
+    ["__mcpRequestDeadlineMs", 8_640_000_000_000],
+    ["__mcpLiveDeadlineKey", "live-deadline-1"],
+  ] as const)(
+    "strips the internal %s param before re-parsing against the strict schema",
+    async (param, value) => {
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+
+      const response = await tool.handler({
+        ...provisionTestArgs("android", `operation-internal-${param}`),
+        boot: false,
+        readiness: "none",
+        [param]: value,
+      } as any);
+
+      expect((response as any).isError).toBeUndefined();
+      expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+        operationId: `operation-internal-${param}`,
+        lifecycleState: "created",
+      });
+    },
+  );
+
+  test("returns a structured invalid_arguments error instead of throwing a raw ZodError", async () => {
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = await tool.handler({
+      ...provisionTestArgs("android", "operation-invalid-args"),
+      boot: false,
+      readiness: "none",
+      totallyUnknownKey: "nope",
+    } as any);
+
+    expect((response as any).isError).toBe(true);
+    const payload = JSON.parse((response as any).content[0].text);
+    expect(payload.error.code).toBe("invalid_arguments");
+    expect(payload.error.message).toContain("provisionDevice");
   });
 
   // `cancelUnownedColdBoot` returns a settlement that resolves on the

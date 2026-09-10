@@ -17,8 +17,11 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  INTERNAL_MCP_SESSION_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
+  deleteInternalToolParams,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -197,9 +200,6 @@ export interface McpServerOptions {
   toolSelectionProfileRegistry?: ToolSelectionProfileRegistry;
 }
 
-const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
-const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
-
 async function resolveDeviceLossOutcome(
   deviceLoss: DeviceLossOutcome,
   timeoutMs?: number,
@@ -278,15 +278,10 @@ function stripInternalToolParams(params: unknown): unknown {
   }
 
   const rest = { ...(params as Record<string, unknown>) };
-  delete rest[INTERNAL_MCP_SESSION_PARAM];
-  delete rest[INTERNAL_EXECUTION_ID_PARAM];
-  delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
-  delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  delete rest[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-  delete rest[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
-  // Safety net: revival already strips this transport-provenance flag (#5863), but
-  // guard the tool boundary against any future path that sets it without reviving.
-  delete rest[DAEMON_NON_FINITE_ENCODED_PARAM];
+  // Strips DAEMON_NON_FINITE_ENCODED_PARAM too as a safety net: revival already
+  // removes that transport-provenance flag (#5863), but this guards the tool
+  // boundary against any future path that sets it without reviving.
+  deleteInternalToolParams(rest);
   return rest;
 }
 

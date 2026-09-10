@@ -51,10 +51,8 @@ import {
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
-import {
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-} from "../daemon/constants";
+import { deleteInternalToolParams } from "../daemon/constants";
+import { formatToolParamError } from "./toolParamError";
 import {
   DEVICE_CREATE_ENV_VAR,
   getDeviceCreationGate,
@@ -125,6 +123,7 @@ import {
   ProvisionDeviceOperationRepository,
   ProvisionDeviceOperationConflictError,
   ProvisionDeviceOperationInProgressError,
+  ProvisionDeviceOperationSupersededError,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -540,6 +539,11 @@ const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 // (#6652).
 const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
 
+// Terminal-but-retryable error code stamped on an operation row whose attempt
+// was rejected by an in-flight MCP session recovery. Distinct from a genuine
+// provisioning failure so the stored row says why the attempt never ran.
+const PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE = "session_recovery_in_progress";
+
 function getShutdownInitiatingExecutionId(): string | undefined {
   return getToolSelectionContext()?.execution?.executionId;
 }
@@ -782,10 +786,48 @@ export interface DeviceToolsDependencies {
   lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
 }
 
-const activeProvisionDeviceOperations = new Map<
-  string,
-  { fingerprint: string; promise: Promise<Record<string, unknown>> }
->();
+/**
+ * In-flight provisionDevice operations, keyed by idempotency key, so several
+ * callers of the same operationId share one lifecycle. `waiters` counts the
+ * callers still listening for the result: the shared `controller` is aborted
+ * when the LAST of them detaches, because past that point the lifecycle would
+ * otherwise keep booting a device and binding a session that no client owns.
+ * A caller that detaches while others are still waiting only detaches itself.
+ */
+interface ActiveProvisionDeviceOperation {
+  fingerprint: string;
+  promise: Promise<Record<string, unknown>>;
+  controller: AbortController;
+  waiters: number;
+}
+
+const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();
+
+/**
+ * Detach one caller from a shared operation. Returns true when this was the
+ * last waiter and the still-running lifecycle was therefore cancelled.
+ */
+function releaseProvisionDeviceWaiter(
+  operationId: string,
+  operation: ActiveProvisionDeviceOperation,
+): boolean {
+  operation.waiters -= 1;
+  if (operation.waiters > 0) {
+    return false;
+  }
+  if (activeProvisionDeviceOperations.get(operationId) !== operation) {
+    // Already settled: its result is persisted and replayable, so there is
+    // nothing left to cancel.
+    return false;
+  }
+  operation.controller.abort(
+    new ActionableError(
+      `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
+        "disconnected",
+    ),
+  );
+  return true;
+}
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
@@ -3191,11 +3233,12 @@ function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceAr
   const __mcpSessionId = input.__mcpSessionId;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const publicInput: Record<string, unknown> = { ...input };
-  delete publicInput.__mcpSessionId;
-  delete publicInput.__executionId;
-  delete publicInput.__executionStartTime;
-  delete publicInput[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  delete publicInput[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
+  // may inject has to go before re-parsing -- hence the canonical shared list
+  // rather than a hand-maintained copy that silently falls behind (a missing
+  // `__mcpLiveDeadlineKey` made this tool unusable for any caller sending a
+  // progress token).
+  deleteInternalToolParams(publicInput);
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
@@ -3308,6 +3351,18 @@ async function waitForSharedOperation<T>(
   } finally {
     removeAbortListener?.();
   }
+}
+
+/**
+ * Distinguish "the caller went away" from a provisioning failure.
+ * `waitForSharedOperation` rejects with the caller signal's own reason, which
+ * is a `DOMException(AbortError)` unless the caller supplied one.
+ */
+function isProvisionDeviceCallerAbort(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted && error === signal.reason) {
+    return true;
+  }
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function createProvisionDeviceResponse(result: Record<string, unknown>) {
@@ -4276,7 +4331,23 @@ export function registerDeviceTools() {
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    const args = parseProvisionDeviceArgs(input);
+    let args: ProvisionDeviceArgs;
+    try {
+      args = parseProvisionDeviceArgs(input);
+    } catch (error) {
+      // The MCP boundary already validated the caller's arguments; a failure
+      // here means the re-parse rejected something the boundary let through
+      // (an internal param, or a genuinely malformed public argument on a
+      // non-MCP call path). Either way the caller gets a structured, coded
+      // error instead of a raw ZodError escaping the tool.
+      const message = `Invalid parameters for tool provisionDevice: ${formatToolParamError(
+        "provisionDevice",
+        error,
+        input,
+      )}`;
+      logger.warn(`[DeviceTools] ${message}`, error);
+      return createToolErrorResponse("invalid_arguments", message);
+    }
     const fingerprint = provisionDeviceFingerprint(args);
     const active = activeProvisionDeviceOperations.get(args.operationId);
     if (active) {
@@ -4286,16 +4357,19 @@ export function registerDeviceTools() {
           `operationId '${args.operationId}' is already running with a different provisionDevice request.`,
         );
       }
-      try {
-        return createProvisionDeviceResponse(await waitForSharedOperation(active.promise, signal));
-      } catch (error) {
-        return provisionDeviceErrorResponse(error);
-      }
+      active.waiters += 1;
+      return await awaitSharedProvisionDeviceOperation(args, active, signal);
     }
 
     const sharedController = new AbortController();
     const promise = executeProvisionDevice(args, fingerprint, sharedController.signal);
-    activeProvisionDeviceOperations.set(args.operationId, { fingerprint, promise });
+    const operation: ActiveProvisionDeviceOperation = {
+      fingerprint,
+      promise,
+      controller: sharedController,
+      waiters: 1,
+    };
+    activeProvisionDeviceOperations.set(args.operationId, operation);
     void promise.then(
       () => {
         if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
@@ -4308,12 +4382,49 @@ export function registerDeviceTools() {
         }
       },
     );
+    return await awaitSharedProvisionDeviceOperation(args, operation, signal);
+  };
+
+  async function awaitSharedProvisionDeviceOperation(
+    args: ProvisionDeviceArgs,
+    operation: ActiveProvisionDeviceOperation,
+    signal: AbortSignal | undefined,
+  ) {
     try {
-      return createProvisionDeviceResponse(await waitForSharedOperation(promise, signal));
+      const result = await waitForSharedOperation(operation.promise, signal);
+      releaseProvisionDeviceWaiter(args.operationId, operation);
+      return createProvisionDeviceResponse(result);
     } catch (error) {
+      const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation);
+      if (isProvisionDeviceCallerAbort(error, signal)) {
+        // The caller went away, which is not a provisioning failure: report it
+        // with a code of its own, and say whether the operation is still
+        // running (so the caller can collect the result by re-issuing the same
+        // operationId) or was cancelled with it.
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} caller cancelled the request ` +
+            `(operation ${cancelledOperation ? "cancelled" : "still running"}): ` +
+            `${errorMessage(error)}`,
+          error,
+        );
+        return createToolErrorResponse(
+          "request_cancelled",
+          cancelledOperation
+            ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
+                "the caller; no other caller was waiting, so the operation was cancelled too."
+            : `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
+                "the caller; the operation is still running and its result can be collected by " +
+                "re-issuing the same operationId.",
+          { operationId: args.operationId, operationContinues: !cancelledOperation },
+        );
+      }
+      logger.warn(
+        `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,
+        error,
+      );
       return provisionDeviceErrorResponse(error);
     }
-  };
+  }
 
   async function executeProvisionDevice(
     args: ProvisionDeviceArgs,
@@ -4323,9 +4434,24 @@ export function registerDeviceTools() {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
     const nowMs = deps.timer.now();
+    // Fence for every write this attempt makes to the operation row: an
+    // attempt that is superseded (its row reclaimed by a retry or by the
+    // expiry sweep) must not stamp its result over the attempt that replaced
+    // it.
+    const attemptId = deps.idGenerator.next();
+    // ONE absolute deadline for the whole request, anchored here and sliced
+    // across every phase below. A replay runs up to three phases (waiting for
+    // the stable-device lifecycle lease, revalidating the live session, then
+    // re-running the lifecycle); computing a fresh `timer.now() + timeoutMs`
+    // per phase re-granted the budget already burned by the previous one, so
+    // one request could occupy ~3x its own timeoutMs -- past the operation
+    // row's TTL and past the daemon's queued-request deadline, which only the
+    // `reserveRollbackTime` form respects.
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const operation = await store.begin(
       args.operationId,
       fingerprint,
+      attemptId,
       nowMs,
       nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
     );
@@ -4340,11 +4466,17 @@ export function registerDeviceTools() {
     try {
       if (
         !operation.started &&
-        (await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal))
+        (await canReplayCompletedProvisionDeviceOperation(
+          args,
+          deps,
+          operation.result,
+          totalDeadlineMs,
+          signal,
+        ))
       ) {
         const replayResult = backfillProvisionDeviceCutout(args, operation.result);
         if (args.resources || replayResult !== operation.result) {
-          await completeProvisionDeviceOperation(store, args.operationId, replayResult);
+          await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult);
         }
         return replayResult;
       }
@@ -4358,11 +4490,12 @@ export function registerDeviceTools() {
           args,
           deps,
           operation.reconcileExistingConfiguration,
-          () => store.markDeviceCreationStarted(args.operationId),
+          () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+          totalDeadlineMs,
           signal,
         );
         const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
-        await completeProvisionDeviceOperation(store, args.operationId, refreshed);
+        await completeProvisionDeviceOperation(store, args.operationId, attemptId, refreshed);
         return refreshed;
       }
 
@@ -4370,17 +4503,44 @@ export function registerDeviceTools() {
         args,
         deps,
         operation.reconcileExistingConfiguration,
-        () => store.markDeviceCreationStarted(args.operationId),
+        () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+        totalDeadlineMs,
         signal,
       );
-      await completeProvisionDeviceOperation(store, args.operationId, result);
+      await completeProvisionDeviceOperation(store, args.operationId, attemptId, result);
       return result;
     } catch (error) {
       if (error instanceof McpSessionRecoveryInProgressError) {
+        // Transient by construction ("cannot remap until recovery finishes"),
+        // so the client is told to retry. A retry only works if this attempt's
+        // row is terminal: an admitted attempt owns a "running" row, and
+        // leaving it running would make every retry report
+        // operation_in_progress for the whole operation TTL (~30m) with
+        // nothing executing. A replay (started === false) instead reads a
+        // "succeeded" row it does not own -- failing that would destroy a
+        // valid completed result -- so only an admitted attempt is failed.
+        if (operation.started) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+              `recovery: ${errorMessage(error)}`,
+            error,
+          );
+          await store.fail(
+            args.operationId,
+            attemptId,
+            PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+            errorMessage(error),
+          );
+        }
+        throw error;
+      }
+      if (error instanceof ProvisionDeviceOperationSupersededError) {
+        // The row belongs to a newer attempt now; stamping this attempt's
+        // failure on it would fail an operation that is still running.
         throw error;
       }
       const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, provisionError.code, provisionError.message, {
+      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message, {
         clearCreationStarted:
           error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
       });
@@ -4445,6 +4605,7 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease | undefined> {
     const device = getPersistedProvisionDevice(result);
@@ -4452,7 +4613,6 @@ export function registerDeviceTools() {
     if (!device || !stableId) {
       return undefined;
     }
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
     return await reserveStableDeviceLifecycle(
       { platform: device.platform, stableId },
       {
@@ -4477,9 +4637,16 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
-    const replayLease = await reserveProvisionDeviceReplayLifecycle(args, deps, result, signal);
+    const replayLease = await reserveProvisionDeviceReplayLifecycle(
+      args,
+      deps,
+      result,
+      totalDeadlineMs,
+      signal,
+    );
     const replaySignal = replayLease
       ? signal
         ? AbortSignal.any([signal, replayLease.signal])
@@ -4487,7 +4654,8 @@ export function registerDeviceTools() {
       : signal;
     try {
       return (
-        !args.boot || (await revalidateProvisionDeviceReplay(args, deps, result, replaySignal))
+        !args.boot ||
+        (await revalidateProvisionDeviceReplay(args, deps, result, totalDeadlineMs, replaySignal))
       );
     } finally {
       replayLease?.release();
@@ -4498,6 +4666,7 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
     const liveSession = getLiveProvisionDeviceSession(result);
@@ -4512,7 +4681,6 @@ export function registerDeviceTools() {
     return await trackDeviceAcquisitionReadiness(
       deviceReadinessLockKey(liveSession.device.platform, liveSession.device.deviceId),
       async () => {
-        const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
         if (args.resources) {
           result.resources = await applyProvisionDeviceResources(
             args,
@@ -4561,10 +4729,17 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
     try {
-      return await revalidateLiveProvisionDeviceSession(args, deps, result, signal);
+      return await revalidateLiveProvisionDeviceSession(
+        args,
+        deps,
+        result,
+        totalDeadlineMs,
+        signal,
+      );
     } catch (error) {
       // A transport routing conflict does not invalidate the healthy device session.
       if (error instanceof McpSessionRecoveryInProgressError) {
@@ -4645,13 +4820,42 @@ export function registerDeviceTools() {
   async function completeProvisionDeviceOperation(
     store: ProvisionDeviceOperationStore,
     operationId: string,
+    attemptId: string,
     result: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await store.complete(operationId, result);
+      if (!(await store.complete(operationId, attemptId, result))) {
+        throw new ProvisionDeviceOperationSupersededError(operationId);
+      }
     } catch (error) {
-      await releaseProvisionDeviceSession(result, "provision-device-persistence-failed");
+      const superseded = error instanceof ProvisionDeviceOperationSupersededError;
+      logger.warn(
+        `[DeviceTools] provisionDevice ${operationId} could not persist its result: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+      await releaseProvisionDeviceSession(
+        result,
+        superseded
+          ? "provision-device-operation-superseded"
+          : "provision-device-persistence-failed",
+      );
       throw error;
+    }
+  }
+
+  /**
+   * Record that this attempt is about to create the device. A false return
+   * means the row was taken over by a newer attempt, so this one must abort
+   * before creating anything rather than provisioning behind its replacement.
+   */
+  async function markProvisionDeviceCreationStarted(
+    store: ProvisionDeviceOperationStore,
+    operationId: string,
+    attemptId: string,
+  ): Promise<void> {
+    if (!(await store.markDeviceCreationStarted(operationId, attemptId))) {
+      throw new ProvisionDeviceOperationSupersededError(operationId);
     }
   }
 
@@ -5050,11 +5254,11 @@ export function registerDeviceTools() {
     deps: DeviceToolsDependencies,
     reconcileExistingConfiguration: boolean,
     markDeviceCreationStarted: () => Promise<void>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<Record<string, unknown>> {
     const perf = createPerformanceTracker(true);
     perf.serial("provisionDevice");
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const deviceManager = deps.deviceManagerFactory();
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
@@ -5537,6 +5741,9 @@ export function registerDeviceTools() {
     }
     if (error instanceof ProvisionDeviceOperationInProgressError) {
       return createToolErrorResponse("operation_in_progress", error.message);
+    }
+    if (error instanceof ProvisionDeviceOperationSupersededError) {
+      return createToolErrorResponse("operation_superseded", error.message);
     }
     return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }

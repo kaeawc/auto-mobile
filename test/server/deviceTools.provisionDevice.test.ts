@@ -2449,6 +2449,55 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  // C-4: boot and automation readiness shared one provision budget, so a slow
+  // cold boot could consume all of it and leave CtrlProxy setup with a
+  // millisecond ("readiness budget exhausted before setup lock"). Boot must be
+  // bounded by its own share of the deadline instead.
+  test("bounds boot by its own share instead of the whole provision budget", async () => {
+    const timer = new FakeTimer();
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    const handle: any = {
+      exitCode: null,
+      signalCode: null,
+      once: () => handle,
+      kill: () => true,
+    };
+    deviceManager.setMockChildProcess("phone-api-36-a", handle);
+    const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);
+    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
+      // Yield once so the boot phase has registered its deadline timer, then
+      // model a slow cold boot that ends 1ms before the whole provision deadline.
+      await Promise.resolve();
+      timer.advanceTime(59_999);
+      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+      const resolved = { ...booted, deviceId: "emulator-5554" };
+      deviceManager.setBootedDevices("android", [resolved]);
+      return resolved;
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    let readinessBudgetMs: number | undefined;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
+        readinessBudgetMs = totalDeadlineMs - timer.now();
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "boot-budget-slice"),
+      timeoutMs: 60_000,
+    });
+
+    const payload = JSON.parse((response as any).content[0].text);
+    // Either boot stayed inside its share and readiness kept a usable budget, or
+    // boot overran its share and the request failed as a timeout. What must not
+    // happen is readiness running with a starved budget.
+    expect(readinessBudgetMs ?? Number.POSITIVE_INFINITY).toBeGreaterThan(1_000);
+    expect(payload.error?.code).toBe("timeout");
+  });
+
   // C-2: `reserveDeviceForReadiness` proves ownership through its `autolockClient`
   // argument before the caller starts readiness side effects ("Acquisition may
   // reboot a device during readiness recovery"). provisionDevice passed no

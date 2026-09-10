@@ -5050,13 +5050,24 @@ export function registerDeviceTools() {
         );
       }
       perf.startOperation("bootDevice");
+      // Boot and automation readiness share one provision budget. Reserve the
+      // readiness slice up front, the way `applyProvisionDeviceResources` does,
+      // so a slow cold boot cannot consume the whole deadline and leave CtrlProxy
+      // setup with a millisecond ("readiness budget exhausted before setup lock").
+      // The slice is capped at half the remaining budget so a short request still
+      // gets a usable boot window; no budget is inflated.
+      const readinessShareMs = Math.min(
+        Math.max(0, totalDeadlineMs - deps.timer.now()) / 2,
+        args.readiness === "automation"
+          ? serverConfig.getRunnerReadinessTimeoutMs()
+          : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      );
       boot = await bootService.boot({
         operationName: "provisionDevice",
         platform: args.device.platform,
         deviceId:
           exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
-        timeoutMs: Math.max(1, totalDeadlineMs - deps.timer.now()),
-        totalDeadlineMs,
+        totalDeadlineMs: totalDeadlineMs - readinessShareMs,
         signal: operationSignal,
       });
       perf.endOperation("bootDevice");

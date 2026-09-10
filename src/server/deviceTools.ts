@@ -51,10 +51,7 @@ import {
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
-import {
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  deleteInternalToolParams,
-} from "../daemon/constants";
+import { deleteInternalToolParams } from "../daemon/constants";
 import { formatToolParamError } from "./toolParamError";
 import {
   DEVICE_CREATE_ENV_VAR,
@@ -125,6 +122,7 @@ import {
   ProvisionDeviceOperationRepository,
   ProvisionDeviceOperationConflictError,
   ProvisionDeviceOperationInProgressError,
+  ProvisionDeviceOperationSupersededError,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -4231,9 +4229,15 @@ export function registerDeviceTools() {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
     const nowMs = deps.timer.now();
+    // Fence for every write this attempt makes to the operation row: an
+    // attempt that is superseded (its row reclaimed by a retry or by the
+    // expiry sweep) must not stamp its result over the attempt that replaced
+    // it.
+    const attemptId = deps.idGenerator.next();
     const operation = await store.begin(
       args.operationId,
       fingerprint,
+      attemptId,
       nowMs,
       nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
     );
@@ -4252,7 +4256,7 @@ export function registerDeviceTools() {
       ) {
         const replayResult = backfillProvisionDeviceCutout(args, operation.result);
         if (args.resources || replayResult !== operation.result) {
-          await completeProvisionDeviceOperation(store, args.operationId, replayResult);
+          await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult);
         }
         return replayResult;
       }
@@ -4266,11 +4270,11 @@ export function registerDeviceTools() {
           args,
           deps,
           operation.reconcileExistingConfiguration,
-          () => store.markDeviceCreationStarted(args.operationId),
+          () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
           signal,
         );
         const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
-        await completeProvisionDeviceOperation(store, args.operationId, refreshed);
+        await completeProvisionDeviceOperation(store, args.operationId, attemptId, refreshed);
         return refreshed;
       }
 
@@ -4278,10 +4282,10 @@ export function registerDeviceTools() {
         args,
         deps,
         operation.reconcileExistingConfiguration,
-        () => store.markDeviceCreationStarted(args.operationId),
+        () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
         signal,
       );
-      await completeProvisionDeviceOperation(store, args.operationId, result);
+      await completeProvisionDeviceOperation(store, args.operationId, attemptId, result);
       return result;
     } catch (error) {
       if (error instanceof McpSessionRecoveryInProgressError) {
@@ -4301,14 +4305,20 @@ export function registerDeviceTools() {
           );
           await store.fail(
             args.operationId,
+            attemptId,
             PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
             errorMessage(error),
           );
         }
         throw error;
       }
+      if (error instanceof ProvisionDeviceOperationSupersededError) {
+        // The row belongs to a newer attempt now; stamping this attempt's
+        // failure on it would fail an operation that is still running.
+        throw error;
+      }
       const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, provisionError.code, provisionError.message, {
+      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message, {
         clearCreationStarted:
           error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
       });
@@ -4573,13 +4583,42 @@ export function registerDeviceTools() {
   async function completeProvisionDeviceOperation(
     store: ProvisionDeviceOperationStore,
     operationId: string,
+    attemptId: string,
     result: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await store.complete(operationId, result);
+      if (!(await store.complete(operationId, attemptId, result))) {
+        throw new ProvisionDeviceOperationSupersededError(operationId);
+      }
     } catch (error) {
-      await releaseProvisionDeviceSession(result, "provision-device-persistence-failed");
+      const superseded = error instanceof ProvisionDeviceOperationSupersededError;
+      logger.warn(
+        `[DeviceTools] provisionDevice ${operationId} could not persist its result: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+      await releaseProvisionDeviceSession(
+        result,
+        superseded
+          ? "provision-device-operation-superseded"
+          : "provision-device-persistence-failed",
+      );
       throw error;
+    }
+  }
+
+  /**
+   * Record that this attempt is about to create the device. A false return
+   * means the row was taken over by a newer attempt, so this one must abort
+   * before creating anything rather than provisioning behind its replacement.
+   */
+  async function markProvisionDeviceCreationStarted(
+    store: ProvisionDeviceOperationStore,
+    operationId: string,
+    attemptId: string,
+  ): Promise<void> {
+    if (!(await store.markDeviceCreationStarted(operationId, attemptId))) {
+      throw new ProvisionDeviceOperationSupersededError(operationId);
     }
   }
 
@@ -5326,6 +5365,9 @@ export function registerDeviceTools() {
     }
     if (error instanceof ProvisionDeviceOperationInProgressError) {
       return createToolErrorResponse("operation_in_progress", error.message);
+    }
+    if (error instanceof ProvisionDeviceOperationSupersededError) {
+      return createToolErrorResponse("operation_superseded", error.message);
     }
     return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }

@@ -51,7 +51,12 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
 class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore {
   private readonly results = new Map<
     string,
-    { fingerprint: string; result?: Record<string, unknown>; creationStarted: boolean }
+    {
+      fingerprint: string;
+      attemptId: string;
+      result?: Record<string, unknown>;
+      creationStarted: boolean;
+    }
   >();
   private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
@@ -63,7 +68,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     this.forcedInProgress.add(operationId);
   }
 
-  async begin(operationId: string, requestFingerprint: string) {
+  async begin(operationId: string, requestFingerprint: string, attemptId: string) {
     if (this.forcedInProgress.has(operationId)) {
       return { started: false as const, inProgress: true as const };
     }
@@ -71,6 +76,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (!existing) {
       this.results.set(operationId, {
         fingerprint: requestFingerprint,
+        attemptId,
         creationStarted: false,
       });
       return { started: true, reconcileExistingConfiguration: false } as const;
@@ -78,6 +84,9 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (existing.fingerprint !== requestFingerprint) {
       throw new ProvisionDeviceOperationConflictError(operationId);
     }
+    // Admission (and a replay) takes the fence, exactly as the repository's
+    // compare-and-set does.
+    existing.attemptId = attemptId;
     return existing.result
       ? {
           started: false as const,
@@ -90,15 +99,23 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         };
   }
 
-  async markDeviceCreationStarted(operationId: string): Promise<void> {
+  async markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean> {
     const operation = this.results.get(operationId);
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
     }
+    if (operation.attemptId !== attemptId) {
+      return false;
+    }
     operation.creationStarted = true;
+    return true;
   }
 
-  async complete(operationId: string, result: Record<string, unknown>): Promise<void> {
+  async complete(
+    operationId: string,
+    attemptId: string,
+    result: Record<string, unknown>,
+  ): Promise<boolean> {
     if (this.completeError) {
       throw this.completeError;
     }
@@ -106,7 +123,11 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
     }
+    if (operation.attemptId !== attemptId) {
+      return false;
+    }
     operation.result = result;
+    return true;
   }
 
   setStoredResult(operationId: string, result: Record<string, unknown>): void {
@@ -123,19 +144,24 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
 
   async fail(
     operationId: string,
-    _errorCode: string,
+    attemptId: string,
+    errorCode: string,
     _message: string,
     options?: { clearCreationStarted?: boolean },
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const operation = this.results.get(operationId);
+    if (operation && operation.attemptId !== attemptId) {
+      return false;
+    }
     this.failCalls++;
-    this.failures.push({ operationId, errorCode: _errorCode });
+    this.failures.push({ operationId, errorCode });
     if (options?.clearCreationStarted) {
-      const operation = this.results.get(operationId);
       if (!operation) {
         throw new Error(`missing operation ${operationId}`);
       }
       operation.creationStarted = false;
     }
+    return true;
   }
 }
 
@@ -788,7 +814,7 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: async () => {
           throw new Error("runner readiness failed");
         },
-        idGenerator: new FakeIdGenerator([`cleanup-${platform}`]),
+        idGenerator: new FakeIdGenerator([`attempt-${platform}`, `cleanup-${platform}`]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -879,7 +905,10 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: async () => {
           throw new Error("runner readiness failed");
         },
-        idGenerator: new FakeIdGenerator([`cleanup-failure-${platform}`]),
+        idGenerator: new FakeIdGenerator([
+          `attempt-failure-${platform}`,
+          `cleanup-failure-${platform}`,
+        ]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -949,7 +978,10 @@ describe("provisionDevice handler", () => {
             throw new Error("first readiness attempt failed");
           }
         },
-        idGenerator: new FakeIdGenerator([`cleanup-retry-${platform}`]),
+        idGenerator: new FakeIdGenerator([
+          `attempt-retry-${platform}`,
+          `cleanup-retry-${platform}`,
+        ]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -1008,7 +1040,7 @@ describe("provisionDevice handler", () => {
           throw new Error("first readiness attempt failed");
         }
       },
-      idGenerator: new FakeIdGenerator(["cleanup-queued-provision"]),
+      idGenerator: new FakeIdGenerator(["attempt-queued-provision", "cleanup-queued-provision"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1055,7 +1087,7 @@ describe("provisionDevice handler", () => {
           throw new Error("writing AVD memory configuration failed");
         },
       }),
-      idGenerator: new FakeIdGenerator(["cleanup-partial-android"]),
+      idGenerator: new FakeIdGenerator(["attempt-partial-android", "cleanup-partial-android"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1107,7 +1139,9 @@ describe("provisionDevice handler", () => {
         throw new Error("retry readiness failed");
       },
       idGenerator: new FakeIdGenerator([
+        "attempt-partial-first-android",
         "cleanup-partial-first-android",
+        "attempt-partial-retry-android",
         "cleanup-partial-retry-android",
       ]),
     });
@@ -1152,7 +1186,7 @@ describe("provisionDevice handler", () => {
       ensureCtrlProxyReady: async () => {
         throw new Error("replacement readiness failed");
       },
-      idGenerator: new FakeIdGenerator(["cleanup-original-android"]),
+      idGenerator: new FakeIdGenerator(["attempt-original-android", "cleanup-original-android"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");

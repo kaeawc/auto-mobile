@@ -18,6 +18,35 @@ function result(stdout = "", stderr = "") {
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
+  test("force termination skips TERM and bounds commands and exit waiting by its deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const commands: string[] = [];
+    const timeouts: Array<number | undefined> = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args, options) {
+        commands.push([file, ...args].join(" "));
+        timeouts.push(options?.timeoutMs);
+        return result(file === "ps" ? "42 1\n43 42\n" : "");
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
+      "deadline elapsed",
+    );
+
+    expect(commands).toEqual([
+      "ps -axo pid=,ppid=",
+      "kill -KILL -- -42",
+      "kill -KILL 43",
+      "kill -KILL 42",
+      "kill -0 42",
+    ]);
+    expect(timeouts.every((timeout) => timeout === 250)).toBe(true);
+    expect(timer.now()).toBe(250);
+  });
+
   test("bounds startup candidate discovery by the supplied deadline", async () => {
     const timer = new FakeTimer();
     const options: Array<HostCommandOptions | undefined> = [];

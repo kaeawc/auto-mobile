@@ -975,6 +975,84 @@ describe("startDevice handler", () => {
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
   });
 
+  // Mirrors "retains a preempted cold boot lease until its emulator process
+  // exits": the recovery path signals the retired replacement but must not hand
+  // the AVD's stable lifecycle key to the next request until it has exited, or a
+  // second instance of the same AVD can be cold-booted over a live qemu process.
+  it("holds the AVD lifecycle lease until the retired ANR replacement process exits", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "System UI ANR persisted after Wait",
+    );
+
+    // The replacement emulator was signalled but has not exited yet.
+    expect(replacementProcess.killed).toBe(true);
+
+    const nextLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: androidImage.name },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let acquired = false;
+    void nextLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    replacementProcess.emit("exit", 0, null);
+    (await nextLease).release();
+  });
+
   it("retires an adopted replacement when its recovered readiness reservation fails", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

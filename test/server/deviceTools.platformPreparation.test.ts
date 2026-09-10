@@ -544,9 +544,7 @@ describe("platform device preparation tools", () => {
     // The in-flight acquisition owns emulator-5562 only. A wildcard startup
     // lease would defer every cohort here, and the DisconnectMonitor skips its
     // whole iteration on a deferred detachment.
-    const detachment = await pool.detachAdbServerResetCohort([
-      pool.getDevice(unrelated.deviceId)!,
-    ]);
+    const detachment = await pool.detachAdbServerResetCohort([pool.getDevice(unrelated.deviceId)!]);
     expect(detachment.deferred).toBe(false);
 
     releaseReadiness();

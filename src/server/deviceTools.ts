@@ -3396,6 +3396,14 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
 
 const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
 
+/**
+ * Collects the process-exit settlements of cold boots this request cancelled but
+ * never owned. `prepareDevice` defers its lifecycle-lease release onto every one
+ * of them, so an AVD's stable key is not handed to the next request while an
+ * emulator this one only signalled is still running.
+ */
+type ColdBootSettlementCollector = (settlement: Promise<void> | undefined) => void;
+
 function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
@@ -3542,6 +3550,7 @@ async function rebootAndroidAfterSystemUiAnr(
   signal: AbortSignal | undefined,
   progress: { report: ProgressCallback } | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
+  collectColdBootSettlement: ColdBootSettlementCollector,
   publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
 ): Promise<{
   boot: DeviceBootResult;
@@ -3609,6 +3618,7 @@ async function rebootAndroidAfterSystemUiAnr(
           devicePool,
           handoff?.replacementDevice,
           adoptedReplacementBoot,
+          collectColdBootSettlement,
         ),
       validatePreservedSession: handoff?.validatePreservedSession,
       releaseRecoveryRouteLease: shutdownReservation?.releaseRecoveryRouteLease,
@@ -3617,7 +3627,7 @@ async function rebootAndroidAfterSystemUiAnr(
     // The pool rolls an adopted replacement back before rejecting its handoff,
     // so any replacement still in scope here is safe to cancel as an unowned
     // cold boot.
-    void cancelUnownedColdBoot(replacementBoot);
+    collectColdBootSettlement(cancelUnownedColdBoot(replacementBoot));
     try {
       await cleanUpFailedSystemUiAnrRecovery(
         devicePool,
@@ -3777,6 +3787,7 @@ async function retireSystemUiAnrReplacement(
   devicePool: DevicePool | undefined,
   expectedReplacement: PooledDevice | undefined,
   replacementBoot: DeviceBootResult,
+  collectColdBootSettlement: ColdBootSettlementCollector,
 ): Promise<void> {
   try {
     if (expectedReplacement) {
@@ -3785,7 +3796,9 @@ async function retireSystemUiAnrReplacement(
   } finally {
     // Retiring the pool entry drops its process tracking, allowing the existing
     // cold-boot cleanup to terminate this recovered emulator deterministically.
-    void cancelUnownedColdBoot(replacementBoot);
+    // The settlement is handed back so the AVD's lifecycle lease is released only
+    // once this emulator has actually exited, exactly as the cold-boot path does.
+    collectColdBootSettlement(cancelUnownedColdBoot(replacementBoot));
   }
 }
 
@@ -3931,6 +3944,7 @@ interface StartDeviceRunnerReadinessInput {
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
   releaseReadinessReservations: DeviceReadinessReservation[];
   publishRecoveredReadinessMarker?: (device: BootedDevice) => void;
+  collectColdBootSettlement: ColdBootSettlementCollector;
 }
 
 async function prepareStartDeviceRunnerReadiness(
@@ -3974,6 +3988,29 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
+/**
+ * A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take the
+ * wildcard startup lease: `androidStartupRequestMatchesAvd` short-circuits on a
+ * missing name, which makes `detachAdbServerResetCohort` defer *every* cohort and
+ * the DisconnectMonitor skip its entire iteration for the minutes the lease is
+ * held. The pool already knows the serial's AVD name. Returning `undefined` falls
+ * back to the wildcard, which is correct only when the serial is unknown to the
+ * pool or the request is criteria-only, where any AVD really may still be picked.
+ */
+function resolveAndroidStartupLeaseAvdName(
+  args: StartDeviceArgs,
+  budgets: { androidAvdName?: string },
+  devicePool: DevicePool,
+): string | undefined {
+  if (budgets.androidAvdName !== undefined) {
+    return budgets.androidAvdName;
+  }
+  if (!args.deviceId) {
+    return undefined;
+  }
+  return devicePool.getDevice(args.deviceId)?.avdName;
+}
+
 async function reserveAndroidStartupLease(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
@@ -3989,16 +4026,7 @@ async function reserveAndroidStartupLease(
     return undefined;
   }
   const remainingMs = bootDeadlineMs - timer.now();
-  // A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take
-  // the wildcard lease: `androidStartupRequestMatchesAvd` short-circuits on a
-  // missing name, which makes `detachAdbServerResetCohort` defer *every* cohort
-  // and the DisconnectMonitor skip its entire iteration for the minutes this
-  // lease is held. The pool already knows the serial's AVD name; fall back to
-  // the wildcard only when the serial is unknown to it or the request is
-  // criteria-only, where any AVD really may still be selected.
-  const exactAvdName =
-    budgets.androidAvdName ??
-    (args.deviceId ? devicePool.getDevice(args.deviceId)?.avdName : undefined);
+  const exactAvdName = resolveAndroidStartupLeaseAvdName(args, budgets, devicePool);
   const requestedName = exactAvdName ?? args.name;
   if (remainingMs <= 0) {
     throw new ActionableError(
@@ -4064,6 +4092,7 @@ function createSystemUiAnrRebooter(
       input.signal,
       input.progress ? { report: input.progress } : undefined,
       recoveryAutolockClient,
+      input.collectColdBootSettlement,
       (replacement) => input.publishRecoveredReadinessMarker?.(replacement),
     );
 }
@@ -5656,7 +5685,13 @@ export function registerDeviceTools() {
     perf: ReturnType<typeof createPerformanceTracker>,
     releaseReadinessReservations: DeviceReadinessReservation[],
     lifecycleLease: VirtualDeviceLifecycleLease,
-    state: { boot: DeviceBootResult | undefined; ownershipTransferred: boolean },
+    state: {
+      boot: DeviceBootResult | undefined;
+      ownershipTransferred: boolean;
+      // Every unowned cold boot this request cancelled, recovery included. The
+      // lifecycle lease is released only once all of them have settled.
+      coldBootSettlements: Promise<void>[];
+    },
   ) => {
     const bootService = new DeviceBootService({
       deviceManager: deviceUtils,
@@ -5746,6 +5781,11 @@ export function registerDeviceTools() {
             acquisitionReadinessKey,
             deviceReadinessLockKey(replacement.platform, replacement.deviceId),
           ),
+        collectColdBootSettlement: (settlement) => {
+          if (settlement) {
+            state.coldBootSettlements.push(settlement);
+          }
+        },
       });
       try {
         state.boot = readinessResult.boot;
@@ -5855,16 +5895,21 @@ export function registerDeviceTools() {
     const deviceMatcher = deps.deviceMatcherFactory();
     const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
     const requestedIdentity = describeStartDeviceRequest(args);
-    const state: { boot: DeviceBootResult | undefined; ownershipTransferred: boolean } = {
+    const state: {
+      boot: DeviceBootResult | undefined;
+      ownershipTransferred: boolean;
+      // Every unowned cold boot this request cancelled, recovery included. The
+      // lifecycle lease is released only once all of them have settled.
+      coldBootSettlements: Promise<void>[];
+    } = {
       boot: undefined,
       ownershipTransferred: false,
+      coldBootSettlements: [],
     };
     const releaseReadinessReservations: DeviceReadinessReservation[] = [];
     let lifecycleReservations:
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
-    let unownedColdBootSettlement: Promise<void> | undefined;
-
     try {
       lifecycleReservations = await reserveStartDeviceLifecycleReservations(
         args,
@@ -5900,7 +5945,10 @@ export function registerDeviceTools() {
     } catch (error) {
       perf.end();
       if (!state.ownershipTransferred) {
-        unownedColdBootSettlement = cancelUnownedColdBoot(state.boot);
+        const settlement = cancelUnownedColdBoot(state.boot);
+        if (settlement) {
+          state.coldBootSettlements.push(settlement);
+        }
       }
       if (error instanceof ActionableError) {
         throw error;
@@ -5910,11 +5958,14 @@ export function registerDeviceTools() {
       for (const releaseReservation of releaseReadinessReservations.reverse()) {
         await releaseReservation();
       }
-      if (unownedColdBootSettlement) {
-        // Release exactly once whatever the settlement does — the bounded wait
-        // in `cancelUnownedColdBoot` guarantees it completes, and `finally`
-        // guarantees the lease is not stranded if it completes by rejecting.
-        void unownedColdBootSettlement
+      if (state.coldBootSettlements.length > 0) {
+        // Release exactly once whatever the settlements do — the bounded wait in
+        // `cancelUnownedColdBoot` guarantees each completes, and `finally`
+        // guarantees the lease is not stranded if one completes by rejecting.
+        // A System UI ANR replacement retired mid-recovery settles here too, so
+        // the AVD's key cannot be handed to the next request while the emulator
+        // this one only signalled is still running.
+        void Promise.allSettled(state.coldBootSettlements)
           .finally(() => lifecycleReservations?.lifecycleLease.release())
           .catch((error: unknown) => {
             logger.warn(

@@ -1493,5 +1493,177 @@ describe("IOSCtrlProxyBuilder", function () {
       expect(result.success).toBe(false);
       expect(result.error).toContain("runner binary SHA256 mismatch");
     });
+
+    test("concurrent build() calls single-flight: only one download/extract happens (#6417)", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+
+      let resolveDownload: (() => void) | undefined;
+      const downloadGate = new Promise<void>((resolve) => {
+        resolveDownload = resolve;
+      });
+
+      class DeferredDownloader extends FakeIOSCtrlProxyBundleDownloader {
+        public override async download(url: string, destination: string): Promise<void> {
+          await downloadGate;
+          await super.download(url, destination);
+        }
+      }
+
+      const downloader = new DeferredDownloader();
+      downloader.checksum = "expected-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      // Both calls start before either has resolved the download, so the
+      // second call must observe (and reuse) the first call's in-flight promise.
+      const firstBuild = builder.build("simulator");
+      const secondBuild = builder.build("simulator");
+
+      resolveDownload!();
+
+      const [firstResult, secondResult] = await Promise.all([firstBuild, secondBuild]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(true);
+      expect(secondResult).toEqual(firstResult);
+      expect(downloader.downloadedUrls.length).toBe(1);
+      expect(downloader.extractedPaths.length).toBe(1);
+    });
+
+    test.each([false, true])(
+      "mixed platform callers resolve independently (device products: %s)",
+      async function (includeDeviceProducts) {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const cacheDir = path.join(tempDir, "cache");
+
+        let resolveDownload: (() => void) | undefined;
+        const downloadGate = new Promise<void>((resolve) => {
+          resolveDownload = resolve;
+        });
+
+        class DeferredDownloader extends FakeIOSCtrlProxyBundleDownloader {
+          public override async download(url: string, destination: string): Promise<void> {
+            await downloadGate;
+            await super.download(url, destination);
+          }
+        }
+
+        const downloader = new DeferredDownloader();
+        downloader.checksum = "expected-checksum";
+        downloader.includeDeviceProducts = includeDeviceProducts;
+
+        IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        const builder = IOSCtrlProxyBuilder.getInstance(
+          { derivedDataPath, bundleCacheDir: cacheDir },
+          { downloader },
+        );
+
+        // Both calls start before either has resolved the download, so the
+        // second call must observe (and reuse) the first call's in-flight promise.
+        const firstBuild = builder.build("device");
+        const secondBuild = builder.build("simulator");
+
+        resolveDownload!();
+
+        const [firstResult, secondResult] = await Promise.all([firstBuild, secondBuild]);
+
+        expect(firstResult.success).toBe(includeDeviceProducts);
+        expect(secondResult.success).toBe(true);
+        expect(secondResult.buildPath).toContain("Debug-iphonesimulator");
+        if (includeDeviceProducts) {
+          expect(firstResult.buildPath).toContain("Debug-iphoneos");
+        }
+        expect(downloader.downloadedUrls.length).toBe(1);
+        expect(downloader.extractedPaths.length).toBe(1);
+      },
+    );
+
+    test("a second concurrent build() call never invokes the downloader's destructive extractBundle a second time (#6417)", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+
+      let resolveDownload: (() => void) | undefined;
+      const downloadGate = new Promise<void>((resolve) => {
+        resolveDownload = resolve;
+      });
+
+      // Mirrors the real DefaultIOSCtrlProxyBundleDownloader's destructive
+      // `fs.rm(destination, { recursive: true, force: true })` before
+      // extracting (src/utils/IOSCtrlProxyBundleDownloader.ts:67-68). Counting
+      // invocations proves the shared derived-data tree is torn down and
+      // rebuilt at most once for a pair of overlapping build() calls, which is
+      // the property that protects a live runner's on-disk bundle and any
+      // per-device runner-<deviceId>.xctestrun another caller wrote in between.
+      class DestructiveDeferredDownloader extends FakeIOSCtrlProxyBundleDownloader {
+        public rmCount = 0;
+
+        public override async download(url: string, destination: string): Promise<void> {
+          await downloadGate;
+          await super.download(url, destination);
+        }
+
+        public override async extractBundle(
+          bundlePath: string,
+          destination: string,
+        ): Promise<void> {
+          this.rmCount += 1;
+          await fs.rm(destination, { recursive: true, force: true });
+          await super.extractBundle(bundlePath, destination);
+        }
+      }
+
+      const downloader = new DestructiveDeferredDownloader();
+      downloader.checksum = "expected-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      // Both calls start before either has resolved the download, so the
+      // second call must observe (and reuse) the first call's in-flight promise
+      // instead of running its own independent rm-rf + re-extract.
+      const firstBuild = builder.build("simulator");
+      const secondBuild = builder.build("simulator");
+
+      resolveDownload!();
+      const [firstResult, secondResult] = await Promise.all([firstBuild, secondBuild]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(true);
+      expect(downloader.rmCount).toBe(1);
+      expect(downloader.extractedPaths.length).toBe(1);
+    });
+    test("a failed shared download allows a subsequent build", async function () {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      const download = downloader.download.bind(downloader);
+      downloader.download = async () => {
+        throw new Error("download unavailable");
+      };
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        {
+          derivedDataPath: path.join(tempDir, "DerivedData"),
+          bundleCacheDir: path.join(tempDir, "cache"),
+        },
+        { downloader },
+      );
+      const [first, second] = await Promise.all([
+        builder.build("device"),
+        builder.build("simulator"),
+      ]);
+      expect(first.success).toBe(false);
+      expect(second.success).toBe(false);
+      downloader.download = download;
+      expect((await builder.build("simulator")).success).toBe(true);
+      expect(downloader.extractedPaths).toHaveLength(1);
+    });
   });
 });

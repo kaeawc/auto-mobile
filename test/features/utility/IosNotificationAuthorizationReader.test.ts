@@ -93,19 +93,62 @@ function fakeDeps(opts: { outer?: string | Error; nested?: string }): {
 }
 
 describe("extractSectionDataBase64", () => {
-  test("extracts and strips whitespace from the base64 blob", () => {
+  test("extracts and strips whitespace from the base64 blob", async () => {
     const xml = outerXml({ "com.apple.MobileSMS": "QUJD\n\t\tREVG" });
-    expect(extractSectionDataBase64(xml, "com.apple.MobileSMS")).toBe("QUJDREVG");
+    expect(await extractSectionDataBase64(xml, "com.apple.MobileSMS")).toBe("QUJDREVG");
   });
 
-  test("returns null for a bundle with no section", () => {
+  test("returns null for a bundle with no section", async () => {
     const xml = outerXml({ "com.apple.MobileSMS": "QUJD" });
-    expect(extractSectionDataBase64(xml, "com.example.absent")).toBeNull();
+    expect(await extractSectionDataBase64(xml, "com.example.absent")).toBeNull();
+  });
+
+  // Issue #6583 follow-up (codex review): the previous ad-hoc regex tokenizer
+  // required a space before the closing `/` (`<true />`) and did not match
+  // Apple's actual plutil output, which emits no-space self-closing tags like
+  // `<true/>`. A stray self-closing boolean sibling anywhere in the document
+  // must not break parsing of an unrelated `<data>` blob.
+  test("tolerates no-space self-closing tags elsewhere in the document", async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+\t<key>sectionInfoVersionNumber</key>
+\t<integer>2</integer>
+\t<key>migrationComplete</key>
+\t<true/>
+\t<key>legacySections</key>
+\t<array/>
+\t<key>sectionInfo</key>
+\t<dict>
+\t\t<key>com.apple.MobileSMS</key>
+\t\t<data>QUJDREVG</data>
+\t</dict>
+</dict>
+</plist>`;
+    expect(await extractSectionDataBase64(xml, "com.apple.MobileSMS")).toBe("QUJDREVG");
+  });
+
+  // The previous regex tokenizer's `indexOf` consumers read raw XML text
+  // without decoding entities, so an escaped bundle id would never match a
+  // lookup by its literal (decoded) value. Reusing the structured parser
+  // fixes this because xml2js decodes entities as part of parsing.
+  test("decodes XML entities in dict keys before matching the bundle id", async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+\t<key>sectionInfo</key>
+\t<dict>
+\t\t<key>com.example.app&amp;co</key>
+\t\t<data>QUJDREVG</data>
+\t</dict>
+</dict>
+</plist>`;
+    expect(await extractSectionDataBase64(xml, "com.example.app&co")).toBe("QUJDREVG");
   });
 });
 
 describe("parseSettingsFromNestedXml", () => {
-  test("pulls integer settings keys", () => {
+  test("pulls integer settings keys", async () => {
     const xml = nestedXml({
       authorizationStatus: 2,
       alertType: 1,
@@ -113,7 +156,7 @@ describe("parseSettingsFromNestedXml", () => {
       notificationCenterSetting: 2,
       pushSettings: 63,
     });
-    expect(parseSettingsFromNestedXml(xml)).toEqual({
+    expect(await parseSettingsFromNestedXml(xml)).toEqual({
       authorizationStatus: 2,
       alertType: 1,
       lockScreenSetting: 2,
@@ -127,7 +170,7 @@ describe("parseSettingsFromNestedXml", () => {
   // dict carrying only `authorizationStatus` (no sibling settings keys) must
   // lose to the real settings dict that also carries `pushSettings`/`alertType`,
   // even though the decoy appears first in document order.
-  test("selects the coherent settings dict, not the first authorizationStatus match", () => {
+  test("selects the coherent settings dict, not the first authorizationStatus match", async () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
@@ -155,12 +198,76 @@ describe("parseSettingsFromNestedXml", () => {
 \t</array>
 </dict>
 </plist>`;
-    expect(parseSettingsFromNestedXml(xml)).toEqual({
+    expect(await parseSettingsFromNestedXml(xml)).toEqual({
       authorizationStatus: 2,
       alertType: 1,
       lockScreenSetting: 2,
       notificationCenterSetting: 2,
       pushSettings: 63,
+    });
+  });
+
+  // Issue #6583 follow-up (codex review): the previous ad-hoc regex tokenizer
+  // did not match no-space self-closing tags (`<true/>`, `<dict/>`) which is
+  // exactly what plutil emits, so a self-closing sibling anywhere in the
+  // `$objects` graph must not derail extraction of the real settings dict.
+  test("tolerates no-space self-closing tags among the $objects siblings", async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+\t<key>$archiver</key>
+\t<string>NSKeyedArchiver</string>
+\t<key>$objects</key>
+\t<array>
+\t\t<string>$null</string>
+\t\t<true/>
+\t\t<dict/>
+\t\t<dict>
+\t\t\t<key>authorizationStatus</key>
+\t\t\t<integer>3</integer>
+\t\t\t<key>pushSettings</key>
+\t\t\t<integer>7</integer>
+\t\t</dict>
+\t</array>
+</dict>
+</plist>`;
+    expect(await parseSettingsFromNestedXml(xml)).toEqual({
+      authorizationStatus: 3,
+      pushSettings: 7,
+      alertType: undefined,
+      lockScreenSetting: undefined,
+      notificationCenterSetting: undefined,
+    });
+  });
+
+  // The previous regex tokenizer's `indexOf` consumers read raw XML text
+  // without decoding entities, so an escaped sibling string value could
+  // corrupt the scan of subsequent tags. Reusing the structured parser fixes
+  // this because xml2js decodes entities as part of parsing.
+  test("tolerates XML entities in sibling string values", async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+\t<key>$archiver</key>
+\t<string>NSKeyedArchiver</string>
+\t<key>$objects</key>
+\t<array>
+\t\t<string>Fish &amp; Chips &lt;shop&gt;</string>
+\t\t<dict>
+\t\t\t<key>authorizationStatus</key>
+\t\t\t<integer>2</integer>
+\t\t\t<key>alertType</key>
+\t\t\t<integer>1</integer>
+\t\t</dict>
+\t</array>
+</dict>
+</plist>`;
+    expect(await parseSettingsFromNestedXml(xml)).toEqual({
+      authorizationStatus: 2,
+      alertType: 1,
+      pushSettings: undefined,
+      lockScreenSetting: undefined,
+      notificationCenterSetting: undefined,
     });
   });
 });

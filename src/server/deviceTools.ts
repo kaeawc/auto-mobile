@@ -5162,8 +5162,8 @@ export function registerDeviceTools() {
                 },
                 provisioned.device,
                 boot!.processHandle,
-                // Our own stable-name readiness reservation must not deny our own
-                // bind when the pooled incarnation changed during readiness (C-1).
+                // Our own stable-name readiness reservation must not deny our
+                // own bind when the pooled incarnation changed during readiness.
                 readinessReservation ? new Set([readinessReservation.owner]) : undefined,
                 undefined,
                 resolveProvisionDeviceAchievedReadiness(args.readiness),

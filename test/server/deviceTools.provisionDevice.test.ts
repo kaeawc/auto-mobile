@@ -2452,7 +2452,7 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
-  // C-5: `cancelUnownedColdBoot` returns a settlement that resolves on the
+  // `cancelUnownedColdBoot` returns a settlement that resolves on the
   // emulator child's `exit` event. provisionDevice discarded it, so the AVD's
   // stable lifecycle lease was released while the emulator was still shutting
   // down and a concurrent start/teardown of the same AVD could relaunch or
@@ -2522,7 +2522,7 @@ describe("provisionDevice handler", () => {
     expect(leaseGranted).toBe(true);
   });
 
-  // C-6: a readiness failure caused by an exhausted deadline was reported and
+  // A readiness failure caused by an exhausted deadline was reported and
   // persisted as `platform_command_failed`, so a controller that retries on
   // `timeout` but treats `platform_command_failed` as terminal gave up on a
   // purely time-based failure.
@@ -2551,8 +2551,8 @@ describe("provisionDevice handler", () => {
     expect(operationStore.failCodes).toEqual(["timeout"]);
   });
 
-  // C-4: boot and automation readiness shared one provision budget, so a slow
-  // cold boot could consume all of it and leave CtrlProxy setup with a
+  // Boot and automation readiness share one provision budget, so a slow cold
+  // boot could consume all of it and leave CtrlProxy setup with a
   // millisecond ("readiness budget exhausted before setup lock"). Boot must be
   // bounded by its own share of the deadline instead.
   test("bounds boot by its own share instead of the whole provision budget", async () => {
@@ -2600,7 +2600,7 @@ describe("provisionDevice handler", () => {
     expect(payload.error?.code).toBe("timeout");
   });
 
-  // C-2: `reserveDeviceForReadiness` proves ownership through its `autolockClient`
+  // `reserveDeviceForReadiness` proves ownership through its `autolockClient`
   // argument before the caller starts readiness side effects ("Acquisition may
   // reboot a device during readiness recovery"). provisionDevice passed no
   // autolock client, so it reset the shared per-device CtrlProxy manager and
@@ -2666,7 +2666,7 @@ describe("provisionDevice handler", () => {
     }
   });
 
-  // C-1: `reserveProvisionDeviceReadiness` records a stable-name readiness
+  // `reserveProvisionDeviceReadiness` records a stable-name readiness
   // reservation keyed `android:<avd>`. If the pooled entry's incarnation changes
   // while readiness is in flight (a disconnect + rediscovery of the same serial,
   // i.e. exactly the Android-reboot case the name reservation exists to bridge),

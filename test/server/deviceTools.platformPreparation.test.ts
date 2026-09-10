@@ -22,6 +22,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
+import type { VirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -89,6 +90,32 @@ describe("platform device preparation tools", () => {
       expect(failure.budgetMs).toBe(10);
     });
   }
+
+  test("reports a start lifecycle-reservation timeout against the acquisition budget", async () => {
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_9_API_36", isRunning: false, source: "local" },
+    ]);
+    const stalledCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => {
+        timer.advanceTime(10_000);
+        throw new Error("lifecycle reservation aborted");
+      },
+    };
+    setDeviceToolsDependencies({ lifecycleCoordinator: stalledCoordinator });
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Pixel_9_API_36",
+      bootTimeoutMs: 5_000,
+      automationReadyTimeoutMs: 1_000,
+    }).catch((error: Error) => error);
+
+    // This is the acquisition path: the killDevice-shaped default reported a
+    // shutdown timeout against an unrelated 30s budget.
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("to disappear after");
+    expect((failure as Error).message).toContain("getAndroid timeout exhausted");
+    expect((failure as Error).message).toContain("budgetMs=6000");
+  });
 
   test("advertises the combined preparation budget including omitted defaults", () => {
     for (const [name, schema, target] of [

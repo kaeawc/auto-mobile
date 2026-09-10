@@ -5379,8 +5379,27 @@ export function registerDeviceTools() {
     stableTarget?: StableDeviceTarget;
   };
 
+  /**
+   * Acquisition-phase timeout. `reserveStableDeviceLifecycle` defaults to the
+   * killDevice-shaped `shutdownTimeoutError`, which on a start path reports the
+   * device as failing to *disappear*, quotes `DEVICE_SHUTDOWN_TIMEOUT_MS`
+   * instead of the caller's budget, and tells the user to verify the shutdown
+   * state. Mirror the phase-labeled style `DeviceBootService` already emits.
+   */
+  const acquisitionLifecycleTimeoutError = (
+    budgets: DevicePreparationBudgets,
+    describedTarget: string,
+    detail: string,
+  ): ActionableError =>
+    new ActionableError(
+      `${budgets.operationName} timeout exhausted while ${detail}; ` +
+        `budgetMs=${budgets.bootTimeoutMs + budgets.automationReadyTimeoutMs}; ` +
+        `target=${describedTarget}; origin=virtualDeviceLifecycleCoordinator`,
+    );
+
   const reserveStartStableDeviceLifecycle = async (
     stableTarget: StableDeviceTarget | undefined,
+    budgets: DevicePreparationBudgets,
     timer: Timer,
     deadlineMs: number,
     signal: AbortSignal | undefined,
@@ -5399,7 +5418,12 @@ export function registerDeviceTools() {
       timer,
       deadlineMs,
       signal,
-      undefined,
+      (detail) =>
+        acquisitionLifecycleTimeoutError(
+          budgets,
+          `${stableTarget.platform}:${stableTarget.stableId}`,
+          detail,
+        ),
       "start",
       coordinator,
     );
@@ -5465,6 +5489,39 @@ export function registerDeviceTools() {
     return { platform: "ios", stableId: match.deviceId };
   };
 
+  const reserveStartSelectorDeviceLifecycle = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> => {
+    const selector = stableStringify({
+      deviceId: args.deviceId,
+      name: args.name,
+      minOsVersion: args.minOsVersion,
+      maxOsVersion: args.maxOsVersion,
+      formFactor: args.formFactor,
+      screenSize: args.screenSize,
+    });
+    try {
+      return await deps.lifecycleCoordinator.reserve(
+        { kind: "selector", platform: args.platform, selector },
+        { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
+      );
+    } catch (error) {
+      // Same acquisition-phase labeling as the stable-identity path above; the
+      // selector fallback had no deadline attribution at all.
+      if (deps.timer.now() >= budgets.automationDeadlineMs) {
+        throw acquisitionLifecycleTimeoutError(
+          budgets,
+          `${args.platform}:${selector}`,
+          "waiting for selector device lifecycle reservation",
+        );
+      }
+      throw error;
+    }
+  };
+
   const reserveStartDeviceLifecycleReservations = async (
     args: StartDeviceArgs,
     budgets: DevicePreparationBudgets,
@@ -5498,26 +5555,12 @@ export function registerDeviceTools() {
       lifecycleLease =
         (await reserveStartStableDeviceLifecycle(
           stableTarget,
+          budgets,
           deps.timer,
           budgets.automationDeadlineMs,
           signal,
           deps.lifecycleCoordinator,
-        )) ??
-        (await deps.lifecycleCoordinator.reserve(
-          {
-            kind: "selector",
-            platform: args.platform,
-            selector: stableStringify({
-              deviceId: args.deviceId,
-              name: args.name,
-              minOsVersion: args.minOsVersion,
-              maxOsVersion: args.maxOsVersion,
-              formFactor: args.formFactor,
-              screenSize: args.screenSize,
-            }),
-          },
-          { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
-        ));
+        )) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
       if (stableTarget?.platform === "ios" && args.name && !args.deviceId) {
         const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
           args,

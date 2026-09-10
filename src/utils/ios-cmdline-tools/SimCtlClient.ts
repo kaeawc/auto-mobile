@@ -1098,7 +1098,7 @@ export class SimCtlClient implements SimCtl {
       };
     } finally {
       abandoned = !acquired;
-      if (abandoned && acquiredRelease) {
+      if (acquiredRelease) {
         const release = acquiredRelease;
         acquiredRelease = undefined;
         this.releaseSimulatorBoot(udid, state, release);

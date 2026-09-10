@@ -39,6 +39,30 @@ import {
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
 
+/**
+ * Release a device session that was minted by an acquisition tool whose result
+ * the server is about to discard as cancelled. Routed through the
+ * SessionManager choke point so registry retire and the release broadcast fan
+ * out exactly as they do for any other release.
+ */
+async function releaseCancelledAcquisition(sessionUuid: string, toolName: string): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  try {
+    await daemonState.getSessionManager().releaseSession(sessionUuid, "acquisition-cancelled");
+  } catch (error) {
+    // Log-and-continue: the caller must still see the cancellation error rather
+    // than a release failure, and the missing-first-heartbeat reap remains the
+    // backstop for a session this release could not free.
+    logger.warn(
+      `[MCP] Failed to release ${sessionUuid} minted by a cancelled ${toolName} acquisition`,
+      error,
+    );
+  }
+}
+
 async function awaitWithCancellation<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
@@ -94,6 +118,8 @@ import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerToolSelectionTools, SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionTools";
 import {
+  DEVICE_SESSION_RECOVERY_PROMPT,
+  DEVICE_SESSION_RECOVERY_TOOLS,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "./deviceSessionResult";
@@ -915,7 +941,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
         ? getDeviceSessionIdFromResult(result)
         : undefined;
-      let acquisitionEnrichmentCancelled = false;
       // Evaluate the returned session directly: a seeded transport may retain
       // its old binding, and a concurrent acquisition may publish another one.
       // Reuse the same route/label union as tools/list without publishing yet.
@@ -924,6 +949,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !result?.isError &&
         acquiredSessionUuid
       ) {
+        let acquisitionEnrichmentCancelled = false;
         try {
           const listed = new Set(
             (
@@ -959,9 +985,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           // proxy can bind and heartbeat it even if optional discovery fails.
           logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
         }
-      }
-      if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
-        throw new ActionableError("MCP request was cancelled during acquisition.");
+        // Scoped to the acquisition enrichment on purpose. At the
+        // top level this ran for EVERY tool, so a cancellation landing while any
+        // handler was finishing discarded that handler's complete, correct
+        // result and replaced it with an error naming an acquisition the tool
+        // never performed. A non-acquisition tool keeps its result here; a
+        // genuine cancellation is still classified by the outer catch.
+        if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
+          // The throw must be symmetric with the mint: this session UUID never
+          // reaches the client, so release it through the SessionManager choke
+          // point instead of leaving the daemon holding the autolocked device
+          // until the missing-first-heartbeat reap.
+          await releaseCancelledAcquisition(acquiredSessionUuid, name);
+          throw new ActionableError("MCP request was cancelled during acquisition.");
+        }
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&
@@ -1034,13 +1071,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             code: "session_ownership_lost",
             message:
               `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}. ` +
-              "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+              DEVICE_SESSION_RECOVERY_PROMPT,
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
             retryable: true,
             recovery: {
               action: "acquire_replacement_session",
-              tools: ["getAndroid", "getApple", "startDevice"],
+              tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
             },
             release: error.release,
           },

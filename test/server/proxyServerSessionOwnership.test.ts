@@ -74,13 +74,13 @@ describe("proxy server session ownership errors", () => {
                 code: "session_ownership_lost",
                 message:
                   "Session ownership lost for session-123: heartbeat-timeout. " +
-                  "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+                  "Call getAndroid, getApple, or provisionDevice to acquire a new device session.",
                 sessionUuid: "session-123",
                 reason: "heartbeat-timeout",
                 retryable: true,
                 recovery: {
                   action: "acquire_replacement_session",
-                  tools: ["getAndroid", "getApple", "startDevice"],
+                  tools: ["getAndroid", "getApple", "provisionDevice"],
                 },
                 release: {
                   sessionId: "session-123",
@@ -223,12 +223,12 @@ describe("proxy server session ownership errors", () => {
                 message:
                   "This MCP connection has no active device session " +
                   "(the previous session was released: daemon-shutdown). " +
-                  "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+                  "Call getAndroid, getApple, or provisionDevice to acquire a new device session.",
                 reason: "daemon-shutdown",
                 retryable: true,
                 recovery: {
                   action: "acquire_replacement_session",
-                  tools: ["getAndroid", "getApple", "startDevice"],
+                  tools: ["getAndroid", "getApple", "provisionDevice"],
                 },
               },
             }),

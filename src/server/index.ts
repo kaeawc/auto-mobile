@@ -3,6 +3,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprot
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
+import { stringifyToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { executionTracker } from "./executionTracker";
@@ -420,7 +421,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   };
 
   // Register tool definitions using the lower-level interface
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const listSessionTools = async () => {
     const sessionId = options.sessionContext?.sessionId;
     const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId);
     const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
@@ -486,7 +487,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         (definition): definition is (typeof definitions)[number] => definition !== undefined,
       ),
     };
-  });
+  };
+  server.server.setRequestHandler(ListToolsRequestSchema, listSessionTools);
 
   // Add ping handler as per MCP specification
   // Note: Using runtime access since TypeScript import has issues
@@ -844,7 +846,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             startTime: execution.startTime,
           });
       }
-      const result = await runWithAbortSignal(requestSignal, () =>
+      let result = await runWithAbortSignal(requestSignal, () =>
         runWithToolSelectionContext(
           {
             // A bound derived session may still target a sibling label. Resolve
@@ -873,6 +875,39 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
       ) {
         ToolRegistry.notifyToolListChanged();
+      }
+      // Report the exact profile-filtered complement after binding, using the
+      // same route/label union as tools/list. Repeated acquisitions also report
+      // current overrides, rather than only the first binding transition.
+      if (
+        (name === "getAndroid" || name === "getApple") &&
+        !result?.isError &&
+        getDeviceSessionIdFromResult(result)
+      ) {
+        const listed = new Set((await listSessionTools()).tools.map((tool) => tool.name));
+        const gatedTools = ToolRegistry.getAllTools()
+          .filter(
+            (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
+          )
+          .map((tool) => tool.name)
+          .sort();
+        let enriched = false;
+        result = {
+          ...result,
+          content: result.content.map((item: { type: string; text?: string }) => {
+            if (enriched || item.type !== "text" || typeof item.text !== "string") {
+              return item;
+            }
+            enriched = true;
+            return {
+              ...item,
+              text: stringifyToolResponse({ ...JSON.parse(item.text), gatedTools }),
+            };
+          }),
+          ...(result.structuredContent
+            ? { structuredContent: { ...result.structuredContent, gatedTools } }
+            : {}),
+        };
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&

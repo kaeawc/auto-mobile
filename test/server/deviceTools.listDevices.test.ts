@@ -4,6 +4,8 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -125,13 +127,43 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
-  test("keeps the resource pointers as a note", async () => {
+  test("does not recommend unreadable resources before acquisition", async () => {
     const payload = await callListDevices();
 
     expect(payload.note).toBeDefined();
     const noteText = JSON.stringify(payload.note);
-    expect(noteText).toContain("automobile:devices/booted");
-    expect(noteText).toContain("automobile:devices/images");
+    expect(payload.note.resources).toEqual([]);
+    expect(noteText).not.toContain("automobile:devices/");
+    expect(noteText).toContain("getAndroid");
+    expect(noteText).toContain("resources/list");
+  });
+
+  test("only recommends registered resources when a session is bound", async () => {
+    const uri = "automobile:devices/booted";
+    const previous = ResourceRegistry.getResource(uri);
+    ResourceRegistry.register(uri, "booted", "booted devices", "application/json", async () => ({
+      uri,
+      text: "[]",
+    }));
+    try {
+      const payload = await runWithToolSelectionContext(
+        { routingSessionUuid: "device-session" },
+        () => callListDevices(),
+      );
+      expect(payload.note.resources).toContain(uri);
+      const listed = ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri);
+      for (const recommended of payload.note.resources) {expect(listed).toContain(recommended);}
+    } finally {
+      ResourceRegistry.unregister(uri);
+      if (previous)
+        {ResourceRegistry.register(
+          previous.uri,
+          previous.name,
+          previous.description,
+          previous.mimeType,
+          previous.handler,
+        );}
+    }
   });
 
   test("marks discovery complete when every requested platform succeeds", async () => {

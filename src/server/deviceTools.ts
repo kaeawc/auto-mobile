@@ -75,6 +75,7 @@ import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { ResourceRegistry } from "./resourceRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { executionTracker } from "./executionTracker";
 import {
@@ -4023,6 +4024,33 @@ async function resolveAndroidStartStableDeviceLifecycleTarget(
   return { platform: "android", stableId: [...stableIds][0] };
 }
 
+function availableDeviceResourceNote() {
+  const listedResourceUris = new Set(
+    getToolSelectionContext()?.routingSessionUuid
+      ? ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri)
+      : [],
+  );
+  const resourceUris = [
+    BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
+    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
+    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
+    DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
+  ];
+  const availableResourceUris = resourceUris.filter((uri) => listedResourceUris.has(uri));
+  return {
+    message:
+      "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +
+      (availableResourceUris.length > 0
+        ? "For available images and richer per-device detail, read these MCP resources:"
+        : "After acquiring a device, refresh resources/list to discover available images and richer per-device detail."),
+    resources: availableResourceUris,
+    uriPrefix:
+      "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
+  };
+}
+
 export function registerDeviceTools() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
@@ -4108,21 +4136,7 @@ export function registerDeviceTools() {
       devices,
       count: devices.length,
       discovery,
-      note: {
-        message:
-          "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +
-          "For available (not-yet-booted) images and richer per-device detail, read these MCP resources:",
-        resources: [
-          BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
-          `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
-          `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
-          DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
-          `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
-          `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
-        ],
-        uriPrefix:
-          "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
-      },
+      note: availableDeviceResourceNote(),
     });
   };
 

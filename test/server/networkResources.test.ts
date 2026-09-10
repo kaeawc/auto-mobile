@@ -163,6 +163,14 @@ describe("network resource registration", () => {
     ResourceRegistry.clearResources();
   });
 
+  it("uses the canonical automobile:path form for every network resource", () => {
+    registerNetworkResources();
+    const uris = ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri);
+    expect(uris).toContain("automobile:network/traffic/live");
+    expect(uris).toContain("automobile:network/stats");
+    expect(uris.some((uri) => uri.startsWith("automobile://"))).toBe(false);
+  });
+
   it("registers one RFC 6570 query template for traffic filters", () => {
     registerNetworkResources();
 

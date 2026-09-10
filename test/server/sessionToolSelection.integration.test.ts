@@ -17,6 +17,67 @@ describe("per-session exact-tool selection", () => {
     ToolRegistry.clearTools();
   });
 
+  for (const acquisition of ["getAndroid", "getApple"]) {
+    test(
+      acquisition + " names gated tools after acquisition and respects re-enabling",
+      async () => {
+        fixture = new McpTestFixture();
+        await fixture.setup();
+        ToolRegistry.clearTools();
+        ToolRegistry.register(
+          acquisition,
+          "acquire",
+          z.object({}),
+          async () => ({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ sessionUuid: "acquired-session", timing: { total: 1 } }),
+              },
+            ],
+          }),
+          { defaultEnabled: true },
+        );
+        ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+          defaultEnabled: false,
+        });
+        ToolRegistry.register("hiddenTool", "hidden", z.object({}), async () => ({ content: [] }), {
+          defaultEnabled: false,
+          hidden: true,
+        });
+        registerToolSelectionTools();
+        const acquire = async () => {
+          const response = await fixture!.client.request(
+            { method: "tools/call", params: { name: acquisition, arguments: {} } },
+            z.any(),
+          );
+          return JSON.parse(response.content[0].text);
+        };
+        const payload = await acquire();
+        expect(payload.sessionUuid).toBe("acquired-session");
+        expect(payload.timing).toEqual({ total: 1 });
+        expect(payload.gatedTools).toEqual(["inputText"]);
+        const listed = await fixture.client.listTools();
+        expect(listed.tools.map((tool) => tool.name)).not.toContain("inputText");
+        const control = listed.tools.find((tool) => tool.name === "setToolEnabled")!;
+        expect((control.inputSchema.properties!.toolName as { enum: string[] }).enum).toContain(
+          "inputText",
+        );
+        await fixture.client.request(
+          {
+            method: "tools/call",
+            params: { name: "setToolEnabled", arguments: { toolName: payload.gatedTools[0] } },
+          },
+          z.any(),
+        );
+        expect((await acquire()).gatedTools).toEqual([]);
+        expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
+          "inputText",
+        );
+      },
+    );
+  }
+
   test("enables one exact tool without exposing its former group sibling", async () => {
     const enabled = new Set<string>();
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> = {

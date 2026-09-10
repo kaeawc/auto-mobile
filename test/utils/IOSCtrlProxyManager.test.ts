@@ -654,6 +654,36 @@ describe("IOSCtrlProxyManager", function () {
       expect(start).not.toHaveBeenCalled();
     });
 
+    // #6415 follow-up: the forced-teardown gate must fail CLOSED on ownership —
+    // a responder that omits deviceId must NOT be adopted as "still our
+    // runner" (which would otherwise block a legitimate restart with the
+    // "still running after forced teardown" error). Unlike the primary
+    // liveness gate's missing-deviceId compat carve-out, here a missing
+    // deviceId means "not proven to be ours", so teardown proceeds and start
+    // is allowed. Exercised through the real health client (curl mock), not a
+    // mocked private method, so the strict wiring at the forceRestart call
+    // site is actually covered.
+    test("does not mistake a forced-teardown responder that omits deviceId for our own runner", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      fakeExecutor.setCommandHandler("curl -s", () => createExecResult('{"status":"ok"}', ""));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      spyOn(manager, "stop").mockResolvedValue();
+      const start = spyOn(
+        manager as unknown as {
+          startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void>;
+        },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      await expect(manager.forceRestart()).resolves.toBeUndefined();
+      expect(start).toHaveBeenCalledTimes(1);
+    });
+
     test("propagates forced teardown failures to a concurrent start", async function () {
       // The post-teardown drain grace polls on the injected timer; auto-advance
       // keeps the runner-still-alive path inside the unit-test time budget.

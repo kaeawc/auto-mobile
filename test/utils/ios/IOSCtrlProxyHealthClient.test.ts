@@ -90,6 +90,37 @@ describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
     expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(true);
   });
 
+  // #6415 follow-up: ownership/forced-teardown decisions must fail closed on a
+  // missing deviceId — the compat carve-out above is for the liveness gate only.
+  describe("checkHealthEndpointOnPortForDevice with requireDeviceId (strict ownership gate)", function () {
+    test("rejects an 'ok' body reporting no deviceId", async function () {
+      const { client } = makeClient(() => execResult('{"status":"ok"}'));
+      expect(
+        await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+          requireDeviceId: true,
+        }),
+      ).toBe(false);
+    });
+
+    test("rejects a mismatched deviceId", async function () {
+      const { client } = makeClient(() => execResult('{"status":"ok","deviceId":"OTHER"}'));
+      expect(
+        await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+          requireDeviceId: true,
+        }),
+      ).toBe(false);
+    });
+
+    test("accepts a matching deviceId", async function () {
+      const { client } = makeClient(() => execResult(`{"status":"ok","deviceId":"${DEVICE_ID}"}`));
+      expect(
+        await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+          requireDeviceId: true,
+        }),
+      ).toBe(true);
+    });
+  });
+
   test("readReportedPortFromHealth returns the self-reported port for our device", async function () {
     const { client } = makeClient(() =>
       execResult(`{"status":"ok","deviceId":"${DEVICE_ID}","port":9100}`),

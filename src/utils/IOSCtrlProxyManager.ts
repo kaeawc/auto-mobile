@@ -1852,12 +1852,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * true only when the old runner is STILL answering at the end of the grace — a
    * listener that merely lags the process teardown stops answering well inside it,
    * and the restart may proceed. Honours the caller's abort signal while polling.
+   *
+   * Strict: a responder that omits deviceId must NOT be mistaken for the runner we
+   * just tried to stop. Fail closed here — unlike the liveness gate elsewhere, where a
+   * missing deviceId is compat-accepted — so a foreign/ambiguous responder on this
+   * port never blocks a legitimate restart (#6415 follow-up).
    */
   private async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
     const graceDeadlineMs = this.timer.now() + FORCE_RESTART_DRAIN_GRACE_MS;
     for (;;) {
       if (
-        !(await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId))
+        !(await this.checkHealthEndpointOnPortForDevice(
+          this.servicePort,
+          this.device.deviceId,
+          undefined,
+          { requireDeviceId: true },
+        ))
       ) {
         return false;
       }
@@ -2956,8 +2966,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     port: number,
     deviceId: string,
     timeoutMs?: number,
+    options?: { requireDeviceId?: boolean },
   ): Promise<boolean> {
-    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs);
+    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs, options);
   }
 
   private getIproxyStartTimeoutMs(): number {

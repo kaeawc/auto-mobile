@@ -52,19 +52,33 @@ export class IOSCtrlProxyHealthClient {
   }
 
   /**
-   * Strict liveness check: the runner answered `/health` with `status === "ok"`
-   * and either omits `deviceId` (an older runner build, or the env-injection
-   * fallback #2731 that can drop the device-id var along with the port) or
-   * reports it as this exact `deviceId`. Rejects a payload whose `deviceId` is
-   * PRESENT but different — a sibling simulator's runner or the Android runner
-   * answering the same/default port (whose plain-text `OK` body also fails the
-   * JSON parse below). This is the one place that decides "what counts as our
-   * runner" (issue #6415); callers must not re-derive identity themselves.
+   * Device-identity-aware `/health` check: the runner answered with
+   * `status === "ok"` and its reported `deviceId` is compatible with the
+   * requested `deviceId`, per `options.requireDeviceId`:
+   *
+   * - **compat (default, `requireDeviceId` unset/false)** — a MISSING `deviceId`
+   *   still counts as a match (an older runner build, or the env-injection
+   *   fallback #2731 that can drop the device-id var along with the port).
+   *   Used by the primary liveness gate (`isRunning`/`waitForHealthEndpoint`
+   *   in {@link IOSCtrlProxyManager}) so those older/degraded runners are not
+   *   spuriously treated as down.
+   * - **strict (`requireDeviceId: true`)** — a MISSING `deviceId` is rejected;
+   *   only an exact match counts. Used by ownership/forced-teardown decisions
+   *   (issue #6415 follow-up) where adopting a foreign responder that omits
+   *   `deviceId` — a sibling simulator's runner, or another process entirely —
+   *   could mistake it for this device's runner.
+   *
+   * Both modes reject a payload whose `deviceId` is PRESENT but different — a
+   * sibling simulator's runner or the Android runner answering the same/default
+   * port (whose plain-text `OK` body also fails the JSON parse below). This is
+   * the one place that decides "what counts as our runner" (issue #6415);
+   * callers must not re-derive identity themselves.
    */
   public async checkHealthEndpointOnPortForDevice(
     port: number,
     deviceId: string,
     timeoutMs?: number,
+    options?: { requireDeviceId?: boolean },
   ): Promise<boolean> {
     const body = await this.readHealthEndpointBodyOnPort(port, timeoutMs);
     if (body === null) {
@@ -75,6 +89,9 @@ export class IOSCtrlProxyHealthClient {
       const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown };
       if (health.status !== "ok") {
         return false;
+      }
+      if (options?.requireDeviceId) {
+        return health.deviceId === deviceId;
       }
       return health.deviceId === undefined || health.deviceId === deviceId;
     } catch (error) {

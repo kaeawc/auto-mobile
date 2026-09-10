@@ -3,7 +3,7 @@ import { getDatabase } from "./database";
 import type { Database, NewToolCall } from "./types";
 import { logger } from "../utils/logger";
 import {
-  createRowCapRetentionState,
+  CLEANUP_CHECK_INTERVAL,
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
@@ -19,10 +19,13 @@ interface ToolCallRecord {
 // process with no prior cap (#6464). Mirrors the row-cap constants already
 // used for the other single-row-insert RowCapTable repositories.
 const TOOL_CALL_RETENTION_MAX_ROWS = 10_000;
-const retentionState = createRowCapRetentionState();
 
 export class ToolCallRepository {
   private db: Kysely<Database> | null;
+  private readonly retentionState = {
+    cleanupInProgress: false,
+    insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
+  };
 
   constructor(db?: Kysely<Database>) {
     this.db = db ?? null;
@@ -59,7 +62,7 @@ export class ToolCallRepository {
   // inserts (#6464), mirroring the other RowCapTable repositories so retention
   // does not add a scan to the hot insert path.
   private async cleanupRetention(): Promise<void> {
-    await runAmortizedRetention(retentionState, () => this.pruneToRowCap());
+    await runAmortizedRetention(this.retentionState, () => this.pruneToRowCap());
   }
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap

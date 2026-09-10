@@ -413,7 +413,10 @@ export class SessionManager {
 
   constructor(
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionPersistence = new DeviceSessionRepository(),
+    deviceSessionRepository: DeviceSessionPersistence = new DeviceSessionRepository(
+      undefined,
+      timer,
+    ),
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912). Because the barrier

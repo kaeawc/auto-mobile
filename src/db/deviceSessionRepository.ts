@@ -3,6 +3,7 @@ import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { logger } from "../utils/logger";
 import type { Platform } from "../models";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 // Terminal-state (`released`/`expired`) rows accumulate for the life of the
 // on-disk DB with no delete path (#6464). Bound their retention window rather
@@ -50,7 +51,10 @@ export interface DeviceSessionPersistence {
 export class DeviceSessionRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor(
+    db?: Kysely<Database>,
+    private readonly timer: Timer = defaultTimer,
+  ) {
     this.db = db ?? null;
   }
 
@@ -69,7 +73,7 @@ export class DeviceSessionRepository {
     // session starts are far less frequent than the amortized-per-insert
     // tables (#6464). Self-contained: a prune failure must never block a new
     // session from being persisted, so it swallows its own errors.
-    await this.pruneExpiredSessions(record.createdAtMs);
+    await this.pruneExpiredSessions(this.timer.now());
     try {
       const db = await this.getDb();
       const now = new Date().toISOString();
@@ -252,11 +256,8 @@ export class DeviceSessionRepository {
 
   /**
    * Delete terminal-state (`released`/`expired`) rows past the retention
-   * window (#6464). `nowMs` is caller-supplied rather than an injected Timer
-   * — this repository has no clock of its own, and every other timestamp on
-   * this class is likewise supplied by the caller (`SessionManager`'s
-   * `Timer`/`FakeTimer`) so the comparison stays consistent with the rest of
-   * a session's lifecycle timestamps in tests. Best-effort: a failure here
+   * window (#6464), using the current clock independently of a rebound
+   * session's original creation time. Best-effort: a failure here
    * must not block a new session from persisting.
    */
   private async pruneExpiredSessions(nowMs: number): Promise<void> {

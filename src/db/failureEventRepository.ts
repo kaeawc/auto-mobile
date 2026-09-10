@@ -6,7 +6,7 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
-  createRowCapRetentionState,
+  CLEANUP_CHECK_INTERVAL,
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
@@ -16,8 +16,6 @@ import {
 // independently (a crash burst must not starve ANR retention and vice versa).
 const CRASH_RETENTION_MAX_ROWS = 10_000;
 const ANR_RETENTION_MAX_ROWS = 10_000;
-const crashRetentionState = createRowCapRetentionState();
-const anrRetentionState = createRowCapRetentionState();
 
 /**
  * Query options for fetching failures
@@ -76,6 +74,14 @@ interface FailureRecord {
 export class FailureEventRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
+  private readonly crashRetentionState = {
+    cleanupInProgress: false,
+    insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
+  };
+  private readonly anrRetentionState = {
+    cleanupInProgress: false,
+    insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
+  };
 
   constructor(timer: Timer = defaultTimer, db?: Kysely<Database>) {
     this.timer = timer;
@@ -485,11 +491,11 @@ export class FailureEventRepository {
   // inserts (#6464), mirroring the other RowCapTable repositories so retention
   // does not add a scan to the hot insert path.
   private async cleanupCrashRetention(): Promise<void> {
-    await runAmortizedRetention(crashRetentionState, () => this.pruneCrashesToRowCap());
+    await runAmortizedRetention(this.crashRetentionState, () => this.pruneCrashesToRowCap());
   }
 
   private async cleanupAnrRetention(): Promise<void> {
-    await runAmortizedRetention(anrRetentionState, () => this.pruneAnrsToRowCap());
+    await runAmortizedRetention(this.anrRetentionState, () => this.pruneAnrsToRowCap());
   }
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap

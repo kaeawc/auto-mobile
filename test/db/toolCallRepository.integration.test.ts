@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { ToolCallRepository } from "../../src/db/toolCallRepository";
@@ -163,6 +163,25 @@ describe("ToolCallRepository", () => {
 // prove the row-cap retention wired directly into `recordToolCall` — the real
 // production write path (`toolRegistry.ts`) — actually bounds the table.
 describe("ToolCallRepository row-cap retention (#6464)", () => {
+  test("sweeps on the first write of each lifetime and then after 256 more writes", async () => {
+    for (let lifetime = 0; lifetime < 2; lifetime++) {
+      const fresh = new ToolCallRepository(db);
+      const prune = spyOn(fresh as any, "pruneToRowCap");
+      try {
+        await fresh.recordToolCall({ toolName: "first", timestamp: "2026-01-01T00:00:00Z" });
+        expect(prune).toHaveBeenCalledTimes(1);
+        for (let index = 0; index < 255; index++) {
+          await fresh.recordToolCall({ toolName: "next", timestamp: "2026-01-01T00:00:00Z" });
+        }
+        expect(prune).toHaveBeenCalledTimes(1);
+        await fresh.recordToolCall({ toolName: "last", timestamp: "2026-01-01T00:00:00Z" });
+        expect(prune).toHaveBeenCalledTimes(2);
+      } finally {
+        prune.mockRestore();
+      }
+    }
+  });
+
   let db: Kysely<Database>;
   let repo: ToolCallRepository;
 

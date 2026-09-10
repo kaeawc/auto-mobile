@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
   DeviceSessionRepository,
@@ -26,11 +26,13 @@ function clearAutolockEnv(): void {
 describe("DeviceSessionRepository", () => {
   let db: Kysely<Database>;
   let repo: DeviceSessionRepository;
+  let timer: FakeTimer;
 
   beforeEach(async () => {
     clearAutolockEnv();
     db = await createTestDatabase();
-    repo = new DeviceSessionRepository(db);
+    timer = new FakeTimer();
+    repo = new DeviceSessionRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -404,6 +406,21 @@ describe("DeviceSessionRepository", () => {
       };
     }
 
+    test("uses current time when rebinding a session created before the retention window", async () => {
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "old" }));
+      await repo.markReleased("old", "released", oneDayMs, "explicit-release");
+      timer.advanceTime(10 * oneDayMs);
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "rebound", createdAtMs: 0 }));
+      expect(await repo.getSession("old")).toBeUndefined();
+      expect(await repo.getSession("rebound")).toBeDefined();
+    });
+
+    test("migrates an index on the session retention cutoff", async () => {
+      const columns = await sql<{ name: string }>`SELECT name
+        FROM pragma_index_info('idx_device_sessions_released_at_ms')`.execute(db);
+      expect(columns.rows).toEqual([{ name: "released_at_ms" }]);
+    });
+
     test("upsertActiveSession prunes terminal-state rows past the retention window", async () => {
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "old-released" }));
       await repo.markReleased("old-released", "released", 1 * oneDayMs, "explicit-release");
@@ -415,6 +432,7 @@ describe("DeviceSessionRepository", () => {
       // `DeviceTeardownOperationRepository.begin()`'s unconditional
       // delete-before-write pattern. Cutoff = day 10 - 7 days = day 3, so the
       // day-1 release is pruned and the day-9 release survives.
+      timer.advanceTime(10 * oneDayMs);
       await repo.upsertActiveSession(
         makeRecord({
           sessionUuid: "new-session",
@@ -434,6 +452,7 @@ describe("DeviceSessionRepository", () => {
       await repo.markReleased("session-1", "released", 2 * oneDayMs, "explicit-release");
 
       // Cutoff = day 3 - 7 days = negative: nothing is old enough to prune.
+      timer.advanceTime(3 * oneDayMs);
       await repo.upsertActiveSession(
         makeRecord({
           sessionUuid: "session-2",
@@ -451,6 +470,7 @@ describe("DeviceSessionRepository", () => {
 
       // A far-future session start would prune any terminal row past the TTL,
       // but "still-active" has `released_at_ms = null` and must survive.
+      timer.advanceTime(365 * oneDayMs);
       await repo.upsertActiveSession(
         makeRecord({
           sessionUuid: "new-session",

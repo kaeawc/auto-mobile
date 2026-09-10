@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { FailureEventRepository } from "../../src/db/failureEventRepository";
@@ -48,6 +48,33 @@ describe("FailureEventRepository", () => {
 
   afterEach(async () => {
     await db.destroy();
+  });
+
+  test("primes independent crash and ANR sweeps for each repository lifetime", async () => {
+    for (let lifetime = 0; lifetime < 2; lifetime++) {
+      const fresh = new FailureEventRepository(timer, db);
+      const crashes = spyOn(fresh as any, "pruneCrashesToRowCap");
+      const anrs = spyOn(fresh as any, "pruneAnrsToRowCap");
+      try {
+        await fresh.saveCrash(makeCrashEvent());
+        await fresh.saveAnr(makeAnrEvent());
+        expect(crashes).toHaveBeenCalledTimes(1);
+        expect(anrs).toHaveBeenCalledTimes(1);
+        for (let index = 0; index < 255; index++) {
+          await fresh.saveCrash(makeCrashEvent());
+          await fresh.saveAnr(makeAnrEvent());
+        }
+        expect(crashes).toHaveBeenCalledTimes(1);
+        expect(anrs).toHaveBeenCalledTimes(1);
+        await fresh.saveCrash(makeCrashEvent());
+        await fresh.saveAnr(makeAnrEvent());
+        expect(crashes).toHaveBeenCalledTimes(2);
+        expect(anrs).toHaveBeenCalledTimes(2);
+      } finally {
+        crashes.mockRestore();
+        anrs.mockRestore();
+      }
+    }
   });
 
   describe("saveCrash and getCrashes", () => {

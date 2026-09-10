@@ -596,36 +596,51 @@ const systemTraySchemaBase = z.object({
   ...responseShapeControlFields,
 });
 
-export const systemTraySchema = withAppIdAliases(
-  addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
-    const notification = value.notification ?? {};
+export const systemTraySchema = withJsonSchemaOverride(
+  withAppIdAliases(
+    addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
+      const notification = value.notification ?? {};
 
-    if (value.action === "open" || value.action === "close") {
-      return;
-    }
+      if (value.action === "open" || value.action === "close") {
+        return;
+      }
 
-    const hasCriteria = notification.title || notification.body || notification.appId;
-    if (!hasCriteria) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
-      });
-    }
+      const hasCriteria = notification.title || notification.body || notification.appId;
+      if (!hasCriteria) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
+        });
+      }
 
-    if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `${value.action} action requires notification.appId`,
-      });
-    }
+      if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.action} action requires notification.appId`,
+        });
+      }
 
-    if (notification.tapActionLabel && value.action !== "tap") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "notification.tapActionLabel is only valid for tap action",
-      });
-    }
-  }),
+      if (notification.tapActionLabel && value.action !== "tap") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "notification.tapActionLabel is only valid for tap action",
+        });
+      }
+    }),
+  ),
+  (jsonSchema) => {
+    jsonSchema.if = { required: ["action"], properties: { action: { const: "list" } } };
+    jsonSchema.then = {
+      required: ["notification"],
+      properties: {
+        notification: {
+          type: "object",
+          required: ["appId"],
+          properties: { appId: { type: "string", minLength: 1 } },
+        },
+      },
+    };
+  },
 );
 
 export const stopAppSchema = withAppIdAliases(

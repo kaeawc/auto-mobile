@@ -9508,7 +9508,30 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "const": "list"
+          }
+        }
+      },
+      "then": {
+        "required": ["notification"],
+        "properties": {
+          "notification": {
+            "type": "object",
+            "required": ["appId"],
+            "properties": {
+              "appId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
     }
   },
   {

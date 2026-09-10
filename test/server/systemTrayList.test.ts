@@ -1,7 +1,9 @@
 import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import Ajv2020 from "ajv/dist/2020";
+import generatedDefinitions from "../../schemas/tool-definitions.json";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
   resolveUniqueTrayAppLabel,
@@ -31,6 +33,16 @@ const row = (title: string, app = "Messages") =>
     node("android:id/text", `Body of ${title}`),
     node("android:id/actions", "", [node("android:id/action0", "Reply")]),
   ]);
+const identifiedRow = (title: string, app = "Messages") => {
+  const result = row(title, app);
+  Object.assign(result.$, { "unique-id": title });
+  return result;
+};
+const positionedRow = (title: string, top: number) => {
+  const result = row(title);
+  result.$.bounds = `[0,${top}][1000,${top + 100}]`;
+  return result;
+};
 const page = (...rows: any[]): ObserveResult => ({
   updatedAt: 0,
   screenSize: { width: 1080, height: 1920 },
@@ -52,12 +64,87 @@ function setup(pages: ObserveResult[]) {
   return { adb, observer };
 }
 const list = () => listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000);
+let validateAdvertised: ReturnType<Ajv2020["compile"]>;
+let validateGenerated: ReturnType<Ajv2020["compile"]>;
+beforeAll(() => {
+  registerInteractionTools();
+  const definition = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
+    (tool) => tool.name === "systemTray",
+  )!;
+  validateAdvertised = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+  validateGenerated = new Ajv2020({ strict: false }).compile(
+    generatedDefinitions.find((tool) => tool.name === "systemTray")!.inputSchema,
+  );
+  ToolRegistry.clearTools();
+});
 afterEach(() => {
   resetSystemTrayDependencies();
   ToolRegistry.clearTools();
 });
 
 describe("systemTray list", () => {
+  test("advertised schema requires appId for list without constraining open and close", () => {
+    for (const validate of [validateAdvertised, validateGenerated]) {
+      for (const notification of [undefined, {}, { title: "Only a title" }, { appId: "" }]) {
+        expect(validate({ action: "list", notification })).toBe(false);
+      }
+      expect(validate({ action: "list", notification: { appId: "com.example.messages" } })).toBe(
+        true,
+      );
+      expect(validate({ action: "open" })).toBe(true);
+      expect(validate({ action: "close" })).toBe(true);
+    }
+  });
+  test("does not resample mutable no-ID rows when the tray cannot scroll", async () => {
+    const initial = page(row("Download 2/10"));
+    Object.assign(initial.viewHierarchy!.hierarchy!.node.$, { scrollable: false });
+    setup([initial, page(row("Download 3/10"))]);
+    const { notifications, swipes } = await list();
+    expect(swipes).toBe(0);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      title: "Download 2/10",
+      body: "Body of Download 2/10",
+    });
+  });
+  test("stops when the tray only exposes backward scrolling", async () => {
+    const initial = page(row("Download 2/10"));
+    Object.assign(initial.viewHierarchy!.hierarchy!.node.$, {
+      scrollable: true,
+      actions: ["scroll_backward"],
+    });
+    setup([initial, page(row("Download 3/10"))]);
+    expect((await list()).swipes).toBe(0);
+  });
+  test("does not overwrite a new page reusing the same screen positions", async () => {
+    setup([
+      page(positionedRow("A", 200), positionedRow("B", 400)),
+      page(positionedRow("C", 200), positionedRow("D", 400)),
+    ]);
+    expect((await list()).notifications.map((notification) => notification.title)).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+    ]);
+  });
+  test("uses an unchanged neighbor to reconcile changing content after scrolling", async () => {
+    setup([
+      page(positionedRow("Download 2/10", 300), positionedRow("Neighbor", 500)),
+      page(positionedRow("Download 3/10", 200), positionedRow("Neighbor", 400)),
+    ]);
+    expect((await list()).notifications.map((notification) => notification.title)).toEqual([
+      "Download 3/10",
+      "Neighbor",
+    ]);
+  });
+  test("keeps distinct rows revealed at different positions without unique IDs", async () => {
+    setup([page(positionedRow("First", 200)), page(positionedRow("Second", 600))]);
+    expect((await list()).notifications.map((notification) => notification.title)).toEqual([
+      "First",
+      "Second",
+    ]);
+  });
   test("rejects ambiguous installed app labels before scanning", async () => {
     const { adb } = setup([page(row("private"))]);
     const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
@@ -158,11 +245,11 @@ describe("systemTray list", () => {
   });
   test("reads actual contents and actions, excludes other apps and scans three swipes", async () => {
     const { adb } = setup([
-      page(row("one"), row("Messages", "Other")),
-      page(row("one"), row("two")),
-      page(row("three")),
-      page(row("four")),
-      page(row("five")),
+      page(identifiedRow("one"), identifiedRow("Messages", "Other")),
+      page(identifiedRow("one"), identifiedRow("two")),
+      page(identifiedRow("three")),
+      page(identifiedRow("four")),
+      page(identifiedRow("five")),
     ]);
     const result = await list();
     expect(result.notifications.map((n) => n.title)).toEqual(["one", "two", "three", "four"]);
@@ -235,7 +322,11 @@ describe("systemTray list", () => {
     expect((await list()).notifications).toHaveLength(1);
   });
   test("retains equal contents seen again after an intervening page", async () => {
-    setup([page(row("same")), page(row("middle")), page(row("same"))]);
+    setup([
+      page(positionedRow("same", 200)),
+      page(positionedRow("middle", 500)),
+      page(positionedRow("same", 700)),
+    ]);
     expect((await list()).notifications.map((notification) => notification.title)).toEqual([
       "same",
       "middle",

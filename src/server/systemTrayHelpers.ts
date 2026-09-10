@@ -17,6 +17,7 @@ import {
   Element,
   ObserveResult,
   ViewHierarchyResult,
+  isFalsy,
 } from "../models";
 import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -34,6 +35,7 @@ import {
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
   getHierarchyRoots,
   getNodeProperties,
+  traverseForHint,
 } from "./system-tray/notificationHints";
 import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
@@ -1474,12 +1476,17 @@ const readTrayNotificationFields = (root: any) => {
   return fields;
 };
 
+interface TrayObservedRow {
+  notification: ListedTrayNotification;
+  bounds?: Element["bounds"];
+}
+
 const readAppTrayNotifications = (
   hierarchy: ViewHierarchyResult,
   appId: string,
   appLabel: string | null,
-): ListedTrayNotification[] => {
-  const notifications: ListedTrayNotification[] = [];
+): TrayObservedRow[] => {
+  const notifications: TrayObservedRow[] = [];
   for (const candidate of collectNotificationCandidates(hierarchy)) {
     const fields = readTrayNotificationFields(candidate.node);
     const label =
@@ -1492,43 +1499,111 @@ const readAppTrayNotifications = (
     }
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
-      id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
-      appId,
-      appLabel: label,
-      title: fields.title,
-      body: [...new Set(fields.bodies)].join("\n") || null,
-      actions: [...new Set(fields.actions)],
-      texts: [...new Set(fields.texts)],
-      inGroup: Boolean(candidate.groupNode),
+      bounds: candidate.element?.bounds,
+      notification: {
+        id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
+        appId,
+        appLabel: label,
+        title: fields.title,
+        body: [...new Set(fields.bodies)].join("\n") || null,
+        actions: [...new Set(fields.actions)],
+        texts: [...new Set(fields.texts)],
+        inGroup: Boolean(candidate.groupNode),
+      },
     });
   }
   return notifications;
 };
 
-// Only adjacent page overlap is a duplicate. Equal contents seen after an
-// intervening page can represent a separate posted notification.
-const trayPageOverlap = (
-  previous: ListedTrayNotification[],
-  current: ListedTrayNotification[],
-): number => {
-  const identity = (notification: ListedTrayNotification) =>
+// Unchanged neighbors can measure the viewport's movement. Their text is only
+// an alignment anchor: an updated row need not have equal text to reconcile.
+const trayRowAnchor = (row: TrayObservedRow): string => {
+  const notification = row.notification;
+  return (
     notification.id ??
     JSON.stringify([
-      notification.appId,
+      notification.appLabel,
       notification.title,
       notification.body,
       notification.actions,
-      notification.inGroup,
-    ]);
-  const left = previous.map(identity);
-  const right = current.map(identity);
-  for (let count = Math.min(left.length, right.length); count > 0; count--) {
-    if (left.slice(-count).every((key, index) => key === right[index])) {
+    ])
+  );
+};
+
+const trayRowsAlign = (
+  previous: TrayObservedRow,
+  current: TrayObservedRow,
+  deltaY: number,
+): boolean => {
+  if (previous.notification.id !== null || current.notification.id !== null) {
+    return (
+      previous.notification.id !== null && previous.notification.id === current.notification.id
+    );
+  }
+  const left = previous.bounds;
+  const right = current.bounds;
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    previous.notification.appLabel === current.notification.appLabel &&
+    previous.notification.inGroup === current.notification.inGroup &&
+    left.left === right.left &&
+    left.right === right.right &&
+    Math.abs(left.top - right.top - deltaY) <= 1
+  );
+};
+
+// Prefer stable node IDs. Otherwise reconcile ordered row positions after
+// accounting for scroll translation, rather than using changing row contents
+// as identity. Without continuity evidence, retain rows conservatively.
+const trayPageOverlap = (previous: TrayObservedRow[], current: TrayObservedRow[]): number => {
+  for (let count = Math.min(previous.length, current.length); count > 0; count--) {
+    const left = previous.slice(-count);
+    const right = current.slice(0, count);
+    const anchor = left.findIndex(
+      (row, index) =>
+        row.bounds && right[index].bounds && trayRowAnchor(row) === trayRowAnchor(right[index]),
+    );
+    if (anchor < 0) {
+      if (
+        left.every(
+          (row, index) =>
+            row.notification.id !== null && row.notification.id === right[index].notification.id,
+        )
+      ) {
+        return count;
+      }
+      continue;
+    }
+    const deltaY = left[anchor].bounds!.top - right[anchor].bounds!.top;
+    if (left.every((row, index) => trayRowsAlign(row, right[index], deltaY))) {
       return count;
     }
   }
   return 0;
 };
+
+// SystemUI reports the tray's scroll boundary through the existing hierarchy.
+// Unknown metadata still allows a bounded swipe; an explicit end avoids
+// repeatedly observing changing progress text when no new rows can be shown.
+const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
+  getHierarchyRoots(hierarchy).some((root) =>
+    traverseForHint(root, (node) => {
+      const props = getNodeProperties(node);
+      if (!props) {
+        return false;
+      }
+      const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
+      if (!resourceId.includes("notification_stack_scroller")) {
+        return false;
+      }
+      if (isFalsy(props.scrollable)) {
+        return true;
+      }
+      return Array.isArray(props.actions) && !props.actions.includes("scroll_forward");
+    }),
+  );
 
 /** Bounded UI inventory, in encounter order, with no inferred posting times. */
 export const listSystemTrayNotifications = async (
@@ -1559,7 +1634,7 @@ export const listSystemTrayNotifications = async (
     awaitTimeoutMs,
   );
   const notifications: ListedTrayNotification[] = [];
-  let previousNotifications: ListedTrayNotification[] = [];
+  let previousNotifications: TrayObservedRow[] = [];
   let previousPage: string | undefined;
   let swipes = 0;
   while (true) {
@@ -1575,9 +1650,13 @@ export const listSystemTrayNotifications = async (
     previousPage = currentPage;
     const pageNotifications = readAppTrayNotifications(observation.viewHierarchy, appId, appLabel);
     const overlap = trayPageOverlap(previousNotifications, pageNotifications);
-    notifications.splice(notifications.length - overlap, overlap, ...pageNotifications);
+    notifications.splice(
+      notifications.length - overlap,
+      overlap,
+      ...pageNotifications.map((row) => row.notification),
+    );
     previousNotifications = pageNotifications;
-    if (swipes === 3) {
+    if (swipes === 3 || trayAtScrollEnd(observation.viewHierarchy)) {
       break;
     }
     const { width, height } = observation.screenSize;

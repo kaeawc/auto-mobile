@@ -1175,7 +1175,11 @@ describe("provisionDevice handler", () => {
       notifyResourcesChanged: async () => {
         throw new Error("resource notification transport closed");
       },
-      idGenerator: new FakeIdGenerator(["session-notify-failure", "cleanup-notify-failure"]),
+      idGenerator: new FakeIdGenerator([
+        "attempt-notify-failure",
+        "session-notify-failure",
+        "cleanup-notify-failure",
+      ]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1220,7 +1224,7 @@ describe("provisionDevice handler", () => {
           throw new Error("reading the created simulator UDID failed");
         },
       }),
-      idGenerator: new FakeIdGenerator(["cleanup-partial-ios"]),
+      idGenerator: new FakeIdGenerator(["attempt-partial-ios", "cleanup-partial-ios"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -1233,9 +1237,15 @@ describe("provisionDevice handler", () => {
         .content[0].text,
     );
 
+    // The rollback target is resolved by re-reading the simulator inventory,
+    // so assert it landed on the UDID this operation created.
     expect(response).toMatchObject({
       success: false,
-      cleanup: { status: "succeeded", operationId: "cleanup-partial-ios" },
+      cleanup: {
+        status: "succeeded",
+        operationId: "cleanup-partial-ios",
+        target: { platform: "ios", stableId: "SIM-123", stableName: "iPhone 17" },
+      },
     });
     expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
   });

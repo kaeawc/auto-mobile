@@ -4,6 +4,8 @@ import type { SessionToolSelectionService } from "../../src/features/toolSelecti
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 
 describe("per-session exact-tool selection", () => {
   let fixture: McpTestFixture | undefined;
@@ -18,6 +20,182 @@ describe("per-session exact-tool selection", () => {
   });
 
   for (const acquisition of ["getAndroid", "getApple"]) {
+    test.each(["broadcast", "plan"])(
+      acquisition + " rejects publication after a %s release during lookup",
+      async (source) => {
+        const lookupStarted = Promise.withResolvers<void>();
+        const releaseLookup = Promise.withResolvers<void>();
+        fixture = new McpTestFixture({
+          sessionToolSelectionService: {
+            isEnabled: async (_sessionUuid, toolName, declaredDefault) => {
+              if (toolName === "inputText") {
+                lookupStarted.resolve();
+                await releaseLookup.promise;
+              }
+              return declaredDefault;
+            },
+          },
+        });
+        await fixture.setup();
+        ToolRegistry.clearTools();
+        ToolRegistry.register(
+          acquisition,
+          "acquire",
+          z.object({}),
+          async () => ({
+            content: [{ type: "text", text: JSON.stringify({ sessionUuid: "released-session" }) }],
+          }),
+          { defaultEnabled: true },
+        );
+        ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+          defaultEnabled: false,
+        });
+        ToolRegistry.register(
+          "inspectRouting",
+          "routing",
+          z.object({}),
+          async () => ({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  sessionUuid: getToolSelectionContext()?.routingSessionUuid,
+                }),
+              },
+            ],
+          }),
+          { defaultEnabled: true },
+        );
+        const pending = fixture.client.request(
+          { method: "tools/call", params: { name: acquisition, arguments: {} } },
+          z.any(),
+        );
+        await lookupStarted.promise;
+        if (source === "broadcast") {
+          SessionReleaseBroadcaster.emit("released-session", "released-during-discovery");
+        } else {
+          ToolRegistry.notifySessionBindingReleased("released-session");
+        }
+        releaseLookup.resolve();
+        await expect(pending).rejects.toThrow(/released during acquisition/);
+        const routed = await fixture.client.request(
+          { method: "tools/call", params: { name: "inspectRouting", arguments: {} } },
+          z.any(),
+        );
+        expect(JSON.parse(routed.content[0].text)).toEqual({});
+      },
+    );
+
+    test(acquisition + " reports the acquired profile on a seeded transport", async () => {
+      fixture = new McpTestFixture({
+        sessionContext: { initialSessionToolBinding: "old-session" },
+        sessionToolSelectionService: {
+          isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+            toolName === "inputText" ? sessionUuid === "old-session" : declaredDefault,
+        },
+      });
+      await fixture.setup();
+      ToolRegistry.clearTools();
+      ToolRegistry.register(
+        acquisition,
+        "acquire",
+        z.object({}),
+        async () => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "new-session" }) }],
+        }),
+        { defaultEnabled: true },
+      );
+      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: false,
+      });
+      expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
+        "inputText",
+      );
+      const response = await fixture.client.request(
+        { method: "tools/call", params: { name: acquisition, arguments: {} } },
+        z.any(),
+      );
+      expect(JSON.parse(response.content[0].text)).toEqual({
+        sessionUuid: "new-session",
+        gatedTools: ["inputText"],
+      });
+    });
+
+    test(acquisition + " publishes concurrent acquisitions in response order", async () => {
+      const lookupStarted = Promise.withResolvers<void>();
+      const releaseLookup = Promise.withResolvers<void>();
+      let held = false;
+      fixture = new McpTestFixture({
+        sessionToolSelectionService: {
+          isEnabled: async (sessionUuid, toolName, declaredDefault) => {
+            if (toolName !== "inputText") {
+              return declaredDefault;
+            }
+            if (sessionUuid === "session-a" && !held) {
+              held = true;
+              lookupStarted.resolve();
+              await releaseLookup.promise;
+            }
+            return sessionUuid === "session-b";
+          },
+        },
+      });
+      await fixture.setup();
+      ToolRegistry.clearTools();
+      ToolRegistry.register(
+        acquisition,
+        "acquire",
+        z.object({ target: z.string() }),
+        async (args) => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: args.target }) }],
+        }),
+        { defaultEnabled: true },
+      );
+      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: false,
+      });
+      ToolRegistry.register(
+        "inspectRouting",
+        "routing",
+        z.object({}),
+        async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: getToolSelectionContext()?.routingSessionUuid }),
+            },
+          ],
+        }),
+        { defaultEnabled: true },
+      );
+      const acquire = async (target: string) => {
+        const response = await fixture!.client.request(
+          { method: "tools/call", params: { name: acquisition, arguments: { target } } },
+          z.any(),
+        );
+        return JSON.parse(response.content[0].text);
+      };
+      const first = acquire("session-a");
+      try {
+        await lookupStarted.promise;
+        expect(await acquire("session-b")).toEqual({ sessionUuid: "session-b", gatedTools: [] });
+        expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
+          "inputText",
+        );
+      } finally {
+        releaseLookup.resolve();
+      }
+      expect(await first).toEqual({ sessionUuid: "session-a", gatedTools: ["inputText"] });
+      expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
+        "inputText",
+      );
+      const routed = await fixture.client.request(
+        { method: "tools/call", params: { name: "inspectRouting", arguments: {} } },
+        z.any(),
+      );
+      expect(JSON.parse(routed.content[0].text)).toEqual({ sessionUuid: "session-a" });
+    });
+
     test(acquisition + " preserves acquisition when profile discovery fails", async () => {
       fixture = new McpTestFixture({
         sessionToolSelectionService: {

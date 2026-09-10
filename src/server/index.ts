@@ -421,9 +421,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   };
 
   // Register tool definitions using the lower-level interface
-  const listSessionTools = async () => {
+  const listSessionTools = async (
+    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
+  ) => {
     const sessionId = options.sessionContext?.sessionId;
-    const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId);
     const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const selectionSessionManager =
       options.toolSelectionSessionManager ??
@@ -488,7 +489,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ),
     };
   };
-  server.server.setRequestHandler(ListToolsRequestSchema, listSessionTools);
+  server.server.setRequestHandler(ListToolsRequestSchema, () => listSessionTools());
 
   // Add ping handler as per MCP specification
   // Note: Using runtime access since TypeScript import has issues
@@ -795,6 +796,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           }
         : undefined;
 
+    let cleanupAcquisitionRelease: (() => void) | undefined;
     try {
       if (
         daemonMode &&
@@ -870,22 +872,35 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           () => tool.handler(handlerParams, progressCallback, requestSignal),
         ),
       );
-      if (
-        isDeviceSessionAcquisitionTool(name) &&
-        sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
-      ) {
-        ToolRegistry.notifyToolListChanged();
+      const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
+        ? getDeviceSessionIdFromResult(result)
+        : undefined;
+      let acquiredSessionReleased = false;
+      if (acquiredSessionUuid) {
+        const onSessionReleased = (releasedSessionUuid: string) => {
+          if (releasedSessionUuid === acquiredSessionUuid) {
+            acquiredSessionReleased = true;
+          }
+        };
+        const unregister = ToolRegistry.registerSessionBindingReleaseHandler({ onSessionReleased });
+        const unsubscribe = SessionReleaseBroadcaster.subscribe(onSessionReleased);
+        cleanupAcquisitionRelease = () => {
+          unregister();
+          unsubscribe();
+        };
       }
-      // Report the exact profile-filtered complement after binding, using the
-      // same route/label union as tools/list. Repeated acquisitions also report
-      // current overrides, rather than only the first binding transition.
+      // Evaluate the returned session directly: a seeded transport may retain
+      // its old binding, and a concurrent acquisition may publish another one.
+      // Reuse the same route/label union as tools/list without publishing yet.
       if (
         (name === "getAndroid" || name === "getApple") &&
         !result?.isError &&
-        getDeviceSessionIdFromResult(result)
+        acquiredSessionUuid
       ) {
         try {
-          const listed = new Set((await listSessionTools()).tools.map((tool) => tool.name));
+          const listed = new Set(
+            (await listSessionTools(acquiredSessionUuid)).tools.map((tool) => tool.name),
+          );
           const gatedTools = ToolRegistry.getAllTools()
             .filter(
               (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
@@ -967,7 +982,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (omissionReason !== null && responseCarriesStructuredContent(result)) {
         logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
       }
-      return stripToolResultStructuredContent(result, omissionReason);
+      const response = stripToolResultStructuredContent(result, omissionReason);
+      // Publish only after all asynchronous enrichment finishes, so concurrent
+      // direct acquisitions bind in response order. Keep this path synchronous.
+      if (acquiredSessionReleased) {
+        throw new ActionableError(
+          `Device session ${acquiredSessionUuid} was released during acquisition. Call ${name} again to acquire a device.`,
+        );
+      }
+      if (acquiredSessionUuid && sessionToolBinding.bind(sessionId, acquiredSessionUuid)) {
+        ToolRegistry.notifyToolListChanged();
+      }
+      return response;
     } catch (error) {
       if (error instanceof TerminalSessionError) {
         const sessionOwnershipLost = {
@@ -1015,6 +1041,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     } finally {
+      cleanupAcquisitionRelease?.();
       executionTracker.endExecution(execution.id);
     }
   });

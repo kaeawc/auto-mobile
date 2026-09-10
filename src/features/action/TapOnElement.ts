@@ -1145,7 +1145,11 @@ export class TapOnElement extends BaseVisualChange {
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
+    throwIfAborted(signal);
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
+    if (effectiveTimeoutMs === 0) {
+      return null;
+    }
     switch (this.device.platform) {
       case "android": {
         const rawHierarchy = await refreshAndroidViewHierarchy(
@@ -1159,7 +1163,15 @@ export class TapOnElement extends BaseVisualChange {
       }
       case "ios": {
         const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
+        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+          effectiveTimeoutMs,
+        );
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       default:

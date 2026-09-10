@@ -5716,8 +5716,11 @@ export function registerDeviceTools() {
         );
         // Recovery must revalidate the caller through the same autolock path;
         // a preserved UUID alone is not proof that this client owns the session.
+        // Read the flag once so the reuse decision below cannot disagree with
+        // the readiness recording that follows it.
+        const autolockEnabled = isDevicePoolAutolockEnabled();
         const boundSessionId =
-          readinessResult.preservedSessionId && !isDevicePoolAutolockEnabled()
+          readinessResult.preservedSessionId && !autolockEnabled
             ? readinessResult.preservedSessionId
             : await bindBootedDeviceSession(
                 state.boot.device,
@@ -5730,7 +5733,7 @@ export function registerDeviceTools() {
                 new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
                 verifiedWarmAndroidAvdIdentity,
               );
-        if (readinessResult.preservedSessionId) {
+        if (readinessResult.preservedSessionId && !autolockEnabled) {
           // #6227 round 7: without autolock, System UI ANR recovery bypasses
           // `bindBootedDeviceSession` (and therefore its own
           // `recordAcquiredSessionReadiness` call) entirely when a preserved
@@ -5744,6 +5747,10 @@ export function registerDeviceTools() {
           // freshly-bound branch. Recording it here closes the gap where a
           // recovered session's readiness cache stayed `undefined` and the first
           // `automationReady` tool after recovery redundantly re-ran setup.
+          // WITH autolock the branch above went through `bindBootedDeviceSession`
+          // instead, and `autolockDevice` already recorded readiness for the
+          // session it returned — which need not be `preservedSessionId`, so
+          // recording it here would bump an unrelated session's expiry.
           recordAcquiredSessionReadiness(
             daemonState,
             readinessResult.preservedSessionId,

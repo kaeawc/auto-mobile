@@ -4775,6 +4775,7 @@ export function registerDeviceTools() {
     creationStarted: boolean,
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
+    unownedColdBootSettlement: Promise<void> | undefined,
   ): Promise<never> {
     const createdDevice =
       provisioned?.created || creationStarted
@@ -4786,6 +4787,9 @@ export function registerDeviceTools() {
     if (!createdDevice) {
       throw error;
     }
+    // A destructive teardown of this AVD must not race the emulator process the
+    // failed attempt is still killing.
+    await unownedColdBootSettlement;
     throw await cleanupFailedProvisionDevice(
       args,
       deps,
@@ -4882,6 +4886,7 @@ export function registerDeviceTools() {
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
+    const bootState: { unownedColdBootSettlement?: Promise<void> } = {};
     try {
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
@@ -4948,6 +4953,7 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         lifecycleLease,
         signal,
+        bootState,
       );
       if (provisioned.created || booted.source === "cold-boot") {
         await deps.notifyResourcesChanged();
@@ -4967,9 +4973,14 @@ export function registerDeviceTools() {
           return rollbackLease;
         },
         error,
+        bootState.unownedColdBootSettlement,
       );
     } finally {
-      lifecycleLease?.release();
+      if (bootState.unownedColdBootSettlement) {
+        void bootState.unownedColdBootSettlement.then(() => lifecycleLease?.release());
+      } else {
+        lifecycleLease?.release();
+      }
     }
   }
 
@@ -5018,6 +5029,9 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
+    // Carries the cold-boot cancellation settlement back to the caller so the
+    // AVD lifecycle lease is not released while the emulator is still exiting.
+    bootState: { unownedColdBootSettlement?: Promise<void> },
   ): Promise<{
     device: BootedDevice;
     sessionId: string;
@@ -5166,7 +5180,7 @@ export function registerDeviceTools() {
       };
     } catch (error) {
       if (!ownershipTransferred) {
-        void cancelUnownedColdBoot(boot);
+        bootState.unownedColdBootSettlement = cancelUnownedColdBoot(boot);
       }
       throw error;
     } finally {

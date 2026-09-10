@@ -2452,6 +2452,76 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  // C-5: `cancelUnownedColdBoot` returns a settlement that resolves on the
+  // emulator child's `exit` event. provisionDevice discarded it, so the AVD's
+  // stable lifecycle lease was released while the emulator was still shutting
+  // down and a concurrent start/teardown of the same AVD could relaunch or
+  // delete it against a live `hardware-qemu.ini.lock`.
+  test("holds the AVD lifecycle lease until a cancelled cold boot has exited", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    const exitListeners: (() => void)[] = [];
+    const handle: any = {
+      exitCode: null,
+      signalCode: null,
+      once: (event: string, listener: () => void) => {
+        if (event === "exit") {
+          exitListeners.push(listener);
+        }
+        return handle;
+      },
+      // A real emulator does not disappear synchronously on kill().
+      kill: () => true,
+    };
+    deviceManager.setMockChildProcess("phone-api-36-a", handle);
+    const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);
+    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
+      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+      const resolved = { ...booted, deviceId: "emulator-5554" };
+      deviceManager.setBootedDevices("android", [resolved]);
+      return resolved;
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: coordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("automation readiness failed");
+      },
+    });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "cold-boot-settlement"),
+      timeoutMs: 60_000,
+    });
+    expect((response as any).isError).toBe(true);
+
+    let leaseGranted = false;
+    const contender = coordinator
+      .reserve(
+        { kind: "stable", platform: "android", stableId: "phone-api-36-a" },
+        { operation: "start", deadlineMs: 60_000 },
+      )
+      .then((lease) => {
+        leaseGranted = true;
+        return lease;
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(leaseGranted).toBe(false);
+
+    expect(exitListeners.length).toBeGreaterThan(0);
+
+    handle.exitCode = 0;
+    for (const listener of exitListeners) {
+      listener();
+    }
+    (await contender).release();
+    expect(leaseGranted).toBe(true);
+  });
+
   // C-6: a readiness failure caused by an exhausted deadline was reported and
   // persisted as `platform_command_failed`, so a controller that retries on
   // `timeout` but treats `platform_command_failed` as terminal gave up on a

@@ -374,7 +374,9 @@ export class XcodeSigningManager {
     const timer = this.dependencies.timer ?? defaultTimer;
     const controller = new AbortController();
     const parent = getAbortSignal();
-    if (parent?.aborted) {return false;}
+    if (parent?.aborted) {
+      return false;
+    }
     const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;
     let onAbort!: () => void;
     const cancelled = new Promise<false>((resolve) => {

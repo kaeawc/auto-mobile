@@ -2449,6 +2449,56 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test.each([
+    ["__mcpSessionId", "mcp-session-1"],
+    ["__executionId", "execution-1"],
+    ["__executionStartTime", 1_000],
+    ["__mcpRequestTimeoutMs", 120_000],
+    // Absolute deadline on the shared timer clock, so it must be far-future.
+    ["__mcpRequestDeadlineMs", 8_640_000_000_000],
+    ["__mcpLiveDeadlineKey", "live-deadline-1"],
+  ] as const)(
+    "strips the internal %s param before re-parsing against the strict schema",
+    async (param, value) => {
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+
+      const response = await tool.handler({
+        ...provisionTestArgs("android", `operation-internal-${param}`),
+        boot: false,
+        readiness: "none",
+        [param]: value,
+      } as any);
+
+      expect((response as any).isError).toBeUndefined();
+      expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+        operationId: `operation-internal-${param}`,
+        lifecycleState: "created",
+      });
+    },
+  );
+
+  test("returns a structured invalid_arguments error instead of throwing a raw ZodError", async () => {
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = await tool.handler({
+      ...provisionTestArgs("android", "operation-invalid-args"),
+      boot: false,
+      readiness: "none",
+      totallyUnknownKey: "nope",
+    } as any);
+
+    expect((response as any).isError).toBe(true);
+    const payload = JSON.parse((response as any).content[0].text);
+    expect(payload.error.code).toBe("invalid_arguments");
+    expect(payload.error.message).toContain("provisionDevice");
+  });
+
   test("reserves rollback and response time from the daemon's queued-request deadline", async () => {
     const timer = new FakeTimer();
     let provisionDeadlineMs: number | undefined;

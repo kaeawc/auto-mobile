@@ -53,8 +53,9 @@ import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  deleteInternalToolParams,
 } from "../daemon/constants";
+import { formatToolParamError } from "./toolParamError";
 import {
   DEVICE_CREATE_ENV_VAR,
   getDeviceCreationGate,
@@ -3143,11 +3144,12 @@ function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceAr
   const __mcpSessionId = input.__mcpSessionId;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const publicInput: Record<string, unknown> = { ...input };
-  delete publicInput.__mcpSessionId;
-  delete publicInput.__executionId;
-  delete publicInput.__executionStartTime;
-  delete publicInput[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  delete publicInput[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
+  // may inject has to go before re-parsing -- hence the canonical shared list
+  // rather than a hand-maintained copy that silently falls behind (a missing
+  // `__mcpLiveDeadlineKey` made this tool unusable for any caller sending a
+  // progress token).
+  deleteInternalToolParams(publicInput);
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
@@ -4161,7 +4163,23 @@ export function registerDeviceTools() {
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    const args = parseProvisionDeviceArgs(input);
+    let args: ProvisionDeviceArgs;
+    try {
+      args = parseProvisionDeviceArgs(input);
+    } catch (error) {
+      // The MCP boundary already validated the caller's arguments; a failure
+      // here means the re-parse rejected something the boundary let through
+      // (an internal param, or a genuinely malformed public argument on a
+      // non-MCP call path). Either way the caller gets a structured, coded
+      // error instead of a raw ZodError escaping the tool.
+      const message = `Invalid parameters for tool provisionDevice: ${formatToolParamError(
+        "provisionDevice",
+        error,
+        input,
+      )}`;
+      logger.warn(`[DeviceTools] ${message}`, error);
+      return createToolErrorResponse("invalid_arguments", message);
+    }
     const fingerprint = provisionDeviceFingerprint(args);
     const active = activeProvisionDeviceOperations.get(args.operationId);
     if (active) {

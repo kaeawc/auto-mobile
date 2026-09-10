@@ -515,6 +515,11 @@ const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 // (#6652).
 const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
 
+// Terminal-but-retryable error code stamped on an operation row whose attempt
+// was rejected by an in-flight MCP session recovery. Distinct from a genuine
+// provisioning failure so the stored row says why the attempt never ran.
+const PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE = "session_recovery_in_progress";
+
 function getShutdownInitiatingExecutionId(): string | undefined {
   return getToolSelectionContext()?.execution?.executionId;
 }
@@ -4280,6 +4285,26 @@ export function registerDeviceTools() {
       return result;
     } catch (error) {
       if (error instanceof McpSessionRecoveryInProgressError) {
+        // Transient by construction ("cannot remap until recovery finishes"),
+        // so the client is told to retry. A retry only works if this attempt's
+        // row is terminal: an admitted attempt owns a "running" row, and
+        // leaving it running would make every retry report
+        // operation_in_progress for the whole operation TTL (~30m) with
+        // nothing executing. A replay (started === false) instead reads a
+        // "succeeded" row it does not own -- failing that would destroy a
+        // valid completed result -- so only an admitted attempt is failed.
+        if (operation.started) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+              `recovery: ${errorMessage(error)}`,
+            error,
+          );
+          await store.fail(
+            args.operationId,
+            PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+            errorMessage(error),
+          );
+        }
         throw error;
       }
       const provisionError = toProvisionDeviceError(args, error);

@@ -23,7 +23,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, McpSessionRecoveryInProgressError } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
@@ -56,6 +56,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
   private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
   failCalls = 0;
+  readonly failures: { operationId: string; errorCode: string }[] = [];
 
   /** Simulate a "running" row left behind by a crashed/earlier attempt. */
   markInProgress(operationId: string): void {
@@ -127,6 +128,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     options?: { clearCreationStarted?: boolean },
   ): Promise<void> {
     this.failCalls++;
+    this.failures.push({ operationId, errorCode: _errorCode });
     if (options?.clearCreationStarted) {
       const operation = this.results.get(operationId);
       if (!operation) {
@@ -1736,6 +1738,37 @@ describe("provisionDevice handler", () => {
       ctrlProxySetup.restore();
       sessionManager.stopCleanupTimer();
     }
+  });
+
+  test("marks the operation row terminal when a fresh attempt hits MCP session recovery", async () => {
+    // McpSessionRecoveryInProgressError is explicitly transient ("cannot remap
+    // until recovery finishes"), so the caller is expected to retry. Leaving
+    // the freshly admitted "running" row untouched would brick the
+    // operationId for the whole PROVISION_DEVICE_OPERATION_TTL_MS (~30m) with
+    // nothing actually running.
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async () => {
+          throw new McpSessionRecoveryInProgressError("mcp-session-recovering");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = await tool.handler({
+      ...provisionTestArgs("android", "operation-recovery-terminal"),
+      boot: false,
+      readiness: "none",
+    });
+
+    expect(JSON.stringify(response)).toContain("recovering a device");
+    expect(operationStore.failures).toEqual([
+      { operationId: "operation-recovery-terminal", errorCode: "session_recovery_in_progress" },
+    ]);
   });
 
   test("reconnecting during recovery preserves the live session and completed operation", async () => {

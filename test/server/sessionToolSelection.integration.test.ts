@@ -6,6 +6,13 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { executionTracker } from "../../src/server/executionTracker";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 describe("per-session exact-tool selection", () => {
   let fixture: McpTestFixture | undefined;
@@ -768,4 +775,88 @@ describe("per-session exact-tool selection", () => {
       ).rejects.toThrow("not user-configurable");
     }
   });
+});
+
+// #6280: the post-handler cancellation guard added alongside the gated-tools
+// enrichment must stay scoped to that enrichment. A cancellation that lands
+// while ANY other tool is finishing used to discard that tool's complete result
+// and replace it with an error naming an acquisition it never performed; and on
+// a real acquisition the throw dropped the minted session UUID without ever
+// releasing it, leaving the daemon holding the device for a client that never
+// learned the handle.
+describe("post-handler cancellation guard scope", () => {
+  let fixture: McpTestFixture | undefined;
+
+  afterEach(async () => {
+    await fixture?.teardown();
+    fixture = undefined;
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+  });
+
+  test("a non-acquisition tool's finished result survives a concurrent cancellation", async () => {
+    const sessionId = "cancel-guard-session";
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => {
+        // Model transport/session teardown landing while the handler is
+        // finishing, after it already produced a complete, correct result.
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return { content: [{ type: "text" as const, text: JSON.stringify({ value: "finished" }) }] };
+      },
+      { defaultEnabled: true },
+    );
+
+    const response = await fixture.client.request(
+      { method: "tools/call", params: { name: "clipboard", arguments: {} } },
+      z.any(),
+    );
+    expect(JSON.parse(response.content[0].text)).toEqual({ value: "finished" });
+  });
+
+  for (const acquisition of ["getAndroid", "getApple"]) {
+    test(acquisition + " releases the minted session when enrichment is cancelled", async () => {
+      const sessionId = "cancel-guard-acquire-session";
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const releases: string[] = [];
+      const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+      sessionManager.releaseSession = async (uuid, reason, allowExpired) => {
+        releases.push(uuid);
+        return await releaseSession(uuid, reason, allowExpired);
+      };
+      const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, new FakeDeviceUtils());
+      DaemonState.getInstance().initialize(sessionManager, pool);
+
+      fixture = new McpTestFixture({ sessionContext: { sessionId } });
+      await fixture.setup();
+      ToolRegistry.clearTools();
+      ToolRegistry.register(
+        acquisition,
+        "acquire",
+        z.object({}),
+        async () => {
+          await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: "minted-session" }) }],
+          };
+        },
+        { defaultEnabled: true },
+      );
+
+      await expect(
+        fixture.client.request(
+          { method: "tools/call", params: { name: acquisition, arguments: {} } },
+          z.any(),
+        ),
+      ).rejects.toThrow(/cancelled during acquisition/);
+      expect(releases).toEqual(["minted-session"]);
+    });
+  }
 });

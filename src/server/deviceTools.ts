@@ -5215,6 +5215,38 @@ export function registerDeviceTools() {
     return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);
   }
 
+  /**
+   * Reserve a not-yet-created iOS simulator by name. This is the one provision
+   * reservation with no stable identity to key on, so it maps a post-deadline
+   * coordinator rejection to the same `ProvisionDeviceError("timeout")` the
+   * stable paths raise instead of leaking an opaque platform failure.
+   */
+  async function reserveIosSelectorProvisionDeviceLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> {
+    try {
+      return await deps.lifecycleCoordinator.reserve(
+        { kind: "selector", platform: "ios", selector: args.device.name },
+        { operation: "provision", deadlineMs: totalDeadlineMs, signal },
+      );
+    } catch (error) {
+      rethrowDeviceLifecycleReservationFailure(
+        error,
+        deps.timer,
+        totalDeadlineMs,
+        (detail) =>
+          new ProvisionDeviceError(
+            "timeout",
+            `Timed out provisioning ios device '${args.device.name}': ${detail}.`,
+          ),
+        "waiting for the device lifecycle reservation",
+      );
+    }
+  }
+
   async function reserveIosProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
@@ -5292,26 +5324,12 @@ export function registerDeviceTools() {
           totalDeadlineMs,
           signal,
         );
-        if (!lifecycleLease) {
-          try {
-            lifecycleLease = await deps.lifecycleCoordinator.reserve(
-              { kind: "selector", platform: "ios", selector: args.device.name },
-              { operation: "provision", deadlineMs: totalDeadlineMs, signal },
-            );
-          } catch (error) {
-            rethrowDeviceLifecycleReservationFailure(
-              error,
-              deps.timer,
-              totalDeadlineMs,
-              (detail) =>
-                new ProvisionDeviceError(
-                  "timeout",
-                  `Timed out provisioning ios device '${args.device.name}': ${detail}.`,
-                ),
-              "waiting for the device lifecycle reservation",
-            );
-          }
-        }
+        lifecycleLease ??= await reserveIosSelectorProvisionDeviceLifecycle(
+          args,
+          deps,
+          totalDeadlineMs,
+          signal,
+        );
       }
       const deviceCreationGate = deps.deviceCreationGateFactory();
       provisioned = await provisionExactDevice(

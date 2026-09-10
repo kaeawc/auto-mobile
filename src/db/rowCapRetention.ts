@@ -109,11 +109,15 @@ export async function runAmortizedRetention(
   if (state.insertsSinceCleanup < checkInterval) {
     return;
   }
-  state.insertsSinceCleanup = 0;
 
+  // Only reset the counter once we've committed to running the cleanup body.
+  // If a cleanup is already in progress, leave the counter at-or-above
+  // `checkInterval` so the very next insert re-checks this gate instead of
+  // silently re-arming a fresh `checkInterval`-insert countdown (#6657).
   if (state.cleanupInProgress) {
     return;
   }
+  state.insertsSinceCleanup = 0;
   state.cleanupInProgress = true;
   try {
     await runCleanup();

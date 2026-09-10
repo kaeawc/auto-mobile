@@ -9,6 +9,7 @@ import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { getAbortSignal } from "../AbortContext";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -372,33 +373,34 @@ export class XcodeSigningManager {
   private async probeXcodebuildAvailability(): Promise<boolean> {
     const timer = this.dependencies.timer ?? defaultTimer;
     const controller = new AbortController();
-    let timeoutId: NodeJS.Timeout | undefined;
-    const availabilityPromise = this.dependencies.xcodebuild.isAvailable({
-      timeoutMs: XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
-      signal: controller.signal,
+    const parent = getAbortSignal();
+    if (parent?.aborted) {return false;}
+    const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;
+    let onAbort!: () => void;
+    const cancelled = new Promise<false>((resolve) => {
+      onAbort = () => resolve(false);
+      signal.addEventListener("abort", onAbort, { once: true });
     });
-    availabilityPromise.catch(() => {
-      // The race below owns the result; this also handles a rejection after
-      // the timeout has already won (e.g. an abort-driven rejection).
-    });
-    const timeout = new Promise<false>((resolve) => {
-      timeoutId = timer.setTimeout(() => {
-        controller.abort();
-        resolve(false);
-      }, XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS);
-    });
+    const timeoutId = timer.setTimeout(
+      () => controller.abort(),
+      XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
+    );
     try {
       return await Promise.race([
-        availabilityPromise.then(
-          (available) => available,
-          () => false,
-        ),
-        timeout,
+        this.dependencies.xcodebuild
+          .isAvailable({
+            timeoutMs: XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
+            signal,
+          })
+          .then(
+            (available) => available,
+            () => false,
+          ),
+        cancelled,
       ]);
     } finally {
-      if (timeoutId) {
-        timer.clearTimeout(timeoutId);
-      }
+      timer.clearTimeout(timeoutId);
+      signal.removeEventListener("abort", onAbort);
     }
   }
 

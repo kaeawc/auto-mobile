@@ -5,6 +5,7 @@ import { XcodeSigningManager } from "../../../src/utils/ios-cmdline-tools/XcodeS
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 const CERT_BASE64 =
   "MIIDETCCAfmgAwIBAgIUJQItJgRhsTPNGV58eJPhAw9xIWcwDQYJKoZIhvcNAQELBQAwGDEWMBQGA1UEAwwNVGVzdCBEZXYgQ2VydDAeFw0yNjAxMTgxOTE5MzVaFw0yNzAxMTgxOTE5MzVaMBgxFjAUBgNVBAMMDVRlc3QgRGV2IENlcnQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDCXt1bEnb5HFGXYeCDJfGUK6A84+6ZowKRvfP4F9XmLn24Pp0bvd0sam7Ayp6rFMkRcCUJ0FmcEUV/JbW30uGmFlrCQG4k4Rved/xrXIYZK1ny2Z5hH0AG13JiStLIqUTARgx1NDnlQl18b5R8OjeXeWD79x/RFrNUyIinW2fnv3jzF8jjme6P3f8pK+TJmLIZQGpNQT+FApApOnND2AEh+RhjnJi3AIDXIpBo8dFhXmOqfE5mtb5gzIyKPrc15l74kW8ndxFoVjJtMinzjbYIsI6t4wOkTJn0hZYDwWHwBfx622cK35zxcGok16EbCdJlfdGxNseeUxWAJoki+MaZAgMBAAGjUzBRMB0GA1UdDgQWBBR4aCibWRc1OiPPqD0CqjTneWJcnTAfBgNVHSMEGDAWgBR4aCibWRc1OiPPqD0CqjTneWJcnTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQAXZsPO3k4url4xeggh0AHjZHH4/FQUKPlrKH1+icN/PrPDqc3ubiuLynTN6oHYMM6bHF1i7/fjTXfwtSH4Y28YnLNA/5Yywz+A2PAr0VlMFDGNn9clM5AiZUrpwhOzRIC2opiSgUBVXcHJr9DlCo227ZaM4EmWlFPwyY6LNUyPfqECwFKmDgtuzSqICOGyJy2s1MGXUiWqeyyJgRe1ZdLhNaC3+3/I/0YBm6TYP8anir7vYZCyCDDEtOlNdv9+qQHtoym1f02VRpntDF+k5qiHPICFDVwHCaSXIoghyEqD3y9HH9GWiGKze3mXB7xofhGUL9ATLpRWrzxHSGVS6shr";
@@ -500,6 +501,32 @@ describe("XcodeSigningManager", () => {
   // must not block detectTeamIdsFromXcode -- and by extension physical-device
   // CtrlProxy startup -- indefinitely. The probe must be bounded even though
   // the injected xcodebuild fake never resolves or rejects on its own.
+  test("cancels an uncooperative availability probe without waiting for its deadline", async () => {
+    const { deps, xcodebuildArgs } = createFakeDependencies();
+    const timer = new FakeTimer();
+    deps.timer = timer;
+    let probeSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const probeStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    deps.xcodebuild.isAvailable = (options) => {
+      probeSignal = options?.signal;
+      started();
+      return new Promise<boolean>(() => {});
+    };
+    const controller = new AbortController();
+    const detection = runWithAbortSignal(controller.signal, () =>
+      new XcodeSigningManager(deps).detectTeamIdsFromXcode(),
+    );
+    await probeStarted;
+    controller.abort();
+    expect(await detection).toEqual([]);
+    expect(probeSignal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(xcodebuildArgs).toHaveLength(0);
+  });
+
   test("bounds a hanging xcodebuild.isAvailable() probe instead of hanging forever", async () => {
     const launchCwd = resolve("/Users/test/hanging-probe");
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;

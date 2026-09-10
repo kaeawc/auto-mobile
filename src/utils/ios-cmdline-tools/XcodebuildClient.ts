@@ -95,7 +95,7 @@ export class XcodebuildClient implements Xcodebuild {
     try {
       return await this.isAvailableWithin(
         options?.timeoutMs ?? DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS,
-        options?.signal,
+        options?.signal ?? getAbortSignal(),
       );
     } catch (error) {
       // A stalled `xcodebuild -version` must not hang callers (issue #6585);

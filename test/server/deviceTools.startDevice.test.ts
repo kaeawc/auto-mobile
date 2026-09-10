@@ -1319,6 +1319,62 @@ describe("startDevice handler", () => {
     lease.release();
   });
 
+  it("releases a stranded cold boot lease once the settlement grace elapses", async () => {
+    // An emulator that ignores SIGTERM never emits "exit"; the lease release
+    // deferred onto that settlement must still happen, or the AVD's stable
+    // identity stays reserved for the life of the daemon.
+    class StuckChildProcess extends FakeExitChildProcess {
+      readonly signals: (NodeJS.Signals | undefined)[] = [];
+
+      override kill(signal?: NodeJS.Signals): boolean {
+        this.signals.push(signal);
+        this.killed = true;
+        return true;
+      }
+    }
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(bootTimer);
+    const childProcess = new StuckChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    setDeviceToolsDependencies({
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android", name: androidImage.name })).rejects.toThrow(
+      "runner unavailable",
+    );
+
+    const teardownLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: androidImage.name },
+      { operation: "teardown", deadlineMs: 1_000_000 },
+    );
+    let acquired = false;
+    void teardownLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    bootTimer.advanceTime(1_000);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(acquired).toBe(true);
+    expect(childProcess.signals).toContain("SIGKILL");
+    const lease = await teardownLease;
+    lease.release();
+  });
+
   it("does not kill a shared cold boot when a later caller loses the reservation race", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

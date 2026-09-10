@@ -3350,6 +3350,8 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
   }
 }
 
+const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
+
 function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
@@ -3364,23 +3366,68 @@ function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void
     );
     return undefined;
   }
-  const processSettlement =
-    typeof boot.processHandle.once !== "function" ||
-    boot.processHandle.exitCode !== null ||
-    boot.processHandle.signalCode !== null
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          boot.processHandle?.once("exit", () => resolve());
-        });
+  const processHandle = boot.processHandle;
+  const alreadySettled =
+    typeof processHandle.once !== "function" ||
+    processHandle.exitCode !== null ||
+    processHandle.signalCode !== null;
+  const processSettlement = alreadySettled
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        processHandle.once("exit", () => resolve());
+      });
   try {
-    boot.processHandle.kill();
+    processHandle.kill();
   } catch (error) {
     logger.warn(
       `[DeviceTools] Failed to cancel unowned cold boot ${boot.device.deviceId}: ${error}`,
       error,
     );
   }
-  return processSettlement;
+  if (alreadySettled) {
+    return processSettlement;
+  }
+  return awaitColdBootSettlement(processSettlement, processHandle, boot.device.deviceId);
+}
+
+/**
+ * An emulator that ignores SIGTERM never emits `exit`, so an unbounded wait on
+ * its settlement strands every resource whose release is deferred onto it (the
+ * lifecycle lease above all). Bound the wait with the injected timer, escalate
+ * to SIGKILL, and let the caller proceed either way.
+ */
+async function awaitColdBootSettlement(
+  processSettlement: Promise<void>,
+  processHandle: NonNullable<DeviceBootResult["processHandle"]>,
+  deviceId: string,
+): Promise<void> {
+  const timer = getDeviceToolsDependencies().timer;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      processSettlement,
+      new Promise<void>((resolve) => {
+        timeoutHandle = timer.setTimeout(() => {
+          logger.warn(
+            `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
+              `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms; escalating to SIGKILL`,
+          );
+          try {
+            processHandle.kill("SIGKILL");
+          } catch (error) {
+            // Best effort: the child may have died between the race and here,
+            // and the caller must not stay blocked on the escalation either.
+            logger.debug(`[DeviceTools] SIGKILL for cold boot ${deviceId} failed: ${error}`);
+          }
+          resolve();
+        }, COLD_BOOT_SETTLEMENT_GRACE_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 function clearColdBootShutdownMarker(source: "booted" | "cold-boot", deviceId: string): void {
@@ -5722,7 +5769,17 @@ export function registerDeviceTools() {
         await releaseReservation();
       }
       if (unownedColdBootSettlement) {
-        void unownedColdBootSettlement.then(() => lifecycleReservations?.lifecycleLease.release());
+        // Release exactly once whatever the settlement does — the bounded wait
+        // in `cancelUnownedColdBoot` guarantees it completes, and `finally`
+        // guarantees the lease is not stranded if it completes by rejecting.
+        void unownedColdBootSettlement
+          .finally(() => lifecycleReservations?.lifecycleLease.release())
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
       } else {
         lifecycleReservations?.lifecycleLease.release();
       }

@@ -1097,10 +1097,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           ? sessionForBinding !== null &&
             sessionForBinding !== undefined &&
             daemonSessionManager.isAdmittedForAutomation(sessionForBinding)
-          : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
-        sessionToolBinding.bind(sessionId, providedSessionUuid)
+          : resolveDirectSessionDevice(providedSessionUuid) !== undefined)
       ) {
-        ToolRegistry.notifyToolListChanged();
+        if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
+          ToolRegistry.notifyToolListChanged();
+        }
+        if (tool.requiresDevice && daemonSessionManager && implicitAutolockMcpSessionId) {
+          await DaemonState.getInstance()
+            .getDevicePool()
+            .attachAutolockSessionToMcpSession(providedSessionUuid, implicitAutolockMcpSessionId);
+        }
       }
       // Wire-boundary output policy: strip the duplicated `structuredContent`
       // tree for no-schema tools unconditionally (issue #2759) and for schema

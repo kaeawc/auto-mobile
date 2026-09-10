@@ -245,6 +245,12 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       platform: "ios",
       keepScreenAwake: false,
     });
+    expect(pool.resolveAutolockSessionForMcpSession(socketSessionId)).toBe(android);
+    const appleBeforeSwitch = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios");
+    await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
+    expect(manager.getSession(android!)?.assignedDevice).toBe(devices[2].deviceId);
+    expect(manager.getSession(appleBeforeSwitch!)?.assignedDevice).toBe(devices[1].deviceId);
+    await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId, platform: "android" });
     await proxy.callTool("routingProbe", {
       sessionUuid: android,
       platform: "ios",

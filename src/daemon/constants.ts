@@ -309,6 +309,9 @@ export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionPro
  */
 export const DAEMON_BOUND_SESSION_PARAM = "__autoMobileBoundSessionUuid";
 
+/** Retained session capabilities restored on selector calls after a socket reconnect. */
+export const DAEMON_OWNED_SESSIONS_PARAM = "__autoMobileOwnedSessionUuids";
+
 /** Socket RPC field identifying a released session used only for inactive resource reads. */
 export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
 

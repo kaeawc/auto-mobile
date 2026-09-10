@@ -5579,8 +5579,13 @@ export class DevicePool {
     }
 
     return async () => {
+      const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
       const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
       await this.releaseDevice(previousDeviceId, sessionId);
+      const replacement = this.devices.get(deviceId);
+      if (wasAutolocked && replacement?.sessionId === sessionId) {
+        replacement.autolockSessionId = sessionId;
+      }
       return session;
     };
   }
@@ -6165,12 +6170,26 @@ export class DevicePool {
     return undefined;
   }
 
+  /** Restore retained capabilities without letting an older queued request reset the default. */
+  async restoreAutolockSessionsForMcpSession(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+  ): Promise<void> {
+    const hadDefault = this.resolveAutolockSessionForMcpSession(mcpSessionId) !== undefined;
+    for (const id of sessionIds) {
+      if (!hadDefault || !this.mcpSessionAcquiredAutolocks.get(mcpSessionId)?.has(id)) {
+        await this.attachAutolockSessionToMcpSession(id, mcpSessionId, !hadDefault);
+      }
+    }
+  }
+
   /**
    * Associate a live autolock session with a reconnected MCP client session.
    */
   async attachAutolockSessionToMcpSession(
     sessionId: string,
     mcpSessionId: string | undefined,
+    makeDefault = true,
   ): Promise<void> {
     if (!mcpSessionId) {
       return;
@@ -6193,7 +6212,9 @@ export class DevicePool {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      if (makeDefault) {
+        this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      }
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);

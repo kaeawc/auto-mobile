@@ -1,6 +1,8 @@
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -148,14 +150,22 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const fixtures = new Map<string, McpTestFixture>();
   const received: string[] = [];
   const routes: string[] = [];
+  let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
     const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
-    const route = (socket as any).getMcpForwardRoute(request, "client");
+    await (socket as any).restoreSelectorSessions(args, socketSessionId);
+    const route = (socket as any).getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
       fixture = new McpTestFixture({
         daemonMode: true,
+        sessionToolSelectionService: {
+          isEnabled: async (id, name, fallback) =>
+            id && ["listDevices", "listDeviceImages"].includes(name) ? false : fallback,
+          getOverride: async (id, name) =>
+            id && ["listDevices", "listDeviceImages"].includes(name) ? false : undefined,
+        },
         sessionContext: {
           sessionId: route.clientKey,
           initialSessionToolBinding: route.sessionUuid,
@@ -176,6 +186,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         "routingProbe",
         "routingProbe",
         z.object({
+          device: z.string().optional(),
           platform: z.enum(["android", "ios"]).optional(),
           deviceId: z.string().optional(),
           sessionUuid: z.string().optional(),
@@ -188,9 +199,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         { deviceReadiness: "booted" },
       );
     }
-    const forwarded = (socket as any).withSocketSessionAutolockKey(args, "client", 10000);
+    const forwarded = (socket as any).withSocketSessionAutolockKey(args, socketSessionId, 10000);
     const result = await fixture.client.callTool({ name, arguments: forwarded });
-    (socket as any).recordBoundMcpClientKey(request, "client", route, true, result);
+    (socket as any).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };
   const daemon = new FakeDaemonManager();
@@ -201,10 +212,17 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     daemonManager: daemon,
     autoStartDaemon: false,
     timer,
+    staticToolDefinitionsProvider: () => [
+      ...getStaticToolDefinitions(),
+      { name: "routingProbe", inputSchema: { properties: { device: {}, sessionUuid: {} } } },
+    ],
   });
   try {
     await proxy.callTool("getAndroid", {});
     await proxy.callTool("getApple", {});
+    for (const name of ["listDevices", "listDeviceImages"]) {
+      await expect(proxy.callTool(name, { platform: "android" })).rejects.toThrow("disabled");
+    }
     // Acquisition and execution intentionally share different internal MCP clients.
     expect(routes[0]).not.toBe(routes[1]);
     for (const args of [
@@ -215,7 +233,13 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     ]) {
       await proxy.callTool("routingProbe", { ...args, keepScreenAwake: false });
     }
-    const android = pool.resolveAutolockSessionForMcpSession("client", "android");
+    // A replacement socket must recover both acquisitions before selector routing.
+    socketSessionId = "replacement-client";
+    client.emitConnectionClosed();
+
+    await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
+    await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
+    const android = pool.resolveAutolockSessionForMcpSession(socketSessionId, "android");
     await proxy.callTool("routingProbe", {
       sessionUuid: android,
       platform: "ios",
@@ -227,13 +251,15 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       keepScreenAwake: false,
     });
     await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId, platform: "android" });
-    expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(android);
+    expect(pool.resolveAutolockSessionForMcpSession(socketSessionId)).toBe(android);
     await proxy.callTool("routingProbe", { keepScreenAwake: false });
     expect(received).toEqual([
       devices[0].deviceId,
       devices[1].deviceId,
       devices[0].deviceId,
       devices[0].deviceId,
+      devices[0].deviceId,
+      devices[1].deviceId,
       devices[0].deviceId,
       devices[0].deviceId,
       devices[0].deviceId,
@@ -256,6 +282,31 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     } finally {
       await pinned.close();
     }
+    const apple = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios")!;
+    // Releasing the default must not fence a different, still-owned session.
+    await proxy.callTool("setActiveDevice", { deviceId: devices[1].deviceId, platform: "ios" });
+    await manager.releaseSession(apple, "heartbeat-timeout");
+    await pool.releaseDevice(devices[1].deviceId, apple);
+    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, apple, "heartbeat-timeout");
+    await expect(
+      proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false }),
+    ).rejects.toThrow();
+    await expect(proxy.callTool("routingProbe", {})).rejects.toThrow();
+    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toThrow();
+    await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
+    await proxy.callTool("routingProbe", { sessionUuid: android, keepScreenAwake: false });
+
+    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    const staleResult = await proxy.callTool("routingProbe", {
+      sessionUuid: apple,
+      keepScreenAwake: false,
+    });
+    expect(staleResult.isError).toBe(true);
+    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    expect(manager.getSession(apple)).toBeNull();
+    await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received.at(-1)).toBe(devices[2].deviceId);
   } finally {
     await proxy.close();
     for (const fixture of fixtures.values()) {
@@ -265,3 +316,23 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     flags.mockRestore();
   }
 }, 30000);
+
+test("setActiveDevice rebinds the current session to an unacquired free device", async () => {
+  await acquireBoth();
+  registerUtilityTools();
+  const result = await ToolRegistry.getTool("setActiveDevice")!.handler({
+    deviceId: devices[2].deviceId,
+    platform: "android",
+    __mcpSessionId: "client",
+  });
+  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(iosSession);
+  expect(manager.getSession(iosSession!)?.assignedDevice).toBe(devices[2].deviceId);
+  expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(iosSession);
+}, 30000);
+
+test("restoring retained sessions preserves an already changed default", async () => {
+  await acquireBoth();
+  await pool.attachAutolockSessionToMcpSession(androidSession!, "client");
+  await pool.restoreAutolockSessionsForMcpSession([androidSession!, iosSession!], "client");
+  expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(androidSession);
+});

@@ -29,6 +29,10 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
+import {
+  registerDirectSessionDevice,
+  resolveDirectSessionDevice,
+} from "./directSessionDeviceRegistry";
 import type { SessionManager } from "../daemon/sessionManager";
 import {
   applyStateAfterBiometricCaptureFailure,
@@ -508,9 +512,14 @@ export function registerUtilityTools() {
             undefined,
             args.deviceId,
           );
-        args.sessionUuid ??= ownedSession;
-        if (ownedSession === args.sessionUuid) {
-          selectedAutolockSession = ownedSession;
+        const targetSession =
+          ownedSession ??
+          DaemonState.getInstance()
+            .getDevicePool()
+            .resolveAutolockSessionForMcpSession(mcpSessionId);
+        args.sessionUuid ??= targetSession;
+        if (targetSession === args.sessionUuid) {
+          selectedAutolockSession = targetSession;
         }
       }
       if (args.sessionUuid && DaemonState.getInstance().isInitialized()) {
@@ -571,6 +580,9 @@ export function registerUtilityTools() {
           args.deviceId,
         );
         const resolvedPlatform = args.platform ?? readyDevice.platform;
+        if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
+          registerDirectSessionDevice(args.sessionUuid, readyDevice);
+        }
 
         // When switching platforms, clear observation caches to prevent stale
         // data from the previous platform contaminating subsequent observe calls.

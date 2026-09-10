@@ -58,6 +58,7 @@ export class SessionToolBinding {
     mcpSessionId: string | undefined,
     params: Record<string, unknown>,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
+    selectingActiveDevice = false,
   ): string | undefined {
     const fallback = this.effectiveSessionUuid(mcpSessionId, params);
     const platform =
@@ -80,13 +81,21 @@ export class SessionToolBinding {
       }
       return fallback;
     }
-    return this.resolveAcquiredDeviceSession(mcpSessionId, lookup, matches);
+    return this.resolveAcquiredDeviceSession(
+      mcpSessionId,
+      lookup,
+      matches,
+      fallback,
+      selectingActiveDevice,
+    );
   }
 
   private resolveAcquiredDeviceSession(
     mcpSessionId: string | undefined,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
     matches: (device: { deviceId: string; platform: string }) => boolean,
+    rebindFallback?: string,
+    selectingActiveDevice = false,
   ): string | undefined {
     const candidates = [...(this.acquiredSessions.get(mcpSessionId) ?? [])].flatMap(
       (sessionUuid) => {
@@ -99,6 +108,14 @@ export class SessionToolBinding {
       return undefined;
     }
     const selected = candidates.filter(matches);
+    if (
+      selected.length === 0 &&
+      selectingActiveDevice &&
+      rebindFallback &&
+      candidates.some((candidate) => candidate.sessionUuid === rebindFallback)
+    ) {
+      return rebindFallback;
+    }
     if (selected.length === 1) {
       return selected[0].sessionUuid;
     }

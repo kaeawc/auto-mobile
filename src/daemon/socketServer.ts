@@ -32,6 +32,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_VERSION,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -1039,6 +1040,9 @@ export class UnixSocketServer {
           };
         }
 
+        if (request.method === "tools/call") {
+          await this.restoreSelectorSessions(request.params?.arguments, sessionId);
+        }
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
         const result = await this.runMcpForwardForCurrentRoute(
@@ -1425,6 +1429,19 @@ export class UnixSocketServer {
     return this.sharedMcpForwardRoute(
       typeof uri === "string" ? `resource:${uri}` : "resource:unknown",
     );
+  }
+
+  private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return;
+    }
+    const ids = (args as Record<string, unknown>)[DAEMON_OWNED_SESSIONS_PARAM];
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && id.length > 0)) {
+      return;
+    }
+    const pool = this.daemonState.getDevicePool();
+    // Restoration accepts only live autolocks and does not reallocate a released UUID.
+    await pool.restoreAutolockSessionsForMcpSession?.([...new Set<string>(ids)], socketSessionId);
   }
 
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
@@ -4608,6 +4625,7 @@ export class UnixSocketServer {
 
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    delete forwardedArgs[DAEMON_OWNED_SESSIONS_PARAM];
     this.throwIfReleasedBoundSession(forwardedArgs);
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;

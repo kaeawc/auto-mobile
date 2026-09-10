@@ -143,25 +143,59 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     try {
       await proxy.callTool("getAndroid", {});
       await proxy.callTool("getApple", {});
-      await proxy.callTool("observe", { platform: "android" });
-      expect(client.callToolCalls.at(-1)?.params).toEqual({ platform: "android" });
+      await proxy.callTool("observe", {
+        platform: "android",
+        __autoMobileOwnedSessionUuids: ["forged"],
+      });
+      expect(client.callToolCalls.at(-1)?.params).toMatchObject({
+        platform: "android",
+        __autoMobileOwnedSessionUuids: ["android-session", "ios-session"],
+      });
+      expect(client.callToolCalls.at(-1)?.params).not.toHaveProperty("sessionUuid");
       await proxy.callTool("observe", { platform: "ios", sessionUuid: "android-session" });
-      expect(client.callToolCalls.at(-1)?.params).toEqual({
+      expect(client.callToolCalls.at(-1)?.params).toMatchObject({
         platform: "ios",
         sessionUuid: "android-session",
       });
       await proxy.callTool("getApple", {});
       await proxy.callTool("setActiveDevice", { platform: "android", deviceId: "emulator-5554" });
-      expect(client.callToolCalls.at(-1)?.params).toEqual({
+      expect(client.callToolCalls.at(-1)?.params).toMatchObject({
         platform: "android",
         deviceId: "emulator-5554",
       });
+      expect(client.callToolCalls.at(-1)?.params).not.toHaveProperty("sessionUuid");
       await proxy.callTool("observe", {});
       expect(client.callToolCalls.at(-1)?.params).toEqual({ sessionUuid: "android-session" });
     } finally {
       await proxy.close();
     }
   });
+
+  test.each(["listDevices", "listDeviceImages"])(
+    "platform filters retain bound policy for %s",
+    async (name) => {
+      const client = new FakeDaemonClient({
+        toolResultFor: (tool) =>
+          tool === "getAndroid" ? deviceStartResult("android-session") : undefined,
+      });
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+      try {
+        await proxy.callTool("getAndroid", {});
+        await proxy.callTool(name, { platform: "android" });
+        expect(client.callToolCalls.at(-1)?.params).toEqual({
+          platform: "android",
+          sessionUuid: "android-session",
+        });
+      } finally {
+        await proxy.close();
+      }
+    },
+  );
 
   test("does not resurrect a session released during setActiveDevice", async () => {
     const client = new FakeDaemonClient({
@@ -304,10 +338,11 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       const observe = await proxy.callTool("observe", { platform: "android", project: "skeleton" });
       expect(observe).toEqual({ content: [{ type: "text", text: "success" }] });
       // Preserve the selector for the daemon; do not turn the retained session into an explicit override.
-      expect(client.callToolCalls.at(-1)).toEqual({
+      expect(client.callToolCalls.at(-1)).toMatchObject({
         toolName: "observe",
         params: { platform: "android", project: "skeleton" },
       });
+      expect(client.callToolCalls.at(-1)?.params).not.toHaveProperty("sessionUuid");
     } finally {
       await proxy.close();
     }
@@ -339,7 +374,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
 
       // The fence is cleared: a subsequent sessionless call routes to M2.
       await proxy.callTool("observe", {});
-      expect(client.callToolCalls.at(-1)).toEqual({
+      expect(client.callToolCalls.at(-1)).toMatchObject({
         toolName: "observe",
         params: { sessionUuid: M2 },
       });

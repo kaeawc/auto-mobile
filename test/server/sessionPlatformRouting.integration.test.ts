@@ -3,6 +3,8 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { afterEach, beforeEach, expect, test, spyOn } from "bun:test";
 import { z } from "zod/v4";
+import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   clearDirectSessionDevices,
@@ -95,4 +97,24 @@ test("explicit session takes precedence over platform", async () => {
     arguments: { sessionUuid: "android-session", platform: "ios" },
   });
   expect(received).toEqual([android.deviceId]);
+});
+
+test("direct setActiveDevice rebinds the default to a free device", async () => {
+  const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "Other" };
+  const manager = new FakeDeviceSessionManager();
+  manager.setConnectedDevices([android, ios, other]);
+  const instance = spyOn(DeviceSessionManager, "getInstance").mockReturnValue(manager);
+  (ToolRegistry as any).deviceSessionManager = manager;
+  registerUtilityTools();
+  try {
+    const result = await fixture.client.callTool({
+      name: "setActiveDevice",
+      arguments: { deviceId: other.deviceId, platform: "android" },
+    });
+    expect(result.isError).not.toBe(true);
+    await fixture.client.callTool({ name: "routingProbe", arguments: {} });
+    expect(received).toEqual([other.deviceId]);
+  } finally {
+    instance.mockRestore();
+  }
 });

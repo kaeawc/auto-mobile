@@ -638,6 +638,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             undefined,
             deviceId,
           );
+        if (!routingSessionUuid && name === "setActiveDevice") {
+          routingSessionUuid = daemonState
+            .getDevicePool()
+            .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId);
+        }
         resolvedImplicitAutolockSessionUuid = routingSessionUuid;
       } else {
         routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
@@ -657,6 +662,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               .getDevice(session.assignedDevice);
             return device ? { deviceId: device.id, platform: device.platform } : undefined;
           },
+          name === "setActiveDevice",
         );
       }
     }

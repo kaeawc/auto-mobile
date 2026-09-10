@@ -468,7 +468,15 @@ function isDeviceAvailable(device: { isAvailable?: boolean }): boolean {
   return device.isAvailable !== false;
 }
 
-const CORE_SIMULATOR_405_CURRENT_STATE_PATTERN = /Unable to boot device in current state: (.+)/;
+// The state capture is non-greedy and stops at either an inline
+// " (domain=...)" clause or end of line, because CoreSimulator emits the
+// domain/code both *before* the sentence ("...(domain=..., code=405): Unable
+// to boot device in current state: Booted") and *appended inline after* the
+// state ("...current state: Booted (domain=..., code=405)"). A greedy capture
+// folded that trailing clause into the state, so it no longer equalled the bare
+// state token (e.g. "Booted") and the rejection was misclassified (issue #6411).
+const CORE_SIMULATOR_405_CURRENT_STATE_PATTERN =
+  /Unable to boot device in current state: (.+?)(?:\s*\(domain=|\s*$)/m;
 
 /**
  * Parse the current-state CoreSimulator 405 rejection (`Unable to boot

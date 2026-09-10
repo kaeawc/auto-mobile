@@ -1055,6 +1055,29 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepCallCount()).toBe(0);
   });
 
+  // Issue #6411: CoreSimulator also emits the 405 with the domain/code appended
+  // *inline after* the reported state ("...current state: Booted (domain=...,
+  // code=405)"). A greedy state capture folded that trailing clause into the
+  // reported state, so it no longer equalled "Booted" and the already-booted
+  // simulator was rethrown instead of accepted.
+  test("accepts a CoreSimulator 405 whose domain/code is appended inline after the state", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    harness.failBootStatusWith(
+      coreSimulator405Error(
+        "Unable to boot device in current state: Booted " +
+          "(domain=com.apple.CoreSimulator.SimError, code=405)",
+      ),
+    );
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+    expect(harness.timer.getSleepCallCount()).toBe(0);
+  });
+
   test("retries a contradictory CoreSimulator 405 response when the simulator is not Booted", async () => {
     const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
     // The verification read after the 405 sees the genuine wedge (Shutdown);

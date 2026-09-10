@@ -303,17 +303,14 @@ function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
 describe("RunnerReadinessService", () => {
   test("does not let Android framework inspection block runner setup", async () => {
     const inspectionStarted = Promise.withResolvers<void>();
+    const inspection = Promise.withResolvers<AndroidFrameworkReadinessResult>();
     const androidClient = new FakeReadinessClient();
     androidClient.connected = false;
     const { service, androidManager } = createService({
       androidClient,
       getAndroidFrameworkReadiness: async () => {
         inspectionStarted.resolve();
-        return {
-          ready: false,
-          unavailableResources: ["package", "settings"],
-          diagnostic: "cmd: Can't find service: package",
-        };
+        return inspection.promise;
       },
     });
 
@@ -325,6 +322,293 @@ describe("RunnerReadinessService", () => {
     });
     await inspectionStarted.promise;
     expect(androidManager.setupCalls).toBe(1);
+    inspection.resolve({ ready: true });
+  });
+
+  test.each(["throw", "reject"])("contains a diagnostic probe that %ss", async (failure) => {
+    const { service } = createService({
+      getAndroidFrameworkReadiness: () => {
+        const error = new Error("diagnostic unavailable");
+        if (failure === "throw") {
+          throw error;
+        }
+        return Promise.reject(error);
+      },
+    });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+    });
+  });
+
+  test("settles owned diagnostic work before successive readiness calls return", async () => {
+    let active = 0;
+    const signals: AbortSignal[] = [];
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [true, true];
+    const { service } = createService({
+      androidClient,
+      getAndroidFrameworkReadiness: async (_device, signal) => {
+        active++;
+        signals.push(signal);
+        try {
+          return await new Promise<AndroidFrameworkReadinessResult>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        } finally {
+          active--;
+        }
+      },
+    });
+    for (let i = 0; i < 2; i++) {
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      });
+      expect(active).toBe(0);
+      expect(signals[i]?.aborted).toBe(true);
+    }
+  });
+
+  test.each(["package", "settings"])(
+    "retries required setup when %s appears later",
+    async (resource) => {
+      const manager = new FakeAndroidManager();
+      let attempts = 0;
+      manager.ensureCompatibleVersion = async () => {
+        attempts++;
+        return attempts === 1
+          ? { status: "failed", error: `Can't find service: ${resource}` }
+          : { status: "compatible" };
+      };
+      const { service, timer } = createService({ androidManager: manager });
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 500,
+      });
+      expect(attempts).toBe(2);
+      expect(timer.now()).toBe(250);
+    },
+  );
+
+  test("retries thrown framework setup failures and resets the setup gate", async () => {
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.setup = async () => {
+      manager.setupCalls++;
+      if (manager.setupCalls === 1) {
+        throw new Error("Can't find service: settings");
+      }
+      manager.installed = true;
+      return { success: true, message: "ready" };
+    };
+    const { service } = createService({ androidManager: manager });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 500,
+    });
+    expect(manager.setupCalls).toBe(2);
+    expect(manager.resetSetupStateCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test("stops transient setup retries at the shared absolute deadline", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      throw new Error("Can't find service: package");
+    };
+    const { service, timer } = createService({ androidManager: manager });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 600,
+        readinessTimeoutMs: 500,
+      }),
+    ).rejects.toThrow(/Can't find service: package/);
+    expect(attempts).toBe(3);
+    expect(timer.now()).toBe(600);
+  });
+
+  test.each(["package", "settings"])(
+    "retries missing %s with runner downloads disabled",
+    async (resource) => {
+      const manager = new FakeAndroidManager();
+      let reads = 0;
+      const read = async () => {
+        reads++;
+        if (reads === 1) {
+          throw new Error(`Can't find service: ${resource}`);
+        }
+        return true;
+      };
+      if (resource === "package") {
+        manager.isInstalled = read;
+      } else {
+        manager.isEnabled = read;
+      }
+      const { service } = createService({ androidManager: manager });
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 500,
+        skipCtrlProxyDownload: true,
+      });
+      expect(reads).toBe(2);
+      expect(manager.setupCalls).toBe(0);
+    },
+  );
+
+  test("does not retry permanent setup errors because an optional probe is unready", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      return { status: "failed", error: "INSTALL_FAILED_INVALID_APK" };
+    };
+    const { service, timer } = createService({
+      androidManager: manager,
+      getAndroidFrameworkReadiness: async () => ({
+        ready: false,
+        unavailableResources: ["package"],
+      }),
+    });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      }),
+    ).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
+  });
+
+  test("classifies the setup failure without treating device names as diagnostics", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      return { status: "failed", error: "INSTALL_FAILED_INVALID_APK" };
+    };
+    const { service } = createService({ androidManager: manager });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "Can't find service: package ",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 500,
+      }),
+    ).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
+    expect(attempts).toBe(1);
+  });
+
+  test("does not leave a sibling status read running across a framework retry", async () => {
+    const manager = new FakeAndroidManager();
+    let installationReads = 0;
+    let active = 0;
+    manager.isInstalled = async () => {
+      installationReads++;
+      if (installationReads === 1) {
+        throw new Error("Can't find service: package");
+      }
+      return true;
+    };
+    manager.isEnabled = async () => {
+      if (installationReads === 1) {
+        active++;
+        return new Promise<boolean>(() => {});
+      }
+      return true;
+    };
+    const { service } = createService({ androidManager: manager });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 500,
+    });
+    expect(installationReads).toBe(2);
+    expect(active).toBe(0);
+  });
+
+  test.each(["failure", "cancellation"])(
+    "aborts diagnostic work when required readiness ends in %s",
+    async (outcome) => {
+      const controller = new AbortController();
+      let inspectionSignal: AbortSignal | undefined;
+      let settled = false;
+      const manager = new FakeAndroidManager();
+      manager.ensureCompatibleVersion = async () => {
+        if (outcome === "cancellation") {
+          controller.abort(new Error("caller cancelled"));
+        }
+        throw new Error("required setup failed");
+      };
+      const { service } = createService({
+        androidManager: manager,
+        getAndroidFrameworkReadiness: async (_device, signal) => {
+          inspectionSignal = signal;
+          try {
+            signal.throwIfAborted();
+            return await new Promise<AndroidFrameworkReadinessResult>((_resolve, reject) => {
+              signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          } finally {
+            settled = true;
+          }
+        },
+      });
+      await expect(
+        service.ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "android",
+          totalDeadlineMs: 30_000,
+          readinessTimeoutMs: 10_000,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow(outcome === "cancellation" ? "caller cancelled" : "required setup failed");
+      // Cancellation can prevent the deferred probe from starting at all.
+      if (inspectionSignal) {
+        expect(inspectionSignal.aborted).toBe(true);
+        expect(settled).toBe(true);
+      }
+    },
+  );
+
+  test("cancels a transient retry delay without starting another setup", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      throw new Error("Can't find service: package");
+    };
+    const { service } = createService({ timer, androidManager: manager, autoAdvance: false });
+    const ready = service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort(new Error("caller cancelled"));
+    await expect(ready).rejects.toThrow("caller cancelled");
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
   });
 
   test("does not let a permanent framework inspection failure prevent readiness", async () => {
@@ -345,6 +629,32 @@ describe("RunnerReadinessService", () => {
         signal: controller.signal,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  test("propagates cancellation arriving while diagnostic work settles", async () => {
+    const controller = new AbortController();
+    const { service } = createService({
+      getAndroidFrameworkReadiness: async (_device, signal) =>
+        new Promise<AndroidFrameworkReadinessResult>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              controller.abort(new Error("cancelled during diagnostic cleanup"));
+              resolve({ ready: true });
+            },
+            { once: true },
+          );
+        }),
+    });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled during diagnostic cleanup");
   });
 
   test("keeps an already-ready Android device on the fast path", async () => {

@@ -165,6 +165,9 @@ evidence intact. Provisioning returns that same result under `resources` and
 also marks the response as an error if configuration is incomplete; it retains
 the provisioned device identity and session so the caller can inspect or retry.
 Device boot/readiness and resource-configuration success are separate facts.
+Booted provisioning responses expose the session as `sessionUuid` and retain
+`sessionId` as an equal compatibility alias, including resource failures and
+replayed operations. With `boot: false`, neither session field is present.
 
 ## Automation capabilities
 

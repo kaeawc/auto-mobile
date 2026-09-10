@@ -41,7 +41,7 @@ import { ResourceRegistry } from "./resourceRegistry";
 
 /**
  * Release a device session that was minted by an acquisition tool whose result
- * the server is about to discard as cancelled (issue #6280). Routed through the
+ * the server is about to discard as cancelled. Routed through the
  * SessionManager choke point so registry retire and the release broadcast fan
  * out exactly as they do for any other release.
  */
@@ -985,7 +985,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           // proxy can bind and heartbeat it even if optional discovery fails.
           logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
         }
-        // Scoped to the acquisition enrichment on purpose (issue #6280). At the
+        // Scoped to the acquisition enrichment on purpose. At the
         // top level this ran for EVERY tool, so a cancellation landing while any
         // handler was finishing discarded that handler's complete, correct
         // result and replaced it with an error naming an acquisition the tool

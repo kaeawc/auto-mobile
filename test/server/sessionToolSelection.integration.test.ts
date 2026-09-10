@@ -777,7 +777,7 @@ describe("per-session exact-tool selection", () => {
   });
 });
 
-// #6280: the post-handler cancellation guard added alongside the gated-tools
+// The post-handler cancellation guard added alongside the gated-tools
 // enrichment must stay scoped to that enrichment. A cancellation that lands
 // while ANY other tool is finishing used to discard that tool's complete result
 // and replace it with an error naming an acquisition it never performed; and on

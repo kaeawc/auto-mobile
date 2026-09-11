@@ -2225,13 +2225,35 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       );
     }
 
-    // A serial can be reused after discovery. Pin the destructive command to
-    // the checked ADB transport when available; a disconnected transport fails
-    // instead of selecting a new emulator that inherited the serial. Older
-    // callers without an expected transport may still match a cold-boot AVD.
-    const adb = this.adbFactory.create(emulator.transportId ? null : emulator);
-    const targetArgs = emulator.transportId ? ["-t", emulator.transportId] : [];
-    await adb.execute([...targetArgs, "emu", "kill"], {
+    // A serial can be reused after discovery, so the checked ADB transport is
+    // the identity to trust. `adb emu` cannot be pinned to it: the console
+    // subcommand ignores `-t` and only selects via `-s`/ANDROID_SERIAL, so
+    // `adb -t <id> emu kill` fails with "more than one emulator detected; use
+    // -s" as soon as a second emulator is attached (issue #6845). Instead
+    // resolve the transport back to a serial immediately before the kill and
+    // refuse when it no longer matches, then dispatch `emu kill` through a
+    // serial-scoped client. Older callers without an expected transport may
+    // still match a cold-boot AVD.
+    if (emulator.transportId) {
+      const transportAdb = this.adbFactory.create(null);
+      const serialResult = await transportAdb.execute(
+        ["-t", emulator.transportId, "get-serialno"],
+        {
+          timeoutMs: options.timeoutMs,
+          noRetry: true,
+          signal: options.signal,
+        },
+      );
+      const observedSerial = serialResult.stdout.trim();
+      if (observedSerial !== emulator.deviceId) {
+        throw new ActionableError(
+          `Emulator '${device.deviceId}' identity changed before termination; transport ${emulator.transportId} now reports '${observedSerial}'. Refusing to kill its replacement.`,
+        );
+      }
+    }
+
+    const adb = this.adbFactory.create(emulator);
+    await adb.execute(["emu", "kill"], {
       timeoutMs: options.timeoutMs,
       noRetry: true,
       signal: options.signal,

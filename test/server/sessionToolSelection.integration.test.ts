@@ -791,10 +791,13 @@ describe("per-session exact-tool selection", () => {
 // learned the handle.
 describe("post-handler cancellation guard scope", () => {
   let fixture: McpTestFixture | undefined;
+  let restoreAutolock: (() => void) | undefined;
 
   afterEach(async () => {
     await fixture?.teardown();
     fixture = undefined;
+    restoreAutolock?.();
+    restoreAutolock = undefined;
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
   });
@@ -874,6 +877,69 @@ describe("post-handler cancellation guard scope", () => {
       expect(releases).toEqual(["minted-session"]);
     });
   }
+
+  test("a cancelled acquisition keeps a pre-existing autolock session it merely reused", async () => {
+    const sessionId = "cancel-guard-reuse-session";
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    restoreAutolock = () => {
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      new FakeDeviceUtils(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const device = { name: "Pixel 8", platform: "android" as const, deviceId: "reused-android-1" };
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    // This MCP client already owns a live autolock session on the device.
+    const existingSessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => {
+        // Reuse, not mint: autolock hands back the caller's own live session.
+        const reused = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: reused }) }],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    await expect(
+      fixture.client.request(
+        { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+        z.any(),
+      ),
+    ).rejects.toThrow(/cancelled during acquisition/);
+
+    // The cancelled request never minted this ownership, so retiring the
+    // session and idling the device would disrupt the client's other work.
+    expect(sessionManager.getSession(existingSessionUuid)).not.toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({
+      status: "busy",
+      sessionId: existingSessionUuid,
+    });
+  });
 
   test("a cancelled acquisition returns its pooled device to the pool", async () => {
     const sessionId = "cancel-guard-pooled-session";

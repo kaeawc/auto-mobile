@@ -875,6 +875,57 @@ describe("post-handler cancellation guard scope", () => {
     });
   }
 
+  test("a cancelled acquisition returns its pooled device to the pool", async () => {
+    const sessionId = "cancel-guard-pooled-session";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      new FakeDeviceUtils(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const device = { name: "Pixel 8", platform: "android" as const, deviceId: "pooled-android-1" };
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => {
+        await pool.assignDeviceToSession("pooled-minted-session", "android");
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ sessionUuid: "pooled-minted-session" }),
+            },
+          ],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    await expect(
+      fixture.client.request(
+        { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+        z.any(),
+      ),
+    ).rejects.toThrow(/cancelled during acquisition/);
+
+    // Releasing only the session leaves the pooled device busy forever: the
+    // client never learned the UUID, so nothing can ever call releaseDevice.
+    expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+  });
+
   test("a cancelled acquisition drops its direct-session mapping in direct mode", async () => {
     const sessionId = "cancel-guard-direct-session";
     clearDirectSessionDevices();

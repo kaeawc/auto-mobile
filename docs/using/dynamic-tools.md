@@ -40,4 +40,4 @@ refresh discovery after the `notifications/tools/list_changed` notification.
 
 A shared-daemon restart ends every device session bound to its prior daemon
 instance. Do not retry or retarget the former session UUID: acquire a fresh
-session with `getAndroid`, `getApple`, or `provisionDevice` before continuing.
+session with `getAndroid` or `getApple` before continuing.

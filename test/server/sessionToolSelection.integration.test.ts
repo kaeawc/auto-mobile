@@ -941,6 +941,106 @@ describe("post-handler cancellation guard scope", () => {
     });
   });
 
+  // The pre-call snapshot this guard used to rely on (read from the pool's
+  // mcpSessionAutolockMap BEFORE the handler ran) is blind to a session minted
+  // by a CONCURRENT call on the same MCP connection: both calls snapshot
+  // `undefined`, the first mints S, the serialized second merely reuses S, and
+  // cancelling the second then released a session — and idled a device — the
+  // first call had already handed to the client. Ownership must come from the
+  // acquisition path itself, per call.
+  test("a cancelled acquisition keeps a session a concurrent sibling call minted", async () => {
+    const sessionId = "cancel-guard-concurrent-session";
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    restoreAutolock = () => {
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      new FakeDeviceUtils(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const device = {
+      name: "Pixel 8",
+      platform: "android" as const,
+      deviceId: "concurrent-android-1",
+    };
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    // Both requests are in flight — and have therefore already taken any
+    // pre-call snapshot — before either one publishes an autolock session.
+    const secondCallStarted = Promise.withResolvers<void>();
+    const firstCallSettled = Promise.withResolvers<void>();
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({ which: z.string() }),
+      async (args: { which: string }) => {
+        if (args.which === "first") {
+          await secondCallStarted.promise;
+          const minted = await pool.autolockDevice(device.deviceId, "android", sessionId);
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: minted }) }],
+          };
+        }
+        secondCallStarted.resolve();
+        await firstCallSettled.promise;
+        // Reuse, not mint: the sibling call already published this session.
+        const reused = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: reused }) }],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    const firstCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: { which: "first" } } },
+      z.any(),
+    );
+    const secondCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: { which: "second" } } },
+      z.any(),
+    );
+
+    const firstResponse = await firstCall;
+    const mintedPayload = JSON.parse(firstResponse.content[0].text);
+    const mintedSessionUuid = mintedPayload.sessionUuid as string;
+    expect(mintedSessionUuid).toBeTruthy();
+    // Wire boundary: the ownership disposition is an internal, per-execution
+    // channel and must never reach the client-visible acquisition result.
+    expect(Object.keys(firstResponse)).not.toContain("__acquisitionOwnership");
+    expect(Object.keys(mintedPayload).filter((key) => key.startsWith("__"))).toEqual([]);
+    firstCallSettled.resolve();
+
+    await expect(secondCall).rejects.toThrow(/cancelled during acquisition/);
+
+    // The cancelled second call only reused this session; releasing it would
+    // retire a handle the first call already returned to the client and idle
+    // the device that call is still driving.
+    expect(sessionManager.getSession(mintedSessionUuid)).not.toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({
+      status: "busy",
+      sessionId: mintedSessionUuid,
+    });
+  });
+
   test("a cancelled acquisition returns its pooled device to the pool", async () => {
     const sessionId = "cancel-guard-pooled-session";
     const timer = new FakeTimer();

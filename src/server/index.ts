@@ -24,6 +24,11 @@ import {
   deleteInternalToolParams,
 } from "../daemon/constants";
 import {
+  type AcquisitionOwnership,
+  createAcquisitionOwnershipLedger,
+  runWithAcquisitionOwnership,
+} from "../daemon/acquisitionOwnership";
+import {
   deviceLostErrorFromAbortSignal,
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
@@ -51,13 +56,14 @@ import { ResourceRegistry } from "./resourceRegistry";
 async function releaseCancelledAcquisition(
   sessionUuid: string,
   toolName: string,
-  reusedSessionUuid: string | undefined,
+  ownership: AcquisitionOwnership,
 ): Promise<void> {
-  if (sessionUuid === reusedSessionUuid) {
+  if (ownership === "reused") {
     // Not this request's to release: with device-pool autolock the acquisition
-    // handed back the session this MCP client already owned
+    // handed back a session that already existed
     // (`reuseOwnedAutolockSession`), so retiring it and idling its device would
-    // disrupt the client's other work on that session.
+    // disrupt whoever minted it -- which may be a concurrent sibling call on
+    // this very MCP connection that already returned the handle to the client.
     return;
   }
   const daemonState = DaemonState.getInstance();
@@ -934,17 +940,19 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             startTime: execution.startTime,
           });
       }
-      // Captured BEFORE the handler runs: with device-pool autolock an
-      // acquisition can simply hand back the session this MCP client already
-      // owns, and a cancelled request must only release ownership it actually
-      // minted (see `releaseCancelledAcquisition`).
-      const preCallAutolockSessionUuid =
-        isDeviceSessionAcquisitionTool(name) && DaemonState.getInstance().isInitialized()
-          ? DaemonState.getInstance()
-              .getDevicePool()
-              .captureAutolockSessionForMcpSession(implicitAutolockMcpSessionId)
-          : undefined;
-      let result = await runWithAbortSignal(requestSignal, () =>
+      // Recorded BY the acquisition path, per call: with device-pool autolock an
+      // acquisition can simply hand back a session that already exists, and a
+      // cancelled request must only release ownership it actually minted (see
+      // `releaseCancelledAcquisition`). A pre-call snapshot of the connection's
+      // autolock session cannot express this -- two concurrent same-target
+      // calls both snapshot the pre-mint state, so the one that merely reused
+      // the other's session looked like the minter.
+      const acquisitionOwnership = isDeviceSessionAcquisitionTool(name)
+        ? createAcquisitionOwnershipLedger()
+        : undefined;
+      // Named rather than inlined so the acquisition-ownership scope does not
+      // add a fourth nested callback layer here.
+      const runToolHandler = () =>
         runWithToolSelectionContext(
           {
             // A bound derived session may still target a sibling label. Resolve
@@ -966,7 +974,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               (name === "executePlan" ? getSessionToolSelectionService() : undefined),
           },
           () => tool.handler(handlerParams, progressCallback, requestSignal),
-        ),
+        );
+      let result = await runWithAbortSignal(requestSignal, () =>
+        runWithAcquisitionOwnership(acquisitionOwnership, runToolHandler),
       );
       const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
         ? getDeviceSessionIdFromResult(result)
@@ -1026,7 +1036,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           // reaches the client, so release it through the SessionManager choke
           // point instead of leaving the daemon holding the autolocked device
           // until the missing-first-heartbeat reap.
-          await releaseCancelledAcquisition(acquiredSessionUuid, name, preCallAutolockSessionUuid);
+          await releaseCancelledAcquisition(
+            acquiredSessionUuid,
+            name,
+            // Absent only when the acquisition bypassed every pool/direct-mode
+            // binding path that reports a disposition. Default to releasing:
+            // the client never received this UUID, so holding it would strand
+            // the device until the missing-first-heartbeat reap.
+            acquisitionOwnership?.get(acquiredSessionUuid) ?? "minted",
+          );
           throw new ActionableError("MCP request was cancelled during acquisition.");
         }
       }

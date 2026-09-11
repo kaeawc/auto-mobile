@@ -35,6 +35,7 @@ import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorCo
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
+import { recordAcquisitionOwnership } from "./acquisitionOwnership";
 import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
@@ -5498,6 +5499,7 @@ export class DevicePool {
           allowSessionRebind,
         ),
       );
+      recordAcquisitionOwnership(sessionId, "minted");
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
@@ -5596,6 +5598,7 @@ export class DevicePool {
       );
     }
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
+    recordAcquisitionOwnership(refreshedSession.sessionId, "reused");
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;
   }
@@ -5851,6 +5854,9 @@ export class DevicePool {
       achievedReadiness,
     );
     if (reusedSessionId) {
+      // This caller was handed the session it already owned; a cancelled
+      // request must not retire it (see `acquisitionOwnership`).
+      recordAcquisitionOwnership(reusedSessionId, "reused");
       return reusedSessionId;
     }
 
@@ -5886,6 +5892,7 @@ export class DevicePool {
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
+    recordAcquisitionOwnership(sessionId, "minted");
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );

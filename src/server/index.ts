@@ -12,7 +12,7 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { TerminalSessionError } from "../daemon/sessionManager";
-import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
+import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -51,6 +51,11 @@ import { ResourceRegistry } from "./resourceRegistry";
 async function releaseCancelledAcquisition(sessionUuid: string, toolName: string): Promise<void> {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
+    // Direct (non-daemon) mode: there is no SessionManager to release through,
+    // but the acquisition still registered a process-local mapping, which would
+    // otherwise keep the cancelled UUID resolvable until teardown or the next
+    // acquisition on that device.
+    unregisterDirectSession(sessionUuid);
     return;
   }
   try {

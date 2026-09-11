@@ -26,10 +26,22 @@ describe("advertised device-session recovery tools", () => {
   });
 
   test("matches the acquisition tools a client can discover", () => {
-    const discoverable = DEVICE_SESSION_ACQUISITION_TOOLS.filter((name) =>
-      ToolRegistry.isUserConfigurableTool(name),
+    const discoverable = DEVICE_SESSION_ACQUISITION_TOOLS.filter(
+      (name) =>
+        ToolRegistry.isUserConfigurableTool(name) &&
+        ToolRegistry.getRegisteredTool(name)?.defaultEnabled === true,
     );
     expect([...DEVICE_SESSION_RECOVERY_TOOLS]).toEqual([...discoverable]);
+  });
+
+  test("excludes acquisition tools that are not enabled on a default connection", () => {
+    // A default connection omits `defaultEnabled: false` tools from discovery
+    // AND rejects the call, so advertising one hands the client dead advice.
+    for (const name of DEVICE_SESSION_RECOVERY_TOOLS) {
+      expect(ToolRegistry.getRegisteredTool(name)?.defaultEnabled).toBe(true);
+    }
+    expect(ToolRegistry.getRegisteredTool("provisionDevice")?.defaultEnabled).toBe(false);
+    expect([...DEVICE_SESSION_RECOVERY_TOOLS]).not.toContain("provisionDevice");
   });
 
   test("excludes the hidden startDevice tool", () => {

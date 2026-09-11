@@ -316,10 +316,42 @@ describe("platform device preparation tools", () => {
     expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
   });
 
-  test("getAndroid rejects contradictory avdName and deviceId instead of silently preferring one", () => {
-    expect(() => getAndroidSchema.parse({ avdName: "Pixel_A", deviceId: "emulator-5556" })).toThrow(
-      /identifier_conflict/,
-    );
+  test("getAndroid accepts avdName paired with that AVD's running serial", async () => {
+    // `deviceId` is documented as a serial OR an image name, so the pair is
+    // only contradictory when the resolved device disagrees with it.
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_A",
+      deviceId: "emulator-5556",
+    };
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const result = await callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+    });
+
+    expect(result.deviceIdentity).toMatchObject({
+      avdName: emulator.name,
+      adbSerial: emulator.deviceId,
+    });
+  });
+
+  test("getAndroid rejects contradictory avdName and deviceId instead of silently preferring one", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_A",
+      deviceId: "emulator-5554",
+    };
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: "emulator-5556",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
   });
 
   test("getApple rejects contradictory udid and deviceId instead of silently preferring one", () => {

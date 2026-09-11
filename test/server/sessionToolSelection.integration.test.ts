@@ -13,6 +13,11 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+  resolveDirectSessionDevice,
+} from "../../src/server/directSessionDeviceRegistry";
 
 describe("per-session exact-tool selection", () => {
   let fixture: McpTestFixture | undefined;
@@ -869,4 +874,48 @@ describe("post-handler cancellation guard scope", () => {
       expect(releases).toEqual(["minted-session"]);
     });
   }
+
+  test("a cancelled acquisition drops its direct-session mapping in direct mode", async () => {
+    const sessionId = "cancel-guard-direct-session";
+    clearDirectSessionDevices();
+    // Direct (non-daemon) mode: no SessionManager to release through, so the
+    // process-local direct-session registry is the only thing that keeps the
+    // cancelled UUID resolvable.
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => {
+        registerDirectSessionDevice("direct-minted-session", {
+          platform: "android",
+          name: "Pixel_9",
+          deviceId: "emulator-5554",
+        });
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ sessionUuid: "direct-minted-session" }),
+            },
+          ],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    await expect(
+      fixture.client.request(
+        { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+        z.any(),
+      ),
+    ).rejects.toThrow(/cancelled during acquisition/);
+
+    expect(resolveDirectSessionDevice("direct-minted-session")).toBeUndefined();
+  });
 });

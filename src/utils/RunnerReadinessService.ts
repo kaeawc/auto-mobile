@@ -242,7 +242,9 @@ export class RunnerReadinessService {
     key: string,
   ): Promise<DeviceReadinessLockRelease> {
     if (this.remainingForPhase(context, "runner-setup") <= 0) {
-      this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock");
+      this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock", {
+        deadlineExhausted: true,
+      });
     }
     try {
       // Shared per-device lock (#6227): the session-scoped readiness upgrade in
@@ -255,7 +257,11 @@ export class RunnerReadinessService {
         timeoutError: () => new Error("readiness setup lock exceeded this request's deadline"),
       });
     } catch (error) {
-      this.fail(context, "runner-setup", 1, normalizeDiagnostic(error));
+      // The lock wait is bounded by the remaining setup budget, so the only
+      // failure it can report here is that bound being reached.
+      this.fail(context, "runner-setup", 1, normalizeDiagnostic(error), {
+        deadlineExhausted: true,
+      });
     }
   }
 
@@ -268,7 +274,9 @@ export class RunnerReadinessService {
         async (attempt) => {
           this.throwIfCallerCancelled(context);
           if (this.remainingForPhase(context, "runner-setup") <= 0) {
-            this.fail(context, "runner-setup", attempt, lastDiagnostic);
+            this.fail(context, "runner-setup", attempt, lastDiagnostic, {
+              deadlineExhausted: true,
+            });
           }
           if (attempt > 1) {
             this.dependencies.getAndroidManager(context.device).resetSetupState();
@@ -876,6 +884,7 @@ export class RunnerReadinessService {
       phase,
       attempts,
       `runner did not become responsive before the readiness deadline${diagnostic}`,
+      { deadlineExhausted: true },
     );
   }
 
@@ -937,7 +946,9 @@ export class RunnerReadinessService {
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     if (this.remainingForPhase(context, phase) <= 0) {
-      this.fail(context, phase, attempts, "readiness budget exhausted before phase started");
+      this.fail(context, phase, attempts, "readiness budget exhausted before phase started", {
+        deadlineExhausted: true,
+      });
     }
     const remainingMs = this.remainingForPhase(context, phase);
     const controller = new AbortController();
@@ -962,7 +973,11 @@ export class RunnerReadinessService {
         await this.awaitAbortSettlement(operationPromise);
       }
       this.throwIfCallerCancelled(context, error);
-      return this.fail(context, phase, attempts, normalizeDiagnostic(error));
+      // Only the phase-timeout path above is budget-driven; an error thrown by
+      // the operation itself is a platform fault whatever the clock says.
+      return this.fail(context, phase, attempts, normalizeDiagnostic(error), {
+        deadlineExhausted: controller.signal.aborted,
+      });
     } finally {
       if (timeoutHandle) {
         this.dependencies.timer.clearTimeout(timeoutHandle);
@@ -1031,11 +1046,21 @@ export class RunnerReadinessService {
     );
   }
 
+  /**
+   * Report a readiness failure. `deadlineExhausted` says the phase ran out of
+   * BUDGET, so callers may treat it as a retryable timeout -- it must be stated
+   * by the caller, never inferred from the remaining budget at throw time: a
+   * terminal platform fault (runner not installed, version mismatch, a setup
+   * error, an orphaned forwarding lease) that happens to land as the phase
+   * deadline passes would otherwise be mapped to a retryable `timeout` and
+   * retried forever.
+   */
   private fail(
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
     detail: string,
+    options?: { deadlineExhausted?: boolean },
   ): never {
     const { device } = context;
     const mapping =
@@ -1048,7 +1073,7 @@ export class RunnerReadinessService {
       device.platform === "android" &&
         RunnerReadinessService.isSetupPhase(phase) &&
         isAndroidFrameworkUnavailable(detail),
-      remainingBudgetMs <= 0,
+      options?.deadlineExhausted ?? false,
     );
   }
 }

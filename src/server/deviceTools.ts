@@ -295,19 +295,14 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
         path: ["avdName"],
       });
     }
-    // Both spellings are accepted together only when they name the same AVD
-    // (`deviceId` also takes an image name). Anything else contradicts itself,
-    // and silently preferring `avdName` would prepare a device the caller did
-    // not name — the worst failure mode for a device-identity API.
-    if (value.avdName && value.deviceId && value.avdName !== value.deviceId) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          `identifier_conflict: avdName '${value.avdName}' and deviceId '${value.deviceId}' ` +
-          "name different devices. Pass only the identifier you mean.",
-        path: ["deviceId"],
-      });
-    }
+    // Both spellings are accepted together: `deviceId` takes a serial OR an
+    // image name, so `avdName: "Pixel_A"` + that AVD's running serial names ONE
+    // device and must not be rejected by the schema, which cannot know which
+    // serial an AVD is running on. The pair is validated after discovery
+    // instead (`validateRequestedAndroidSerial`), where a genuine disagreement
+    // is reported with the same machine-readable `identifier_conflict` code.
+    // Silently preferring `avdName` without that check would prepare a device
+    // the caller did not name — the worst failure mode for a device-identity API.
   });
 
 export const getAppleSchema = devicePreparationTimeoutSchema
@@ -820,6 +815,14 @@ function releaseProvisionDeviceWaiter(
     // nothing left to cancel.
     return false;
   }
+  // Retire the entry HERE, not when the abandoned promise finally settles: the
+  // caller is told `operationContinues: false`, so a retry arriving while the
+  // cancelled lifecycle is still unwinding must NOT join it (it would count as
+  // a waiter from zero and inherit the cancellation failure). Dropping the
+  // entry sends that retry through `executeProvisionDevice`, where the durable
+  // operation row is the authority on whether the prior attempt is still live.
+  // The settle handlers are identity-guarded, so this early delete is safe.
+  activeProvisionDeviceOperations.delete(operationId);
   operation.controller.abort(
     new ActionableError(
       `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
@@ -3448,6 +3451,36 @@ function validateBootIdentity(
   }
 }
 
+/**
+ * getAndroid accepts `avdName` and `deviceId` together (see `getAndroidSchema`).
+ * `deviceId` is a serial OR an image name, so the pair identifies one device
+ * whenever the resolved device carries the requested serial — or is that image.
+ * Anything else is a genuine `identifier_conflict`, reportable only here,
+ * because the mapping from AVD name to serial is not known until discovery.
+ */
+function validateRequestedAndroidSerial(
+  pair: { avdName: string; deviceId: string } | undefined,
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): void {
+  if (!pair) {
+    return;
+  }
+  const requested = pair.deviceId;
+  if (
+    device.deviceId === requested ||
+    device.name === requested ||
+    sourceImage?.name === requested
+  ) {
+    return;
+  }
+  throw new ActionableError(
+    `identifier_conflict: avdName '${pair.avdName}' resolved to ` +
+      `${device.name} (${device.deviceId}), which is not the requested deviceId ` +
+      `'${requested}'. Pass only the identifier you mean.`,
+  );
+}
+
 function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: string): void {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
@@ -4592,22 +4625,22 @@ export function registerDeviceTools() {
         // row is terminal: an admitted attempt owns a "running" row, and
         // leaving it running would make every retry report
         // operation_in_progress for the whole operation TTL (~30m) with
-        // nothing executing. A replay (started === false) instead reads a
-        // "succeeded" row it does not own -- failing that would destroy a
-        // valid completed result -- so only an admitted attempt is failed.
-        if (operation.started) {
-          logger.warn(
-            `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
-              `recovery: ${errorMessage(error)}`,
-            error,
-          );
-          await store.fail(
-            args.operationId,
-            attemptId,
-            PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
-            errorMessage(error),
-          );
-        }
+        // nothing executing. A replay (started === false) owns an exclusive
+        // "replaying" row, so it must be failed too or every retry would report
+        // operation_in_progress for the rest of the TTL; store.fail() reverts a
+        // replaying row to "succeeded" with its result intact, so this cannot
+        // destroy a valid completed result.
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+            `recovery: ${errorMessage(error)}`,
+          error,
+        );
+        await store.fail(
+          args.operationId,
+          attemptId,
+          PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+          errorMessage(error),
+        );
         throw error;
       }
       if (error instanceof ProvisionDeviceOperationSupersededError) {
@@ -5474,7 +5507,17 @@ export function registerDeviceTools() {
       );
     } finally {
       if (bootState.unownedColdBootSettlement) {
-        void bootState.unownedColdBootSettlement.then(() => lifecycleLease?.release());
+        // Release exactly once whatever the settlement does -- `finally`
+        // guarantees the lease is not stranded if it completes by rejecting
+        // (mirrors `prepareDevice`'s deferred release).
+        void bootState.unownedColdBootSettlement
+          .finally(() => lifecycleLease?.release())
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
       } else {
         lifecycleLease?.release();
       }
@@ -5849,6 +5892,8 @@ export function registerDeviceTools() {
     operationName: string;
     androidAvdName?: string;
     stableTarget?: StableDeviceTarget;
+    /** getAndroid's `avdName` + `deviceId` pair, validated after discovery. */
+    requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
   };
 
   /**
@@ -6103,6 +6148,11 @@ export function registerDeviceTools() {
     );
     perf.endOperation("bootDevice");
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
+    validateRequestedAndroidSerial(
+      budgets.requestedAndroidIdentifierPair,
+      state.boot.device,
+      state.boot.sourceImage,
+    );
     validatePooledDeviceMapping(state.boot.device, requestedIdentity);
     // A warm AVD has no cold-boot source image, but its explicit getAndroid
     // identifier is still the stable identity needed for later recovery.
@@ -6453,6 +6503,14 @@ export function registerDeviceTools() {
           ? {
               androidAvdName: args.avdName,
               stableTarget: { platform: "android", stableId: args.avdName },
+              ...(args.deviceId
+                ? {
+                    requestedAndroidIdentifierPair: {
+                      avdName: args.avdName,
+                      deviceId: args.deviceId,
+                    },
+                  }
+                : {}),
             }
           : {}),
       },

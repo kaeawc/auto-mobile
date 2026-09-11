@@ -25,7 +25,10 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool, McpSessionRecoveryInProgressError } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
 
@@ -57,6 +60,8 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
       attemptId: string;
       result?: Record<string, unknown>;
       creationStarted: boolean;
+      /** A completed operation whose replay is currently owned by an attempt. */
+      replaying: boolean;
     }
   >();
   private readonly forcedInProgress = new Set<string>();
@@ -80,25 +85,34 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         fingerprint: requestFingerprint,
         attemptId,
         creationStarted: false,
+        replaying: false,
       });
       return { started: true, reconcileExistingConfiguration: false } as const;
     }
     if (existing.fingerprint !== requestFingerprint) {
       throw new ProvisionDeviceOperationConflictError(operationId);
     }
+    // A replay is EXCLUSIVE: the repository moves a claimed replay to the
+    // non-terminal `replaying` status, so a concurrent begin() sees
+    // in-progress instead of being handed the same completed device.
+    if (existing.replaying) {
+      return { started: false as const, inProgress: true as const };
+    }
     // Admission (and a replay) takes the fence, exactly as the repository's
     // compare-and-set does.
     existing.attemptId = attemptId;
-    return existing.result
-      ? {
-          started: false as const,
-          result: existing.result,
-          reconcileExistingConfiguration: existing.creationStarted,
-        }
-      : {
-          started: true as const,
-          reconcileExistingConfiguration: existing.creationStarted,
-        };
+    if (existing.result) {
+      existing.replaying = true;
+      return {
+        started: false as const,
+        result: existing.result,
+        reconcileExistingConfiguration: existing.creationStarted,
+      };
+    }
+    return {
+      started: true as const,
+      reconcileExistingConfiguration: existing.creationStarted,
+    };
   }
 
   async markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean> {
@@ -129,6 +143,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
       return false;
     }
     operation.result = result;
+    operation.replaying = false;
     return true;
   }
 
@@ -158,6 +173,10 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     this.failCalls++;
     this.failures.push({ operationId, errorCode });
     this.failCodes.push(errorCode);
+    if (operation?.replaying) {
+      // A failed replay keeps the completed result recoverable.
+      operation.replaying = false;
+    }
     if (options?.clearCreationStarted) {
       if (!operation) {
         throw new Error(`missing operation ${operationId}`);
@@ -2090,7 +2109,10 @@ describe("provisionDevice handler", () => {
         first.sessionId,
       );
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected")).toBeUndefined();
-      expect(operationStore.failCalls).toBe(0);
+      // The deferred replay releases its exclusive replay claim, and doing so
+      // must leave the completed result intact for the retry below.
+      expect(operationStore.failCodes).toEqual(["session_recovery_in_progress"]);
+      expect(operationStore.getStoredResult(args.operationId)).toBeDefined();
       recovery!.releaseRecoveryRouteLease();
       await recovery!.release();
       const second = JSON.parse(
@@ -2539,6 +2561,130 @@ describe("provisionDevice handler", () => {
       operationContinues: false,
     });
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+  });
+
+  test("releases the stable lifecycle lease when the cold-boot settlement rejects", async () => {
+    const platform = "android" as const;
+    const timer = new FakeTimer();
+    const inner = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const reserved: string[] = [];
+    const released: string[] = [];
+    const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async (identity, options) => {
+        const lease = await inner.reserve(identity, options);
+        const key = JSON.stringify(lease.identity);
+        reserved.push(key);
+        return {
+          get signal() {
+            return lease.signal;
+          },
+          get identity() {
+            return lease.identity;
+          },
+          bindCanonicalIdentity: async (canonical) => await lease.bindCanonicalIdentity(canonical),
+          transitionToTeardown: () => lease.transitionToTeardown(),
+          release: () => {
+            released.push(JSON.stringify(lease.identity));
+            lease.release();
+          },
+        };
+      },
+    };
+    const provisioned = provisionedTestDevice(platform, true);
+    configureProvisionBootAndTeardown(deviceManager, platform);
+    // Registering the exit listener throws, so the unowned cold-boot
+    // settlement promise REJECTS. A lease release deferred onto it with a bare
+    // `.then()` would never run.
+    deviceManager.setMockChildProcess(provisioned.device.name, {
+      exitCode: null,
+      signalCode: null,
+      once: () => {
+        throw new Error("exit listener registration failed");
+      },
+      kill: () => true,
+    } as any);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner readiness failed");
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    await tool.handler(provisionTestArgs(platform, "operation-rejected-cold-boot-settlement"));
+    for (let drain = 0; drain < 25; drain++) {
+      await Promise.resolve();
+    }
+
+    expect(reserved.length).toBeGreaterThan(0);
+    expect(released).toEqual(reserved);
+  });
+
+  test("does not hand a retry the cancelled attempt's failure before it settles", async () => {
+    let provisionCalls = 0;
+    let releaseFirstAttempt!: () => void;
+    const firstAttemptGate = new Promise<void>((resolve) => {
+      releaseFirstAttempt = resolve;
+    });
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls += 1;
+          if (provisionCalls > 1) {
+            return provisionedTestDevice("android", true);
+          }
+          await new Promise<void>((resolve) => {
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          // The cancelled lifecycle is still unwinding when the retry arrives.
+          await firstAttemptGate;
+          throw request.signal?.reason ?? new Error("aborted");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-retry-after-sole-abort"),
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await Promise.resolve();
+    caller.abort(new Error("client went away"));
+    const cancelled = JSON.parse(((await call) as any).content[0].text);
+    expect(cancelled).toMatchObject({
+      error: { code: "request_cancelled" },
+      operationContinues: false,
+    });
+
+    // The response promised the operation was cancelled, so a retry must not
+    // join the aborted lifecycle and inherit its failure; it consults the
+    // durable store instead.
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(retried.error?.code).not.toBe("request_cancelled");
+    expect(retried.error).toBeUndefined();
+    expect(retried).toMatchObject({ operationId: args.operationId });
+    expect(provisionCalls).toBe(2);
+
+    releaseFirstAttempt();
   });
 
   test("tells a detaching joiner that the shared operation continues", async () => {

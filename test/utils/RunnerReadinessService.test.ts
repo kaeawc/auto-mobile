@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
+  RunnerReadinessError,
   RunnerReadinessService,
   SystemUiAnrRecoveryRequiredError,
   type AndroidFrameworkReadinessResult,
@@ -1527,6 +1528,50 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.not.toThrow(/runner did not become responsive/);
+  });
+
+  test("does not flag a terminal connect fault as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 71579) owns CtrlProxy forwarding for emulator-5554.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    // The orphaned forwarding lease is a platform fault, not a slow device.
+    // It merely happens to be reported once the phase budget is spent, and
+    // provisionDevice maps `deadlineExhausted` to a RETRYABLE `timeout`.
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+  });
+
+  test("flags a genuine readiness budget exhaustion as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
   });
 
   test("preserves the Android diagnostic for an ordinary connect failure that is not a forwarding-lease conflict (issue #6260 PRRT ft82e)", async () => {

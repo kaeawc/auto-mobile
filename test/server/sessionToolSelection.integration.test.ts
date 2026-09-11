@@ -1229,6 +1229,117 @@ describe("post-handler cancellation guard scope", () => {
     });
   });
 
+  // The admission fence is only sound if the mint-time baseline predates the
+  // publication it fences. `autolockDevice` publishes the session to the MCP
+  // connection BEFORE awaiting autolock metadata persistence, so an ordinary
+  // tool can be admitted onto the handle while that await is pending; reading
+  // the counter afterwards would bank that admission as the baseline and leave
+  // the cancelled minter free to retire the session beneath it.
+  test("a cancelled minter keeps a session admitted while autolock metadata persisted", async () => {
+    const sessionId = "cancel-guard-pending-persistence-session";
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    restoreAutolock = () => {
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const deviceUtils = new FakeDeviceUtils();
+    const device = {
+      name: "Pixel 8",
+      platform: "android" as const,
+      deviceId: "pending-persistence-android-1",
+    };
+    deviceUtils.setBootedDevices("android", [device]);
+
+    const persistenceStarted = Promise.withResolvers<void>();
+    const releasePersistence = Promise.withResolvers<void>();
+    const deviceSessionRepository = {
+      markAutolockSession: async (): Promise<void> => {
+        persistenceStarted.resolve();
+        await releasePersistence.promise;
+      },
+    };
+
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      deviceUtils,
+      undefined,
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    let observedSessionUuid: string | undefined;
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({ platform: z.string().optional(), sessionUuid: z.string().optional() }),
+      async (_device: unknown, args: { sessionUuid?: string }) => {
+        observedSessionUuid = args.sessionUuid;
+        return { success: true };
+      },
+      // `booted` keeps this fake tool out of CtrlProxy/accessibility setup.
+      { deviceReadiness: "booted" },
+    );
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => {
+        const sessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    const minterCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+      z.any(),
+    );
+
+    await persistenceStarted.promise;
+    const publishedSessionUuid = pool.captureAutolockSessionForMcpSession(sessionId);
+    expect(publishedSessionUuid).toBeDefined();
+    // Pre-seed the keep-awake cache so the ordinary tool's context setup never
+    // shells out to adb (this suite runs on fakes).
+    sessionManager.setKeepScreenAwake(publishedSessionUuid!, {
+      applied: false,
+      skipReason: "test",
+    });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: sessionId,
+    });
+    expect(observedSessionUuid).toBe(publishedSessionUuid);
+    releasePersistence.resolve();
+
+    await expect(minterCall).rejects.toThrow(/cancelled during acquisition/);
+
+    // The admission landed after the mint, so the cancelled minter must leave
+    // the session (and its device) to the execution already driving it.
+    expect(sessionManager.getSession(publishedSessionUuid!)).not.toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({
+      status: "busy",
+      sessionId: publishedSessionUuid,
+    });
+  });
+
   test("a cancelled acquisition returns its pooled device to the pool", async () => {
     const sessionId = "cancel-guard-pooled-session";
     const timer = new FakeTimer();

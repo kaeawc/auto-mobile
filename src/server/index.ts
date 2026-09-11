@@ -48,7 +48,18 @@ import { ResourceRegistry } from "./resourceRegistry";
  * SessionManager choke point so registry retire and the release broadcast fan
  * out exactly as they do for any other release.
  */
-async function releaseCancelledAcquisition(sessionUuid: string, toolName: string): Promise<void> {
+async function releaseCancelledAcquisition(
+  sessionUuid: string,
+  toolName: string,
+  reusedSessionUuid: string | undefined,
+): Promise<void> {
+  if (sessionUuid === reusedSessionUuid) {
+    // Not this request's to release: with device-pool autolock the acquisition
+    // handed back the session this MCP client already owned
+    // (`reuseOwnedAutolockSession`), so retiring it and idling its device would
+    // disrupt the client's other work on that session.
+    return;
+  }
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
     // Direct (non-daemon) mode: there is no SessionManager to release through,
@@ -923,6 +934,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             startTime: execution.startTime,
           });
       }
+      // Captured BEFORE the handler runs: with device-pool autolock an
+      // acquisition can simply hand back the session this MCP client already
+      // owns, and a cancelled request must only release ownership it actually
+      // minted (see `releaseCancelledAcquisition`).
+      const preCallAutolockSessionUuid =
+        isDeviceSessionAcquisitionTool(name) && DaemonState.getInstance().isInitialized()
+          ? DaemonState.getInstance()
+              .getDevicePool()
+              .captureAutolockSessionForMcpSession(implicitAutolockMcpSessionId)
+          : undefined;
       let result = await runWithAbortSignal(requestSignal, () =>
         runWithToolSelectionContext(
           {
@@ -1005,7 +1026,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           // reaches the client, so release it through the SessionManager choke
           // point instead of leaving the daemon holding the autolocked device
           // until the missing-first-heartbeat reap.
-          await releaseCancelledAcquisition(acquiredSessionUuid, name);
+          await releaseCancelledAcquisition(acquiredSessionUuid, name, preCallAutolockSessionUuid);
           throw new ActionableError("MCP request was cancelled during acquisition.");
         }
       }

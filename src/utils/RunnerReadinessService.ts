@@ -257,8 +257,12 @@ export class RunnerReadinessService {
         timeoutError: () => new Error("readiness setup lock exceeded this request's deadline"),
       });
     } catch (error) {
-      // The lock wait is bounded by the remaining setup budget, so the only
-      // failure it can report here is that bound being reached.
+      // The queued wait also rejects on caller abort; that cancellation must
+      // propagate unchanged rather than be reported as a deadline exhaustion,
+      // which provisionDevice maps to a RETRYABLE `timeout`.
+      this.throwIfCallerCancelled(context, error);
+      // Otherwise the lock wait is bounded by the remaining setup budget, so
+      // the only failure it can report here is that bound being reached.
       this.fail(context, "runner-setup", 1, normalizeDiagnostic(error), {
         deadlineExhausted: true,
       });

@@ -25,7 +25,10 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool, McpSessionRecoveryInProgressError } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
 
@@ -2558,6 +2561,75 @@ describe("provisionDevice handler", () => {
       operationContinues: false,
     });
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+  });
+
+  test("releases the stable lifecycle lease when the cold-boot settlement rejects", async () => {
+    const platform = "android" as const;
+    const timer = new FakeTimer();
+    const inner = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const reserved: string[] = [];
+    const released: string[] = [];
+    const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async (identity, options) => {
+        const lease = await inner.reserve(identity, options);
+        const key = JSON.stringify(lease.identity);
+        reserved.push(key);
+        return {
+          get signal() {
+            return lease.signal;
+          },
+          get identity() {
+            return lease.identity;
+          },
+          bindCanonicalIdentity: async (canonical) => await lease.bindCanonicalIdentity(canonical),
+          transitionToTeardown: () => lease.transitionToTeardown(),
+          release: () => {
+            released.push(JSON.stringify(lease.identity));
+            lease.release();
+          },
+        };
+      },
+    };
+    const provisioned = provisionedTestDevice(platform, true);
+    configureProvisionBootAndTeardown(deviceManager, platform);
+    // Registering the exit listener throws, so the unowned cold-boot
+    // settlement promise REJECTS. A lease release deferred onto it with a bare
+    // `.then()` would never run.
+    deviceManager.setMockChildProcess(provisioned.device.name, {
+      exitCode: null,
+      signalCode: null,
+      once: () => {
+        throw new Error("exit listener registration failed");
+      },
+      kill: () => true,
+    } as any);
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner readiness failed");
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    await tool.handler(provisionTestArgs(platform, "operation-rejected-cold-boot-settlement"));
+    for (let drain = 0; drain < 25; drain++) {
+      await Promise.resolve();
+    }
+
+    expect(reserved.length).toBeGreaterThan(0);
+    expect(released).toEqual(reserved);
   });
 
   test("does not hand a retry the cancelled attempt's failure before it settles", async () => {

@@ -5507,7 +5507,17 @@ export function registerDeviceTools() {
       );
     } finally {
       if (bootState.unownedColdBootSettlement) {
-        void bootState.unownedColdBootSettlement.then(() => lifecycleLease?.release());
+        // Release exactly once whatever the settlement does -- `finally`
+        // guarantees the lease is not stranded if it completes by rejecting
+        // (mirrors `prepareDevice`'s deferred release).
+        void bootState.unownedColdBootSettlement
+          .finally(() => lifecycleLease?.release())
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
       } else {
         lifecycleLease?.release();
       }

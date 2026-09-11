@@ -584,6 +584,67 @@ describe("platform device preparation tools", () => {
     await pool.releaseAdbServerResetCohortReservations(detachment.devices);
   });
 
+  // The same exactness must hold for the AVD-image-name spelling of `deviceId`
+  // (`getAndroid({ deviceId: "Pixel_9_API_36" })`): the pool is keyed by running
+  // serial, so an image that is not running yet is unknown to it. Falling back
+  // to the unnamed wildcard lease there makes this exact acquisition wait on —
+  // and defer — every unrelated reset cohort for its whole preparation.
+  test("an image-name getAndroid does not block reset recovery of an unrelated AVD", async () => {
+    const targetImage: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      isRunning: false,
+      source: "local",
+    };
+    const unrelated: BootedDevice = {
+      platform: "android",
+      name: "Pixel_Tablet_API_35",
+      deviceId: "emulator-5570",
+    };
+    const unrelatedImage: DeviceInfo = {
+      platform: "android",
+      name: unrelated.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(unrelated, unrelatedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [unrelated]);
+    deviceUtils.setDeviceImages("android", [targetImage, unrelatedImage]);
+
+    let releaseReadiness!: () => void;
+    const readinessGate = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        await readinessGate;
+      },
+    });
+    registerDeviceTools();
+
+    const inFlight = callTool("getAndroid", { deviceId: targetImage.name });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    const detachment = await pool.detachAdbServerResetCohort([pool.getDevice(unrelated.deviceId)!]);
+    expect(detachment.deferred).toBe(false);
+
+    releaseReadiness();
+    await inFlight.catch(() => undefined);
+    await pool.releaseAdbServerResetCohortReservations(detachment.devices);
+  });
+
   test("applies the named boot deadline while waiting for reset recovery", async () => {
     const stale: BootedDevice = {
       platform: "android",

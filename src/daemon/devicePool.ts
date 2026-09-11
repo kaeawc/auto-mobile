@@ -5506,6 +5506,10 @@ export class DevicePool {
       device.assignmentCount++;
       device.errorCount = 0;
 
+      // Same ordering rule as `autolockDevice`: capture the fence before the
+      // session-creation await, so an admission that lands while it is pending
+      // cannot be banked as this mint's baseline.
+      const admissionCountAtMint = this.getSessionAdmissionCount(sessionId);
       await this.createSessionOrRestore(
         device,
         assignmentSnapshot,
@@ -5517,7 +5521,7 @@ export class DevicePool {
           allowSessionRebind,
         ),
       );
-      recordAcquisitionOwnership(sessionId, "minted", this.getSessionAdmissionCount(sessionId));
+      recordAcquisitionOwnership(sessionId, "minted", admissionCountAtMint);
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
@@ -5907,12 +5911,19 @@ export class DevicePool {
     // skip) setup. The setter is monotonic, so recording here is safe even for
     // a restored session that already reached a higher level.
     this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
+    // Snapshot the admission fence BEFORE publishing the autolock route below.
+    // Publication makes this session resolvable to any ordinary tool call on
+    // the same MCP connection, and the metadata persistence that follows is an
+    // await: reading the counter after it would bank an admission that landed
+    // during that window as the mint-time baseline, leaving a cancelled minter
+    // free to retire the session beneath the execution already driving it.
+    const admissionCountAtMint = this.getSessionAdmissionCount(sessionId);
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
-    recordAcquisitionOwnership(sessionId, "minted", this.getSessionAdmissionCount(sessionId));
+    recordAcquisitionOwnership(sessionId, "minted", admissionCountAtMint);
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );

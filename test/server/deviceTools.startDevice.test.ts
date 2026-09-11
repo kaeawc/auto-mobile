@@ -1604,7 +1604,72 @@ describe("startDevice handler", () => {
     lease.release();
   });
 
-  it("releases a stranded cold boot lease once the settlement grace elapses", async () => {
+  it("holds a stranded cold boot lease until the forced kill actually exits", async () => {
+    // `kill("SIGKILL")` only requests signal delivery: the emulator is still
+    // running, and still holding hardware-qemu.ini.lock, until it emits "exit".
+    // Resolving the settlement at the moment of escalation released the AVD's
+    // stable lifecycle lease underneath a live process, so the next request
+    // could relaunch or delete the same AVD mid-shutdown.
+    class StuckChildProcess extends FakeExitChildProcess {
+      readonly signals: (NodeJS.Signals | undefined)[] = [];
+
+      override kill(signal?: NodeJS.Signals): boolean {
+        this.signals.push(signal);
+        this.killed = true;
+        return true;
+      }
+    }
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(bootTimer);
+    const childProcess = new StuckChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    setDeviceToolsDependencies({
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android", name: androidImage.name })).rejects.toThrow(
+      "runner unavailable",
+    );
+
+    const teardownLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: androidImage.name },
+      { operation: "teardown", deadlineMs: 1_000_000 },
+    );
+    let acquired = false;
+    void teardownLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    // SIGTERM ignored: the grace elapses and the escalation fires.
+    bootTimer.advanceTime(1_000);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(childProcess.signals).toContain("SIGKILL");
+    // The child has not exited yet, so the lease must still be held.
+    expect(acquired).toBe(false);
+
+    childProcess.emit("exit", 0, "SIGKILL");
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(true);
+    const lease = await teardownLease;
+    lease.release();
+  });
+
+  it("releases a stranded cold boot lease once the post-SIGKILL grace elapses", async () => {
     // An emulator that ignores SIGTERM never emits "exit"; the lease release
     // deferred onto that settlement must still happen, or the AVD's stable
     // identity stays reserved for the life of the daemon.
@@ -1653,9 +1718,16 @@ describe("startDevice handler", () => {
     for (let attempt = 0; attempt < 50; attempt++) {
       await Promise.resolve();
     }
+    expect(childProcess.signals).toContain("SIGKILL");
+
+    // Even SIGKILL is only a request; the bounded post-kill grace is what
+    // guarantees the deferred release eventually happens.
+    bootTimer.advanceTime(1_000);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
 
     expect(acquired).toBe(true);
-    expect(childProcess.signals).toContain("SIGKILL");
     const lease = await teardownLease;
     lease.release();
   });

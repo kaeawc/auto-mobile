@@ -24,7 +24,7 @@ import {
   deleteInternalToolParams,
 } from "../daemon/constants";
 import {
-  type AcquisitionOwnership,
+  type AcquisitionOwnershipRecord,
   createAcquisitionOwnershipLedger,
   runWithAcquisitionOwnership,
 } from "../daemon/acquisitionOwnership";
@@ -56,9 +56,9 @@ import { ResourceRegistry } from "./resourceRegistry";
 async function releaseCancelledAcquisition(
   sessionUuid: string,
   toolName: string,
-  ownership: AcquisitionOwnership,
+  ownership: AcquisitionOwnershipRecord,
 ): Promise<void> {
-  if (ownership === "reused") {
+  if (ownership.ownership === "reused") {
     // Not this request's to release: with device-pool autolock the acquisition
     // handed back a session that already existed
     // (`reuseOwnedAutolockSession`), so retiring it and idling its device would
@@ -73,6 +73,14 @@ async function releaseCancelledAcquisition(
     // otherwise keep the cancelled UUID resolvable until teardown or the next
     // acquisition on that device.
     unregisterDirectSession(sessionUuid);
+    return;
+  }
+  if (daemonState.getDevicePool().getSessionReuseCount(sessionUuid) > ownership.reuseCountAtMint) {
+    // Fence against a later hand-off: this call minted the session, but the
+    // pool has since handed the same session to another live acquisition, which
+    // may already have returned the handle to the client. Retiring it now would
+    // strand that caller and idle the device it is still driving. Its own
+    // release (or the idle/heartbeat reap) remains the backstop.
     return;
   }
   try {
@@ -1043,7 +1051,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // binding path that reports a disposition. Default to releasing:
             // the client never received this UUID, so holding it would strand
             // the device until the missing-first-heartbeat reap.
-            acquisitionOwnership?.get(acquiredSessionUuid) ?? "minted",
+            acquisitionOwnership?.get(acquiredSessionUuid) ?? {
+              ownership: "minted",
+              reuseCountAtMint: 0,
+            },
           );
           throw new ActionableError("MCP request was cancelled during acquisition.");
         }

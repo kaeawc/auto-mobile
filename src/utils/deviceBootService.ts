@@ -351,9 +351,14 @@ export class DeviceBootService {
     const booted = await this.runPhase(context, "resolving the running device image", () =>
       this.dependencies.deviceManager.getBootedDevices(image.platform),
     );
-    const running = booted.find(
-      (device) => device.deviceId === image.deviceId || device.name === image.name,
-    );
+    // Exact lifecycle identity first: simulators can share a display name, so a
+    // same-name sibling listed ahead of the requested UDID would be handed back
+    // here and then rejected by the caller's identity check -- failing an
+    // acquisition whose target is up. The name fallback still covers an
+    // AVD/image name spelling of `deviceId`, which carries no serial.
+    const running =
+      booted.find((device) => device.deviceId === image.deviceId) ??
+      booted.find((device) => device.name === image.name);
     if (!running) {
       return this.bootImage(image, context, progress, false);
     }

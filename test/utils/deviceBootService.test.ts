@@ -358,6 +358,48 @@ describe("DeviceBootService", () => {
     expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
+  // Simulators may share a display name, so the running lookup inside
+  // `bootMatchedImage` must not settle for a same-name sibling when the request
+  // named an exact UDID: the caller's identity check rejects the wrong UDID and
+  // the acquisition fails even though the requested simulator is up.
+  it("prefers the requested UDID over a same-name simulator when reusing a running image", async () => {
+    const devices = new FakeDeviceUtils();
+    const iosImage: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "UDID-A",
+      isRunning: true,
+      osVersion: "18.0",
+    };
+    const sameNameSibling: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "UDID-B",
+    };
+    const requested: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "UDID-A" };
+    devices.setDeviceImages("ios", [iosImage]);
+    // The requested simulator finishes booting between the initial discovery
+    // and the running lookup inside `bootMatchedImage`; the same-name sibling
+    // is listed first when it reappears.
+    let discoveries = 0;
+    devices.setBootedDevices("ios", [sameNameSibling, requested]);
+    const listBooted = devices.getBootedDevices.bind(devices);
+    devices.getBootedDevices = async (platform) => {
+      const booted = await listBooted(platform);
+      discoveries++;
+      return discoveries === 1 ? [sameNameSibling] : booted;
+    };
+
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: "UDID-A",
+      preferRunning: true,
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe("UDID-A");
+  });
+
   it("preserves a cooperative readiness diagnostic at the boot deadline", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

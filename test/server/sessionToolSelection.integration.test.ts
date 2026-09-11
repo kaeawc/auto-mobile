@@ -1041,6 +1041,98 @@ describe("post-handler cancellation guard scope", () => {
     });
   });
 
+  // The inverse interleaving of the case above: the MINTER is the call that is
+  // cancelled, after a sibling acquisition already reused its session and
+  // returned that handle to the client. The mint-time disposition alone says
+  // "minted", so releasing on it retires a session the sibling is still using
+  // and idles the device beneath it. Ownership must be fenced against reuse
+  // that happened after the mint.
+  test("a cancelled minter keeps a session a sibling call already reused", async () => {
+    const sessionId = "cancel-guard-reused-after-mint-session";
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    restoreAutolock = () => {
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      new FakeDeviceUtils(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const device = {
+      name: "Pixel 8",
+      platform: "android" as const,
+      deviceId: "reused-after-mint-android-1",
+    };
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    const minted = Promise.withResolvers<string>();
+    const siblingReused = Promise.withResolvers<void>();
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({ which: z.string() }),
+      async (args: { which: string }) => {
+        if (args.which === "minter") {
+          const sessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
+          minted.resolve(sessionUuid);
+          // The sibling reuses and returns this handle to the client while the
+          // minter is still in its own gated-tools enrichment.
+          await siblingReused.promise;
+          await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }],
+          };
+        }
+        await minted.promise;
+        const reused = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: reused }) }],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    const minterCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: { which: "minter" } } },
+      z.any(),
+    );
+    const siblingCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: { which: "sibling" } } },
+      z.any(),
+    );
+
+    const siblingResponse = await siblingCall;
+    const mintedSessionUuid = await minted.promise;
+    expect(JSON.parse(siblingResponse.content[0].text).sessionUuid).toBe(mintedSessionUuid);
+    siblingReused.resolve();
+
+    await expect(minterCall).rejects.toThrow(/cancelled during acquisition/);
+
+    // The sibling already holds this handle: retiring it would strand the
+    // client and idle the device it is still driving.
+    expect(sessionManager.getSession(mintedSessionUuid)).not.toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({
+      status: "busy",
+      sessionId: mintedSessionUuid,
+    });
+  });
+
   test("a cancelled acquisition returns its pooled device to the pool", async () => {
     const sessionId = "cancel-guard-pooled-session";
     const timer = new FakeTimer();

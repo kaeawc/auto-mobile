@@ -62,6 +62,8 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
       creationStarted: boolean;
       /** A completed operation whose replay is currently owned by an attempt. */
       replaying: boolean;
+      /** A prior attempt reported a terminal failure, so the row is retryable. */
+      failed: boolean;
     }
   >();
   private readonly forcedInProgress = new Set<string>();
@@ -86,6 +88,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         attemptId,
         creationStarted: false,
         replaying: false,
+        failed: false,
       });
       return { started: true, reconcileExistingConfiguration: false } as const;
     }
@@ -100,8 +103,8 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     }
     // Admission (and a replay) takes the fence, exactly as the repository's
     // compare-and-set does.
-    existing.attemptId = attemptId;
     if (existing.result) {
+      existing.attemptId = attemptId;
       existing.replaying = true;
       return {
         started: false as const,
@@ -109,6 +112,16 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         reconcileExistingConfiguration: existing.creationStarted,
       };
     }
+    // A still-`running` row is within its TTL, so a prior attempt may be
+    // executing it right now: the repository reports in-progress rather than
+    // re-entering the lifecycle. Only a terminally `failed` row is re-admitted
+    // (with a fresh fence); the fake must not hand out a second attempt while
+    // the first is still unwinding.
+    if (!existing.failed) {
+      return { started: false as const, inProgress: true as const };
+    }
+    existing.attemptId = attemptId;
+    existing.failed = false;
     return {
       started: true as const,
       reconcileExistingConfiguration: existing.creationStarted,
@@ -144,6 +157,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     }
     operation.result = result;
     operation.replaying = false;
+    operation.failed = false;
     return true;
   }
 
@@ -174,8 +188,11 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     this.failures.push({ operationId, errorCode });
     this.failCodes.push(errorCode);
     if (operation?.replaying) {
-      // A failed replay keeps the completed result recoverable.
+      // A failed replay keeps the completed result recoverable: the row
+      // returns to `succeeded`, not `failed`.
       operation.replaying = false;
+    } else if (operation) {
+      operation.failed = true;
     }
     if (options?.clearCreationStarted) {
       if (!operation) {
@@ -2708,16 +2725,26 @@ describe("provisionDevice handler", () => {
       operationContinues: false,
     });
 
-    // The response promised the operation was cancelled, so a retry must not
-    // join the aborted lifecycle and inherit its failure; it consults the
-    // durable store instead.
+    // The cancelled attempt is still unwinding, so its row is still `running`:
+    // the store refuses a second concurrent attempt rather than re-entering
+    // the lifecycle, and the retry is told to wait -- never handed the
+    // in-flight attempt's own cancellation.
+    const duringUnwind = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(duringUnwind.error?.code).toBe("operation_in_progress");
+    expect(provisionCalls).toBe(1);
+
+    // Once it settles into a terminal failure the operation is retryable
+    // again, and the retry runs its own provision instead of inheriting the
+    // cancelled attempt's failure.
+    releaseFirstAttempt();
+    for (let drain = 0; drain < 25; drain++) {
+      await Promise.resolve();
+    }
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     expect(retried.error?.code).not.toBe("request_cancelled");
     expect(retried.error).toBeUndefined();
     expect(retried).toMatchObject({ operationId: args.operationId });
     expect(provisionCalls).toBe(2);
-
-    releaseFirstAttempt();
   });
 
   test("tells a detaching joiner that the shared operation continues", async () => {

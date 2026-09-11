@@ -32,18 +32,22 @@ export type AcquisitionOwnership = "minted" | "reused";
 export interface AcquisitionOwnershipRecord {
   ownership: AcquisitionOwnership;
   /**
-   * The pool's admission counter for this session at the moment the call
-   * recorded a mint (`DevicePool.getSessionAdmissionCount`). The mint-time
-   * disposition alone is not enough to decide a release: `autolockDevice`
-   * publishes the session to the MCP connection before the minting call
-   * finishes gated-tools enrichment, so another execution can be admitted onto
-   * that handle — a sibling acquisition reusing it, or any ordinary device tool
-   * resolving it implicitly through `ToolRegistry` — while the minter is still
-   * running. If only the minter is then cancelled, its ledger still says
-   * `minted`. Comparing this value against the pool's current counter fences
-   * the release against every such later admission.
+   * Whether this execution's participation in the session has already been
+   * settled with the pool (`DevicePool.noteSessionParticipantSettled`).
+   *
+   * The mint-time disposition alone is not enough to decide a release:
+   * `autolockDevice` publishes the session to the MCP connection before the
+   * minting call finishes gated-tools enrichment, so another execution can be
+   * admitted onto that handle — a sibling acquisition reusing it, or any
+   * ordinary device tool resolving it implicitly through `ToolRegistry` —
+   * while the minter is still running. The pool therefore tracks live
+   * participants per session, and every execution that was admitted onto one
+   * must settle exactly once: published when it returned the handle, unsettled
+   * -> dropped when it was cancelled or failed. This flag makes that
+   * idempotent, because the cancellation path and the request handler's
+   * `finally` can both reach the same record.
    */
-  admissionCountAtMint: number;
+  settled?: boolean;
 }
 
 export type AcquisitionOwnershipLedger = Map<string, AcquisitionOwnershipRecord>;
@@ -71,24 +75,21 @@ export async function runWithAcquisitionOwnership<T>(
  * Record how `sessionUuid` came to be owned by the acquisition currently
  * running. A no-op outside an acquisition scope, so pool callers that are not
  * serving a tool call (tests, recovery, direct API use) need no special case.
- *
- * `admissionCountAtMint` is only meaningful for a mint; callers on a path with
- * no pool counter (direct mode, recovery hand-back) leave it at its default.
  */
 export function recordAcquisitionOwnership(
   sessionUuid: string,
   ownership: AcquisitionOwnership,
-  admissionCountAtMint = 0,
 ): void {
-  acquisitionOwnershipContext.getStore()?.set(sessionUuid, { ownership, admissionCountAtMint });
+  acquisitionOwnershipContext.getStore()?.set(sessionUuid, { ownership });
 }
 
 /**
  * Whether the acquisition currently running already recorded a disposition for
- * `sessionUuid`. Lets a post-mint admission fence distinguish a genuinely
+ * `sessionUuid`. Lets the admission bookkeeping distinguish a genuinely
  * concurrent execution from the minting call's own nested tool calls, which
- * share this execution's async scope and must not advance the counter the
- * mint captured. Always false outside an acquisition scope.
+ * share this execution's async scope and must not register a second
+ * participant in the session it just minted. Always false outside an
+ * acquisition scope.
  */
 export function hasRecordedAcquisitionOwnership(sessionUuid: string): boolean {
   return acquisitionOwnershipContext.getStore()?.has(sessionUuid) ?? false;

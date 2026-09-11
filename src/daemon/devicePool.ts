@@ -35,7 +35,7 @@ import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorCo
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
-import { recordAcquisitionOwnership } from "./acquisitionOwnership";
+import { type AcquisitionOwnership, recordAcquisitionOwnership } from "./acquisitionOwnership";
 import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
@@ -287,6 +287,19 @@ interface AndroidEmulatorRecoveryOptions {
 }
 
 /**
+ * Who is currently using one live device session, and whether it ever reached
+ * the client. See `DevicePool.sessionParticipation`.
+ */
+interface SessionParticipation {
+  /** Executions admitted onto the session other than the one that minted it. */
+  liveAdmissions: number;
+  /** Whether the minting execution is still in flight. */
+  minterLive: boolean;
+  /** Whether some execution admitted onto it already returned the handle. */
+  published: boolean;
+}
+
+/**
  * A process can emit output after readiness. Capture its redacted bounded tail
  * so a later unexpected exit has the same useful evidence as an early launch
  * failure without retaining unbounded process output.
@@ -381,14 +394,21 @@ export class DevicePool {
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   /**
-   * How many times each live session has been admitted to an execution other
-   * than the one that minted it (see `noteSessionAdmission`) — a later
-   * acquisition call reusing it, or any ordinary device tool resolved onto it
-   * implicitly through `ToolRegistry`. Read by the MCP request handler to fence
-   * a cancelled minter's release against another execution that is already
-   * driving the same handle (`acquisitionOwnership`).
+   * Live participation in each session: the executions currently admitted onto
+   * it, plus whether any of them already handed the session to the client.
+   * Read by the MCP request handler to decide whether a cancelled acquisition
+   * may retire the session (`acquisitionOwnership`).
+   *
+   * A monotonic admission COUNT cannot answer that question: when a minter and
+   * a sibling that reused the same session are both cancelled, the count is
+   * non-zero for the minter (so it refuses to release) while the sibling
+   * refuses too because it is not the owner, and the session is stranded until
+   * the idle/heartbeat reap. Tracking live participants instead lets the LAST
+   * cancelled participant release, whichever one it is, while any live
+   * participant — or a session already handed back to the client — still keeps
+   * it.
    */
-  private readonly sessionAdmissionCounts: Map<string, number> = new Map();
+  private readonly sessionParticipation: Map<string, SessionParticipation> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
@@ -546,15 +566,15 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // autolock metadata is still removed when their session ends.
     this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
-      // The admission fence only matters while the session is live. This
-      // callback fires exactly once per real session termination, for every
-      // release reason (including the lazy-expiry paths that never reach
+      // Participation only matters while the session is live. This callback
+      // fires exactly once per real session termination, for every release
+      // reason (including the lazy-expiry paths that never reach
       // `releaseDevice`), and never for a rebind of a still-live session — so
-      // it is the only place the counter may be dropped. Clearing it on every
+      // it is the only place the entry may be dropped. Clearing it on every
       // `releaseDevice` instead would erase recorded admissions when a live
       // session is merely rebound onto a replacement device, letting a
       // cancelled minter retire a session another execution is still driving.
-      this.sessionAdmissionCounts.delete(sessionId);
+      this.sessionParticipation.delete(sessionId);
       if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
@@ -5506,10 +5526,11 @@ export class DevicePool {
       device.assignmentCount++;
       device.errorCount = 0;
 
-      // Same ordering rule as `autolockDevice`: capture the fence before the
-      // session-creation await, so an admission that lands while it is pending
-      // cannot be banked as this mint's baseline.
-      const admissionCountAtMint = this.getSessionAdmissionCount(sessionId);
+      // Same ordering rule as `autolockDevice`: register the minter as a live
+      // participant before the session-creation await, so an execution that is
+      // admitted onto the session while that await is pending can never find it
+      // unattended.
+      this.noteSessionMint(sessionId);
       await this.createSessionOrRestore(
         device,
         assignmentSnapshot,
@@ -5521,7 +5542,7 @@ export class DevicePool {
           allowSessionRebind,
         ),
       );
-      recordAcquisitionOwnership(sessionId, "minted", admissionCountAtMint);
+      recordAcquisitionOwnership(sessionId, "minted");
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
@@ -5911,19 +5932,19 @@ export class DevicePool {
     // skip) setup. The setter is monotonic, so recording here is safe even for
     // a restored session that already reached a higher level.
     this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
-    // Snapshot the admission fence BEFORE publishing the autolock route below.
-    // Publication makes this session resolvable to any ordinary tool call on
-    // the same MCP connection, and the metadata persistence that follows is an
-    // await: reading the counter after it would bank an admission that landed
-    // during that window as the mint-time baseline, leaving a cancelled minter
-    // free to retire the session beneath the execution already driving it.
-    const admissionCountAtMint = this.getSessionAdmissionCount(sessionId);
+    // Register the minter as a live participant BEFORE publishing the autolock
+    // route below. Publication makes this session resolvable to any ordinary
+    // tool call on the same MCP connection, and the metadata persistence that
+    // follows is an await: a session with no recorded participant is one a
+    // cancelled acquisition is free to retire, so the minter must be on the
+    // books before anything else can reach the handle.
+    this.noteSessionMint(sessionId);
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
-    recordAcquisitionOwnership(sessionId, "minted", admissionCountAtMint);
+    recordAcquisitionOwnership(sessionId, "minted");
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
@@ -6083,21 +6104,87 @@ export class DevicePool {
   /**
    * Record that `sessionUuid` was admitted to an execution other than the one
    * that minted it: a later acquisition call handed the same session
-   * (`reuseExistingDeviceSession` / `reuseOwnedAutolockSession`), or an
-   * ordinary device tool resolved onto it through
-   * `ToolRegistry.resolveImplicitAutolockSession` — both admit the session to
-   * work the minter does not own. Monotonic per session: only the session's
-   * terminal release drops the entry, and session UUIDs are never reissued, so
-   * the counter a minter captured can only be advanced by a genuinely later
-   * admission.
+   * (`reuseExistingDeviceSession` / `reuseOwnedAutolockSession`), the System UI
+   * ANR recovery hand-back in `deviceTools`, or an ordinary device tool
+   * resolved onto it through `ToolRegistry.resolveImplicitAutolockSession` —
+   * all admit the session to work the minter does not own. Every admission must
+   * be matched by exactly one `noteSessionParticipantSettled` when that
+   * execution finishes, one way or the other.
    */
   noteSessionAdmission(sessionUuid: string): void {
-    this.sessionAdmissionCounts.set(sessionUuid, this.getSessionAdmissionCount(sessionUuid) + 1);
+    this.getSessionParticipation(sessionUuid).liveAdmissions++;
   }
 
-  /** How many other executions have been admitted onto `sessionUuid` (see above). */
+  /**
+   * Record the minting execution as a live participant in the session it just
+   * created. A mint outside any tool execution (recovery, direct API use,
+   * tests) never settles, which is correct: nobody cancelled that minter, so no
+   * cancelled participant may retire its session.
+   */
+  private noteSessionMint(sessionUuid: string): void {
+    this.getSessionParticipation(sessionUuid).minterLive = true;
+  }
+
+  /**
+   * Drop one participant from `sessionUuid` now that its execution finished.
+   * `published` marks the session as handed to the client, which retires the
+   * whole question: from then on the client owns the handle and only its own
+   * release (or the idle/heartbeat reap) may end the session. A cancelled or
+   * failed execution settles unpublished — it never exposed the session.
+   */
+  noteSessionParticipantSettled(
+    sessionUuid: string,
+    ownership: AcquisitionOwnership,
+    published: boolean,
+  ): void {
+    const participation = this.sessionParticipation.get(sessionUuid);
+    if (!participation) {
+      return;
+    }
+    if (published) {
+      participation.published = true;
+    }
+    if (ownership === "minted") {
+      participation.minterLive = false;
+    } else {
+      participation.liveAdmissions = Math.max(0, participation.liveAdmissions - 1);
+    }
+  }
+
+  /**
+   * Whether a cancelled acquisition may retire `sessionUuid`. Only the last
+   * cancelled participant may: any live participant is still driving the
+   * handle, and a published session already reached the client. A session with
+   * no recorded participation was never tracked here (direct assignment,
+   * recovery), so the caller's own mint-time disposition decides.
+   */
+  canReleaseCancelledSession(sessionUuid: string): boolean {
+    const participation = this.sessionParticipation.get(sessionUuid);
+    if (!participation) {
+      return true;
+    }
+    return (
+      !participation.published && !participation.minterLive && participation.liveAdmissions === 0
+    );
+  }
+
+  /** How many other executions are currently admitted onto `sessionUuid`. */
   getSessionAdmissionCount(sessionUuid: string): number {
-    return this.sessionAdmissionCounts.get(sessionUuid) ?? 0;
+    return this.sessionParticipation.get(sessionUuid)?.liveAdmissions ?? 0;
+  }
+
+  private getSessionParticipation(sessionUuid: string): SessionParticipation {
+    const existing = this.sessionParticipation.get(sessionUuid);
+    if (existing) {
+      return existing;
+    }
+    const created: SessionParticipation = {
+      liveAdmissions: 0,
+      minterLive: false,
+      published: false,
+    };
+    this.sessionParticipation.set(sessionUuid, created);
+    return created;
   }
 
   private throwIfFreshStartAlreadyBound(

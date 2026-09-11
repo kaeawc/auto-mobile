@@ -26,6 +26,7 @@ import {
 import {
   type AcquisitionOwnershipRecord,
   createAcquisitionOwnershipLedger,
+  type AcquisitionOwnershipLedger,
   runWithAcquisitionOwnership,
 } from "../daemon/acquisitionOwnership";
 import {
@@ -48,6 +49,32 @@ import {
 import { ResourceRegistry } from "./resourceRegistry";
 
 /**
+ * Drop this execution's participation in `sessionUuid` with the device pool,
+ * exactly once. `published` says the handle is on its way to the client, which
+ * settles the session's fate: from then on only its owner's release (or the
+ * idle/heartbeat reap) may end it. Every other outcome — cancellation, a
+ * failed handler — settles unpublished, because the client never learned the
+ * UUID. A no-op in direct mode, where there is no pool to track participants.
+ */
+function settleAcquisitionParticipation(
+  sessionUuid: string,
+  ownership: AcquisitionOwnershipRecord,
+  published: boolean,
+): void {
+  if (ownership.settled) {
+    return;
+  }
+  ownership.settled = true;
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  daemonState
+    .getDevicePool()
+    .noteSessionParticipantSettled(sessionUuid, ownership.ownership, published);
+}
+
+/**
  * Release a device session that was minted by an acquisition tool whose result
  * the server is about to discard as cancelled. Routed through the
  * SessionManager choke point so registry retire and the release broadcast fan
@@ -58,33 +85,30 @@ async function releaseCancelledAcquisition(
   toolName: string,
   ownership: AcquisitionOwnershipRecord,
 ): Promise<void> {
-  if (ownership.ownership === "reused") {
-    // Not this request's to release: with device-pool autolock the acquisition
-    // handed back a session that already existed
-    // (`reuseOwnedAutolockSession`), so retiring it and idling its device would
-    // disrupt whoever minted it -- which may be a concurrent sibling call on
-    // this very MCP connection that already returned the handle to the client.
-    return;
-  }
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
     // Direct (non-daemon) mode: there is no SessionManager to release through,
-    // but the acquisition still registered a process-local mapping, which would
-    // otherwise keep the cancelled UUID resolvable until teardown or the next
-    // acquisition on that device.
-    unregisterDirectSession(sessionUuid);
+    // but a MINTING acquisition still registered a process-local mapping, which
+    // would otherwise keep the cancelled UUID resolvable until teardown or the
+    // next acquisition on that device. A call that merely reused an existing
+    // session must leave that mapping alone.
+    if (ownership.ownership === "minted") {
+      unregisterDirectSession(sessionUuid);
+    }
     return;
   }
-  if (
-    daemonState.getDevicePool().getSessionAdmissionCount(sessionUuid) >
-    ownership.admissionCountAtMint
-  ) {
-    // Fence against a later admission: this call minted the session, but the
-    // pool has since admitted the same session to another live execution — a
-    // sibling acquisition that may already have returned the handle to the
-    // client, or an ordinary device tool resolved onto it implicitly. Retiring
-    // it now would strand that caller and idle the device it is still driving.
-    // Its own release (or the idle/heartbeat reap) remains the backstop.
+  // This execution is leaving the session, and it never exposed the handle.
+  settleAcquisitionParticipation(sessionUuid, ownership, false);
+  if (!daemonState.getDevicePool().canReleaseCancelledSession(sessionUuid)) {
+    // Somebody else still holds the session: another live execution is driving
+    // the same handle (a sibling acquisition, or an ordinary device tool
+    // resolved onto it implicitly), or one of them already returned the handle
+    // to the client. Retiring it now would strand that caller and idle the
+    // device underneath it. Its own release (or the idle/heartbeat reap)
+    // remains the backstop. Only the LAST cancelled participant gets here —
+    // whether it minted the session or merely reused it — because until then
+    // nobody may release a session somebody is still using, and after it
+    // nobody outside the daemon can: no response ever carried the UUID out.
     return;
   }
   try {
@@ -888,6 +912,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     let cleanupAcquisitionRelease: (() => void) | undefined;
     const releasedAcquisitionSessions = new Set<string>();
+    // Declared out here so the `finally` below can settle every session this
+    // execution was admitted onto, on every exit path.
+    let acquisitionOwnership: AcquisitionOwnershipLedger | undefined;
     try {
       if (isDeviceSessionAcquisitionTool(name)) {
         // A handler can mint and release a session before returning its UUID.
@@ -959,7 +986,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // autolock session cannot express this -- two concurrent same-target
       // calls both snapshot the pre-mint state, so the one that merely reused
       // the other's session looked like the minter.
-      const acquisitionOwnership = isDeviceSessionAcquisitionTool(name)
+      acquisitionOwnership = isDeviceSessionAcquisitionTool(name)
         ? createAcquisitionOwnershipLedger()
         : undefined;
       // Named rather than inlined so the acquisition-ownership scope does not
@@ -1057,10 +1084,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // the device until the missing-first-heartbeat reap.
             acquisitionOwnership?.get(acquiredSessionUuid) ?? {
               ownership: "minted",
-              admissionCountAtMint: 0,
             },
           );
           throw new ActionableError("MCP request was cancelled during acquisition.");
+        }
+        const acquiredOwnership = acquisitionOwnership?.get(acquiredSessionUuid);
+        if (acquiredOwnership) {
+          // The enriched result is on its way to the client, so the session is
+          // published: no later cancelled participant may retire it.
+          settleAcquisitionParticipation(acquiredSessionUuid, acquiredOwnership, true);
         }
       }
       const isRecordingIdCleanup =
@@ -1174,6 +1206,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     } finally {
+      if (acquisitionOwnership) {
+        // Whatever else happened, this execution is done with every session it
+        // was admitted onto. A path that already settled (the cancellation
+        // release, the published hand-back) is idempotent; anything else — a
+        // failed handler, an error mapped to a device-loss outcome — settles
+        // unpublished here, because the client never received the UUID. Without
+        // this the participant would leak and keep the session unreleasable for
+        // the daemon's lifetime.
+        for (const [sessionUuid, record] of acquisitionOwnership) {
+          settleAcquisitionParticipation(sessionUuid, record, false);
+        }
+      }
       cleanupAcquisitionRelease?.();
       executionTracker.endExecution(execution.id);
     }

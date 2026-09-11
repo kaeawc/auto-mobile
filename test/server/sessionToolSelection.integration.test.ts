@@ -1340,6 +1340,97 @@ describe("post-handler cancellation guard scope", () => {
     });
   });
 
+  // Both participants in a shared session can be cancelled: the minter and a
+  // sibling that reused its handle. Neither response exposes the session, so
+  // nobody outside the daemon can ever release it — the LAST cancelled
+  // participant must, whichever one it is.
+  test("both cancelled participants release the session and idle its device", async () => {
+    const sessionId = "cancel-guard-both-cancelled-session";
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    restoreAutolock = () => {
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      new FakeDeviceUtils(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const device = {
+      name: "Pixel 8",
+      platform: "android" as const,
+      deviceId: "both-cancelled-android-1",
+    };
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    const minted = Promise.withResolvers<string>();
+    const siblingReused = Promise.withResolvers<void>();
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({ which: z.string() }),
+      async (args: { which: string }) => {
+        if (args.which === "minter") {
+          const sessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
+          minted.resolve(sessionUuid);
+          await siblingReused.promise;
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }],
+          };
+        }
+        const mintedSessionUuid = await minted.promise;
+        const reused = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        expect(reused).toBe(mintedSessionUuid);
+        // Both in-flight requests are cancelled together, so neither response
+        // ever carries the handle back to the client.
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        siblingReused.resolve();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: reused }) }],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    const minterCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: { which: "minter" } } },
+      z.any(),
+    );
+    const siblingCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: { which: "sibling" } } },
+      z.any(),
+    );
+
+    // Both reject at once, so settle them together rather than leaving one
+    // rejection unobserved while the other is asserted.
+    const outcomes = await Promise.allSettled([minterCall, siblingCall]);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe("rejected");
+      expect(String((outcome as PromiseRejectedResult).reason)).toMatch(
+        /cancelled during acquisition/,
+      );
+    }
+
+    const mintedSessionUuid = await minted.promise;
+    expect(sessionManager.getSession(mintedSessionUuid)).toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+  });
+
   test("a cancelled acquisition returns its pooled device to the pool", async () => {
     const sessionId = "cancel-guard-pooled-session";
     const timer = new FakeTimer();

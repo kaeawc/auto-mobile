@@ -29,13 +29,28 @@ export type AcquisitionOwnership = "minted" | "reused";
  * first mints, the second reuses — so the disposition must be recorded by the
  * call that produced the session, inside that call's own async scope.
  */
-export type AcquisitionOwnershipLedger = Map<string, AcquisitionOwnership>;
+export interface AcquisitionOwnershipRecord {
+  ownership: AcquisitionOwnership;
+  /**
+   * The pool's reuse counter for this session at the moment the call recorded
+   * a mint (`DevicePool.getSessionReuseCount`). The mint-time disposition alone
+   * is not enough to decide a release: `autolockDevice` publishes the session
+   * to the MCP connection before the minting call finishes gated-tools
+   * enrichment, so a concurrent acquisition can reuse and return that handle
+   * while the minter is still running. If only the minter is then cancelled,
+   * its ledger still says `minted`. Comparing this value against the pool's
+   * current counter fences the release against every such later hand-off.
+   */
+  reuseCountAtMint: number;
+}
+
+export type AcquisitionOwnershipLedger = Map<string, AcquisitionOwnershipRecord>;
 
 const acquisitionOwnershipContext = new AsyncLocalStorage<AcquisitionOwnershipLedger>();
 
 /** A ledger for one tool execution. */
 export function createAcquisitionOwnershipLedger(): AcquisitionOwnershipLedger {
-  return new Map<string, AcquisitionOwnership>();
+  return new Map<string, AcquisitionOwnershipRecord>();
 }
 
 /**
@@ -54,10 +69,14 @@ export async function runWithAcquisitionOwnership<T>(
  * Record how `sessionUuid` came to be owned by the acquisition currently
  * running. A no-op outside an acquisition scope, so pool callers that are not
  * serving a tool call (tests, recovery, direct API use) need no special case.
+ *
+ * `reuseCountAtMint` is only meaningful for a mint; callers on a path with no
+ * pool counter (direct mode, recovery hand-back) leave it at its default.
  */
 export function recordAcquisitionOwnership(
   sessionUuid: string,
   ownership: AcquisitionOwnership,
+  reuseCountAtMint = 0,
 ): void {
-  acquisitionOwnershipContext.getStore()?.set(sessionUuid, ownership);
+  acquisitionOwnershipContext.getStore()?.set(sessionUuid, { ownership, reuseCountAtMint });
 }

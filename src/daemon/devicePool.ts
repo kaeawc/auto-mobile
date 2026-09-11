@@ -380,6 +380,13 @@ export class DevicePool {
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
+  /**
+   * How many times each live session has been handed back to a LATER
+   * acquisition call (see `noteSessionReuse`). Read by the MCP request handler
+   * to fence a cancelled minter's release against a sibling that already
+   * returned the same handle to the client (`acquisitionOwnership`).
+   */
+  private readonly sessionReuseCounts: Map<string, number> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
@@ -4498,6 +4505,9 @@ export class DevicePool {
    * Frees the device so it can be assigned to other sessions.
    */
   async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
+    // The reuse fence only matters while the session is live; dropping it here
+    // keeps the counter map bounded by the set of assigned sessions.
+    this.sessionReuseCounts.delete(expectedSessionId);
     const releasedCapture = this.releasedDeviceCaptures.get(expectedSessionId);
     if (releasedCapture?.deviceId === deviceId) {
       this.releasedDeviceCaptures.delete(expectedSessionId);
@@ -5499,7 +5509,7 @@ export class DevicePool {
           allowSessionRebind,
         ),
       );
-      recordAcquisitionOwnership(sessionId, "minted");
+      recordAcquisitionOwnership(sessionId, "minted", this.getSessionReuseCount(sessionId));
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
@@ -5598,6 +5608,7 @@ export class DevicePool {
       );
     }
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
+    this.noteSessionReuse(refreshedSession.sessionId);
     recordAcquisitionOwnership(refreshedSession.sessionId, "reused");
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;
@@ -5856,6 +5867,7 @@ export class DevicePool {
     if (reusedSessionId) {
       // This caller was handed the session it already owned; a cancelled
       // request must not retire it (see `acquisitionOwnership`).
+      this.noteSessionReuse(reusedSessionId);
       recordAcquisitionOwnership(reusedSessionId, "reused");
       return reusedSessionId;
     }
@@ -5892,7 +5904,7 @@ export class DevicePool {
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
-    recordAcquisitionOwnership(sessionId, "minted");
+    recordAcquisitionOwnership(sessionId, "minted", this.getSessionReuseCount(sessionId));
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
@@ -6047,6 +6059,21 @@ export class DevicePool {
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {
     return mcpSessionId ? this.mcpSessionAutolockMap.get(mcpSessionId) : undefined;
+  }
+
+  /**
+   * Record that `sessionUuid` was handed to an acquisition call other than the
+   * one that minted it. Monotonic per session: a release of the session drops
+   * the entry, and session UUIDs are never reissued, so the counter a minter
+   * captured can only be advanced by a genuinely later hand-off.
+   */
+  private noteSessionReuse(sessionUuid: string): void {
+    this.sessionReuseCounts.set(sessionUuid, this.getSessionReuseCount(sessionUuid) + 1);
+  }
+
+  /** How many later acquisitions have been handed `sessionUuid` (see above). */
+  getSessionReuseCount(sessionUuid: string): number {
+    return this.sessionReuseCounts.get(sessionUuid) ?? 0;
   }
 
   private throwIfFreshStartAlreadyBound(

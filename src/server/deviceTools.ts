@@ -79,6 +79,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { recordAcquisitionOwnership } from "../daemon/acquisitionOwnership";
 import { executionTracker } from "./executionTracker";
 import {
   registerDirectSessionDevice,
@@ -6256,6 +6257,12 @@ export function registerDeviceTools() {
         // Read the flag once so the reuse decision below cannot disagree with
         // the readiness recording that follows it.
         const autolockEnabled = isDevicePoolAutolockEnabled();
+        if (readinessResult.preservedSessionId && !autolockEnabled) {
+          // Recovery hands back a session an earlier call already owns; every
+          // other branch below reports its own disposition from inside the
+          // pool (see `acquisitionOwnership`).
+          recordAcquisitionOwnership(readinessResult.preservedSessionId, "reused");
+        }
         const boundSessionId =
           readinessResult.preservedSessionId && !autolockEnabled
             ? readinessResult.preservedSessionId
@@ -6607,6 +6614,7 @@ export function registerDeviceTools() {
     const sessionId = getDeviceToolsDependencies().idGenerator.next();
     if (!daemonState.isInitialized()) {
       registerDirectSessionDevice(sessionId, device);
+      recordAcquisitionOwnership(sessionId, "minted");
       return sessionId;
     }
     const boundSessionId = await daemonState

@@ -546,6 +546,15 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // autolock metadata is still removed when their session ends.
     this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+      // The admission fence only matters while the session is live. This
+      // callback fires exactly once per real session termination, for every
+      // release reason (including the lazy-expiry paths that never reach
+      // `releaseDevice`), and never for a rebind of a still-live session — so
+      // it is the only place the counter may be dropped. Clearing it on every
+      // `releaseDevice` instead would erase recorded admissions when a live
+      // session is merely rebound onto a replacement device, letting a
+      // cancelled minter retire a session another execution is still driving.
+      this.sessionAdmissionCounts.delete(sessionId);
       if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
@@ -4507,9 +4516,6 @@ export class DevicePool {
    * Frees the device so it can be assigned to other sessions.
    */
   async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
-    // The admission fence only matters while the session is live; dropping it
-    // here keeps the counter map bounded by the set of assigned sessions.
-    this.sessionAdmissionCounts.delete(expectedSessionId);
     const releasedCapture = this.releasedDeviceCaptures.get(expectedSessionId);
     if (releasedCapture?.deviceId === deviceId) {
       this.releasedDeviceCaptures.delete(expectedSessionId);

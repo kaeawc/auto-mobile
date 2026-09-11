@@ -273,6 +273,13 @@ interface ExecutionTargetInput {
   options: DeviceAwareToolOptions;
   deviceSessionManager: DeviceSessionManager;
   signal?: AbortSignal;
+  /**
+   * Called when this execution is admitted onto a published autolock session it
+   * did not mint. The caller owns the matching settlement, so it must learn
+   * about the admission even when resolution later throws — hence a callback
+   * rather than a field on the resolved context.
+   */
+  onSessionAdmitted?: (sessionUuid: string) => void;
 }
 
 interface ExecutionTargetContext {
@@ -537,14 +544,17 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // A published autolock session reaches ordinary tools through this
         // route, never through the acquisition path, so the cancelled-minter
         // release fence (`acquisitionOwnership`) would not see this use of it.
-        // Count it as an admission unless this very execution is the one that
-        // produced the session — a minting call's own nested tool calls share
-        // its async scope and must not advance the counter it captured.
+        // Register it as a live participant unless this very execution is the
+        // one that produced the session — a minting call's own nested tool
+        // calls share its async scope and must not register a second
+        // participant in it. `onSessionAdmitted` hands the matching settlement
+        // to the tool wrapper, which owns this execution's end.
         if (
           DaemonState.getInstance().isInitialized() &&
           !hasRecordedAcquisitionOwnership(implicitSessionUuid)
         ) {
           DaemonState.getInstance().getDevicePool().noteSessionAdmission(implicitSessionUuid);
+          input.onSessionAdmitted?.(implicitSessionUuid);
         }
         if (execution) {
           executionTracker.setResolvedAutolockSessionUuid(
@@ -1279,6 +1289,12 @@ export class ToolRegistryClass {
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;
       let sessionUuid = handlerArgs.sessionUuid;
+      // Set when this call was admitted onto an autolock session another call
+      // published. Settled in the `finally` below so the participant is dropped
+      // however this execution ends; a successful return publishes the session,
+      // which is what stops a concurrently-cancelled minter from retiring it.
+      let admittedSessionUuid: string | undefined;
+      let admittedSessionPublished = false;
 
       try {
         const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
@@ -1287,10 +1303,13 @@ export class ToolRegistryClass {
           options,
           deviceSessionManager: this.deviceSessionManager,
           signal,
+          onSessionAdmitted: (admitted) => {
+            admittedSessionUuid = admitted;
+          },
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
-        return await runWithToolSelectionContext(
+        const response = await runWithToolSelectionContext(
           // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.
           {
@@ -1362,7 +1381,14 @@ export class ToolRegistryClass {
             }
           },
         );
+        admittedSessionPublished = true;
+        return response;
       } finally {
+        if (admittedSessionUuid && DaemonState.getInstance().isInitialized()) {
+          DaemonState.getInstance()
+            .getDevicePool()
+            .noteSessionParticipantSettled(admittedSessionUuid, "reused", admittedSessionPublished);
+        }
         await this.toolCallRepository.recordToolCall({
           toolName: name,
           timestamp: toolCallTimestamp,

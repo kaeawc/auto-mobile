@@ -4105,22 +4105,80 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
  * wildcard startup lease: `androidStartupRequestMatchesAvd` short-circuits on a
  * missing name, which makes `detachAdbServerResetCohort` defer *every* cohort and
  * the DisconnectMonitor skip its entire iteration for the minutes the lease is
- * held. The pool already knows the serial's AVD name. Returning `undefined` falls
- * back to the wildcard, which is correct only when the serial is unknown to the
- * pool or the request is criteria-only, where any AVD really may still be picked.
+ * held. The pool already knows a running serial's AVD name, and an AVD image name
+ * (the other spelling `deviceId` accepts) resolves against the image listing.
+ * Returning `undefined` falls back to the wildcard, which is correct only when the
+ * identifier names neither a pooled serial nor a known image, or the request is
+ * criteria-only, where any AVD really may still be picked.
  */
-function resolveAndroidStartupLeaseAvdName(
+async function resolveAndroidStartupLeaseAvdName(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
   devicePool: DevicePool,
-): string | undefined {
+  deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
   if (budgets.androidAvdName !== undefined) {
     return budgets.androidAvdName;
   }
   if (!args.deviceId) {
     return undefined;
   }
-  return devicePool.getDevice(args.deviceId)?.avdName;
+  const pooled = devicePool.getDevice(args.deviceId);
+  if (pooled) {
+    return pooled.avdName;
+  }
+  // Not a running serial: on Android `deviceId` doubles as an AVD image name
+  // (see `getAndroidSchema`), and the pool is keyed by serial, so an image that
+  // is not running yet is unknown to it. Name the lease after the image rather
+  // than taking the wildcard, which would make this exact acquisition wait on —
+  // and defer — every unrelated reset cohort.
+  return await resolveAndroidStartupLeaseImageName(
+    args.deviceId,
+    deviceUtils,
+    bootDeadlineMs,
+    timer,
+    signal,
+  );
+}
+
+/**
+ * The requested identifier when it names a known, bounded-listing AVD image;
+ * `undefined` when it names none, which keeps the wildcard lease for genuinely
+ * unresolvable requests. A failed listing also falls back to the wildcard: the
+ * lease is a coordination hint, and failing the acquisition over an optional
+ * lookup would be worse than a briefly over-broad lease.
+ */
+async function resolveAndroidStartupLeaseImageName(
+  deviceId: string,
+  deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  try {
+    const images = await runWithinShutdownDeadline(
+      { name: deviceId, platform: "android", deviceId },
+      timer,
+      bootDeadlineMs,
+      "Android AVD image lookup for the startup lease did not complete",
+      signal,
+      async () => await deviceUtils.listDeviceImages("android"),
+      undefined,
+      "to name its Android startup lease",
+    );
+    return images.some((image) => image.platform === "android" && image.name === deviceId)
+      ? deviceId
+      : undefined;
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Could not resolve AVD image '${deviceId}' for the startup lease: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
 }
 
 async function reserveAndroidStartupLease(
@@ -4128,6 +4186,7 @@ async function reserveAndroidStartupLease(
   budgets: { androidAvdName?: string },
   bootDeadlineMs: number,
   timer: Timer,
+  deviceUtils: PlatformDeviceManager,
   signal?: AbortSignal,
 ): Promise<(() => Promise<void>) | undefined> {
   if (args.platform !== "android") {
@@ -4137,8 +4196,17 @@ async function reserveAndroidStartupLease(
   if (!devicePool) {
     return undefined;
   }
+  const exactAvdName = await resolveAndroidStartupLeaseAvdName(
+    args,
+    budgets,
+    devicePool,
+    deviceUtils,
+    bootDeadlineMs,
+    timer,
+    signal,
+  );
+  // Read after the resolution above so the wait reflects the budget it left.
   const remainingMs = bootDeadlineMs - timer.now();
-  const exactAvdName = resolveAndroidStartupLeaseAvdName(args, budgets, devicePool);
   const requestedName = exactAvdName ?? args.name;
   if (remainingMs <= 0) {
     throw new ActionableError(
@@ -6064,6 +6132,7 @@ export function registerDeviceTools() {
         budgets,
         bootDeadlineMs,
         deps.timer,
+        deviceUtils,
         signal,
       );
       const stableTarget = await resolveStartStableDeviceLifecycleTarget(

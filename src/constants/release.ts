@@ -464,11 +464,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "b6aef89cd7272dd331be9238a534edcd4eee0de591a5f84c81eb3fb4fd0f37e9",
-  ipaSha256: "38871f3178db40a6180ce5d06760cfd2411db1f63df6a7a93d2c50fa9c0361a0",
+  apkSha256: "ca3361027d78a1bb35d2219bb26f3b3199ec1e0834543b5200deba1e04785884",
+  ipaSha256: "c63da7b0d0918f68920a64a6cc69371ebf564ce97b673610c427ba2928ffaef1",
   runnerSha256Target: "xctest",
   videoJarSha256: "e5ce791aed17a1bf391db5737367a8ca2d7792b805f2fa4235e4ec7f8cee062c",
-  runnerSha256: "33037da4af11dceadd985c529d71dd48603f6536b1e837bc89c254b1896e2df7",
+  runnerSha256: "6c72c687621f140e00442808e8180ba71b68c80340291f579ac4eefb22816130",
 };
 
 /**

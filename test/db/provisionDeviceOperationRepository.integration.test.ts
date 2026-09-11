@@ -52,6 +52,83 @@ describe("ProvisionDeviceOperationRepository", () => {
     );
   });
 
+  test("admits only one replay of a completed operation at a time", async () => {
+    const repository = new ProvisionDeviceOperationRepository(db);
+    await repository.begin("operation-replay", "request-a", "attempt-1", 0, FAR_FUTURE_EXPIRY_MS);
+    await repository.complete("operation-replay", "attempt-1", { deviceId: "emulator-5554" });
+
+    expect(
+      await repository.begin("operation-replay", "request-a", "attempt-2", 0, FAR_FUTURE_EXPIRY_MS),
+    ).toEqual({
+      started: false,
+      result: { deviceId: "emulator-5554" },
+      reconcileExistingConfiguration: false,
+    });
+
+    // A second daemon process replaying the SAME completed operation must not
+    // be handed the device while the first replay is still rebinding it: both
+    // would reconfigure it, and the loser's fenced complete() failure releases
+    // the session the winner returned.
+    expect(
+      await repository.begin("operation-replay", "request-a", "attempt-3", 0, FAR_FUTURE_EXPIRY_MS),
+    ).toEqual({ started: false, inProgress: true });
+
+    // The first replay still owns the fence and can finish.
+    expect(
+      await repository.complete("operation-replay", "attempt-2", { deviceId: "emulator-5554" }),
+    ).toBe(true);
+    expect(
+      await repository.begin("operation-replay", "request-a", "attempt-4", 0, FAR_FUTURE_EXPIRY_MS),
+    ).toEqual({
+      started: false,
+      result: { deviceId: "emulator-5554" },
+      reconcileExistingConfiguration: false,
+    });
+  });
+
+  test("keeps the completed result recoverable when a replay fails", async () => {
+    const repository = new ProvisionDeviceOperationRepository(db);
+    await repository.begin(
+      "operation-replay-fail",
+      "request-a",
+      "attempt-1",
+      0,
+      FAR_FUTURE_EXPIRY_MS,
+    );
+    await repository.complete("operation-replay-fail", "attempt-1", { deviceId: "emulator-5554" });
+    await repository.begin(
+      "operation-replay-fail",
+      "request-a",
+      "attempt-2",
+      0,
+      FAR_FUTURE_EXPIRY_MS,
+    );
+
+    expect(
+      await repository.fail(
+        "operation-replay-fail",
+        "attempt-2",
+        "session_rebind_failed",
+        "rebind failed",
+      ),
+    ).toBe(true);
+
+    // The device really was provisioned; a failed replay must not discard that.
+    expect(
+      await repository.begin(
+        "operation-replay-fail",
+        "request-a",
+        "attempt-3",
+        0,
+        FAR_FUTURE_EXPIRY_MS,
+      ),
+    ).toEqual({
+      started: false,
+      result: { deviceId: "emulator-5554" },
+      reconcileExistingConfiguration: false,
+    });
+  });
+
   test("permits configuration reconciliation only after creation began", async () => {
     const repository = new ProvisionDeviceOperationRepository(db);
 

@@ -20,6 +20,14 @@ export type ProvisionDeviceOperationBeginResult =
  * under its own `attemptId`, and every later mutation matches on that token.
  * Each mutation returns whether it actually changed a row -- `false` means the
  * caller was superseded and must not report success.
+ *
+ * A REPLAY of a completed operation is exclusive too: `begin()` hands back the
+ * stored result only by moving the row to the non-terminal `replaying` status,
+ * so a concurrent `begin()` reports `inProgress` instead of handing a second
+ * process the same device. Whoever receives a replay result therefore OWNS the
+ * row and must end it with `complete()` or `fail()`; `fail()` on a replaying
+ * row reverts it to `succeeded` with its result intact, so a failed replay
+ * releases the claim without discarding the completed provision.
  */
 export interface ProvisionDeviceOperationStore {
   begin(
@@ -208,7 +216,28 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
     message: string,
     options?: { clearCreationStarted?: boolean },
   ): Promise<boolean> {
-    const update = await this.getDb()
+    const db = this.getDb();
+    // A failed REPLAY must not erase the completed provision it was replaying:
+    // the device really was created, so the stored result stays the durable
+    // answer and the row returns to `succeeded` for the next caller to replay.
+    // The error is still recorded for diagnostics (a later admission clears it).
+    const revertedReplay = await db
+      .updateTable("provision_device_operations")
+      .set({
+        status: "succeeded",
+        error_code: errorCode,
+        error_message: message,
+        ...(options?.clearCreationStarted ? { creation_started: 0 } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .where("operation_id", "=", operationId)
+      .where("attempt_id", "=", attemptId)
+      .where("status", "=", "replaying")
+      .executeTakeFirst();
+    if (Number(revertedReplay.numUpdatedRows) > 0) {
+      return true;
+    }
+    const update = await db
       .updateTable("provision_device_operations")
       .set({
         status: "failed",
@@ -250,14 +279,21 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       if (result) {
         // A replay still writes to this row (cutout backfill, session rebind),
         // so it has to take the fence as well -- otherwise its own complete()
-        // would be rejected as superseded. Claiming is a compare-and-set on
-        // the token just read, so two concurrent replays cannot both own it.
+        // would be rejected as superseded. It moves the row to the EXCLUSIVE
+        // non-terminal `replaying` status rather than leaving it `succeeded`:
+        // re-claiming a terminal status only rotated the token, so a second
+        // process could read the rotated token and claim the same completed
+        // operation, and both would reconfigure/rebind the device (the loser's
+        // fenced complete() then fails and releases the session the winner
+        // returned). `result_json` is preserved through the claim so the
+        // persisted result stays recoverable for rebind logic and for the next
+        // caller if this replay fails.
         const claimed = await this.claim(
           operationId,
           attemptId,
           expiresAtMs,
           existing,
-          "succeeded",
+          "replaying",
         );
         if (!claimed) {
           return { started: false, inProgress: true };
@@ -274,7 +310,9 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
     // executing it right now. Report in-progress rather than silently
     // re-entering the provisioning lifecycle (#6652 defect 1) -- unlike
     // "failed", which stays retryable immediately.
-    if (existing.status === "running") {
+    // `replaying` is the same contract for a completed operation whose replay
+    // is currently owned by another attempt (see the claim above).
+    if (existing.status === "running" || existing.status === "replaying") {
       return { started: false, inProgress: true };
     }
     // Admission is a compare-and-set, not a read-then-hope: the retry only
@@ -303,7 +341,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
     attemptId: string,
     expiresAtMs: number,
     existing: { attempt_id: string; status: string },
-    status: "running" | "succeeded",
+    status: "running" | "replaying",
   ): Promise<boolean> {
     const update = await this.getDb()
       .updateTable("provision_device_operations")

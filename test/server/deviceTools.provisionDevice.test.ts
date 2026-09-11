@@ -57,6 +57,8 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
       attemptId: string;
       result?: Record<string, unknown>;
       creationStarted: boolean;
+      /** A completed operation whose replay is currently owned by an attempt. */
+      replaying: boolean;
     }
   >();
   private readonly forcedInProgress = new Set<string>();
@@ -80,25 +82,34 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         fingerprint: requestFingerprint,
         attemptId,
         creationStarted: false,
+        replaying: false,
       });
       return { started: true, reconcileExistingConfiguration: false } as const;
     }
     if (existing.fingerprint !== requestFingerprint) {
       throw new ProvisionDeviceOperationConflictError(operationId);
     }
+    // A replay is EXCLUSIVE: the repository moves a claimed replay to the
+    // non-terminal `replaying` status, so a concurrent begin() sees
+    // in-progress instead of being handed the same completed device.
+    if (existing.replaying) {
+      return { started: false as const, inProgress: true as const };
+    }
     // Admission (and a replay) takes the fence, exactly as the repository's
     // compare-and-set does.
     existing.attemptId = attemptId;
-    return existing.result
-      ? {
-          started: false as const,
-          result: existing.result,
-          reconcileExistingConfiguration: existing.creationStarted,
-        }
-      : {
-          started: true as const,
-          reconcileExistingConfiguration: existing.creationStarted,
-        };
+    if (existing.result) {
+      existing.replaying = true;
+      return {
+        started: false as const,
+        result: existing.result,
+        reconcileExistingConfiguration: existing.creationStarted,
+      };
+    }
+    return {
+      started: true as const,
+      reconcileExistingConfiguration: existing.creationStarted,
+    };
   }
 
   async markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean> {
@@ -129,6 +140,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
       return false;
     }
     operation.result = result;
+    operation.replaying = false;
     return true;
   }
 
@@ -158,6 +170,10 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     this.failCalls++;
     this.failures.push({ operationId, errorCode });
     this.failCodes.push(errorCode);
+    if (operation?.replaying) {
+      // A failed replay keeps the completed result recoverable.
+      operation.replaying = false;
+    }
     if (options?.clearCreationStarted) {
       if (!operation) {
         throw new Error(`missing operation ${operationId}`);
@@ -2090,7 +2106,10 @@ describe("provisionDevice handler", () => {
         first.sessionId,
       );
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected")).toBeUndefined();
-      expect(operationStore.failCalls).toBe(0);
+      // The deferred replay releases its exclusive replay claim, and doing so
+      // must leave the completed result intact for the retry below.
+      expect(operationStore.failCodes).toEqual(["session_recovery_in_progress"]);
+      expect(operationStore.getStoredResult(args.operationId)).toBeDefined();
       recovery!.releaseRecoveryRouteLease();
       await recovery!.release();
       const second = JSON.parse(

@@ -4617,22 +4617,22 @@ export function registerDeviceTools() {
         // row is terminal: an admitted attempt owns a "running" row, and
         // leaving it running would make every retry report
         // operation_in_progress for the whole operation TTL (~30m) with
-        // nothing executing. A replay (started === false) instead reads a
-        // "succeeded" row it does not own -- failing that would destroy a
-        // valid completed result -- so only an admitted attempt is failed.
-        if (operation.started) {
-          logger.warn(
-            `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
-              `recovery: ${errorMessage(error)}`,
-            error,
-          );
-          await store.fail(
-            args.operationId,
-            attemptId,
-            PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
-            errorMessage(error),
-          );
-        }
+        // nothing executing. A replay (started === false) owns an exclusive
+        // "replaying" row, so it must be failed too or every retry would report
+        // operation_in_progress for the rest of the TTL; store.fail() reverts a
+        // replaying row to "succeeded" with its result intact, so this cannot
+        // destroy a valid completed result.
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+            `recovery: ${errorMessage(error)}`,
+          error,
+        );
+        await store.fail(
+          args.operationId,
+          attemptId,
+          PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+          errorMessage(error),
+        );
         throw error;
       }
       if (error instanceof ProvisionDeviceOperationSupersededError) {

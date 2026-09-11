@@ -3566,25 +3566,45 @@ async function awaitColdBootSettlement(
   deviceId: string,
 ): Promise<void> {
   const timer = getDeviceToolsDependencies().timer;
+  if (await raceColdBootExit(processSettlement, timer)) {
+    return;
+  }
+  logger.warn(
+    `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
+      `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms; escalating to SIGKILL`,
+  );
+  try {
+    processHandle.kill("SIGKILL");
+  } catch (error) {
+    // Best effort: the child may have died between the race and here, and the
+    // caller must not stay blocked on the escalation either.
+    logger.debug(`[DeviceTools] SIGKILL for cold boot ${deviceId} failed: ${error}`);
+  }
+  // `kill()` only requests signal delivery: the emulator is still running — and
+  // still holding its AVD's lock files — until it emits `exit`. Resolving here
+  // would hand the stable key to the next request mid-shutdown, so wait for the
+  // real exit, bounded by one more grace so the release can never be stranded.
+  if (!(await raceColdBootExit(processSettlement, timer))) {
+    logger.warn(
+      `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
+        `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms of SIGKILL; releasing its deferred ` +
+        "resources anyway",
+    );
+  }
+}
+
+/**
+ * Waits for `settlement`, bounded by one `COLD_BOOT_SETTLEMENT_GRACE_MS` grace
+ * on the injected timer. Resolves true when the process settled first, false
+ * when the grace expired.
+ */
+async function raceColdBootExit(settlement: Promise<void>, timer: Timer): Promise<boolean> {
   let timeoutHandle: NodeJS.Timeout | undefined;
   try {
-    await Promise.race([
-      processSettlement,
-      new Promise<void>((resolve) => {
-        timeoutHandle = timer.setTimeout(() => {
-          logger.warn(
-            `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
-              `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms; escalating to SIGKILL`,
-          );
-          try {
-            processHandle.kill("SIGKILL");
-          } catch (error) {
-            // Best effort: the child may have died between the race and here,
-            // and the caller must not stay blocked on the escalation either.
-            logger.debug(`[DeviceTools] SIGKILL for cold boot ${deviceId} failed: ${error}`);
-          }
-          resolve();
-        }, COLD_BOOT_SETTLEMENT_GRACE_MS);
+    return await Promise.race([
+      settlement.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeoutHandle = timer.setTimeout(() => resolve(false), COLD_BOOT_SETTLEMENT_GRACE_MS);
       }),
     ]);
   } finally {

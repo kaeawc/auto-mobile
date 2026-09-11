@@ -14,6 +14,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { DaemonState } from "../daemon/daemonState";
+import { hasRecordedAcquisitionOwnership } from "../daemon/acquisitionOwnership";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
@@ -533,6 +534,18 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       );
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
+        // A published autolock session reaches ordinary tools through this
+        // route, never through the acquisition path, so the cancelled-minter
+        // release fence (`acquisitionOwnership`) would not see this use of it.
+        // Count it as an admission unless this very execution is the one that
+        // produced the session — a minting call's own nested tool calls share
+        // its async scope and must not advance the counter it captured.
+        if (
+          DaemonState.getInstance().isInitialized() &&
+          !hasRecordedAcquisitionOwnership(implicitSessionUuid)
+        ) {
+          DaemonState.getInstance().getDevicePool().noteSessionAdmission(implicitSessionUuid);
+        }
         if (execution) {
           executionTracker.setResolvedAutolockSessionUuid(
             execution.executionId,

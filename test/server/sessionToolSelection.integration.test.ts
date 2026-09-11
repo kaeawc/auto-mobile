@@ -1133,6 +1133,102 @@ describe("post-handler cancellation guard scope", () => {
     });
   });
 
+  // A sibling ACQUISITION is not the only post-mint use of a published session:
+  // `autolockDevice` publishes the mapping to the MCP connection, so any
+  // ordinary device tool on that connection (`observe`, `tapOn`, ...) is
+  // admitted onto the same session through
+  // `ToolRegistry.resolveImplicitAutolockSession` without ever touching the
+  // acquisition path. Cancelling the minter mid-enrichment must not retire the
+  // session beneath that execution either.
+  test("a cancelled minter keeps a session an ordinary tool call was admitted onto", async () => {
+    const sessionId = "cancel-guard-implicit-admission-session";
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    restoreAutolock = () => {
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const deviceUtils = new FakeDeviceUtils();
+    const device = {
+      name: "Pixel 8",
+      platform: "android" as const,
+      deviceId: "implicit-admission-android-1",
+    };
+    deviceUtils.setBootedDevices("android", [device]);
+    const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    const minted = Promise.withResolvers<string>();
+    const siblingAdmitted = Promise.withResolvers<void>();
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    let observedSessionUuid: string | undefined;
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({ platform: z.string().optional(), sessionUuid: z.string().optional() }),
+      async (_device: unknown, args: { sessionUuid?: string }) => {
+        observedSessionUuid = args.sessionUuid;
+        return { success: true };
+      },
+      // `booted` keeps this fake tool out of CtrlProxy/accessibility setup.
+      { deviceReadiness: "booted" },
+    );
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => {
+        const sessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        minted.resolve(sessionUuid);
+        // The ordinary tool call is admitted onto the published session while
+        // the minter is still in its own gated-tools enrichment.
+        await siblingAdmitted.promise;
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    const minterCall = fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+      z.any(),
+    );
+
+    const mintedSessionUuid = await minted.promise;
+    // Pre-seed the keep-awake cache so the ordinary tool's context setup never
+    // shells out to adb (this suite runs on fakes).
+    sessionManager.setKeepScreenAwake(mintedSessionUuid, { applied: false, skipReason: "test" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: sessionId,
+    });
+    expect(observedSessionUuid).toBe(mintedSessionUuid);
+    siblingAdmitted.resolve();
+
+    await expect(minterCall).rejects.toThrow(/cancelled during acquisition/);
+
+    // An ordinary tool call already ran on this handle: retiring it would idle
+    // the device underneath that execution.
+    expect(sessionManager.getSession(mintedSessionUuid)).not.toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({
+      status: "busy",
+      sessionId: mintedSessionUuid,
+    });
+  });
+
   test("a cancelled acquisition returns its pooled device to the pool", async () => {
     const sessionId = "cancel-guard-pooled-session";
     const timer = new FakeTimer();

@@ -75,12 +75,16 @@ async function releaseCancelledAcquisition(
     unregisterDirectSession(sessionUuid);
     return;
   }
-  if (daemonState.getDevicePool().getSessionReuseCount(sessionUuid) > ownership.reuseCountAtMint) {
-    // Fence against a later hand-off: this call minted the session, but the
-    // pool has since handed the same session to another live acquisition, which
-    // may already have returned the handle to the client. Retiring it now would
-    // strand that caller and idle the device it is still driving. Its own
-    // release (or the idle/heartbeat reap) remains the backstop.
+  if (
+    daemonState.getDevicePool().getSessionAdmissionCount(sessionUuid) >
+    ownership.admissionCountAtMint
+  ) {
+    // Fence against a later admission: this call minted the session, but the
+    // pool has since admitted the same session to another live execution — a
+    // sibling acquisition that may already have returned the handle to the
+    // client, or an ordinary device tool resolved onto it implicitly. Retiring
+    // it now would strand that caller and idle the device it is still driving.
+    // Its own release (or the idle/heartbeat reap) remains the backstop.
     return;
   }
   try {
@@ -1053,7 +1057,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // the device until the missing-first-heartbeat reap.
             acquisitionOwnership?.get(acquiredSessionUuid) ?? {
               ownership: "minted",
-              reuseCountAtMint: 0,
+              admissionCountAtMint: 0,
             },
           );
           throw new ActionableError("MCP request was cancelled during acquisition.");

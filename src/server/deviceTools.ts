@@ -815,6 +815,14 @@ function releaseProvisionDeviceWaiter(
     // nothing left to cancel.
     return false;
   }
+  // Retire the entry HERE, not when the abandoned promise finally settles: the
+  // caller is told `operationContinues: false`, so a retry arriving while the
+  // cancelled lifecycle is still unwinding must NOT join it (it would count as
+  // a waiter from zero and inherit the cancellation failure). Dropping the
+  // entry sends that retry through `executeProvisionDevice`, where the durable
+  // operation row is the authority on whether the prior attempt is still live.
+  // The settle handlers are identity-guarded, so this early delete is safe.
+  activeProvisionDeviceOperations.delete(operationId);
   operation.controller.abort(
     new ActionableError(
       `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +

@@ -2560,6 +2560,61 @@ describe("provisionDevice handler", () => {
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
   });
 
+  test("does not hand a retry the cancelled attempt's failure before it settles", async () => {
+    let provisionCalls = 0;
+    let releaseFirstAttempt!: () => void;
+    const firstAttemptGate = new Promise<void>((resolve) => {
+      releaseFirstAttempt = resolve;
+    });
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls += 1;
+          if (provisionCalls > 1) {
+            return provisionedTestDevice("android", true);
+          }
+          await new Promise<void>((resolve) => {
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          // The cancelled lifecycle is still unwinding when the retry arrives.
+          await firstAttemptGate;
+          throw request.signal?.reason ?? new Error("aborted");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("android", "operation-retry-after-sole-abort"),
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await Promise.resolve();
+    caller.abort(new Error("client went away"));
+    const cancelled = JSON.parse(((await call) as any).content[0].text);
+    expect(cancelled).toMatchObject({
+      error: { code: "request_cancelled" },
+      operationContinues: false,
+    });
+
+    // The response promised the operation was cancelled, so a retry must not
+    // join the aborted lifecycle and inherit its failure; it consults the
+    // durable store instead.
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(retried.error?.code).not.toBe("request_cancelled");
+    expect(retried.error).toBeUndefined();
+    expect(retried).toMatchObject({ operationId: args.operationId });
+    expect(provisionCalls).toBe(2);
+
+    releaseFirstAttempt();
+  });
+
   test("tells a detaching joiner that the shared operation continues", async () => {
     let resolveProvision!: (result: ExactProvisionedDevice) => void;
     setDeviceToolsDependencies({

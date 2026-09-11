@@ -640,6 +640,39 @@ describe("provisionDevice handler", () => {
     expect(second).toEqual(first);
   });
 
+  test("releases the replay claim when nothing about the persisted result changed", async () => {
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-idempotent-replay-claim",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+          displayCutout: "hole_punch" as const,
+        },
+      },
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    // A replay with no resources whose cutout fields are already current still
+    // owns the exclusive `replaying` claim taken by begin(); it has to end that
+    // claim, or every later identical call reports operation_in_progress for
+    // the rest of the operation TTL.
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const third = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(second).toEqual(first);
+    expect(third).toEqual(first);
+    expect(third.error).toBeUndefined();
+  });
+
   test("backfills cutout fields when replaying a legacy persisted result", async () => {
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {

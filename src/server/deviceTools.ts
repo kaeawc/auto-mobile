@@ -4584,9 +4584,13 @@ export function registerDeviceTools() {
         ))
       ) {
         const replayResult = backfillProvisionDeviceCutout(args, operation.result);
-        if (args.resources || replayResult !== operation.result) {
-          await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult);
-        }
+        // Unconditionally, even when the persisted result is byte-for-byte what
+        // we are about to return: begin() moved this row to the EXCLUSIVE
+        // non-terminal `replaying` status, so returning without completing it
+        // would leave the claim held and make every later identical call report
+        // operation_in_progress until the row's TTL (~30m) expires. Re-storing
+        // an identical result is harmless; leaving the claim open is not.
+        await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult);
         return replayResult;
       }
       if (!operation.started) {

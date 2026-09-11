@@ -59,7 +59,16 @@ async function releaseCancelledAcquisition(sessionUuid: string, toolName: string
     return;
   }
   try {
-    await daemonState.getSessionManager().releaseSession(sessionUuid, "acquisition-cancelled");
+    const releasedDeviceId = await daemonState
+      .getSessionManager()
+      .releaseSession(sessionUuid, "acquisition-cancelled");
+    if (releasedDeviceId) {
+      // Releasing the session only records the freed assignment; the pooled
+      // device stays `busy` until releaseDevice runs. Nothing else can ever run
+      // it here, because the client never received the cancelled UUID -- so the
+      // device would be held for the daemon's lifetime.
+      await daemonState.getDevicePool().releaseDevice(releasedDeviceId, sessionUuid);
+    }
   } catch (error) {
     // Log-and-continue: the caller must still see the cancellation error rather
     // than a release failure, and the missing-first-heartbeat reap remains the

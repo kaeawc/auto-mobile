@@ -10,6 +10,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   private voiceOverEnabled: boolean = false;
   private readonly voiceOverEnabledResults: boolean[] = [];
   private readonly resolvedStateResults: Array<boolean | null> = [];
+  private persistentResolvedState: boolean | null | undefined;
   private callCount: number = 0;
   private invalidatedDevices: string[] = [];
 
@@ -36,6 +37,14 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   }
 
   /**
+   * Configure the tri-state result returned after queued outcomes are consumed.
+   * Passing `null` models a persistently unreadable CtrlProxy probe.
+   */
+  setPersistentResolvedState(result: boolean | null | undefined): void {
+    this.persistentResolvedState = result;
+  }
+
+  /**
    * Get the number of times isVoiceOverEnabled was called
    */
   getCallCount(): number {
@@ -56,6 +65,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     this.voiceOverEnabled = false;
     this.voiceOverEnabledResults.length = 0;
     this.resolvedStateResults.length = 0;
+    this.persistentResolvedState = undefined;
     this.callCount = 0;
     this.invalidatedDevices = [];
     this.isVoiceOverEnabledFeatureFlagsArgs.length = 0;
@@ -112,6 +122,13 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     this.isVoiceOverEnabledTimeoutMsArgs.push(timeoutMs);
     if (this.resolvedStateResults.length > 0) {
       return this.resolvedStateResults.shift()!;
+    }
+    const queuedLegacyResult = this.voiceOverEnabledResults.shift();
+    if (queuedLegacyResult !== undefined) {
+      return queuedLegacyResult;
+    }
+    if (this.persistentResolvedState !== undefined) {
+      return this.persistentResolvedState;
     }
     return this.voiceOverEnabled;
   }

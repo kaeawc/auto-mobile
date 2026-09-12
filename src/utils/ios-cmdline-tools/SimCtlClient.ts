@@ -2018,15 +2018,26 @@ export class SimCtlClient implements SimCtl {
     // Parse the text output to find LCD screen information
     const lines = result.stdout.split("\n");
     let inLCDScreen = false;
-    let width = 0;
-    let height = 0;
-    let uiScale = 1;
+    // Accumulated per-section so a later section's fields can never mix with
+    // an earlier section's fields (issue #6584). Reset whenever a new LCD
+    // section starts.
+    let sectionWidth = 0;
+    let sectionHeight = 0;
+    let sectionUiScale: number | null = null;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
 
       // Look for LCD screen section
       if (line.includes("LCD:") || line.includes("Screen Type: Integrated")) {
+        if (!inLCDScreen) {
+          // The two markers can both occur in one LCD section. Reset only when
+          // entering a section, otherwise a later marker would discard fields
+          // already read from the same section.
+          sectionWidth = 0;
+          sectionHeight = 0;
+          sectionUiScale = null;
+        }
         inLCDScreen = true;
         continue;
       }
@@ -2037,8 +2048,8 @@ export class SimCtlClient implements SimCtl {
           // Extract dimensions from format "Pixel Size: {1179, 2556}"
           const pixelSizeMatch = line.match(/Pixel Size:\s*\{(\d+),\s*(\d+)\}/);
           if (pixelSizeMatch) {
-            width = parseInt(pixelSizeMatch[1], 10);
-            height = parseInt(pixelSizeMatch[2], 10);
+            sectionWidth = parseInt(pixelSizeMatch[1], 10);
+            sectionHeight = parseInt(pixelSizeMatch[2], 10);
           }
         }
 
@@ -2046,22 +2057,45 @@ export class SimCtlClient implements SimCtl {
           // Extract UI scale from format "Preferred UI Scale: 3"
           const uiScaleMatch = line.match(/Preferred UI Scale:\s*(\d+(?:\.\d+)?)/);
           if (uiScaleMatch) {
-            uiScale = parseFloat(uiScaleMatch[1]);
+            sectionUiScale = parseFloat(uiScaleMatch[1]);
           }
         }
       }
 
-      // Reset flag if we encounter a new port section
+      // Section closes at the next Port: line. Only commit the accumulated
+      // values, and stop scanning, once this section carries both a pixel
+      // size and a UI scale — never let a later, incomplete section overwrite
+      // or blend with an earlier complete one.
       if (line.startsWith("Port:") && inLCDScreen) {
+        if (
+          sectionWidth > 0 &&
+          sectionHeight > 0 &&
+          sectionUiScale !== null &&
+          sectionUiScale > 0
+        ) {
+          return {
+            width: Math.round(sectionWidth / sectionUiScale),
+            height: Math.round(sectionHeight / sectionUiScale),
+          } as ScreenSize;
+        }
         inLCDScreen = false;
       }
     }
 
-    // If we found valid dimensions, apply UI scale and return logical size
-    if (width > 0 && height > 0 && uiScale > 0) {
+    // The last LCD section in `simctl io enumerate` output is not always
+    // followed by a trailing "Port:" line, so a complete in-progress section
+    // (both pixel size and UI scale collected) must also be finalized here at
+    // EOF rather than only ever being finalized by the "Port:" sentinel above.
+    if (
+      inLCDScreen &&
+      sectionWidth > 0 &&
+      sectionHeight > 0 &&
+      sectionUiScale !== null &&
+      sectionUiScale > 0
+    ) {
       return {
-        width: Math.round(width / uiScale),
-        height: Math.round(height / uiScale),
+        width: Math.round(sectionWidth / sectionUiScale),
+        height: Math.round(sectionHeight / sectionUiScale),
       } as ScreenSize;
     }
 

@@ -1931,10 +1931,15 @@ export class SimCtlClient implements SimCtl {
 
       // Look for LCD screen section
       if (line.includes("LCD:") || line.includes("Screen Type: Integrated")) {
+        if (!inLCDScreen) {
+          // The two markers can both occur in one LCD section. Reset only when
+          // entering a section, otherwise a later marker would discard fields
+          // already read from the same section.
+          sectionWidth = 0;
+          sectionHeight = 0;
+          sectionUiScale = null;
+        }
         inLCDScreen = true;
-        sectionWidth = 0;
-        sectionHeight = 0;
-        sectionUiScale = null;
         continue;
       }
 

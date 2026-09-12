@@ -690,6 +690,7 @@ export const observeDiffNodeChangeSchema = z
  */
 export const observeDiffSchema = z
   .object({
+    keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     isDiff: z.literal(true),
     skeleton: z
       .array(skeletonElementSchema)
@@ -846,6 +847,7 @@ const perfSnapshotSchema = z.object({
 
 export const observeResultSchema = z
   .object({
+    keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),

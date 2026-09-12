@@ -120,6 +120,7 @@ import {
   ensureSystemTrayOpen,
   ensureSystemTrayClosed,
   captureSystemTrayTerminalEvidence,
+  observeSystemTrayAfterTap,
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   tapElement,
@@ -601,7 +602,7 @@ export const systemTraySchema = withAppIdAliases(
     if (!hasCriteria) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `${value.action} action requires at least one notification criteria (title, body, or appId)`,
+        message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
       });
     }
 
@@ -1598,6 +1599,7 @@ export function registerInteractionTools() {
     device: BootedDevice,
     args: SystemTrayArgs,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ) => {
     try {
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
@@ -1666,7 +1668,7 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "tap") {
-        let { match } = await waitForNotificationMatch(
+        let { observation: baseline, match } = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
@@ -1692,6 +1694,7 @@ export function registerInteractionTools() {
           );
           if (reMatch.match) {
             match = reMatch.match;
+            baseline = reMatch.observation;
           } else {
             throw new ActionableError(
               "Expanded collapsed notification group but could not re-match the notification. " +
@@ -1708,18 +1711,20 @@ export function registerInteractionTools() {
         }
 
         await tapElement(device, tapMatch.element);
-        const { observeScreenFactory } = getSystemTrayDependencies();
-        const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute({
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-        });
+        const { observation: nextObservation, settled } = await observeSystemTrayAfterTap(
+          device,
+          baseline,
+          signal,
+        );
         await captureSystemTrayTerminalEvidence(device, nextObservation);
 
         return createJSONToolResponse({
-          message: notification.tapActionLabel
-            ? `Tapped notification action "${notification.tapActionLabel}"`
-            : "Tapped notification",
+          message:
+            (notification.tapActionLabel
+              ? `Tapped notification action "${notification.tapActionLabel}"`
+              : "Tapped notification") +
+            (settled ? "" : "; effect not yet settled — re-observe before continuing"),
+          settled,
           match: match.match.matches,
           tapTarget: {
             text: tapMatch.text,

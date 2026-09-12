@@ -21,6 +21,11 @@ class DeviceResourceParserTest {
           "virtualCount": 1,
           "physicalCount": 0,
           "lastUpdated": "2024-01-24T23:00:00Z",
+          "observationComplete": false,
+          "sourceObservations": {
+            "ios-simulator": { "observationComplete": true },
+            "ios-physical": { "observationComplete": false, "discoveryError": { "code": "failed" } }
+          },
           "devices": [
               {
                   "name": "Pixel 8 API 35",
@@ -28,7 +33,8 @@ class DeviceResourceParserTest {
                   "deviceId": "emulator-5554",
                   "source": "local",
                   "isVirtual": true,
-                  "status": "booted"
+                  "status": "booted",
+                  "identity": { "stableId": "Pixel_8", "connectionId": "transport-1" }
               }
           ]
       }
@@ -37,6 +43,10 @@ class DeviceResourceParserTest {
 
     val result = DeviceResourceParser.parseBootedDevices(json)
     assertNotNull(result)
+    assertEquals(false, result.observationComplete)
+    assertEquals(true, result.sourceObservations["ios-simulator"]?.observationComplete)
+    assertEquals(false, result.sourceObservations["ios-physical"]?.observationComplete)
+    assertEquals("Pixel_8", result.devices.single().identity?.stableId)
     assertEquals(1, result.totalCount)
     assertEquals(1, result.androidCount)
     assertEquals(0, result.iosCount)

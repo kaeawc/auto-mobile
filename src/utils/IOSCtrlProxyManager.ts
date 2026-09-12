@@ -38,6 +38,14 @@ export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 const SHUTDOWN_STOP_TIMEOUT_MS = 1_200;
 const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
+// `stop()` tears the runner's process tree down, but its HTTP listener can keep
+// answering /health for a moment while the process drains. A single probe fired
+// the instant stop() returns races that drain and rejects a perfectly restartable
+// runner ("still running after forced teardown"), so give the drain the same
+// bounded grace the shutdown path already allows a forced stop before concluding
+// the runner really is wedged.
+const FORCE_RESTART_DRAIN_GRACE_MS = SHUTDOWN_FORCE_STOP_TIMEOUT_MS;
+const FORCE_RESTART_DRAIN_POLL_INTERVAL_MS = 50;
 
 /**
  * iOS-specific setup result; carries the build result alongside the
@@ -217,10 +225,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static startupOrphanRunnerReap: Promise<void> | null = null;
 
   // Cache for status checks
-  private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
   private cachedInstalled: { isInstalled: boolean; timestamp: number } | null = null;
   private cachedRunning: { isRunning: boolean; timestamp: number } | null = null;
-  private static readonly AVAILABILITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
   private static readonly STATUS_CACHE_TTL = 30 * 1000; // 30 seconds
   private static readonly IMPORTANT_OUTPUT_MARKERS = [
     "error",
@@ -240,6 +246,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Setup state tracking
   private attemptedSetup: boolean = false;
+  // #6575: the legacy-app uninstall probe is a one-time cleanup for a
+  // long-renamed bundle ID; gate it to at most once per manager instance so
+  // repeat setup() calls (including the attemptedSetup fast path) don't pay
+  // for a redundant external-process round trip.
+  private legacyCheckDone: boolean = false;
 
   // XCUITest process state
   private xcTestProcessId: number | null = null;
@@ -750,7 +761,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Clear all caches
    */
   public clearCaches(): void {
-    this.cachedAvailability = null;
     this.cachedInstalled = null;
     this.cachedRunning = null;
     logger.info("[IOSCtrlProxy] Cleared all caches");
@@ -854,27 +864,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * Check if the service is available (installed and running)
+   * Check if the service is available (installed and running).
+   *
+   * Delegates directly to isInstalled()/isRunning() rather than layering its
+   * own cache on top: isRunning() already carries the 30s STATUS_CACHE_TTL,
+   * which is the only freshness the setup() gate's comment above assumes. A
+   * separate hour-long positive cache here let a runner that died without a
+   * local child-exit event (killed externally, simulator erased, wedged but
+   * still answering /health) report "already running" for up to an hour
+   * (#6416).
    */
   public async isAvailable(): Promise<boolean> {
-    // Check cache first
-    if (this.cachedAvailability && this.cachedAvailability.isAvailable) {
-      const cacheAge = this.timer.now() - this.cachedAvailability.timestamp;
-      if (cacheAge < IOSCtrlProxyManager.AVAILABILITY_CACHE_TTL) {
-        return this.cachedAvailability.isAvailable;
-      }
-    }
-
     const [installed, running] = await Promise.all([this.isInstalled(), this.isRunning()]);
-
-    const available = installed && running;
-
-    this.cachedAvailability = {
-      isAvailable: available,
-      timestamp: this.timer.now(),
-    };
-
-    return available;
+    return installed && running;
   }
 
   // MARK: - Service Control
@@ -1208,8 +1210,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.xcTestProcess = null;
         // Host-control mode has no local child-exit event to clear these as a side
         // effect (handleProcessExit), so clear explicitly for both modes — otherwise
-        // cachedRunning/cachedAvailability can serve a stale positive to the next
-        // setup() for up to STATUS_CACHE_TTL (#2834 review).
+        // cachedRunning can serve a stale positive to the next setup() for up to
+        // STATUS_CACHE_TTL (#2834 review).
         this.clearCaches();
         this.processSupervisor.stop();
         await this.processSupervisor.start();
@@ -1319,6 +1321,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * This cleans up the old bundle ID left over from before the rename to CtrlProxy.
    */
   private async uninstallLegacyAppIfPresent(): Promise<void> {
+    if (this.legacyCheckDone) {
+      return;
+    }
+    this.legacyCheckDone = true;
     try {
       const simulator = this.isSimulator();
       const isInstalled = await this.deviceAppManager.getInstalledAppBundleHash(
@@ -1811,7 +1817,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             options.signal.reason ?? new Error("iOS CtrlProxy restart was aborted"),
           );
         }
-        if (await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId)) {
+        if (await this.isRunnerStillHealthyAfterForcedTeardown(options.signal)) {
           throw new Error(
             "iOS CtrlProxy is still running after forced teardown; refusing to reuse a potentially unresponsive runner",
           );
@@ -1839,6 +1845,31 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       })
       .catch(() => {});
     await restart;
+  }
+
+  /**
+   * Poll the health endpoint for a bounded grace after a forced teardown. Returns
+   * true only when the old runner is STILL answering at the end of the grace — a
+   * listener that merely lags the process teardown stops answering well inside it,
+   * and the restart may proceed. Honours the caller's abort signal while polling.
+   */
+  private async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
+    const graceDeadlineMs = this.timer.now() + FORCE_RESTART_DRAIN_GRACE_MS;
+    for (;;) {
+      if (
+        !(await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId))
+      ) {
+        return false;
+      }
+      const remainingMs = graceDeadlineMs - this.timer.now();
+      if (remainingMs <= 0) {
+        return true;
+      }
+      await this.sleepForHealthPoll(
+        Math.min(FORCE_RESTART_DRAIN_POLL_INTERVAL_MS, remainingMs),
+        signal,
+      );
+    }
   }
 
   private async waitForForceRestart(options: CtrlProxyStartOptions): Promise<boolean> {
@@ -2255,12 +2286,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const argsOut = processInfo?.command ?? "";
       if (
         !argsOut.includes("CtrlProxy") ||
-        (await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo))
+        (await this.processClient.isDaemonManagedSimulatorXcodebuildProcess({
+          command: argsOut,
+          ppid: processInfo?.ppid,
+          environment: processInfo?.environment,
+        }))
       ) {
         continue;
       }
       const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
-      if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {
+      if (!this.processClient.hasDeviceIdentity(identityText, this.device.deviceId)) {
         continue;
       }
       const port =
@@ -2294,10 +2329,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         continue;
       }
       const processInfo = await this.processClient.getProcessInfo(pid, deadline);
-      if (
-        !processInfo ||
-        !IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(processInfo.command)
-      ) {
+      if (!processInfo || !this.processClient.isDirectCtrlProxyRunnerCommand(processInfo.command)) {
         continue;
       }
       const port =
@@ -2345,7 +2377,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     for (const port of candidatePorts) {
       const listeningProcesses = await this.findListeningProcessesOnPort(port);
       for (const process of listeningProcesses) {
-        if (!IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(process.command)) {
+        if (!this.processClient.isDirectCtrlProxyRunnerCommand(process.command)) {
           continue;
         }
         // A direct in-simulator runner with a daemon-managed xcodebuild/shell ancestor is
@@ -2465,12 +2497,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private isOwnedCtrlProxyRunnerProcess(process: ListeningProcess): boolean {
-    if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
+    if (!this.processClient.isCtrlProxyRunnerCommand(process.command)) {
       return false;
     }
     return (
-      IOSCtrlProxyManager.hasDeviceIdentity(process.command, this.device.deviceId) ||
-      IOSCtrlProxyManager.hasDeviceIdentity(process.environment ?? "", this.device.deviceId)
+      this.processClient.hasDeviceIdentity(process.command, this.device.deviceId) ||
+      this.processClient.hasDeviceIdentity(process.environment ?? "", this.device.deviceId)
     );
   }
 
@@ -2485,7 +2517,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return false;
       }
       if (
-        IOSCtrlProxyManager.hasDeviceIdentity(processInfo.command, this.device.deviceId) ||
+        this.processClient.hasDeviceIdentity(processInfo.command, this.device.deviceId) ||
         processInfo.command.includes(this.device.deviceId)
       ) {
         return true;
@@ -2513,7 +2545,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       deadline?: number;
     } = {},
   ): Promise<DaemonManagedRunnerTreeRoot> {
-    if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
+    if (!processClient.isCtrlProxyRunnerCommand(process.command)) {
       return { kind: "not_daemon_managed" };
     }
 
@@ -2521,7 +2553,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     let parentPid = process.ppid;
     const visitedPids = new Set<number>([process.pid]);
 
-    if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
+    if (IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
       rootPid = IOSCtrlProxyManager.rootPidForDaemonManagedProcess(
         process.pid,
         process.ppid,
@@ -2607,7 +2639,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     pid: number,
     requireOrphanedRoot: boolean | undefined,
   ): DaemonManagedRunnerParentRoot | null {
-    if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
+    if (
+      !IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)
+    ) {
       return null;
     }
     return {
@@ -2616,7 +2650,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         process.ppid,
         requireOrphanedRoot,
       ),
-      terminal: IOSCtrlProxyManager.isShellCommand(process.command),
+      terminal: IOSCtrlProxyProcessClient.isShellCommand(process.command),
     };
   }
 
@@ -2638,84 +2672,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return processes.map((process) => `PID ${process.pid} (cmd: ${process.command})`).join(", ");
   }
 
-  private static hasDeviceIdentity(text: string, deviceId: string): boolean {
-    return (
-      text.includes(`id=${deviceId}`) ||
-      text.includes(`AUTOMOBILE_DEVICE_ID=${deviceId}`) ||
-      text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`)
-    );
-  }
-
-  private async isDaemonManagedSimulatorXcodebuildProcess(
-    command: string,
-    processInfo?: { ppid?: number; environment?: string } | null,
-  ): Promise<boolean> {
-    const environment = processInfo?.environment ?? "";
-    if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
-      return false;
-    }
-    if (processInfo?.ppid === 1) {
-      return true;
-    }
-    if (await this.hasOrphanedDaemonManagedShellParent(processInfo?.ppid)) {
-      return true;
-    }
-    return !IOSCtrlProxyManager.hasExternalXcodebuildIdentity(environment);
-  }
-
-  private async hasOrphanedDaemonManagedShellParent(
-    parentPid: number | undefined,
-  ): Promise<boolean> {
-    if (parentPid === undefined || parentPid <= 1) {
-      return false;
-    }
-    const parentInfo = await this.processClient.getProcessInfo(parentPid);
-    if (!parentInfo || parentInfo.ppid !== 1) {
-      return false;
-    }
-    return (
-      IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
-      IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
-    );
-  }
-
-  private static isDaemonManagedSimulatorXcodebuildCommandShape(command: string): boolean {
-    return (
-      command.includes("xcodebuild") &&
-      command.includes("test-without-building") &&
-      command.includes("-xctestrun") &&
-      command.includes("platform=iOS Simulator") &&
-      command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
-      !command.includes("CTRL_PROXY_IOS_PORT=") &&
-      !command.includes("AUTOMOBILE_DEVICE_ID=")
-    );
-  }
-
-  private static isShellCommand(command: string): boolean {
-    return /(?:^|\/)(?:ba|z|c|t?c|k)?sh(?:\s|$)/.test(command);
-  }
-
-  private static hasExternalXcodebuildIdentity(environment: string): boolean {
-    return (
-      environment.includes("CTRL_PROXY_IOS_PORT=") ||
-      environment.includes("AUTOMOBILE_DEVICE_ID=") ||
-      environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=")
-    );
-  }
-
-  private static isCtrlProxyRunnerCommand(command: string): boolean {
-    return (
-      command.includes("CtrlProxy") &&
-      (command.includes("xcodebuild") ||
-        command.includes("CtrlProxyUITests") ||
-        command.includes("CtrlProxyUITests-Runner") ||
-        command.includes(".xctestrun"))
-    );
-  }
-
-  private static isDirectCtrlProxyRunnerCommand(command: string): boolean {
-    return command.includes("CtrlProxyUITests-Runner");
-  }
+  // Runner-identification predicates (hasDeviceIdentity, isCtrlProxyRunnerCommand,
+  // isDirectCtrlProxyRunnerCommand, isDaemonManagedSimulatorXcodebuildProcess and its
+  // supporting shape/shell helpers) now live solely on IOSCtrlProxyProcessClient — see
+  // IOSCtrlProxyProcessClient.ts. Keeping private copies here let them silently diverge
+  // (#6372 follow-up); callers in this file delegate to `this.processClient` /
+  // `IOSCtrlProxyProcessClient` instead.
 
   /**
    * Check if the tracked iproxy process is alive.

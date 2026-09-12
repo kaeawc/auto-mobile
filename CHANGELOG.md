@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.0.71] - 2026-09-10
+
+### Fixed
+
+- logging: closeLogStream relies on an unverified WriteStream error/close ordering and can hang if close never arrives ([#6700](https://github.com/kaeawc/auto-mobile/issues/6700)) (maintenance)
+- tap(ios): refreshViewHierarchy drops the caller's remaining budget when fetching the iOS hierarchy ([#6615](https://github.com/kaeawc/auto-mobile/issues/6615)) (ios)
+- simctl(ios): privacy grants for multiple permissions run concurrently against one device's TCC.db ([#6581](https://github.com/kaeawc/auto-mobile/issues/6581)) (ios, needs-device-verify)
+
+### Other
+
+- cli: the built-in help advertises forms the schemas reject — 'tapOn --text "Submit"' fails, union params render as the word "union", and bare --help starts a server then stack-traces ([#6817](https://github.com/kaeawc/auto-mobile/issues/6817)) (bot-filed, routine:dogfood)
+- systemTray(tap): returns the pre-tap shade as observationDiff.reason='diff_emitted', so an inline Reply that worked reads as a no-op ([#6816](https://github.com/kaeawc/auto-mobile/issues/6816)) (bot-filed, routine:dogfood)
+- mcp errors: schema-validation messages name leaf keys but not the object holding them — systemTray 'find' rejects the exact title/body/appId it tells you to pass ([#6815](https://github.com/kaeawc/auto-mobile/issues/6815)) (bot-filed, routine:dogfood)
+- mcp: acquiring a device session removes 57 of 84 tools from tools/list, and nothing names the 57 — an LLM client cannot reach setToolEnabled for a tool it can no longer see ([#6814](https://github.com/kaeawc/auto-mobile/issues/6814)) (bot-filed, routine:dogfood)
+- observe(android): the soft keyboard is enumerated key-by-key, so 69% of the skeleton is Gboard on any focused text field ([#6795](https://github.com/kaeawc/auto-mobile/issues/6795)) (bot-filed, routine:dogfood)
+
 ## [v0.0.70] - 2026-09-10
 
 ### Fixed

@@ -1,6 +1,7 @@
 import { createConnection, Socket } from "node:net";
 import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
+import { z } from "zod";
 import { logger } from "../utils/logger";
 import { encodeNonFinite } from "../utils/nonFiniteJson";
 import { ActionableError } from "../models";
@@ -32,6 +33,28 @@ import {
   sanitizeDeviceControlTransportFailure,
 } from "./deviceControlTransportFailure";
 import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
+import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
+import type { DaemonStatus } from "./types";
+
+const socketStatusSchema = z.object({
+  pid: z.number().int().positive().optional(),
+  version: z.string().trim().min(1),
+  buildId: z.string().optional(),
+  entryScript: z.string().optional(),
+  releaseVersion: z.string().optional(),
+  startedAt: z.number().finite().optional(),
+});
+
+/** The server rejected this request before dispatch; retry cannot duplicate work. */
+export class DaemonHandshakeMismatchError extends ActionableError {
+  constructor(
+    readonly failure: DaemonHandshakeFailure,
+    message: string,
+  ) {
+    super(`Daemon preflight failed; no device operation started. ${message}`);
+    this.name = "DaemonHandshakeMismatchError";
+  }
+}
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -624,17 +647,54 @@ export class DaemonClient {
       const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
       const boundSessionLoss = sanitizeBoundSessionLoss(response.boundSessionLoss);
       pending.reject(
-        boundSessionLoss
-          ? new DaemonBoundSessionLostError(boundSessionLoss)
-          : transportFailure
-            ? new DeviceControlTransportError(
-                response.error || "Device-control transport failure",
-                transportFailure,
-              )
-            : response.error === DAEMON_SHUTTING_DOWN_ERROR_MESSAGE
-              ? new DaemonShuttingDownError()
-              : new ActionableError(response.error || "Unknown error from daemon"),
+        isDaemonHandshakeFailure(response.handshakeFailure)
+          ? new DaemonHandshakeMismatchError(
+              response.handshakeFailure,
+              response.error || "Daemon identity mismatch",
+            )
+          : boundSessionLoss
+            ? new DaemonBoundSessionLostError(boundSessionLoss)
+            : transportFailure
+              ? new DeviceControlTransportError(
+                  response.error || "Device-control transport failure",
+                  transportFailure,
+                )
+              : response.error === DAEMON_SHUTTING_DOWN_ERROR_MESSAGE
+                ? new DaemonShuttingDownError()
+                : new ActionableError(response.error || "Unknown error from daemon"),
       );
+    }
+  }
+
+  /** Read the actual socket owner's identity, including older version-only daemons. */
+  async getDaemonStatus(): Promise<DaemonStatus> {
+    // ide/status is side-effect-free and existed before structured handshake
+    // errors. Like doctor, this diagnostic request deliberately omits identity.
+    const diagnostic = new DaemonClient(
+      this.socketPath,
+      this.connectionTimeout,
+      this.timer,
+      {},
+      null,
+    );
+    try {
+      const parsed = socketStatusSchema.safeParse(
+        await diagnostic.callDaemonMethod("ide/status", {}),
+      );
+      if (!parsed.success) {
+        throw new ActionableError(
+          "Daemon preflight failed: the socket owner returned no version identity; no device operation started. Restart the daemon from this client installation.",
+        );
+      }
+      const { releaseVersion, ...identity } = parsed.data;
+      return {
+        running: true,
+        ...identity,
+        socketPath: this.socketPath,
+        ...(releaseVersion ? { assetVersion: releaseVersion } : {}),
+      };
+    } finally {
+      await diagnostic.close();
     }
   }
 

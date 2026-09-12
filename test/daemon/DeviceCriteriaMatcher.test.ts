@@ -190,6 +190,19 @@ describe("DeviceCriteriaMatcher", () => {
       expect(matcher.deviceImageMatchesCriteria(image, { iosVersion: "16.0" })).toBe(false);
     });
 
+    // iosVersionFromRuntime now delegates to the shared iosVersionStringFromRuntimeId
+    // helper, which matches "iOS" case-insensitively like iosVersion.ts's own
+    // simctl-list-devices parser always did. Before that dedup, this private copy
+    // only matched an exact-case "iOS" token (#6372 follow-up).
+    test("matches iOS version from a differently-cased runtime id", () => {
+      const image = deviceImage({
+        name: "iPhone 15",
+        platform: "ios",
+        runtime: "com.apple.CoreSimulator.SimRuntime.IOS-17-5",
+      });
+      expect(matcher.deviceImageMatchesCriteria(image, { iosVersion: "17.5" })).toBe(true);
+    });
+
     test("rejects platform mismatch", () => {
       const image = deviceImage({ name: "Pixel", platform: "android" });
       expect(matcher.deviceImageMatchesCriteria(image, { platform: "ios" })).toBe(false);

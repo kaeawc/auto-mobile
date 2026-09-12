@@ -156,6 +156,9 @@ export class DeviceSessionRepository {
           updated_at: new Date().toISOString(),
         })
         .where("session_uuid", "=", sessionUuid)
+        // Like activity refresh, delayed autolock metadata may only update a
+        // live row. Cancellation can durably retire it while this write waits.
+        .where("status", "=", "active")
         .execute();
     } catch (error) {
       logger.warn(

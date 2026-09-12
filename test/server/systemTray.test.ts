@@ -7,6 +7,7 @@ import {
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
+  observeSystemTrayAfterTap,
   ensureSystemTrayClosed,
   ensureSystemTrayOpen,
   tapElement,
@@ -150,6 +151,174 @@ const advancePendingSleeps = async (timer: FakeTimer, steps: number): Promise<vo
     }
   }
 };
+
+describe("systemTray post-tap observation", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  for (const tapActionLabel of [undefined, "Reply"]) {
+    test(`waits for a delayed effect to settle for ${tapActionLabel ?? "notification body"}`, async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+      const before = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 2000 });
+      const intermediate = createObservation(createTrayHierarchy("Opening reply"));
+      const after = createObservation(createTrayHierarchy("Reply"));
+      after.viewHierarchy!.hierarchy.node.node[0].$["resource-id"] =
+        "com.android.systemui:id/remote_input_text";
+      const fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult((index) => {
+        if (index === 0) {
+          return before;
+        }
+        const frame =
+          fakeTimer.now() >= 750 ? after : fakeTimer.now() >= 450 ? intermediate : before;
+        return {
+          ...frame,
+          viewHierarchy: { ...frame.viewHierarchy!, updatedAt: 2001 + fakeTimer.now() },
+        };
+      });
+      setSystemTrayDependencies({
+        timer: fakeTimer,
+        adbFactory: () => fakeAdb,
+        observeScreenFactory: () => fakeObserveScreen,
+      });
+      ToolRegistry.clearTools();
+      registerInteractionTools();
+      const handler = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!;
+      const response = await handler(device, {
+        action: "tap",
+        notification: { title: "Reply", tapActionLabel },
+        platform: "android",
+      });
+      const payload = JSON.parse((response.content[0] as { text: string }).text);
+      expect(payload.success).toBe(true);
+      expect(payload.settled).toBe(true);
+      expect(JSON.stringify(payload.observation)).toContain("remote_input_text");
+      expect(fakeTimer.now()).toBeGreaterThanOrEqual(1750);
+      expect(fakeTimer.now()).toBeLessThanOrEqual(2500);
+      expect(fakeObserveScreen.getExecuteOptions()[1]).toMatchObject({
+        skipWaitForFresh: false,
+        minTimestamp: 2001,
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+      });
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+      ).toHaveLength(1);
+    });
+  }
+
+  for (const platform of ["android", "ios"] as const) {
+    test(`settles ${platform} effects when the device clock trails host fallback time`, async () => {
+      const timer = new FakeTimer();
+      timer.advanceTime(100000);
+      timer.enableAutoAdvance();
+      const baseline = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 900 });
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(
+        createObservation({ ...createTrayHierarchy("Send"), updatedAt: 1000 }),
+      );
+      setSystemTrayDependencies({
+        timer,
+        adbFactory: () => new SequencedFakeAdbExecutor([100000]),
+        observeScreenFactory: () => observer,
+      });
+      const result = await observeSystemTrayAfterTap({ ...device, platform }, baseline);
+      expect(result.settled).toBe(true);
+      expect(observer.getExecuteOptions()[0].minTimestamp).toBe(901);
+      expect(timer.now()).toBe(101050);
+    });
+  }
+
+  for (const alternating of [false, true]) {
+    test(`${alternating ? "does not settle alternating" : "settles a new"} window with the same tree`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const baseline = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 900 });
+      baseline.activeWindow = { appId: "messages", activityName: "Source" };
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult((index) => ({
+        ...baseline,
+        activeWindow: { appId: "messages", activityName: alternating && index % 2 ? "B" : "A" },
+        viewHierarchy: { ...baseline.viewHierarchy!, updatedAt: 2001 + timer.now() },
+      }));
+      setSystemTrayDependencies({
+        timer,
+        adbFactory: () => new SequencedFakeAdbExecutor([2000]),
+        observeScreenFactory: () => observer,
+      });
+      const result = await observeSystemTrayAfterTap(device, baseline);
+      expect(result.settled).toBe(!alternating);
+      expect(timer.now()).toBe(alternating ? 2550 : 1050);
+    });
+  }
+
+  test("stops post-tap observation when the request is cancelled", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult((index) => {
+      if (index > 0) controller.abort(new Error("request cancelled"));
+      return createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 1000 + index });
+    });
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => new SequencedFakeAdbExecutor([900]),
+      observeScreenFactory: () => observer,
+    });
+    registerInteractionTools();
+    const pending = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(
+      device,
+      { action: "tap", notification: { title: "Reply" }, platform: "android" },
+      undefined,
+      controller.signal,
+    );
+    await expect(pending).rejects.toThrow("Operation cancelled");
+    expect(observer.getExecuteCallCount()).toBe(2);
+    expect(observer.getExecuteOptions()[1].signal).toBe(controller.signal);
+    expect(timer.now()).toBe(0);
+  });
+
+  for (const stale of [false, true]) {
+    test(`omits uncertain evidence when ${stale ? "changed captures are stale" : "no effect arrives"}`, async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+      const before = createObservation(createTrayHierarchy("Reply"));
+      const fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult((index) => ({
+        ...before,
+        freshness: { isFresh: !stale },
+        viewHierarchy: {
+          ...createTrayHierarchy(stale && index > 0 ? "Changed" : "Reply"),
+          updatedAt: 2001 + fakeTimer.now(),
+        },
+      }));
+      setSystemTrayDependencies({
+        timer: fakeTimer,
+        adbFactory: () => fakeAdb,
+        observeScreenFactory: () => fakeObserveScreen,
+      });
+      registerInteractionTools();
+      const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+        action: "tap",
+        notification: { title: "Reply" },
+        platform: "android",
+      });
+      const payload = JSON.parse((response.content[0] as { text: string }).text);
+      expect(payload.success).toBe(true);
+      expect(payload.settled).toBe(false);
+      expect(payload.message).toContain("effect not yet settled");
+      expect(payload.observation).toBeUndefined();
+      expect(payload.observationDiff).toBeUndefined();
+      expect(fakeTimer.now()).toBe(2550);
+    });
+  }
+});
 
 describe("systemTray find", () => {
   afterEach(() => {
@@ -1258,7 +1427,7 @@ describe("systemTray group expansion", () => {
 
   test("tap action expands collapsed group then re-matches", async () => {
     const fakeTimer = new FakeTimer();
-    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
 
     const collapsedHierarchy = createTrayWithGroupedNotifications("FUBStaging", [
       "Zillow Real-Time Tour request",
@@ -1269,12 +1438,13 @@ describe("systemTray group expansion", () => {
       "Test message",
     ]);
 
-    const fakeObserveScreen = new SequencedObserveScreen([
-      createObservation(collapsedHierarchy),
-      createObservation(expandedHierarchy),
-      createObservation(expandedHierarchy),
-      createObservation(expandedHierarchy),
-    ]);
+    const fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setObserveResult((index) =>
+      createObservation({
+        ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
+        updatedAt: 2001 + fakeTimer.now(),
+      }),
+    );
 
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -1294,8 +1464,13 @@ describe("systemTray group expansion", () => {
       platform: "android",
     });
     await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
     fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
-    await tap;
+    const response = await tap;
+    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    // Expanding the group is not evidence that the subsequent notification tap worked.
+    expect(payload.settled).toBe(false);
+    expect(payload.observation).toBeUndefined();
 
     const tapCommands = fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"));
     expect(tapCommands).toHaveLength(2);

@@ -11,6 +11,7 @@ import {
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -1046,6 +1047,55 @@ describe("finalizeToolResponse", () => {
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation.context).toEqual(obsSc.context);
     });
+
+    test.each(["skeleton", "full"] as const)(
+      "%s diffs preserve the keyboard projection contract",
+      (project) => {
+        const { store } = makeStore();
+        finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+          name: "observe",
+          sessionUuid: "s1",
+          baselineStore: store,
+        });
+        const next = sameScreenObserve();
+        (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+        const key = {
+          text: "Q",
+          clickable: true,
+          bounds: { left: 0, top: 100, right: 50, bottom: 150 },
+        };
+        setElementProvenance(key, {
+          group: 1,
+          enter: 1,
+          exit: 1,
+          keyboardPackage: "example.keyboard",
+        });
+        next.elements = { clickable: [key], text: [key], scrollable: [], media: [] };
+        (next.viewHierarchy!.hierarchy.node as any).node.push({
+          extras: { "automobile:imePackage": "example.keyboard" },
+          node: [key],
+        });
+        const result = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, observation: next }),
+          {
+            name: "tapOn",
+            args: { project },
+            sessionUuid: "s1",
+            baselineStore: store,
+          },
+        );
+        const observation = (result.structuredContent as any).observation;
+        expect(observation.isDiff).toBe(true);
+        expect(observation.keyboard).toEqual({ visible: true, package: "example.keyboard" });
+        expect(observation.skeleton).toEqual([]);
+        expect(observation.added.some((entry: any) => entry.attributes.text === "Q")).toBe(
+          project === "full",
+        );
+        expect(JSON.parse(result.content[0].text).observation.keyboard).toEqual(
+          observation.keyboard,
+        );
+      },
+    );
 
     test("a diff with no surviving readout row omits `context` entirely rather than emitting `[]`", () => {
       const { store } = makeStore();

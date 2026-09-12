@@ -88,7 +88,6 @@ import {
   setAndroidKeyValueDirect,
   withAndroidSharedPreferencesInspectionFallback,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
-import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   resolveApkChecksum,
@@ -519,6 +518,7 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
+  private readonly identityStartedAt: number;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
@@ -615,6 +615,7 @@ export class UnixSocketServer {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     };
+    this.identityStartedAt = this.timer.now();
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -1174,6 +1175,14 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: evaluation.message,
+      handshakeFailure: {
+        code: "daemon_identity_mismatch",
+        phase: "daemon-preflight",
+        executionStarted: false,
+        reason: evaluation.reason,
+        daemon: this.daemonIdentity,
+        client: extractClientHandshake(request),
+      },
     };
   }
 
@@ -2741,7 +2750,11 @@ export class UnixSocketServer {
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).
-          version: getMcpServerVersion(),
+          version: this.daemonIdentity.version,
+          pid: process.pid,
+          buildId: this.daemonIdentity.build.buildId,
+          entryScript: this.daemonIdentity.build.entryScript,
+          startedAt: this.identityStartedAt,
           releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
           android: {
             ctrlProxy: {

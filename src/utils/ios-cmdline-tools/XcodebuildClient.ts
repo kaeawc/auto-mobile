@@ -28,11 +28,21 @@ export type XcodebuildSpawner = (
   options: SpawnOptions,
 ) => ChildProcess;
 
+export interface XcodebuildAvailabilityOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 export interface Xcodebuild {
   executeCommand(args: string[], options?: XcodebuildCommandOptions): Promise<ExecResult>;
-  isAvailable(): Promise<boolean>;
+  isAvailable(options?: XcodebuildAvailabilityOptions): Promise<boolean>;
   startStreaming(args: string[], options?: XcodebuildStreamingOptions): Promise<ChildProcess>;
 }
+
+// Default bound for `isAvailable()` probes (e.g. `detectTeamIdsFromXcode`,
+// issue #6585): a stalled `xcodebuild -version` must never hang a caller
+// indefinitely, so every availability check is timer/abort-bounded.
+const DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
 
 const execAsync = async (
   file: string,
@@ -81,8 +91,18 @@ export class XcodebuildClient implements Xcodebuild {
     this.timer = timer;
   }
 
-  async isAvailable(): Promise<boolean> {
-    return this.isLocalXcodebuildAvailable();
+  async isAvailable(options?: XcodebuildAvailabilityOptions): Promise<boolean> {
+    try {
+      return await this.isAvailableWithin(
+        options?.timeoutMs ?? DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS,
+        options?.signal ?? getAbortSignal(),
+      );
+    } catch (error) {
+      // A stalled `xcodebuild -version` must not hang callers (issue #6585);
+      // treat a timed-out/aborted probe the same as "not available".
+      logger.debug(`[iOS] xcodebuild availability probe timed out or was aborted: ${error}`);
+      return false;
+    }
   }
 
   async executeCommand(

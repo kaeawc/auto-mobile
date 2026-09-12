@@ -1308,6 +1308,41 @@ class ViewHierarchyExtractorTest {
     assertTrue(serialized.contains("com.android.systemui:id/clock"))
   }
 
+  @Test
+  fun `unified hierarchy preserves IME subtree identity and raw key detail`() {
+    val appRoot = fakeNode(packageName = "example.keyboard", text = "Settings")
+    val imeRoot =
+      fakeNode(
+        packageName = "example.keyboard",
+        text = "Keyboard",
+        children = listOf(fakeNode(packageName = "example.keyboard", text = "Q")),
+      )
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(id = 1, layer = 0, root = appRoot, focused = true),
+          fakeWindow(
+            id = 2,
+            layer = 1,
+            root = imeRoot,
+            type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+          ),
+        ),
+        appRoot,
+        disableAllFiltering = true,
+        occlusionEnabled = false,
+      )
+    val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
+    val app = roots[0] as kotlinx.serialization.json.JsonObject
+    val ime = roots[1] as kotlinx.serialization.json.JsonObject
+    assertNull(app["extras"])
+    assertEquals(
+      kotlinx.serialization.json.JsonPrimitive("example.keyboard"),
+      (ime["extras"] as kotlinx.serialization.json.JsonObject)["automobile:imePackage"],
+    )
+    assertTrue(ime.toString().contains("\"Q\""))
+  }
+
   private fun fakeNode(
     packageName: String,
     text: String? = null,

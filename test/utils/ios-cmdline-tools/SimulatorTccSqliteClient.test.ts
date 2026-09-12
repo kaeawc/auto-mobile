@@ -7,6 +7,8 @@ import type {
 } from "../../../src/utils/HostCommandExecutor";
 import {
   SimulatorTccSqliteClient,
+  permissionForTccService,
+  tccServiceForPermission,
   type TccDatabaseFileSystem,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -61,6 +63,35 @@ class FakeSqliteExecutor implements HostCommandExecutor {
 }
 
 describe("SimulatorTccSqliteClient", () => {
+  test("tccServiceForPermission and permissionForTccService are inverses on the canonical vocabulary (#6372 dedup)", () => {
+    // These two functions - and IosSimulatorPermissions's grant/query paths -
+    // all derive from the single TCC_SERVICE_BY_PERMISSION table in this
+    // module. A permission that maps to a service this round-trip doesn't
+    // recover would indicate the vocabulary drifted apart again.
+    const canonicalPermissions = [
+      "calendar",
+      "camera",
+      "contacts",
+      "location",
+      "location-always",
+      "media-library",
+      "microphone",
+      "motion",
+      "photos",
+      "photos-add",
+      "reminders",
+      "siri",
+    ];
+    for (const permission of canonicalPermissions) {
+      const service = tccServiceForPermission(permission);
+      expect(service.startsWith("kTCCService")).toBe(true);
+      expect(permissionForTccService(service)).toBe(permission);
+    }
+    // Unknown permissions and already-qualified services pass through unchanged.
+    expect(tccServiceForPermission("kTCCServiceCamera")).toBe("kTCCServiceCamera");
+    expect(permissionForTccService("kTCCServiceUnknown")).toBe("kTCCServiceUnknown");
+  });
+
   test("owns TCC path resolution and issues parameterized sqlite argv queries", async () => {
     const executor = new FakeSqliteExecutor();
     const fileSystem = new FakeTccFileSystem();

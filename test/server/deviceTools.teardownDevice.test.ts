@@ -1535,9 +1535,9 @@ describe("deleteDevice handler", () => {
     let provisionCalls = 0;
     const provisionOperationStore: ProvisionDeviceOperationStore = {
       begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
-      markDeviceCreationStarted: async () => {},
-      complete: async () => {},
-      fail: async () => {},
+      markDeviceCreationStarted: async () => true,
+      complete: async () => true,
+      fail: async () => true,
     };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
@@ -1606,9 +1606,9 @@ describe("deleteDevice handler", () => {
     let provisionCalls = 0;
     const provisionOperationStore: ProvisionDeviceOperationStore = {
       begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
-      markDeviceCreationStarted: async () => {},
-      complete: async () => {},
-      fail: async () => {},
+      markDeviceCreationStarted: async () => true,
+      complete: async () => true,
+      fail: async () => true,
     };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({

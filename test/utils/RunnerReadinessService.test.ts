@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
+  RunnerReadinessError,
   RunnerReadinessService,
   SystemUiAnrRecoveryRequiredError,
   type AndroidFrameworkReadinessResult,
@@ -8,6 +9,10 @@ import {
   type ReadinessClient,
   type ReadinessIosManager,
 } from "../../src/utils/RunnerReadinessService";
+import {
+  acquireDeviceReadinessLock,
+  deviceReadinessLockKey,
+} from "../../src/utils/deviceReadinessLock";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const androidDevice = (deviceId = "emulator-5554"): BootedDevice => ({
@@ -156,7 +161,15 @@ class FakeIosManager implements ReadinessIosManager {
     await this.onForceRestart?.(options);
   }
 
-  resetSetupState(): void {}
+  resetSetupStateCalls = 0;
+  resetSetupStateCallOrder: number[] = [];
+  setupCallOrder: number[] = [];
+  private callSeq = 0;
+
+  resetSetupState(): void {
+    this.resetSetupStateCalls++;
+    this.resetSetupStateCallOrder.push(++this.callSeq);
+  }
 
   async setup(
     _force?: boolean,
@@ -165,6 +178,7 @@ class FakeIosManager implements ReadinessIosManager {
     minimumHealthPollDurationMs?: number,
   ) {
     this.setupCalls++;
+    this.setupCallOrder.push(++this.callSeq);
     this.setupSignal = signal;
     this.setupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
     if (this.onSetup) {
@@ -1091,6 +1105,45 @@ describe("RunnerReadinessService", () => {
     expect(restartedClient.healthCalls).toBe(1);
   });
 
+  for (const skipCtrlProxyDownload of [false, true]) {
+    test(`uses the final iOS runner port after ${skipCtrlProxyDownload ? "cached start" : "setup"}`, async () => {
+      const iosManager = new FakeIosManager();
+      const staleClient = new FakeReadinessClient();
+      staleClient.connected = false;
+      // The stale port could belong to another healthy runner. Never probe it.
+      const readyClient = new FakeReadinessClient();
+      const requestedPorts: number[] = [];
+      const timer = new FakeTimer();
+      const reallocate = async () => {
+        timer.advanceTime(90_000);
+        iosManager.servicePort = 9_876;
+      };
+      iosManager.onSetup = reallocate;
+      iosManager.onStart = reallocate;
+      const { service } = createService({
+        timer,
+        iosManager,
+        getIosClient: (_device, port) => {
+          requestedPorts.push(port);
+          return port === 9_876 ? readyClient : staleClient;
+        },
+      });
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload,
+      });
+
+      expect(requestedPorts).toEqual([8_765, 9_876]);
+      expect(staleClient.connectionCalls).toBe(0);
+      expect(staleClient.healthCalls).toBe(0);
+      expect(readyClient.healthCalls).toBe(1);
+    });
+  }
+
   test("cancels the iOS force-restart when its readiness budget expires", async () => {
     const timer = new FakeTimer();
     const iosManager = new FakeIosManager();
@@ -1119,6 +1172,32 @@ describe("RunnerReadinessService", () => {
     timer.advanceTime(1_000);
     await expect(ready).rejects.toThrow(/phase=runner-setup/);
     expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
+  });
+
+  // #6416: the disconnected branch of ensureIosReady called manager.setup()
+  // without first resetting the setup gate, unlike the connected branch
+  // (line ~613) and the Android path (RunnerReadinessService.ts:265). A prior
+  // readiness attempt can leave attemptedSetup latched with a stale positive
+  // cachedAvailability (or, post-#6416 fix, an isRunning() cache) so setup()
+  // reports "already running" against a runner that is actually gone.
+  test("resets the iOS setup gate before calling setup() on the disconnected branch", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.resetSetupStateCalls).toBe(1);
+    expect(iosManager.setupCalls).toBe(1);
+    expect(Math.min(...iosManager.resetSetupStateCallOrder)).toBeLessThan(
+      Math.min(...iosManager.setupCallOrder),
+    );
   });
 
   test("starts only the cached iOS runner when downloads are disabled", async () => {
@@ -1488,6 +1567,107 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.not.toThrow(/runner did not become responsive/);
+  });
+
+  test("does not flag a terminal connect fault as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 71579) owns CtrlProxy forwarding for emulator-5554.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    // The orphaned forwarding lease is a platform fault, not a slow device.
+    // It merely happens to be reported once the phase budget is spent, and
+    // provisionDevice maps `deadlineExhausted` to a RETRYABLE `timeout`.
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+  });
+
+  test("flags a genuine readiness budget exhaustion as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
+  });
+
+  test("propagates caller cancellation while queued for the readiness setup lock instead of flagging a deadline exhaustion", async () => {
+    // The readiness lock rejects a queued waiter on caller abort as well as on
+    // its own timeout; only the latter is a deadline exhaustion, which
+    // provisionDevice maps to a RETRYABLE `timeout`.
+    const { service } = createService({ autoAdvance: false });
+    const key = deviceReadinessLockKey("android", "emulator-5554");
+    const releaseHolder = await acquireDeviceReadinessLock(key);
+    const controller = new AbortController();
+
+    try {
+      const pending = service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android deviceId=emulator-5554",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+          signal: controller.signal,
+        })
+        .catch((thrown: unknown) => thrown);
+      await Promise.resolve();
+      controller.abort(new Error("caller cancelled"));
+      const error = await pending;
+
+      expect(error).not.toBeInstanceOf(RunnerReadinessError);
+      expect((error as Error).message).toBe("caller cancelled");
+    } finally {
+      releaseHolder();
+    }
+  });
+
+  test("flags readiness setup lock budget expiry as a deadline exhaustion", async () => {
+    const timer = new FakeTimer();
+    const { service } = createService({ timer, autoAdvance: false });
+    const key = deviceReadinessLockKey("android", "emulator-5554");
+    const releaseHolder = await acquireDeviceReadinessLock(key);
+
+    try {
+      const pending = service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android deviceId=emulator-5554",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+        })
+        .catch((thrown: unknown) => thrown);
+      await Promise.resolve();
+      timer.advanceTime(2_000);
+      await Promise.resolve();
+      const error = await pending;
+
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
+    } finally {
+      releaseHolder();
+    }
   });
 
   test("preserves the Android diagnostic for an ordinary connect failure that is not a forwarding-lease conflict (issue #6260 PRRT ft82e)", async () => {

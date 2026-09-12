@@ -1,3 +1,4 @@
+import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
@@ -273,6 +274,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
     releaseReason === "device-killed" ||
+    releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("device-disconnected:")
   );
 }
@@ -527,6 +529,7 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
+    getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
       throw new ActionableError(
         `Cannot create device session ${sessionId}: the daemon is shutting down.`,
@@ -624,14 +627,15 @@ export class SessionManager {
   }
 
   private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
-    if (this.acceptingSessionCreations) {
+    const cancellation = getAbortSignal();
+    if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
     }
     const releasedAtMs = this.timer.now();
     const snapshot: SessionReleaseSnapshot = {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
-      releaseReason: "daemon-shutdown",
+      releaseReason: cancellation?.aborted ? "session-creation-cancelled" : "daemon-shutdown",
       releasedAtMs,
       terminal: true,
       heartbeat: {
@@ -643,6 +647,7 @@ export class SessionManager {
     };
     await this.persistTerminalReleaseIfNeeded(snapshot);
     this.notifySessionRelease(snapshot);
+    cancellation?.throwIfAborted();
     throw new TerminalSessionError(session.sessionId, snapshot);
   }
 

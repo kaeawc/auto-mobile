@@ -61,6 +61,18 @@ export function tccServiceForPermission(permission: string): string {
     : (TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission);
 }
 
+/** The inverse of {@link tccServiceForPermission}: the AutoMobile permission
+ * name for a raw `kTCCService*` identifier, or the service string unchanged
+ * when it isn't one of the known services. */
+export function permissionForTccService(service: string): string {
+  for (const [permission, tccService] of TCC_SERVICE_BY_PERMISSION) {
+    if (tccService === service) {
+      return permission;
+    }
+  }
+  return service;
+}
+
 function sqliteParameterValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }

@@ -39,6 +39,17 @@ export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 /**
+ * MCP session identity the daemon injects so a tool handler can autolock on
+ * behalf of the calling session. Exported here (rather than kept local to
+ * `server/index.ts`, where it originates) so it can take part in the canonical
+ * {@link INTERNAL_TOOL_PARAM_NAMES} list without an import cycle.
+ */
+export const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
+
+/** This execution's id, injected alongside {@link INTERNAL_EXECUTION_START_TIME_PARAM}. */
+export const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
+
+/**
  * ABSOLUTE wall-clock deadline (on the same `defaultTimer` clock used
  * throughout `src/server/` and `src/features/`), computed at the instant the
  * daemon captured {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} in
@@ -311,6 +322,33 @@ export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
  * walk entirely. It is stripped before the tool runs (see `stripInternalToolParams`).
  */
 export const DAEMON_NON_FINITE_ENCODED_PARAM = "__autoMobileNonFiniteEncoded";
+
+/**
+ * Every internal argument name `server/index.ts` may inject into a tool call's
+ * params. This is the CANONICAL list: `stripInternalToolParams` strips exactly
+ * these before the tool runs, and a handler that re-parses its own public
+ * arguments against a `.strict()` schema (e.g. `provisionDevice`) must strip
+ * exactly these too. Keeping one list means adding a new internal param cannot
+ * silently break a strict-schema handler with an "Unrecognized key" ZodError,
+ * which is precisely how `__mcpLiveDeadlineKey` broke `provisionDevice` for
+ * every caller that sends a progress token.
+ */
+export const INTERNAL_TOOL_PARAM_NAMES = [
+  INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_EXECUTION_ID_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  DAEMON_NON_FINITE_ENCODED_PARAM,
+] as const;
+
+/** Delete every {@link INTERNAL_TOOL_PARAM_NAMES} key from `params`, in place. */
+export function deleteInternalToolParams(params: Record<string, unknown>): void {
+  for (const name of INTERNAL_TOOL_PARAM_NAMES) {
+    delete params[name];
+  }
+}
 
 /** Loopback-only header for a released session's inactive resource-read capability. */
 export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uuid";

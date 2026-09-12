@@ -22,6 +22,10 @@ import {
   DeviceControlTransportError,
   sanitizeDeviceControlTransportFailure,
 } from "../daemon/deviceControlTransportFailure";
+import {
+  DEVICE_SESSION_RECOVERY_PROMPT,
+  DEVICE_SESSION_RECOVERY_TOOLS,
+} from "./deviceSessionResult";
 
 /**
  * Options for creating a proxy MCP server
@@ -39,13 +43,13 @@ function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
       code: "session_ownership_lost",
       message:
         `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
-        "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+        DEVICE_SESSION_RECOVERY_PROMPT,
       sessionUuid: error.sessionUuid,
       reason: error.reason,
       retryable: true,
       recovery: {
         action: "acquire_replacement_session",
-        tools: ["getAndroid", "getApple", "startDevice"],
+        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
       },
       ...(error.release ? { release: error.release } : {}),
     },
@@ -82,7 +86,7 @@ function noActiveDeviceSessionPayload(error: DaemonConnectionSessionReleasedErro
       retryable: true,
       recovery: {
         action: "acquire_replacement_session",
-        tools: ["getAndroid", "getApple", "startDevice"],
+        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
       },
     },
   };

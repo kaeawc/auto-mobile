@@ -38,6 +38,14 @@ export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 const SHUTDOWN_STOP_TIMEOUT_MS = 1_200;
 const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
+// `stop()` tears the runner's process tree down, but its HTTP listener can keep
+// answering /health for a moment while the process drains. A single probe fired
+// the instant stop() returns races that drain and rejects a perfectly restartable
+// runner ("still running after forced teardown"), so give the drain the same
+// bounded grace the shutdown path already allows a forced stop before concluding
+// the runner really is wedged.
+const FORCE_RESTART_DRAIN_GRACE_MS = SHUTDOWN_FORCE_STOP_TIMEOUT_MS;
+const FORCE_RESTART_DRAIN_POLL_INTERVAL_MS = 50;
 
 /**
  * iOS-specific setup result; carries the build result alongside the
@@ -1811,7 +1819,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             options.signal.reason ?? new Error("iOS CtrlProxy restart was aborted"),
           );
         }
-        if (await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId)) {
+        if (await this.isRunnerStillHealthyAfterForcedTeardown(options.signal)) {
           throw new Error(
             "iOS CtrlProxy is still running after forced teardown; refusing to reuse a potentially unresponsive runner",
           );
@@ -1839,6 +1847,31 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       })
       .catch(() => {});
     await restart;
+  }
+
+  /**
+   * Poll the health endpoint for a bounded grace after a forced teardown. Returns
+   * true only when the old runner is STILL answering at the end of the grace — a
+   * listener that merely lags the process teardown stops answering well inside it,
+   * and the restart may proceed. Honours the caller's abort signal while polling.
+   */
+  private async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
+    const graceDeadlineMs = this.timer.now() + FORCE_RESTART_DRAIN_GRACE_MS;
+    for (;;) {
+      if (
+        !(await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId))
+      ) {
+        return false;
+      }
+      const remainingMs = graceDeadlineMs - this.timer.now();
+      if (remainingMs <= 0) {
+        return true;
+      }
+      await this.sleepForHealthPoll(
+        Math.min(FORCE_RESTART_DRAIN_POLL_INTERVAL_MS, remainingMs),
+        signal,
+      );
+    }
   }
 
   private async waitForForceRestart(options: CtrlProxyStartOptions): Promise<boolean> {

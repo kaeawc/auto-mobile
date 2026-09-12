@@ -602,8 +602,38 @@ describe("IOSCtrlProxyManager", function () {
       expect(start).toHaveBeenCalledTimes(2);
     });
 
+    test("restarts once a draining runner stops answering its health endpoint (#6833)", async function () {
+      // stop() kills the process tree, but the runner's HTTP listener can answer a
+      // health probe for a moment while it drains; a single immediate probe raced it.
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      spyOn(manager, "stop").mockResolvedValue();
+      let healthProbes = 0;
+      spyOn(
+        manager as unknown as {
+          checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean>;
+        },
+        "checkHealthEndpointOnPortForDevice",
+      ).mockImplementation(async () => {
+        healthProbes++;
+        return healthProbes <= 2;
+      });
+      const start = spyOn(
+        manager as unknown as {
+          startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void>;
+        },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      await manager.forceRestart();
+
+      expect(healthProbes).toBe(3);
+      expect(start).toHaveBeenCalledTimes(1);
+    });
+
     test("fails rather than reusing a runner that remains after forced teardown", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       spyOn(manager, "stop").mockResolvedValue();
       spyOn(
         manager as unknown as {
@@ -625,7 +655,10 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("propagates forced teardown failures to a concurrent start", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      // The post-teardown drain grace polls on the injected timer; auto-advance
+      // keeps the runner-still-alive path inside the unit-test time budget.
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const stopped = deferred();
       spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
       spyOn(

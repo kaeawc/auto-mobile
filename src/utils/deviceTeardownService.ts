@@ -46,6 +46,24 @@ export interface DeviceTeardownWorkflow<TTarget, TStop, TResponse> {
   isFailure(response: TResponse): boolean;
 }
 
+/**
+ * Ownership of a lease transferred in by a failed provision. Exactly one of the
+ * teardown entry point or the accepted operation releases it, and `consumed`
+ * says which: `execute` claims it, every other exit releases it.
+ */
+interface TransferredLeaseOwnership {
+  readonly lease: VirtualDeviceLifecycleLease | undefined;
+  consumed: boolean;
+}
+
+function releaseUnconsumedTransferredLease(transfer: TransferredLeaseOwnership): void {
+  if (transfer.consumed) {
+    return;
+  }
+  transfer.consumed = true;
+  transfer.lease?.release();
+}
+
 interface AcceptedTeardown<TResponse> {
   fingerprint: string;
   promise: Promise<TResponse>;
@@ -83,42 +101,66 @@ export class DeviceTeardownService {
     request: DeviceTeardownRequest,
     workflow: DeviceTeardownWorkflow<TTarget, TStop, TResponse>,
   ): Promise<TResponse> {
-    const existing = this.operations.get(request.operationId) as
-      | AcceptedTeardown<TResponse>
-      | undefined;
-    if (existing) {
-      if (existing.fingerprint !== request.fingerprint) {
-        return workflow.conflict();
-      }
-      return await this.waitForCaller(existing.promise, request.callerSignal);
-    }
-    if (request.callerSignal?.aborted) {
-      throw (
-        request.callerSignal.reason ??
-        new ActionableError("Device teardown cancelled before it was accepted")
-      );
-    }
-
-    const execution = { destructionStarted: false };
-    const ownerToken = this.dependencies.operationStore
-      ? (this.dependencies.idGenerator?.next() ?? defaultIdGenerator.next())
-      : "";
-    const promise = this.beginAndExecute(request, workflow, execution, ownerToken);
-    const entry: AcceptedTeardown<TResponse> = {
-      fingerprint: request.fingerprint,
-      promise,
-      execution,
-      renewalWatchdogs: new Set(),
-      renewalEpoch: 0,
-      renewalFailures: 0,
-      ownerToken,
+    const leaseTransfer: TransferredLeaseOwnership = {
+      lease: request.lifecycleLease,
+      consumed: false,
     };
-    this.operations.set(request.operationId, entry as AcceptedTeardown<unknown>);
-    void promise.then(
-      (response) => this.recordTerminalResult(request.operationId, entry, response, workflow),
-      () => this.deleteOperation(request.operationId, entry),
-    );
-    return await this.waitForCaller(promise, request.callerSignal);
+    let acceptedByOperation = false;
+    try {
+      const existing = this.operations.get(request.operationId) as
+        | AcceptedTeardown<TResponse>
+        | undefined;
+      if (existing) {
+        if (existing.fingerprint !== request.fingerprint) {
+          return workflow.conflict();
+        }
+        return await this.waitForCaller(existing.promise, request.callerSignal);
+      }
+      if (request.callerSignal?.aborted) {
+        throw (
+          request.callerSignal.reason ??
+          new ActionableError("Device teardown cancelled before it was accepted")
+        );
+      }
+
+      const execution = { destructionStarted: false };
+      const ownerToken = this.dependencies.operationStore
+        ? (this.dependencies.idGenerator?.next() ?? defaultIdGenerator.next())
+        : "";
+      const promise = this.beginAndExecute(request, workflow, execution, ownerToken, leaseTransfer);
+      acceptedByOperation = true;
+      const entry: AcceptedTeardown<TResponse> = {
+        fingerprint: request.fingerprint,
+        promise,
+        execution,
+        renewalWatchdogs: new Set(),
+        renewalEpoch: 0,
+        renewalFailures: 0,
+        ownerToken,
+      };
+      this.operations.set(request.operationId, entry as AcceptedTeardown<unknown>);
+      void promise.then(
+        (response) => {
+          releaseUnconsumedTransferredLease(leaseTransfer);
+          this.recordTerminalResult(request.operationId, entry, response, workflow);
+        },
+        () => {
+          releaseUnconsumedTransferredLease(leaseTransfer);
+          this.deleteOperation(request.operationId, entry);
+        },
+      );
+      return await this.waitForCaller(promise, request.callerSignal);
+    } finally {
+      // A transferred reservation has no other handle: an entry point that
+      // never hands it to an accepted operation must release it, or the
+      // stableId stays reserved forever and every later provision/start/
+      // teardown burns its own deadline waiting on nobody. Once the operation
+      // owns it, only that operation may release it — this caller may have
+      // stopped waiting while the operation is still running.
+      if (!acceptedByOperation) {
+        releaseUnconsumedTransferredLease(leaseTransfer);
+      }
+    }
   }
 
   dispose(): void {
@@ -141,6 +183,7 @@ export class DeviceTeardownService {
     workflow: DeviceTeardownWorkflow<TTarget, TStop, TResponse>,
     execution: { destructionStarted: boolean },
     ownerToken: string,
+    leaseTransfer: TransferredLeaseOwnership,
   ): Promise<TResponse> {
     const operationStore = this.dependencies.operationStore;
     if (operationStore) {
@@ -179,7 +222,13 @@ export class DeviceTeardownService {
     }
 
     const controller = new AbortController();
-    const response = await this.execute(request, controller.signal, workflow, execution);
+    const response = await this.execute(
+      request,
+      controller.signal,
+      workflow,
+      execution,
+      leaseTransfer,
+    );
     if (!operationStore) {
       return response;
     }
@@ -219,13 +268,17 @@ export class DeviceTeardownService {
     signal: AbortSignal,
     workflow: DeviceTeardownWorkflow<TTarget, TStop, TResponse>,
     execution: { destructionStarted: boolean },
+    leaseTransfer: TransferredLeaseOwnership,
   ): Promise<TResponse> {
     let phase: DeviceTeardownPhase = "precondition";
     let target: TTarget | undefined;
-    let lease = request.lifecycleLease;
+    let lease = leaseTransfer.lease;
     let retainLease = false;
     try {
       if (lease) {
+        // This is the only path that consumes a transferred lease; from here
+        // the `finally` below (or `retainLeaseUntil`) owns its release.
+        leaseTransfer.consumed = true;
         lease.transitionToTeardown();
       } else {
         lease = await this.dependencies.lifecycleCoordinator.reserve(

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
+  RunnerReadinessError,
   RunnerReadinessService,
   SystemUiAnrRecoveryRequiredError,
   type AndroidFrameworkReadinessResult,
@@ -8,6 +9,10 @@ import {
   type ReadinessClient,
   type ReadinessIosManager,
 } from "../../src/utils/RunnerReadinessService";
+import {
+  acquireDeviceReadinessLock,
+  deviceReadinessLockKey,
+} from "../../src/utils/deviceReadinessLock";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const androidDevice = (deviceId = "emulator-5554"): BootedDevice => ({
@@ -1527,6 +1532,107 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.not.toThrow(/runner did not become responsive/);
+  });
+
+  test("does not flag a terminal connect fault as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 71579) owns CtrlProxy forwarding for emulator-5554.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    // The orphaned forwarding lease is a platform fault, not a slow device.
+    // It merely happens to be reported once the phase budget is spent, and
+    // provisionDevice maps `deadlineExhausted` to a RETRYABLE `timeout`.
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+  });
+
+  test("flags a genuine readiness budget exhaustion as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
+  });
+
+  test("propagates caller cancellation while queued for the readiness setup lock instead of flagging a deadline exhaustion", async () => {
+    // The readiness lock rejects a queued waiter on caller abort as well as on
+    // its own timeout; only the latter is a deadline exhaustion, which
+    // provisionDevice maps to a RETRYABLE `timeout`.
+    const { service } = createService({ autoAdvance: false });
+    const key = deviceReadinessLockKey("android", "emulator-5554");
+    const releaseHolder = await acquireDeviceReadinessLock(key);
+    const controller = new AbortController();
+
+    try {
+      const pending = service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android deviceId=emulator-5554",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+          signal: controller.signal,
+        })
+        .catch((thrown: unknown) => thrown);
+      await Promise.resolve();
+      controller.abort(new Error("caller cancelled"));
+      const error = await pending;
+
+      expect(error).not.toBeInstanceOf(RunnerReadinessError);
+      expect((error as Error).message).toBe("caller cancelled");
+    } finally {
+      releaseHolder();
+    }
+  });
+
+  test("flags readiness setup lock budget expiry as a deadline exhaustion", async () => {
+    const timer = new FakeTimer();
+    const { service } = createService({ timer, autoAdvance: false });
+    const key = deviceReadinessLockKey("android", "emulator-5554");
+    const releaseHolder = await acquireDeviceReadinessLock(key);
+
+    try {
+      const pending = service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android deviceId=emulator-5554",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+        })
+        .catch((thrown: unknown) => thrown);
+      await Promise.resolve();
+      timer.advanceTime(2_000);
+      await Promise.resolve();
+      const error = await pending;
+
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
+    } finally {
+      releaseHolder();
+    }
   });
 
   test("preserves the Android diagnostic for an ordinary connect failure that is not a forwarding-lease conflict (issue #6260 PRRT ft82e)", async () => {

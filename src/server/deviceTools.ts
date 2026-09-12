@@ -79,7 +79,6 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { recordAcquisitionOwnership } from "../daemon/acquisitionOwnership";
 import { executionTracker } from "./executionTracker";
 import {
   registerDirectSessionDevice,
@@ -3802,26 +3801,6 @@ async function reserveSystemUiAnrShutdown(
   return reservation;
 }
 
-/**
- * Report this execution's use of a device session that System UI ANR recovery
- * handed back rather than minting a new one. Every other branch reports its own
- * disposition from inside the pool (see `acquisitionOwnership`); this one is
- * outside it, so it must both record the ownership and register the admission
- * on the pool exactly as the pool's own reuse paths do. Recovery only ABORTS
- * the earlier executions that were using the session, it does not wait for them
- * to settle, so without a live participant of its own this execution's session
- * could be retired by a cancelled minter while it is still running on it.
- */
-function recordPreservedRecoverySessionOwnership(
-  preservedSessionId: string,
-  daemonState: DaemonState,
-): void {
-  if (daemonState.isInitialized()) {
-    daemonState.getDevicePool().noteSessionAdmission(preservedSessionId);
-  }
-  recordAcquisitionOwnership(preservedSessionId, "reused");
-}
-
 async function shutdownAndroidForSystemUiAnr(
   device: BootedDevice,
   deviceManager: PlatformDeviceManager,
@@ -6366,9 +6345,6 @@ export function registerDeviceTools() {
         // Read the flag once so the reuse decision below cannot disagree with
         // the readiness recording that follows it.
         const autolockEnabled = isDevicePoolAutolockEnabled();
-        if (readinessResult.preservedSessionId && !autolockEnabled) {
-          recordPreservedRecoverySessionOwnership(readinessResult.preservedSessionId, daemonState);
-        }
         const boundSessionId =
           readinessResult.preservedSessionId && !autolockEnabled
             ? readinessResult.preservedSessionId
@@ -6720,7 +6696,6 @@ export function registerDeviceTools() {
     const sessionId = getDeviceToolsDependencies().idGenerator.next();
     if (!daemonState.isInitialized()) {
       registerDirectSessionDevice(sessionId, device);
-      recordAcquisitionOwnership(sessionId, "minted");
       return sessionId;
     }
     const boundSessionId = await daemonState

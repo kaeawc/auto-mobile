@@ -795,67 +795,6 @@ describe("startDevice handler", () => {
     expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
   });
 
-  // Recovery hands the preserved session back to THIS execution but only
-  // ABORTS the earlier executions that were using it — it never waits for them
-  // to settle. So this execution must register as a live participant in the
-  // session before it reports "reused" ownership; otherwise a cancelled minter
-  // sees an unattended session and retires it (and idles its device) beneath
-  // the recovery that is still running on it.
-  it("registers a pool admission for a preserved session handed back by recovery", async () => {
-    const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-    );
-    const recoveryImage = {
-      ...androidImage,
-      deviceId: "emulator-5556",
-    };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      unknownRuntimeDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
-    expect(pool.getSessionAdmissionCount("owner-session")).toBe(0);
-    DaemonState.getInstance().initialize(daemonSessionManager, pool);
-    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
-    fakeMatcher.setImageResult(recoveryImage);
-    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
-      fakeDeviceUtils.setBootedDevices("android", []);
-    };
-    let readinessAttempts = 0;
-    setDeviceToolsDependencies({
-      timer,
-      ensureCtrlProxyReady: async () => {
-        readinessAttempts++;
-        if (readinessAttempts === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-    registerDeviceTools();
-
-    const result = await callStartDevice({ platform: "android" });
-
-    expect(result.sessionUuid).toBe("owner-session");
-    expect(pool.getSessionAdmissionCount("owner-session")).toBe(1);
-    expect(pool.canReleaseCancelledSession("owner-session")).toBe(false);
-  });
-
   // #6227 round 7 (continued): with autolock ON the recording above must NOT
   // run — `bindBootedDeviceSession` -> `autolockDevice` records readiness
   // itself, and the session it returns need not be the preserved one. Recording

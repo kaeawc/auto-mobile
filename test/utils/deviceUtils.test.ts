@@ -482,6 +482,50 @@ describe("MultiPlatformDeviceManager", () => {
     ]);
   });
 
+  test("listDeviceImages(android) ignores a physical handset whose model matches an AVD name", async () => {
+    // getBootedDevices also reports physical handsets, whose `name` is
+    // ro.product.model. A handset that happens to be modelled "Pixel_8" must not
+    // mark the like-named AVD running, or bootMatchedImage() hands back the
+    // handset instead of booting the AVD (issue #6850 review).
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "39081FDJH00QZQ", source: "local" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: false },
+    ]);
+  });
+
+  test("listDeviceImages(android) still reports the AVD running for an emulator-NNNN serial", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: true },
+    ]);
+  });
+
   test("listDeviceImages(ios) surfaces iOS image discovery failures", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,

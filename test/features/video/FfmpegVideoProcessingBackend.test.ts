@@ -7,6 +7,7 @@ import {
   containsIosRecordingStartMessage,
   FfmpegVideoProcessingBackend,
   IOS_RECORDING_FILE_READY_TIMEOUT_MS,
+  IOS_RECORDING_START_TIMEOUT_MS,
   IOS_RECORDING_STOP_TIMEOUT_MS,
   pipeCaptureToEncoder,
   PROCESS_EXIT_TIMEOUT_MS,
@@ -432,7 +433,177 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(starts).toBe(2); // exhausted the bounded retry budget
   });
 
-  test("fails and reaps a slow iOS start within the five-second total budget", async function () {
+  // A capture child that spawns immediately but only emits the recordVideo
+  // handshake after `handshakeDelayMs` of fake time, the way `simctl` behaves on a
+  // macOS runner that is also busy with xcodebuild and Simulator.
+  function makeSlowHandshakeChild(handshakeDelayMs: number, timer: Timer): ChildProcess {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ChildProcess;
+    Object.assign(child, {
+      stderr,
+      stdout: null,
+      stdin: null,
+      killed: false,
+      exitCode: null,
+      signalCode: null,
+      pid: 4242,
+      kill: () => {
+        (child as unknown as { killed: boolean }).killed = true;
+        queueMicrotask(() => {
+          child.emit("exit", 0, "SIGINT");
+          child.emit("close");
+        });
+        return true;
+      },
+    });
+    timer.setTimeout(() => child.emit("spawn"), 0);
+    timer.setTimeout(() => stderr.write("Recording started\n"), handshakeDelayMs);
+    return child;
+  }
+
+  test("starts iOS recording when a loaded host needs over five seconds to hand shake (#6857)", async function () {
+    let starts = 0;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => {
+        starts++;
+        return makeSlowHandshakeChild(6000, timer);
+      },
+      executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)"),
+    } as unknown as SimCtl;
+
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-loaded-host-udid" };
+
+    const handle = await backend.start(mockConfig);
+
+    expect(handle.recordingId).toBe("test-recording");
+    expect(starts).toBe(1); // the first attempt's handshake window outlasts a loaded host
+  });
+
+  test("reports a state probe that exhausts its own budget as unknown, not unavailable (#6857)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const probeBudgets: Array<number | undefined> = [];
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => makeCaptureChild(false, timer), // never hand shakes
+      executeCommandArgs: async (_args: string[], timeoutMs?: number) => {
+        probeBudgets.push(timeoutMs);
+        await timer.sleep(timeoutMs ?? 0); // burn the whole probe budget, then time out
+        throw new Error(`Command timed out after ${timeoutMs}ms: xcrun simctl list devices udid`);
+      },
+    } as unknown as SimCtl;
+
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 25;
+    (backend as any).iosRecordingStartMaxAttempts = 1;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-slow-probe-udid" };
+
+    let error: Error | undefined;
+    try {
+      await backend.start(mockConfig);
+    } catch (caught) {
+      error = caught as Error;
+    }
+
+    expect(error).toBeDefined();
+    // A probe that ran out of time proves nothing about the simulator, so it must not
+    // be reported as a definitive "unavailable" state.
+    expect(error!.message).toContain("simulator state unknown");
+    expect(error!.message).not.toContain("simulator state unavailable");
+    // The terminal attempt has no retry left to protect, so it gets a budget a loaded
+    // host can actually deliver instead of the old 250ms slice.
+    expect(probeBudgets).toEqual([3000]);
+  });
+
+  test("still reports a definitive simctl failure as an unavailable state (#6857)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => makeCaptureChild(false, timer),
+      executeCommandArgs: async () => {
+        throw new Error("Invalid device: ios-missing-udid");
+      },
+    } as unknown as SimCtl;
+
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 25;
+    (backend as any).iosRecordingStartMaxAttempts = 1;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-missing-udid" };
+
+    let error: Error | undefined;
+    try {
+      await backend.start(mockConfig);
+    } catch (caught) {
+      error = caught as Error;
+    }
+
+    expect(error).toBeDefined();
+    expect(error!.message).toContain("simulator state unavailable");
+    expect(error!.message).toContain("Invalid device: ios-missing-udid");
+  });
+
+  test("keeps the between-attempt state probe small so the retry keeps its budget (#6857)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const probeBudgets: Array<number | undefined> = [];
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => makeCaptureChild(false, timer),
+      executeCommandArgs: async (_args: string[], timeoutMs?: number) => {
+        probeBudgets.push(timeoutMs);
+        return diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)");
+      },
+    } as unknown as SimCtl;
+
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 2000;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-probe-budget-udid" };
+
+    await expect(backend.start(mockConfig)).rejects.toThrow("Failed to start iOS recording");
+
+    // Attempt 1 shares the start deadline with the pending retry; the terminal attempt
+    // does not, so only it gets the full diagnostic budget.
+    expect(probeBudgets).toEqual([250, 3000]);
+  });
+
+  test("fails and reaps a slow iOS start within the bounded total budget", async function () {
     const timer = new FakeTimer();
     const stderr = new PassThrough();
     const signals: Array<NodeJS.Signals | number | undefined> = [];
@@ -472,16 +643,19 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     (backend as any).iosRecordingStartMaxAttempts = 1;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-slow-udid" };
 
+    // The single attempt gets the whole start budget minus the cleanup slice reserved
+    // for reaping it, so the handshake wait is the only pending timer.
+    const handshakeBudgetMs = IOS_RECORDING_START_TIMEOUT_MS - 500;
     const starting = backend.start(mockConfig);
-    for (let i = 0; i < 20 && !timer.getPendingTimeouts().includes(4500); i++) {
+    for (let i = 0; i < 20 && !timer.getPendingTimeouts().includes(handshakeBudgetMs); i++) {
       await Promise.resolve();
     }
-    expect(timer.getPendingTimeouts()).toEqual([4500]);
+    expect(timer.getPendingTimeouts()).toEqual([handshakeBudgetMs]);
 
-    timer.advanceTime(4500);
+    timer.advanceTime(handshakeBudgetMs);
     await expect(starting).rejects.toThrow("Failed to start iOS recording");
 
-    expect(timer.now()).toBeLessThanOrEqual(5000);
+    expect(timer.now()).toBeLessThanOrEqual(IOS_RECORDING_START_TIMEOUT_MS);
     expect(signals).toEqual(["SIGKILL"]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(stderr.listenerCount("data")).toBe(0);
@@ -570,9 +744,9 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     for (let attempt = 0; attempt < 20 && probeSignal === undefined; attempt++) {
       await Promise.resolve();
     }
-    expect(timer.getPendingTimeouts()).toEqual([5000]);
+    expect(timer.getPendingTimeouts()).toEqual([IOS_RECORDING_START_TIMEOUT_MS]);
 
-    timer.advanceTime(5000);
+    timer.advanceTime(IOS_RECORDING_START_TIMEOUT_MS);
     await expect(starting).rejects.toThrow("FFmpeg is not available");
     expect(probeSignal?.aborted).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -618,9 +792,9 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     for (let attempt = 0; attempt < 20 && availabilitySignal === undefined; attempt++) {
       await Promise.resolve();
     }
-    expect(timer.getPendingTimeouts()).toEqual([5000]);
+    expect(timer.getPendingTimeouts()).toEqual([IOS_RECORDING_START_TIMEOUT_MS]);
 
-    timer.advanceTime(5000);
+    timer.advanceTime(IOS_RECORDING_START_TIMEOUT_MS);
     await expect(starting).rejects.toThrow("Timed out checking simctl availability");
     expect(availabilitySignal?.aborted).toBe(true);
     expect(captureStarts).toBe(0);

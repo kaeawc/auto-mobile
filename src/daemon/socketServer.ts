@@ -3922,11 +3922,11 @@ export class UnixSocketServer {
         ? undefined
         : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs);
     const cached = this.getAppendTextInput(targetDevice);
-    const run = async (input: AppendTextInput, timeoutMs: number) =>
+    const run = async (input: AppendTextInput, pending: string, timeoutMs: number) =>
       signal
-        ? await input.appendText(text, timeoutMs, beforeKeyEvent, signal)
-        : await input.appendText(text, timeoutMs, beforeKeyEvent);
-    const result = await run(cached.input, appendTimeoutMs);
+        ? await input.appendText(pending, timeoutMs, beforeKeyEvent, signal)
+        : await input.appendText(pending, timeoutMs, beforeKeyEvent);
+    const result = await run(cached.input, text, appendTimeoutMs);
     if (result.success || !cached.fromCache || signal?.aborted) {
       return result;
     }
@@ -3936,12 +3936,33 @@ export class UnixSocketServer {
     // unchanged. A failure is the first evidence either way, so drop the helper
     // and give a freshly built one exactly one attempt before surfacing the
     // error.
+    //
+    // The retry resumes from the UNCONFIRMED SUFFIX only. `charsSent` is the
+    // exact prefix the failed helper landed on the device, so replaying the whole
+    // string would duplicate it ("AB" after "A" becomes "AAB", issue #3351). An
+    // ABSENT `charsSent` means the helper cannot say whether its in-flight key
+    // event landed (an adb timeout kills the host child, not Android's handling
+    // of the event), which makes every replay unsafe: surface the failure.
+    const confirmed = result.charsSent;
+    if (confirmed === undefined) {
+      return result;
+    }
+    const pending = text.slice(confirmed);
+    if (pending.length === 0) {
+      return result;
+    }
     this.evictDeviceInputCache(targetDevice.deviceId);
     const retryTimeoutMs = deadline - this.timer.now();
     if (retryTimeoutMs <= 0) {
       return result;
     }
-    return await run(this.getAppendTextInput(targetDevice).input, retryTimeoutMs);
+    const retry = await run(this.getAppendTextInput(targetDevice).input, pending, retryTimeoutMs);
+    // Progress accumulates across both helpers so the caller's retry boundary
+    // stays an index into the ORIGINAL text; an ambiguous retry poisons the
+    // whole count, so it reports no boundary at all.
+    return retry.charsSent === undefined
+      ? { success: retry.success, ...(retry.error !== undefined ? { error: retry.error } : {}) }
+      : { ...retry, charsSent: confirmed + retry.charsSent };
   }
 
   private async validateAppendFrameContext(

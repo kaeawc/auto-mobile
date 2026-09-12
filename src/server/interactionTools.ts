@@ -69,6 +69,7 @@ import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import {
   addDeviceTargetingToSchema,
+  appIdFieldAliases,
   platformSchema,
   withAppIdAliases,
   withCanonicalDiscriminatedUnionJsonSchema,
@@ -629,14 +630,22 @@ export const systemTraySchema = withJsonSchemaOverride(
     }),
   ),
   (jsonSchema) => {
+    const notificationSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>)
+      .notification;
+    const notificationProperties = notificationSchema.properties as Record<string, unknown>;
+    Object.assign(
+      notificationProperties,
+      Object.fromEntries(appIdFieldAliases.map((alias) => [alias, { type: "string" }])),
+    );
     jsonSchema.if = { required: ["action"], properties: { action: { const: "list" } } };
     jsonSchema.then = {
       required: ["notification"],
       properties: {
         notification: {
-          type: "object",
-          required: ["appId"],
-          properties: { appId: { type: "string", minLength: 1 } },
+          anyOf: ["appId", ...appIdFieldAliases].map((field) => ({
+            required: [field],
+            properties: { [field]: { type: "string", minLength: 1 } },
+          })),
         },
       },
     };
@@ -1662,7 +1671,7 @@ export function registerInteractionTools() {
         signal?.throwIfAborted();
         const inventory = await getSystemTrayDependencies()
           .appInventoryFactory(device)
-          .executeDetailedResult();
+          .executeDetailedResult(signal);
         signal?.throwIfAborted();
         if (!inventory.successful) {
           throw new ActionableError(

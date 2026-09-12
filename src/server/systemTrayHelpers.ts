@@ -1672,20 +1672,12 @@ export const listSystemTrayNotifications = async (
   );
   const rows: TrayObservedRow[] = [];
   let previousNotifications: TrayObservedRow[] = [];
-  let previousPage: string | undefined;
   let swipes = 0;
   while (true) {
     signal?.throwIfAborted();
     if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
       throw new ActionableError("Notification shade is not open; cannot list notifications.");
     }
-    const currentPage = JSON.stringify(
-      collectNotificationCandidates(observation.viewHierarchy).map((candidate) => candidate.node),
-    );
-    if (currentPage === previousPage) {
-      break;
-    }
-    previousPage = currentPage;
     const pageNotifications = readTrayNotifications(observation.viewHierarchy);
     const overlap = trayPageOverlap(previousNotifications, pageNotifications);
     rows.splice(rows.length - overlap, overlap, ...pageNotifications);

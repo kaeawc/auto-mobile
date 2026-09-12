@@ -50,7 +50,14 @@ const page = (...rows: any[]): ObserveResult => ({
     hierarchy: { node: node("com.android.systemui:id/notification_stack_scroller", "", rows) },
   },
 });
-function setup(pages: ObserveResult[]) {
+function setup(pages: ObserveResult[], markScrollBoundary = true) {
+  for (const [index, page] of pages.entries()) {
+    if (markScrollBoundary && page.viewHierarchy!.hierarchy!.node.$.scrollable === undefined) {
+      Object.assign(page.viewHierarchy!.hierarchy!.node.$, {
+        scrollable: index < pages.length - 1,
+      });
+    }
+  }
   const adb = new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
   let index = 0;
@@ -66,23 +73,28 @@ const list = () => listSystemTrayNotifications(device, "com.example.messages", "
 class FakeTrayApps {
   labels = new Map<string, string | null>([["com.example.messages", "Messages"]]);
   calls: string[] = [];
+  inventorySignals: (AbortSignal | undefined)[] = [];
   resolve: SystemTrayDependencies["appLabelResolver"] = async (_device, appId) => {
     this.calls.push(appId);
     return this.labels.get(appId) ?? null;
   };
   inventory: SystemTrayDependencies["appInventoryFactory"] = () => ({
-    executeDetailedResult: async () => ({
-      successful: true,
-      apps: {
-        profiles: {},
-        system: [...this.labels.keys()].map((packageName) => ({
-          packageName,
-          userIds: [0],
-          foreground: false,
-          recent: false,
-        })),
-      },
-    }),
+    executeDetailedResult: async (signal?: AbortSignal) => {
+      this.inventorySignals.push(signal);
+      signal?.throwIfAborted();
+      return {
+        successful: true,
+        apps: {
+          profiles: {},
+          system: [...this.labels.keys()].map((packageName) => ({
+            packageName,
+            userIds: [0],
+            foreground: false,
+            recent: false,
+          })),
+        },
+      };
+    },
   });
   install() {
     setSystemTrayDependencies({
@@ -181,6 +193,12 @@ describe("systemTray list", () => {
         expect(validate({ action: "list", notification })).toBe(false);
       }
       expect(validate({ action: "list", notification: { appId: "com.example.messages" } })).toBe(
+        true,
+      );
+      expect(
+        validate({ action: "list", notification: { packageName: "com.example.messages" } }),
+      ).toBe(true);
+      expect(validate({ action: "list", notification: { bundleId: "com.example.messages" } })).toBe(
         true,
       );
       expect(validate({ action: "open" })).toBe(true);
@@ -297,6 +315,20 @@ describe("systemTray list", () => {
     expect(payload.notifications[0]).toMatchObject({ title: "read me", body: "Body of read me" });
     expect(payload.success).toBe(true);
   });
+  test("passes the request signal into the fresh app inventory", async () => {
+    setup([page(row("read me"))]);
+    const apps = new FakeTrayApps();
+    apps.install();
+    registerInteractionTools();
+    const controller = new AbortController();
+    await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(
+      device,
+      { action: "list", notification: { appId: "com.example.messages" } },
+      undefined,
+      controller.signal,
+    );
+    expect(apps.inventorySignals).toEqual([controller.signal]);
+  });
 
   test("requires appId without relaxing find or destructive actions", () => {
     expect(
@@ -333,11 +365,17 @@ describe("systemTray list", () => {
       3,
     );
   });
-  test("stops on an unchanged page and returns an empty list", async () => {
-    setup([page(row("Other notification", "Other"))]);
+  test("continues a bounded scan when an unidentifiable page repeats", async () => {
+    const repeated = page(row("Other notification", "Other"));
+    delete repeated.viewHierarchy!.hierarchy!.node.$.scrollable;
+    setup([repeated], false);
     const result = await list();
     expect(result.notifications).toEqual([]);
-    expect(result.swipes).toBe(1);
+    expect(result.swipes).toBe(3);
+  });
+  test("retains identical no-ID pages because they may represent different notifications", async () => {
+    setup([page(positionedRow("Generic", 200)), page(positionedRow("Generic", 200))]);
+    expect((await list()).notifications).toHaveLength(2);
   });
   test("reads semantic fields nested inside notification content wrappers", async () => {
     setup([

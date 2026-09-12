@@ -2490,10 +2490,7 @@ async function verifyPooledAndroidAvdName(
     : { reason: "conflict", pooledAvdName, runtimeAvdName };
 }
 
-function pooledAvdNameRefusalMessage(
-  device: BootedDevice,
-  refusal: PooledAvdNameRefusal,
-): string {
+function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNameRefusal): string {
   if (refusal.reason === "conflict") {
     return (
       `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +

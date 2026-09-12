@@ -80,9 +80,7 @@ class TeardownDeviceManager extends FakeDeviceUtils {
 
   private discoveriesSinceKill: number | undefined;
 
-  override async getBootedDevicesDetailed(
-    platform: SomePlatform,
-  ): Promise<BootedDeviceDiscovery> {
+  override async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
     if (
       this.discoveriesSinceKill !== undefined &&
       this.clearBootedDevicesAfterDiscoveries !== undefined

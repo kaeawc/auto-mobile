@@ -156,7 +156,6 @@ describe("platform device preparation tools", () => {
       platform: "android",
       name: "Pixel_9_API_36",
       deviceId: "emulator-5562",
-      transportId: "17",
     };
     deviceUtils.setBootedDevices("android", [emulator]);
     matcher.setBootedResult(emulator);
@@ -172,7 +171,6 @@ describe("platform device preparation tools", () => {
       avdName: "Pixel_9_API_36",
       adbSerial: "emulator-5562",
       emulatorConsolePort: 5562,
-      adbTransportId: "17",
     });
   });
 

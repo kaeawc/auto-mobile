@@ -468,7 +468,6 @@ export const killDeviceSchema = z.object({
     name: z.string().describe("Device image name"),
     deviceId: z.string(),
     platform: platformSchema,
-    transportId: z.string().optional(),
   }),
 });
 
@@ -741,7 +740,6 @@ function deviceIdentityPayload(
       avdName: sourceImage?.platform === "android" ? sourceImage.name : device.name,
       adbSerial: device.deviceId,
       emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
-      adbTransportId: device.transportId ?? null,
     };
   }
 

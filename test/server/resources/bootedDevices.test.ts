@@ -39,7 +39,6 @@ describe("MCP Booted Device Resources", () => {
     name: "Pixel_7_API_34",
     platform: "android",
     deviceId: "emulator-5554",
-    transportId: "1",
     source: "local",
   };
 
@@ -242,11 +241,12 @@ describe("MCP Booted Device Resources", () => {
         android: { observationComplete: true },
         ios: { observationComplete: true },
       });
+      // No pool is wired in this fixture, so there is no incarnation to name
+      // the epoch and `connectionId` falls back to the bare serial.
       expect(data.devices[0]).toMatchObject({
         identity: {
           stableId: "Pixel_7_API_34",
-          connectionId: "1",
-          transportId: "1",
+          connectionId: "emulator-5554",
         },
         lifecycleState: "booted",
         readiness: { state: "unknown" },
@@ -694,6 +694,15 @@ describe("MCP Booted Device Resources", () => {
       );
       expect(idleDevice).toBeDefined();
       expect(idleDevice?.poolStatus).toBe("idle");
+
+      // With a pool wired, `connectionId` names THIS connection epoch: a reused
+      // serial alone cannot tell a consumer whether to flush its per-device
+      // state, so the pool's incarnation is appended.
+      const pooledIncarnation = devicePool.getDeviceIncarnation(assignedDevice!.deviceId);
+      expect(pooledIncarnation).toBeDefined();
+      expect(assignedDevice?.identity?.connectionId).toBe(
+        `${assignedDevice!.deviceId}#${pooledIncarnation}`,
+      );
 
       // Clean up SessionManager timer to prevent process hang
       sessionManager.stopCleanupTimer();

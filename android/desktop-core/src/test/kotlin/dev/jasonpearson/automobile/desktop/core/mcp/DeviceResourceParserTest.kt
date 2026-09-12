@@ -34,7 +34,7 @@ class DeviceResourceParserTest {
                   "source": "local",
                   "isVirtual": true,
                   "status": "booted",
-                  "identity": { "stableId": "Pixel_8", "connectionId": "transport-1" }
+                  "identity": { "stableId": "Pixel_8", "connectionId": "emulator-5554#3" }
               }
           ]
       }

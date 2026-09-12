@@ -70,8 +70,14 @@ export interface DeviceServiceStatus {
 
 interface DeviceIdentity {
   stableId: string;
+  /**
+   * Key for THIS connection epoch of the device. An adb serial is reused across
+   * boots, so the serial alone cannot tell a consumer "same device, stream
+   * continues" from "device rebooted, flush your state". When the pool knows the
+   * device's `incarnation` this is `<deviceId>#<incarnation>`; otherwise the
+   * serial alone, which callers must read as "no epoch information".
+   */
   connectionId: string;
-  transportId?: string;
 }
 
 interface DeviceReadiness {
@@ -165,6 +171,7 @@ interface PoolDeviceInfo {
   assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility;
   avdName?: string;
+  incarnation?: number;
 }
 
 /**
@@ -340,17 +347,16 @@ function toDeviceIdentity(
   poolInfo: PoolDeviceInfo | undefined,
   isVirtual: boolean,
 ): DeviceIdentity {
-  const identity: DeviceIdentity = {
+  return {
     stableId:
       device.platform === "android" && isVirtual
         ? (poolInfo?.avdName ?? device.name)
         : device.deviceId,
-    connectionId: device.transportId ?? device.deviceId,
+    connectionId:
+      poolInfo?.incarnation === undefined
+        ? device.deviceId
+        : `${device.deviceId}#${poolInfo.incarnation}`,
   };
-  if (device.transportId) {
-    identity.transportId = device.transportId;
-  }
-  return identity;
 }
 
 function isVirtualDevice(device: BootedDevice): boolean {
@@ -382,6 +388,7 @@ function getPoolDeviceInfo(
     assignedSession: pooledDevice.sessionId || undefined,
     recoveryEligibility: devicePool.getRecoveryEligibility(deviceId),
     avdName: pooledDevice.avdName,
+    incarnation: pooledDevice.incarnation,
   };
 }
 

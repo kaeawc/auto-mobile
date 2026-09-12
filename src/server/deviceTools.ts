@@ -3409,7 +3409,7 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
  * `getAndroidSchema`), so a serial that necessarily differs from the requested
  * string is still the requested device when the AVD name matches.
  */
-function isMismatchedBootedDeviceId(
+export function isMismatchedBootedDeviceId(
   args: StartDeviceArgs,
   device: BootedDevice,
   sourceImage: DeviceInfo | undefined,
@@ -3464,7 +3464,7 @@ function validateBootIdentity(
  * Anything else is a genuine `identifier_conflict`, reportable only here,
  * because the mapping from AVD name to serial is not known until discovery.
  */
-function validateRequestedAndroidSerial(
+export function validateRequestedAndroidSerial(
   pair: { avdName: string; deviceId: string } | undefined,
   device: BootedDevice,
   sourceImage: DeviceInfo | undefined,

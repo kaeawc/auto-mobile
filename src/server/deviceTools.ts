@@ -863,7 +863,8 @@ async function defaultResolveRunningAndroidAvdName(
     return await new AndroidEmulatorClient().resolveRunningAvdName(device, timeoutMs, signal);
   } catch (error) {
     // An unreachable console is one of the three expected outcomes of this
-    // probe; the caller treats "could not resolve" as its documented blind spot.
+    // probe; "could not resolve" makes the caller REFUSE the destructive action,
+    // so this is a warn-and-report-unresolved, never a swallow that proceeds.
     logger.warn(
       `[DeviceTools] Could not re-resolve the AVD name for ${device.deviceId}: ${errorMessage(error)}`,
       error,

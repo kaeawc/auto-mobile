@@ -951,11 +951,13 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("drops a cached positive availability so a now-down runner is re-probed", async function () {
-      // isAvailable only serves a cache when it is POSITIVE, so this pins the
-      // cachedAvailability clear specifically: deleting `this.cachedAvailability = null`
-      // (or `this.cachedRunning = null`) from clearCaches leaves the stale positive and
-      // reds the final assertion. cachedInstalled has no such test here because for a
-      // simulator device isInstalled is unconditionally true — clearing it is unobservable.
+      // isAvailable() delegates directly to isRunning() (#6416 — it no longer
+      // layers its own hour-long cache on top), so this pins that clearCaches()
+      // still drops the underlying cachedRunning positive: deleting
+      // `this.cachedRunning = null` from clearCaches leaves the stale positive
+      // and reds the final assertion. cachedInstalled has no such test here
+      // because for a simulator device isInstalled is unconditionally true —
+      // clearing it is unobservable.
       const fakeExecutor = new FakeProcessExecutor();
       let healthy = true;
       fakeExecutor.setCommandHandler("curl -s", () =>
@@ -971,9 +973,9 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      expect(await manager.isAvailable()).toBe(true); // installed(true)+running(true) → cached positive
+      expect(await manager.isAvailable()).toBe(true); // installed(true)+running(true) → running cached positive
       healthy = false;
-      expect(await manager.isAvailable()).toBe(true); // positive availability cache is served (stale)
+      expect(await manager.isAvailable()).toBe(true); // running's own STATUS_CACHE_TTL cache is served (stale)
       manager.clearCaches();
       expect(await manager.isAvailable()).toBe(false); // caches dropped → re-probes the down runner
     });
@@ -1047,6 +1049,226 @@ describe("IOSCtrlProxyManager", function () {
 
       expect((await manager.setup()).success).toBe(true);
       expect(launchCount).toBe(2);
+    });
+  });
+
+  // #6575: the legacy-app uninstall probe used to run on every setup() call,
+  // including the attemptedSetup fast path that exists to make repeat calls
+  // cheap. It should fire at most once per manager instance.
+  describe("legacy-app uninstall probe runs at most once per manager (#6575)", function () {
+    test("does not re-probe on a setup() call that hits the attemptedSetup fast path", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      let legacyProbeCount = 0;
+      const fakeDeviceAppManager = {
+        getInstalledAppBundleHash: async () => {
+          legacyProbeCount++;
+          return null;
+        },
+      } as unknown as DeviceAppManager;
+      const xcodebuild: Xcodebuild = {
+        executeCommand: async () => createExecResult("", ""),
+        isAvailable: async () => true,
+        startStreaming: async () => {
+          healthy = true;
+          return new FakeChildProcess() as unknown as ChildProcess;
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        fakeDeviceAppManager,
+        undefined,
+        undefined,
+        xcodebuild,
+      );
+      fakeTimer.enableAutoAdvance();
+
+      const first = await manager.setup();
+      expect(first.success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+
+      // Second call hits the `attemptedSetup && !force` fast path.
+      const second = await manager.setup();
+      expect(second.success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+    });
+
+    test("keeps the lifetime guard latched across setup resets", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      fakeExecutor.setCommandHandler("kill -0", () => {
+        throw new Error("runner is no longer running");
+      });
+      let legacyProbeCount = 0;
+      const fakeDeviceAppManager = {
+        getInstalledAppBundleHash: async () => {
+          legacyProbeCount++;
+          return null;
+        },
+      } as unknown as DeviceAppManager;
+      const xcodebuild: Xcodebuild = {
+        executeCommand: async () => createExecResult("", ""),
+        isAvailable: async () => true,
+        startStreaming: async () => {
+          healthy = true;
+          return new FakeChildProcess() as unknown as ChildProcess;
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        fakeDeviceAppManager,
+        undefined,
+        undefined,
+        xcodebuild,
+      );
+      fakeTimer.enableAutoAdvance();
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+
+      healthy = false;
+      manager.resetSetupState();
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(legacyProbeCount).toBe(1);
+    });
+  });
+
+  // #6416: `isAvailable()` used to serve a positive answer from a 1-hour
+  // `cachedAvailability` layer that `setup()`'s already-attempted gate
+  // consults. A runner that dies without a local child-exit event (killed
+  // externally, simulator erased, wedged-but-still-answering /health) is
+  // never re-probed until that hour elapses, so `setup()` keeps reporting
+  // "CtrlProxy was already running" against a dead runner. The fix removes
+  // that layer so the gate relies on `isRunning()`'s own 30s STATUS_CACHE_TTL.
+  describe("setup gate re-probes after STATUS_CACHE_TTL (#6416)", function () {
+    test("setup() re-probes and does not report success once the runner stops answering, even under an hour", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = true;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        {
+          ...createFakeBuilder(),
+          needsRebuild: async () => true,
+          build: async () => ({ success: false, message: "fake rebuild unavailable" }),
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder,
+        fakeExecutor,
+        undefined,
+        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+      );
+
+      // First pass through the gate: attemptedSetup becomes true and the
+      // runner is genuinely up.
+      const first = await manager.setup();
+      expect(first.success).toBe(true);
+
+      // Second pass: attemptedSetup is now true, so this call goes through
+      // the isAvailable() gate and (pre-fix) populates cachedAvailability
+      // with a positive result.
+      const second = await manager.setup();
+      expect(second.success).toBe(true);
+
+      // The runner goes away without a local child-exit event. Advance past
+      // the 30s STATUS_CACHE_TTL (but nowhere near the old 1-hour window) so
+      // isRunning() is willing to re-probe.
+      healthy = false;
+      fakeTimer.advanceTime(31 * 1000);
+
+      const third = await manager.setup();
+      expect(third.success).toBe(false);
+      expect(third.message).not.toBe("CtrlProxy was already running");
+    });
+
+    test("setup() still does not report success after a full hour, pinning that the fix does not depend on the old TTL value", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = true;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        {
+          ...createFakeBuilder(),
+          needsRebuild: async () => true,
+          build: async () => ({ success: false, message: "fake rebuild unavailable" }),
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder,
+        fakeExecutor,
+        undefined,
+        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+      );
+
+      expect((await manager.setup()).success).toBe(true);
+      expect((await manager.setup()).success).toBe(true);
+
+      healthy = false;
+      fakeTimer.advanceTime(60 * 60 * 1000 + 1000);
+
+      const result = await manager.setup();
+      expect(result.success).toBe(false);
+      expect(result.message).not.toBe("CtrlProxy was already running");
+    });
+
+    test("the fast path still short-circuits when the runner really is up", async function () {
+      const fakeExecutor = new FakeProcessExecutor();
+      const healthy = true;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        {
+          ...createFakeBuilder(),
+          needsRebuild: async () => true,
+          build: async () => ({ success: false, message: "fake rebuild unavailable" }),
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder,
+        fakeExecutor,
+        undefined,
+        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+      );
+
+      expect((await manager.setup()).success).toBe(true);
+      expect((await manager.setup()).success).toBe(true);
+
+      fakeTimer.advanceTime(31 * 1000);
+
+      const result = await manager.setup();
+      expect(result.success).toBe(true);
+      expect(result.message).toBe("CtrlProxy was already running");
     });
   });
 

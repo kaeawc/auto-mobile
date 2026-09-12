@@ -774,6 +774,13 @@ export class RunnerReadinessService {
       return;
     }
 
+    // A prior readiness request may have left the setup gate latched
+    // (attemptedSetup) with a stale positive from earlier in this daemon's
+    // lifetime. Reopen it before this independent request tries setup again,
+    // matching the Android path (see :265) and the connected branch above
+    // (:613) — otherwise setup() can report "already running" against a
+    // runner that died without a local child-exit event (#6416).
+    manager.resetSetupState();
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.setup(false, context.perf, signal, this.remainingForPhase(context, "runner-setup")),
     );

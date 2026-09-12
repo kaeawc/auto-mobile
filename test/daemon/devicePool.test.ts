@@ -265,6 +265,10 @@ describe("DevicePool", () => {
       this.resolveDiscoveryRelease();
     }
 
+    addToConcurrentSnapshot(device: BootedDevice): void {
+      this.concurrentSnapshot.push(device);
+    }
+
     private discoveryFor(devices: BootedDevice[], platform: SomePlatform) {
       const platforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
       return {
@@ -3489,6 +3493,21 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-new")?.sessionId).toBe("session-2");
     });
 
+    // A handset serial is unique, so it never needs the emulator's identity
+    // reconciliation — but it still has to be PRESENT. Unplugging one after the
+    // last refresh must not leave it assignable (#6863 review).
+    test("does not assign a pooled physical handset that was unplugged after the last refresh", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("R5CT10ABCDE", "android", "SM-S911B"),
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(devicePool.assignDeviceToSession("session-1", "android")).rejects.toThrow();
+
+      expect(devicePool.getDevice("R5CT10ABCDE")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
     test("does not assign but retains a pooled iOS simulator when liveness discovery fails", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [];
@@ -3880,7 +3899,11 @@ describe("DevicePool", () => {
       await deferredDeviceManager.waitForDiscoveryStart();
 
       await devicePool.assignDeviceToSession("concurrent-session", "android");
-      await devicePool.addDevice(createBootedDevice("R5CT654321", "android", "Pixel 9"));
+      const spareHandset = createBootedDevice("R5CT654321", "android", "Pixel 9");
+      // The handset has to be discoverable too: a pooled Android entry is
+      // re-proved present before it is handed out, handsets included.
+      deferredDeviceManager.addToConcurrentSnapshot(spareHandset);
+      await devicePool.addDevice(spareHandset);
       deferredDeviceManager.releaseDiscovery();
       await preflightAllocation;
 
@@ -6352,7 +6375,7 @@ describe("DevicePool", () => {
       // tryAssignDeviceWithCriteria (issue #2656). Criteria-based allocation
       // must distribute load to the least-recently-used idle device, the same
       // way platform-based allocation does.
-      await devicePool.initializeWithDevices([
+      await initializeLiveDevices([
         createBootedDevice("dev-a", "android"),
         createBootedDevice("dev-b", "android"),
         createBootedDevice("dev-c", "android"),

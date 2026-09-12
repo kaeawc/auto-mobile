@@ -2123,14 +2123,27 @@ export class DevicePool {
   }
 
   /**
-   * Whether a pooled entry must be re-proved present before it is handed out.
+   * Whether a pooled entry must be re-proved PRESENT before it is handed out.
    *
-   * Emulator console ports are the reused identifiers: `emulator-5554` is
-   * handed to whichever AVD boots into that console slot next, so a pooled
-   * entry for one can be silently stale. A handset serial is globally unique
-   * and never reassigned, so the ordinary refresh prune is sufficient there.
+   * Every Android entry must: a handset unplugged after the last refresh is
+   * gone from `adb devices` but still sitting in the pool, and assigning it
+   * hands a session a device that cannot answer (#6863 review).
    */
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
+    return device.platform === "android";
+  }
+
+  /**
+   * Whether a pooled entry's serial can be REASSIGNED to a different runtime.
+   *
+   * Emulator console ports are the reused identifiers: `emulator-5554` is handed
+   * to whichever AVD boots into that console slot next, so a serial that is
+   * present still has to prove it is the same runtime. A handset serial is
+   * globally unique and never reassigned, so presence is the whole question
+   * there — and its name (`ro.product.model`) is not identity, so running it
+   * through identity reconciliation could only produce false replacements.
+   */
+  private hasReusableSerial(device: PooledDevice): boolean {
     return device.platform === "android" && consolePortFromSerial(device.id) !== null;
   }
 
@@ -2154,7 +2167,9 @@ export class DevicePool {
 
     const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
     if (bootedDevice) {
-      return await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld);
+      return this.hasReusableSerial(device)
+        ? await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld)
+        : this.confirmLivePooledDevice(device);
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -2182,18 +2197,7 @@ export class DevicePool {
     assignmentLockHeld: boolean,
   ): Promise<boolean> {
     if (this.matchesRuntimeIdentity(device, bootedDevice)) {
-      if (this.devices.get(device.id) !== device) {
-        // A concurrent re-add replaced this entry while discovery was in
-        // flight. Serial, platform and name cannot tell the incarnations
-        // apart — only the pool's own entry identity can — so the captured
-        // object is a previous incarnation and must not be handed out.
-        logger.debug(
-          `Rejecting superseded pooled incarnation of ${device.id} after liveness check`,
-        );
-        return false;
-      }
-      this.refreshMissingDeviceMisses.delete(device.id);
-      return true;
+      return this.confirmLivePooledDevice(device);
     }
     const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
       device,
@@ -2201,6 +2205,23 @@ export class DevicePool {
       assignmentLockHeld,
     );
     return !replaced && this.devices.get(device.id) === device;
+  }
+
+  /**
+   * Accept a pooled entry discovery just confirmed is present.
+   *
+   * Guarded on entry identity: a concurrent re-add can have replaced this entry
+   * while discovery was in flight, and serial, platform and name cannot tell the
+   * incarnations apart — only the pool's own entry object can — so the captured
+   * object would be a previous incarnation and must not be handed out.
+   */
+  private confirmLivePooledDevice(device: PooledDevice): boolean {
+    if (this.devices.get(device.id) !== device) {
+      logger.debug(`Rejecting superseded pooled incarnation of ${device.id} after liveness check`);
+      return false;
+    }
+    this.refreshMissingDeviceMisses.delete(device.id);
+    return true;
   }
 
   private async replaceIdlePooledDeviceForLivenessCheck(

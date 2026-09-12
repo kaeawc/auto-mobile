@@ -1501,17 +1501,20 @@ describe("SessionManager", () => {
           },
         }),
       );
+      const device = { name: "device-1", deviceId: "device-1", platform: "android" as const };
+      const deviceManager = new FakeDeviceManager();
+      // A pooled Android entry is re-proved present against discovery before it
+      // is handed out, handsets included, so discovery has to list it.
+      deviceManager.bootedDevices = [device];
       const pool = new DevicePool(
         manager,
         "test-daemon",
         fakeTimer,
         new FakeInstalledAppsRepository(),
-        new FakeDeviceManager(),
+        deviceManager,
       );
       try {
-        await pool.initializeWithDevices([
-          { name: "device-1", deviceId: "device-1", platform: "android" },
-        ]);
+        await pool.initializeWithDevices([device]);
         await pool.assignDeviceToSession("s1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
 

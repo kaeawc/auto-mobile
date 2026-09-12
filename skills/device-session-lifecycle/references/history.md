@@ -94,6 +94,12 @@ daemon and desktop ship together):
   mismatch on every Android cold boot, emulator torn down. Fix: unknown
   transportId is a wildcard. **Not caught by unit tests** (needed live adb
   transport timing).
+- #6863: `transportId` removed from the identity model entirely — pool
+  `incarnation` is the only epoch token. The two entries above are HISTORY:
+  the fast same-serial reconnect they fixed is now an accepted, documented
+  blind spot, handled by self-healing epoch-keyed caches and by re-resolving
+  an AVD name from the runtime before any destructive action. Do not
+  reintroduce the field.
 - #5258 → #5365: multiplexed subscriptions — `subscriptionId` echoed on
   subscribe and stamped on every frame (backfill included);
   unsubscribe/update_cadence per-subscription; pong/close/error

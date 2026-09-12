@@ -29,9 +29,25 @@ not found" = transport session, not pool session), #5411 (pool session
 rebind), the #5256 epic (epoch identity was missing entirely).
 
 `incarnation` (bumped only at pooled-entry **creation**) is the sole thing
-distinguishing "same serial, new boot" from "same device". Anything
-identity-sensitive must be keyed on it, with unknown `transportId` treated as
-wildcard (#5372 regression: strict compare broke every Android cold boot).
+distinguishing "same serial, new boot" from "same device", and since #6863 it
+is the ONLY epoch token in the model — the ADB transport id is gone from
+`BootedDevice`/`PooledDevice`, and discovery carries nothing else. Anything
+identity-sensitive must be keyed on the incarnation; runtime identity is
+validated by serial + platform + name (with `Unknown (<serial>)` tolerated as
+"the console could not answer", never as "a different device"), and a boundary
+is observed as **disappearance then reappearance** — the pool evicts an entry
+the moment discovery stops listing the serial and re-adds it under a fresh
+incarnation.
+
+**Documented blind spot**: a same-serial restart faster than one discovery
+interval never reaches the pool, so it reads as continuity. Every host-side
+cache keyed on the epoch must therefore SELF-HEAL on failure (evict and rebuild
+once before surfacing the error — see the append-helper cache in
+`src/daemon/socketServer.ts`), and any destructive action that would act on a
+pool-cached AVD name must re-resolve it from the runtime first
+(`AndroidEmulatorClient.resolveRunningAvdName`, used by killDevice/deleteDevice).
+Historical entries in `references/history.md` that reason about `transportId`
+(e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
 
 ## 2. Invariants (the contract every fix must preserve)
 
@@ -105,9 +121,9 @@ wildcard (#5372 regression: strict compare broke every Android cold boot).
    killDevice success on `adb emu kill` ack, install success on the wrong
    simulator. Smell: success derived from a command's ack, not from
    ground-truth polling. (#3334, #3393, #5294, #2387, #5237)
-4. **Identity by mutable key** — serial/UDID/transportId used where an
-   incarnation or epoch UUID belongs. Smell: `deviceId` in a map key for
-   anything longer-lived than one call. (#3393, #5267, #5369, epic #5256)
+4. **Identity by mutable key** — serial/UDID used where an incarnation or
+   epoch UUID belongs. Smell: `deviceId` in a map key for anything
+   longer-lived than one call. (#3393, #5267, #5369, epic #5256, #6863)
 5. **Heartbeat bookkeeping vs real liveness** — grace windows,
    `hasReceivedHeartbeat`, agent think-time gaps. Smell: expiry math with two
    clocks or two flags. (#2443, #5288, #5411)
@@ -239,10 +255,11 @@ comments. **A refactor that drops a comment silently drops an invariant.**
   `FakeTimer` auto-fires scheduled intervals when advanced a full period
   (don't also fire manually); `initializeWithDevices` is deliberately a
   silent pre-populate (no ready listeners).
-- **Known blind spot**: unit fakes can't represent live adb transport
-  population timing — #5369 shipped green through unit tests. Anything
-  touching pool runtime identity (`transportId`, incarnation matching on
-  real reconnects) needs a live-emulator check: `/manual-test` sweep, or
+- **Known blind spot**: unit fakes can't represent live adb reconnect timing —
+  #5369 shipped green through unit tests. Anything touching pool runtime
+  identity (incarnation boundaries, name matching on real reconnects, the
+  fast-restart case the pool cannot observe) needs a live-emulator check:
+  `/manual-test` sweep, or
   `--cli startDevice`/`killDevice` against a real emulator; with ≥2
   emulators, sanity-check returned `deviceId` against `adb emu avd name`.
 - Streaming changes (`deviceSessionUuid` stamping, subscription routing)

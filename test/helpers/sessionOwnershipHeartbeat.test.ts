@@ -3,6 +3,26 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { startSessionOwnershipHeartbeat } from "./sessionOwnershipHeartbeat";
 
 describe("startSessionOwnershipHeartbeat", () => {
+  test("propagates an initial renewal failure before starting the keeper", async () => {
+    const timer = new FakeTimer();
+    let calls = 0;
+
+    await expect(
+      startSessionOwnershipHeartbeat({
+        intervalMs: 2_000,
+        timer,
+        renew: async () => {
+          calls++;
+          throw new Error("daemon heartbeat timed out");
+        },
+      }),
+    ).rejects.toThrow("daemon heartbeat timed out");
+
+    expect(calls).toBe(1);
+    await timer.advanceTimeAsync(10_000);
+    expect(calls).toBe(1);
+  });
+
   test("renews immediately and at the configured cadence until cleanup", async () => {
     const timer = new FakeTimer();
     const calls: AbortSignal[] = [];

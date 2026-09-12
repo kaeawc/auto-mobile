@@ -21,6 +21,7 @@ const DEFAULT_TEST_TIMEOUT_MS = 420000;
 // The daemon's default ownership timeout is 10s. Renew well within that window
 // while one-shot CLI calls are doing iOS setup or leaving a recording active.
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
+const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;
@@ -86,7 +87,11 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-async function runLocalCliOutput(args: string[], signal?: AbortSignal): Promise<string> {
+async function runLocalCliOutput(
+  args: string[],
+  signal?: AbortSignal,
+  timeout?: number,
+): Promise<string> {
   // The workflow warms CtrlProxy in the daemon process before this test runs.
   // Calling the local CLI keeps start and stop in that same process; importing
   // the tool handler here would create a second cold DeviceSessionManager and
@@ -97,6 +102,7 @@ async function runLocalCliOutput(args: string[], signal?: AbortSignal): Promise<
     {
       maxBuffer: 10 * 1024 * 1024,
       signal,
+      timeout,
     },
   );
   return stdout;
@@ -112,7 +118,11 @@ async function startVideoRecordingSessionHeartbeat(
   return startSessionOwnershipHeartbeat({
     intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
     renew: async (signal) => {
-      await runLocalCliOutput(["--daemon", "heartbeat", sessionUuid], signal);
+      await runLocalCliOutput(
+        ["--daemon", "heartbeat", sessionUuid],
+        signal,
+        SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS,
+      );
     },
   });
 }

@@ -2097,11 +2097,22 @@ export class SimCtlClient implements SimCtl {
     }
 
     const cacheAge = this.timer.now() - this.headlessSessionCacheTimestamp;
-    if (this.headlessSessionCache === null || cacheAge >= SimCtlClient.HEADLESS_SESSION_CACHE_TTL) {
-      this.headlessSessionCache = await this.detectHeadlessSession(signal);
-      this.headlessSessionCacheTimestamp = this.timer.now();
+    if (this.headlessSessionCache !== null && cacheAge < SimCtlClient.HEADLESS_SESSION_CACHE_TTL) {
+      return this.headlessSessionCache;
     }
-    return this.headlessSessionCache;
+
+    // Two device starts can race past the expired TTL and each launch an
+    // independent probe. Stamp every probe with the time it started and only
+    // commit its result if no later-started probe has already written the
+    // cache, so a slower, older completion cannot overwrite (and refresh the
+    // timestamp of) a newer result. Each caller keeps its own probe + signal.
+    const probeStartedAt = this.timer.now();
+    const headless = await this.detectHeadlessSession(signal);
+    if (probeStartedAt >= this.headlessSessionCacheTimestamp) {
+      this.headlessSessionCache = headless;
+      this.headlessSessionCacheTimestamp = probeStartedAt;
+    }
+    return headless;
   }
 
   private async detectHeadlessSession(signal?: AbortSignal): Promise<boolean> {

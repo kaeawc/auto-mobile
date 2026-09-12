@@ -703,12 +703,11 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new ActionableError("simctl is not available. Install Xcode command line tools.");
     }
 
-    const capturePath = path.join(config.outputDirectory, `${config.recordingId}-raw.mov`);
-
-    const args = ["io", device.deviceId, "recordVideo", capturePath];
+    const captureBaseName = `${config.recordingId}-raw`;
 
     const maxAttempts = Math.max(1, this.iosRecordingStartMaxAttempts);
     const attemptFailures: string[] = [];
+    let previousCapturePath: string | undefined;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       throwIfRecordingStartAborted(config.abortSignal, "iOS");
@@ -716,18 +715,28 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       if (remainingBeforeSpawn <= 0) {
         break;
       }
-      if (attempt > 1) {
-        // `simctl io ... recordVideo` creates the capture file *before* it emits the
-        // "Recording started" handshake, so an attempt we killed for missing that
-        // handshake leaves a partial .mov behind — and simctl refuses to record over
-        // an existing file (exit 17, "cannot save recorded video output into a file
-        // that already exists"), which would make the #4076 retry fail in exactly the
-        // case it exists for. The partial can never hold a usable recording (the
-        // handshake never completed), so drop it. Safe to unlink here: the previous
-        // attempt's capture process was already reaped by cleanupFailedIosStart
-        // below, so simctl cannot recreate the file after the unlink.
-        await this.removeStaleCapture(capturePath);
+      // Give every attempt its own capture file. `simctl io ... recordVideo` creates
+      // the target *before* it emits the "Recording started" handshake, so an attempt
+      // we killed for missing that handshake leaves a partial .mov behind — and simctl
+      // refuses to record over an existing file (exit 17, "cannot save recorded video
+      // output into a file that already exists"). Reusing one path made the retry
+      // depend on unlinking that partial before the dying capture process could
+      // recreate it; losing that race exit-17'd the retry and failed the whole start
+      // (issue #6851). A per-attempt path is immune regardless of cleanup timing —
+      // the retry never targets the first attempt's leftover. Attempt 1 keeps the
+      // bare `<id>-raw.mov` name so the common first-try success path is unchanged.
+      const capturePath = path.join(
+        config.outputDirectory,
+        attempt === 1 ? `${captureBaseName}.mov` : `${captureBaseName}-attempt${attempt}.mov`,
+      );
+      const args = ["io", device.deviceId, "recordVideo", capturePath];
+      if (previousCapturePath !== undefined) {
+        // Best-effort disk hygiene only: drop the prior attempt's partial so retries
+        // don't leak `.mov` files. Correctness no longer depends on this succeeding —
+        // the unique path above already prevents the exit-17 collision.
+        await this.removeStaleCapture(previousCapturePath);
       }
+      previousCapturePath = capturePath;
       const captureProcess = await simctl.startCommandArgs(args, {
         stdio: ["ignore", "ignore", "pipe"],
       });

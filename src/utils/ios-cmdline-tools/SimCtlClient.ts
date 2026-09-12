@@ -20,6 +20,7 @@ import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
+import { iosVersionStringFromRuntimeId } from "./iosVersion";
 import { getAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
@@ -416,16 +417,7 @@ function normalizeIosVersion(
     return trimmedOsVersion;
   }
 
-  if (!runtimeId) {
-    return undefined;
-  }
-
-  const match = runtimeId.match(/iOS[-_](\d+(?:[-_]\d+)*)/);
-  if (!match) {
-    return undefined;
-  }
-
-  return match[1].replace(/_/g, ".").replace(/-/g, ".");
+  return iosVersionStringFromRuntimeId(runtimeId);
 }
 
 /** Numeric, component-wise comparison of dotted version strings. */

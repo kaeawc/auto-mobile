@@ -144,6 +144,33 @@ describe("IOSCtrlProxyProcessClient", () => {
     expect(host.getExecutedCommands()).toContain("ps -p 42 -o ppid= -o args=");
   });
 
+  test("does not report a daemon-managed runner behind an orphaned shell as external, even when its own environment carries a device identity marker (#6372 predicate-divergence regression)", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("pgrep -x xcodebuild", result("42\n"));
+    host.setCommandResponse(
+      "ps -p 42 -o ppid= -o args=",
+      result(
+        "500 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+      ),
+    );
+    // The runner's own environment carries AUTOMOBILE_DEVICE_ID=, which in
+    // isolation looks like an externally (hot-reload) launched xcodebuild.
+    host.setCommandResponse("ps eww -p 42 -o command=", result("AUTOMOBILE_DEVICE_ID=DEVICE-1"));
+    // But its immediate parent is an orphaned shell wrapping the same
+    // daemon-managed xcodebuild shape, so the runner is still daemon-owned.
+    host.setCommandResponse(
+      "ps -p 500 -o ppid= -o args=",
+      result(
+        "1 /bin/sh -c xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+      ),
+    );
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    const process = await client.findExternalXcodebuildCtrlProxyProcess("DEVICE-1");
+
+    expect(process).toBeNull();
+  });
+
   test("does not identify a recycled PID as a CtrlProxy runner", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("kill -0 42", result());

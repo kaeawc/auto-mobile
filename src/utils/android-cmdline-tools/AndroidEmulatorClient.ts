@@ -2215,11 +2215,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }
 
-    if (
-      emulator.name !== device.name ||
-      emulator.platform !== device.platform ||
-      (device.transportId !== undefined && emulator.transportId !== device.transportId)
-    ) {
+    if (emulator.name !== device.name || emulator.platform !== device.platform) {
       throw new ActionableError(
         `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
       );
@@ -2229,38 +2225,19 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     // shutdown lets the emulator write its quick-boot snapshot on exit; a guest
     // `shell reboot -p` halts the OS without it, so the next quick-boot of the
     // AVD resumes into a halted guest that never comes adb-online and burns the
-    // whole getAndroid readiness budget (issue #6849 regression of #6845).
+    // whole getAndroid readiness budget (issue #6849 regression of #6845). The
+    // console kill is therefore the only termination primitive here; there is
+    // no `reboot -p` path.
     //
-    // `adb emu` cannot be pinned to a transport: the console subcommand ignores
-    // `-t` and only selects via `-s`/ANDROID_SERIAL, so `adb -t <id> emu kill`
-    // fails with "more than one emulator detected; use -s" as soon as a second
-    // emulator is attached (issue #6845). A serial can be reused after a device
-    // exits, so when an expected transport is known, first resolve it back to a
-    // serial with `-t <id> get-serialno` and refuse the kill if it no longer
-    // names the expected serial — adb never reuses a transport id, so a
-    // transport whose emulator has gone fails the check instead of pointing at a
-    // replacement. Only then dispatch the serial-scoped `emu kill`, with no
-    // awaited work between the check and the kill so the verified serial cannot
-    // be freed and re-inherited in the gap. Callers confirm disappearance and
-    // incarnation. A discovery that reports no transport at all has nothing to
-    // verify and falls through to the same serial-scoped `emu kill`.
-    if (emulator.transportId) {
-      const transportAdb = this.adbFactory.create(null);
-      const serialResult = await transportAdb.execute(
-        ["-t", emulator.transportId, "get-serialno"],
-        {
-          timeoutMs: options.timeoutMs,
-          noRetry: true,
-          signal: options.signal,
-        },
-      );
-      const observedSerial = serialResult.stdout.trim();
-      if (observedSerial !== emulator.deviceId) {
-        throw new ActionableError(
-          `Emulator '${device.deviceId}' identity changed before termination; transport ${emulator.transportId} now reports '${observedSerial}'. Refusing to kill its replacement.`,
-        );
-      }
-    }
+    // `adb emu` selects a device by serial only — the console subcommand ignores
+    // `-t` and honours just `-s`/ANDROID_SERIAL, so `adb -t <id> emu kill` fails
+    // with "more than one emulator detected; use -s" as soon as a second
+    // emulator is attached (issue #6845). The kill is consequently always
+    // serial-scoped through the discovered emulator, which is what makes it
+    // correct with several emulators attached. Transport ids are not used for
+    // termination at all: the serial is the kill's identity, the discovery-time
+    // check above refuses a replacement AVD found on that serial, and callers
+    // confirm disappearance and incarnation afterwards.
     const adb = this.adbFactory.create(emulator);
     await adb.execute(["emu", "kill"], {
       timeoutMs: options.timeoutMs,

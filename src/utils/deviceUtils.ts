@@ -14,6 +14,7 @@ import type { DiscoverySource } from "./discoverySource";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 import { getAbortSignal, runWithAbortSignal } from "./AbortContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
@@ -423,16 +424,42 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]> {
     switch (platform) {
       case "android":
-        return this.emulator.listAvds();
+        return this.listAndroidDeviceImages();
       case "ios":
         return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
-        const emulators = await this.emulator.listAvds();
+        const emulators = await this.listAndroidDeviceImages();
         const simulators = await this.listIosDeviceImagesIfAvailable({
           swallowDiscoveryErrors: true,
         });
         return [...emulators, ...simulators];
     }
+  }
+
+  /**
+   * List Android AVD images with live isRunning state. `listAvds` reports every
+   * AVD as isRunning:false; the iOS listing already reports its booted state
+   * from simctl, so this overlays the booted-emulator scan to keep the two
+   * platforms' image listings symmetric (issue #6850). `getBootedDevices`
+   * swallows discovery failures to an empty list, so a scan failure degrades to
+   * isRunning:false rather than failing the listing.
+   *
+   * Only `emulator-<port>` serials may contribute to the overlay: the booted
+   * scan also reports physical handsets, whose `name` is ro.product.model, and
+   * a handset modelled like an AVD would otherwise mark that AVD running and
+   * let bootMatchedImage() hand back the handset instead of booting the AVD.
+   */
+  private async listAndroidDeviceImages(): Promise<DeviceInfo[]> {
+    const [images, bootedDevices] = await Promise.all([
+      this.emulator.listAvds(),
+      this.emulator.getBootedDevices(),
+    ]);
+    const runningAvdNames = new Set(
+      bootedDevices
+        .filter((device) => isAndroidEmulatorSerial(device.deviceId))
+        .map((device) => device.name),
+    );
+    return images.map((image) => ({ ...image, isRunning: runningAvdNames.has(image.name) }));
   }
 
   /**

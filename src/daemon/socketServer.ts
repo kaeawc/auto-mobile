@@ -3922,11 +3922,16 @@ export class UnixSocketServer {
         ? undefined
         : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs);
     const cached = this.getAppendTextInput(targetDevice);
-    const run = async (input: AppendTextInput, pending: string, timeoutMs: number) =>
+    const run = async (
+      input: AppendTextInput,
+      pending: string,
+      timeoutMs: number,
+      validate: typeof beforeKeyEvent,
+    ) =>
       signal
-        ? await input.appendText(pending, timeoutMs, beforeKeyEvent, signal)
-        : await input.appendText(pending, timeoutMs, beforeKeyEvent);
-    const result = await run(cached.input, text, appendTimeoutMs);
+        ? await input.appendText(pending, timeoutMs, validate, signal)
+        : await input.appendText(pending, timeoutMs, validate);
+    const result = await run(cached.input, text, appendTimeoutMs, beforeKeyEvent);
     if (result.success || !cached.fromCache || signal?.aborted) {
       return result;
     }
@@ -3956,7 +3961,17 @@ export class UnixSocketServer {
     if (retryTimeoutMs <= 0) {
       return result;
     }
-    const retry = await run(this.getAppendTextInput(targetDevice).input, pending, retryTimeoutMs);
+    // No frame validator on the retry. This is the SAME logical append: the
+    // original call already validated `frameContext` before its first key event,
+    // and the confirmed prefix has since emitted TYPE_VIEW_TEXT_CHANGED, which
+    // advances the runner's frame epoch. Re-validating here would reject a
+    // suffix that is safe to type (#6863 review).
+    const retry = await run(
+      this.getAppendTextInput(targetDevice).input,
+      pending,
+      retryTimeoutMs,
+      undefined,
+    );
     // Progress accumulates across both helpers so the caller's retry boundary
     // stays an index into the ORIGINAL text; an ambiguous retry poisons the
     // whole count, so it reports no boundary at all.

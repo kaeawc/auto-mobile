@@ -1201,6 +1201,91 @@ describe("UnixSocketServer input/typeText", () => {
     expect(deviceField).toBe("xABCDE");
   });
 
+  // The self-heal retry resumes the SAME logical append: the original call
+  // already validated the frame context before its first key event, and the
+  // confirmed prefix has since emitted TYPE_VIEW_TEXT_CHANGED, which advances the
+  // runner's frame epoch. Re-running the validator on the rebuilt helper would
+  // therefore reject a suffix that is perfectly safe to type
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("does not re-validate the frame context when resuming a self-healed append", async () => {
+    let validationCalls = 0;
+    const validateFrameContext = mock(async () => {
+      validationCalls += 1;
+      // The confirmed prefix advanced the frame epoch, so any validation after
+      // the original append's own one is answered "stale".
+      return validationCalls > 2
+        ? { success: false, error: "Stale frame context; observe a fresh frame before retrying" }
+        : { success: true };
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
+      () => {};
+    let deviceField = "";
+    const validatorsReceived: Array<unknown> = [];
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      const helper = factoryCalls;
+      let helperCalls = 0;
+      return {
+        appendText: async (
+          text: string,
+          _timeoutMs: number,
+          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+        ) => {
+          helperCalls++;
+          validatorsReceived.push(beforeKeyEvent);
+          if (beforeKeyEvent) {
+            const validation = await beforeKeyEvent();
+            if (!validation.success) {
+              return { success: false, error: validation.error, charsSent: 0 };
+            }
+          }
+          if (helper === 1 && helperCalls === 2) {
+            deviceField += text.slice(0, 2);
+            return { success: false, error: "helper died mid-append", charsSent: 2 };
+          }
+          deviceField += text;
+          return { success: true, charsSent: text.length };
+        },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = (text: string, frameContext: string) =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        { platform: "android", deviceId: "emulator-5554", text, mode: "append", frameContext },
+        1234,
+      );
+
+    expect((await append("x", "epoch:1")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    const response = await append("ABCDE", "epoch:2");
+
+    expect(response.success).toBe(true);
+    expect(factoryCalls).toBe(2);
+    // The rebuilt helper resumes the suffix with NO validator of its own.
+    expect(validatorsReceived).toHaveLength(3);
+    expect(validatorsReceived[2]).toBeUndefined();
+    // One validation per logical append; the retry adds none.
+    expect(validationCalls).toBe(2);
+    expect(deviceField).toBe("xABCDE");
+  });
+
   // An omitted `charsSent` means the helper cannot say whether the in-flight key
   // event landed (an adb timeout kills the host child, not the device's handling
   // of it). Replaying anything there can duplicate a character, so the failure is

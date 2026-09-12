@@ -5662,16 +5662,6 @@ export class DevicePool {
   }
 
   /**
-   * Whether a discovery observation describes the same runtime as a pooled
-   * entry.
-   *
-   * A discovery listing carries no connection-epoch token, so serial, platform
-   * and name are all there is to compare; the pool's own `incarnation` is the
-   * only epoch boundary, and it is minted when the pool re-creates an entry
-   * (see `daemon/deviceSessionRegistry.ts`). Name handling is delegated to
-   * {@link namesAgreeOnIdentity}.
-   */
-  /**
    * Whether this pool's entry for a serial describes the runtime a discovery
    * listing just reported on it — false when there is no entry at all.
    *
@@ -5685,6 +5675,16 @@ export class DevicePool {
     return pooled !== undefined && this.matchesRuntimeIdentity(pooled, expected);
   }
 
+  /**
+   * Whether a discovery observation describes the same runtime as a pooled
+   * entry.
+   *
+   * A discovery listing carries no connection-epoch token, so serial, platform
+   * and name are all there is to compare; the pool's own `incarnation` is the
+   * only epoch boundary, and it is minted when the pool re-creates an entry
+   * (see `daemon/deviceSessionRegistry.ts`). Name handling is delegated to
+   * {@link namesAgreeOnIdentity}.
+   */
   private matchesRuntimeIdentity(
     pooled: PooledDevice,
     expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,

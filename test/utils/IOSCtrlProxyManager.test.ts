@@ -655,7 +655,10 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("propagates forced teardown failures to a concurrent start", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      // The post-teardown drain grace polls on the injected timer; auto-advance
+      // keeps the runner-still-alive path inside the unit-test time budget.
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const stopped = deferred();
       spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
       spyOn(

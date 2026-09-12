@@ -6199,6 +6199,15 @@ export class DevicePool {
     mcpSessionId: string,
   ): Promise<void> {
     for (const id of sessionIds) {
+      // Nothing left to restore for a session this connection already holds
+      // while it also already has a default. Re-checked each iteration rather
+      // than snapshotted, so an attachment cannot act on a stale reading.
+      if (
+        this.mcpSessionAcquiredAutolocks.get(mcpSessionId)?.has(id) &&
+        this.resolveAutolockSessionForMcpSession(mcpSessionId) !== undefined
+      ) {
+        continue;
+      }
       // "if-absent" defers the default decision to attach time, under the
       // assignment mutex. A pre-loop snapshot would be stale by the time the
       // second attachment runs, letting restoration clobber a `setActiveDevice`

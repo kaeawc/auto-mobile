@@ -389,7 +389,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
-    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const discoveredDevice = { ...androidDevice };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);

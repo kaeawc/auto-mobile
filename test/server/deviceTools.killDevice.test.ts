@@ -2553,7 +2553,6 @@ describe("killDevice handler", () => {
           name: image.name,
           platform: "android",
           deviceId: image.deviceId!,
-          transportId: "1",
         },
       }),
     );
@@ -3043,7 +3042,6 @@ describe("killDevice handler", () => {
         name: "Pixel 8",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "1",
       };
       manager.setBootedDevices("android", [device]);
       const deviceSessionRepository = new FakeDeviceSessionRepository();
@@ -3077,7 +3075,7 @@ describe("killDevice handler", () => {
       // An active observation-stream subscriber has already caused this singleton
       // to exist. Its cadence callback later resolves only an existing instance.
       const activeObserver = AndroidCtrlProxyClient.getInstance(
-        { ...device, transportId: undefined },
+        { ...device },
         new FakeAdbClientFactory(),
       );
       activeObserver.bindSession("session-5503");
@@ -3125,7 +3123,6 @@ describe("killDevice handler", () => {
         name: "Pixel 8",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "1",
       };
       manager.setBootedDevices("android", [device]);
       setDeviceToolsDependencies({
@@ -3183,7 +3180,6 @@ describe("killDevice handler", () => {
         name: "Pixel 8",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "1",
       };
       // A different AVD taking the serial is the detectable replacement now
       // that the identity model carries no ADB transport id.
@@ -3242,7 +3238,6 @@ describe("killDevice handler", () => {
         name: "Pixel 8",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "1",
       };
       const incompleteManager = new IncompleteThenBootedDiscoveryKillDeviceManager(device);
       manager = incompleteManager;
@@ -3292,7 +3287,6 @@ describe("killDevice handler", () => {
         name: "Pixel 8",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "1",
       };
       manager.setBootedDevices("android", [device]);
       setDeviceToolsDependencies({
@@ -3375,7 +3369,6 @@ describe("killDevice handler", () => {
         name: "Pixel 8",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "1",
       };
       manager.setBootedDevices("android", [device]);
       setDeviceToolsDependencies({
@@ -3413,7 +3406,6 @@ describe("killDevice handler", () => {
       };
       const observedDevice: BootedDevice = {
         ...requestedDevice,
-        transportId: "1",
       };
       manager.setBootedDevices("android", [observedDevice]);
       setDeviceToolsDependencies({

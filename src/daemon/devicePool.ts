@@ -154,8 +154,6 @@ export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
-  /** ADB transport identity for Android devices; changes when a serial reconnects. */
-  transportId?: string;
   sessionId: string | null; // Session currently using it, null if idle
   status: DeviceStatus; // Current status
   lastUsedAt: number; // Last usage timestamp
@@ -616,7 +614,6 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
-        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -718,7 +715,6 @@ export class DevicePool {
             id: device.deviceId,
             name: device.name,
             platform: device.platform,
-            transportId: device.transportId,
             sessionId: null,
             status: "idle",
             lastUsedAt: now,
@@ -824,7 +820,6 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
-        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,

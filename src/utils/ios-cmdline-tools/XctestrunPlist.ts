@@ -10,6 +10,14 @@ import { Parser } from "xml2js";
  *
  * Only the plist subset that appears in `.xctestrun` files is supported:
  * dict, array, string, integer, real, true/false, date, data.
+ *
+ * `<data>` parses to a `Buffer` and `<real>` parses to a {@link PlistReal}
+ * wrapper (rather than a bare `number`) so that a round-trip through
+ * {@link buildPlist} writes back the same plist type it read — a plain
+ * `number` always means `<integer>`. Without the wrapper, an integral
+ * `<real>` (e.g. `<real>30</real>`) would satisfy `Number.isInteger` and get
+ * rewritten as `<integer>30</integer>`, silently corrupting the type
+ * (issue #6372).
  */
 export type PlistValue =
   | string
@@ -17,8 +25,14 @@ export type PlistValue =
   | boolean
   | Date
   | Buffer
+  | PlistReal
   | PlistValue[]
   | Map<string, PlistValue>;
+
+/** Wraps a `<real>` plist value so it round-trips distinctly from `<integer>`. */
+export class PlistReal {
+  constructor(public readonly value: number) {}
+}
 
 interface PlistNode {
   "#name": string;
@@ -54,13 +68,15 @@ const nodeToValue = (node: PlistNode | undefined): PlistValue => {
     case "array":
       return (node.$$ ?? []).map((child) => nodeToValue(child));
     case "string":
-    case "data":
       return node._ ?? "";
+    case "data":
+      return node._ ? Buffer.from(node._, "base64") : Buffer.alloc(0);
     case "date":
       return node._ ? new Date(node._) : new Date(0);
     case "integer":
-    case "real":
       return node._ ? Number(node._) : 0;
+    case "real":
+      return new PlistReal(node._ ? Number(node._) : 0);
     case "true":
       return true;
     case "false":
@@ -115,6 +131,10 @@ const valueToXml = (value: PlistValue, depth: number): string => {
 
   if (typeof value === "boolean") {
     return `${pad}${value ? "<true/>" : "<false/>"}`;
+  }
+
+  if (value instanceof PlistReal) {
+    return `${pad}<real>${value.value}</real>`;
   }
 
   if (typeof value === "number") {

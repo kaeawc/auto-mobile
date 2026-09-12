@@ -1188,5 +1188,63 @@ describe("Simctl", function () {
       expect(launchctlCalls()).toHaveLength(1);
       expect(openCalls()).toHaveLength(3);
     });
+
+    test("re-probes launchctl once the headless-session cache TTL elapses (issue #6372)", async function () {
+      const fakeTimer = new FakeTimer();
+      simctl = new Simctl(null, recordingExec("Aqua"), fakeTimer, "darwin");
+
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(1);
+
+      // Still within the TTL: no re-probe.
+      fakeTimer.advanceTime(1000);
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(1);
+
+      // Past the TTL: a GUI login/logout in between should be picked up again.
+      fakeTimer.advanceTime(60_000);
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(2);
+    });
+
+    test("a slower older same-tick probe cannot overwrite a newer headless-session result (PR #6830)", async function () {
+      const fakeTimer = new FakeTimer();
+      const pending: Array<(managerName: string) => void> = [];
+      const controlledExec: typeof mockExecAsync = async (
+        file: string,
+        args: string[],
+      ): Promise<ExecResult> => {
+        calls.push({ file, args });
+        if (file === "launchctl" && args[0] === "managername") {
+          return await new Promise<ExecResult>((resolve) => {
+            pending.push((managerName: string) =>
+              resolve(createExecResult(`${managerName}\n`, "")),
+            );
+          });
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(null, controlledExec, fakeTimer, "darwin");
+
+      // Both probes begin at t=0, as concurrent device starts can do.
+      const callA = simctl.openSimulatorApp();
+      const callB = simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(2);
+
+      // Newer probe B (started at t=40000) resolves first: a headless session.
+      pending[1]("System");
+      await callB;
+      // Older probe A (started at t=0) resolves last: a GUI session. It must
+      // NOT clobber B's newer cached result nor refresh the timestamp.
+      pending[0]("Aqua");
+      await callA;
+
+      // Cache must still reflect B (headless): a subsequent call within the TTL
+      // neither re-probes launchctl nor shells `open -a Simulator`.
+      const opensAfterRace = openCalls().length;
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(2);
+      expect(openCalls()).toHaveLength(opensAfterRace);
+    });
   });
 });

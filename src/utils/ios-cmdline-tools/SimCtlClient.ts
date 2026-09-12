@@ -539,8 +539,14 @@ export class SimCtlClient implements SimCtl {
   ) => ChildProcess;
   private readonly fileSystem: SimCtlFileSystem;
   private readonly bootOptions: SimCtlBootOptions;
-  // Cached result of the launchctl headless-session probe (null = not yet probed)
+  // Cached result of the launchctl headless-session probe (null = not yet probed).
+  // Re-probed after HEADLESS_SESSION_CACHE_TTL so a GUI login/logout mid-process
+  // (e.g. an SSH session that later gains a GUI, or vice versa) does not leave a
+  // stale answer cached for the process lifetime (issue #6372).
   private headlessSessionCache: boolean | null = null;
+  private headlessSessionCacheTimestamp = 0;
+  private headlessSessionProbeSequence = 0;
+  private static readonly HEADLESS_SESSION_CACHE_TTL = 30_000; // 30 seconds
 
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
@@ -2147,7 +2153,9 @@ export class SimCtlClient implements SimCtl {
    *     context with no GUI domain.
    *
    * If detection itself fails we assume a GUI session to preserve the prior
-   * behavior. The result is cached so launchctl is probed at most once.
+   * behavior. The result is cached for {@link HEADLESS_SESSION_CACHE_TTL} so
+   * launchctl is not probed on every call, but a stale answer does not persist
+   * for the process lifetime — mirrors the {@link DEVICE_LIST_CACHE_TTL} pattern.
    */
   private async isHeadlessSession(signal?: AbortSignal): Promise<boolean> {
     if (this.platform !== "darwin") {
@@ -2159,10 +2167,26 @@ export class SimCtlClient implements SimCtl {
       return override === "true" || override === "1";
     }
 
-    if (this.headlessSessionCache === null) {
-      this.headlessSessionCache = await this.detectHeadlessSession(signal);
+    const cacheAge = this.timer.now() - this.headlessSessionCacheTimestamp;
+    if (
+      this.headlessSessionCache !== null &&
+      cacheAge >= 0 &&
+      cacheAge < SimCtlClient.HEADLESS_SESSION_CACHE_TTL
+    ) {
+      return this.headlessSessionCache;
     }
-    return this.headlessSessionCache;
+
+    // Two device starts can race past the expired TTL and each launch an
+    // independent probe. A sequence distinguishes probes that begin in the
+    // same timer tick; only the newest one may update the cache. Each caller
+    // keeps its own probe and cancellation signal.
+    const probeSequence = ++this.headlessSessionProbeSequence;
+    const headless = await this.detectHeadlessSession(signal);
+    if (probeSequence === this.headlessSessionProbeSequence) {
+      this.headlessSessionCache = headless;
+      this.headlessSessionCacheTimestamp = this.timer.now();
+    }
+    return headless;
   }
 
   private async detectHeadlessSession(signal?: AbortSignal): Promise<boolean> {

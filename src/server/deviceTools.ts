@@ -3228,7 +3228,10 @@ function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
+// Exported for property-based testing: the idempotency-key fingerprint is the
+// contract that decides whether a reused operationId is the SAME request, so its
+// determinism and field sensitivity are worth exercising directly.
+export function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
   return createHash("sha256")
     .update(
       stableStringify({
@@ -3262,7 +3265,10 @@ function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceAr
   };
 }
 
-function provisionDeviceDeadlineMs(
+// Exported for property-based testing: the absolute deadline arithmetic clamps
+// the requested budget against the transport deadline minus reserved rollback
+// time, and those clamping invariants are worth exercising directly.
+export function provisionDeviceDeadlineMs(
   args: ProvisionDeviceArgs,
   timer: Pick<Timer, "now">,
   reserveRollbackTime: boolean,

@@ -15,16 +15,6 @@ updates:
     open-pull-requests-limit: 10
     # Set versioning strategy appropriate for a library/package
     versioning-strategy: "increase-if-necessary"
-    groups:
-      # sharp ships libvips as a separately-linked native matrix (top-level
-      # `sharp` + every `@img/sharp-*` platform binary). Bump them together in
-      # one PR so a partial update can never split the matrix — validated safe
-      # under Bun on macOS + Linux (arm64/x64) at 0.35.3; see
-      # docs/design-docs/image-backend.md.
-      sharp:
-        patterns:
-          - "sharp"
-          - "@img/sharp-*"
     ignore:
       # These top-level entries are transitive pins hoisted to a single copy by
       # scripts/release/pin-runtime-deps.ts (issue #5421), NOT packages our code
@@ -53,6 +43,32 @@ updates:
       # runtime effect. Allow only patch updates to the pinned 1.4.x line.
       - dependency-name: "sax"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      # sharp is bumped by hand, never by Dependabot (PR #6820). Two reasons,
+      # either of which alone is fatal:
+      #
+      #   1. sharp ships libvips as a separately-linked native matrix — the
+      #      top-level `sharp` plus 23 `@img/sharp-*` / `@img/sharp-libvips-*`
+      #      entries in optionalDependencies, 24 in all — and every one of them
+      #      must move in lock-step. Dependabot only bumps the entries eligible
+      #      at the moment it opens the PR: #6820 moved `sharp` 0.35.3 -> 0.35.4
+      #      and 17 of the 23, leaving six behind, so `sharp` failed to load on
+      #      linux-x64, the image backend silently fell back to Jimp, and the
+      #      WebP encoding test reddened the required Node build. A `groups:`
+      #      rule only makes a split *less likely*, which is why the group that
+      #      used to live here is gone; scripts/check-sharp-matrix-coherence.ts
+      #      is the gate that actually rejects one.
+      #   2. Any sharp change also invalidates the committed
+      #      scripts/release/runtime-graph.json that the pinned-runtime-graph
+      #      check verifies (issue #5421), and Dependabot cannot regenerate it.
+      #      A human must run
+      #      `bun run build && bun scripts/release/pin-runtime-deps.ts --write && bun install`
+      #      and commit package.json + bun.lock + runtime-graph.json together;
+      #      see docs/design-docs/release/runtime-dependency-pinning.md.
+      #
+      # No `update-types:` here on purpose — ignore every version, patches
+      # included, since even a patch splits the matrix and stales the manifest.
+      - dependency-name: "sharp"
+      - dependency-name: "@img/*"
   # Android Gradle dependencies
   - package-ecosystem: "gradle"
     directory: "/android"

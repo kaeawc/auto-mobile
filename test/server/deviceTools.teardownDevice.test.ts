@@ -66,14 +66,38 @@ class TeardownDeviceManager extends FakeDeviceUtils {
   destroyError?: Error;
   killError?: Error;
   replacementAfterKill?: BootedDevice;
+  /**
+   * Drop the booted list after this many discoveries following the kill, so a
+   * test can model a device that is still listed for a poll or two while it
+   * winds down and then really goes away.
+   */
+  clearBootedDevicesAfterDiscoveries?: number;
   killGate?: Promise<void>;
   killStarted?: () => void;
   destroyGate?: Promise<void>;
   destroyStarted?: () => void;
   private readonly destroyedIdentities = new Set<string>();
 
+  private discoveriesSinceKill: number | undefined;
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+  ): Promise<BootedDeviceDiscovery> {
+    if (
+      this.discoveriesSinceKill !== undefined &&
+      this.clearBootedDevicesAfterDiscoveries !== undefined
+    ) {
+      if (this.discoveriesSinceKill >= this.clearBootedDevicesAfterDiscoveries) {
+        this.setBootedDevices("android", []);
+      }
+      this.discoveriesSinceKill++;
+    }
+    return await super.getBootedDevicesDetailed(platform);
+  }
+
   override async killDevice(device: BootedDevice): Promise<void> {
     this.killedDevices.push(device);
+    this.discoveriesSinceKill = 0;
     this.killStarted?.();
     await this.killGate;
     this.setBootedDevices(
@@ -1264,7 +1288,51 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
-  test("fails closed when an unresolved Android replacement reuses the target serial", async () => {
+  // An emulator winding down keeps its serial in `adb devices` after the console
+  // has stopped answering `avd name`, so discovery labels the device that is
+  // STILL THERE `Unknown (<serial>)`. That placeholder is not evidence that a
+  // different AVD took the serial, so the stop phase keeps waiting for the
+  // serial to clear instead of refusing on a newcomer that does not exist
+  // (#6863 review).
+  test("keeps waiting when the target serial is still listed under an unresolved name", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const device: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    manager.replacementAfterKill = {
+      ...device,
+      name: "Unknown (emulator-5554)",
+    };
+    manager.clearBootedDevicesAfterDiscoveries = 1;
+    manager.setBootedDevices("android", [device]);
+    manager.setDeviceImages("android", [
+      {
+        platform: "android",
+        name: device.name,
+        isRunning: true,
+      },
+    ]);
+
+    const response = await teardownTool().handler(request("android", device.name, device.name));
+
+    expect(responseBody(response).state).toBe("destroyed");
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({ name: device.name }),
+      }),
+    ]);
+  });
+
+  // And when the serial never clears, teardown still fails closed: an unresolved
+  // name is never taken as proof that the target stopped either.
+  test("fails closed when a serial that never clears keeps an unresolved name", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
     const device: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1285,12 +1353,7 @@ describe("deleteDevice handler", () => {
 
     const response = await teardownTool().handler(request("android", device.name, device.name));
 
-    expect(responseBody(response).failure).toEqual(
-      expect.objectContaining({
-        phase: "stop",
-        code: "target_identity_unresolved",
-      }),
-    );
+    expect(responseBody(response).state).toBe("failed");
     expect(manager.destroyRequests).toEqual([]);
   });
 

@@ -1560,7 +1560,7 @@ async function waitForDeviceShutdown(
     if (platformWasDiscovered && !matchingDevice) {
       return undefined;
     }
-    if (matchingDevice && !isSameBootedDeviceIdentity(device, matchingDevice)) {
+    if (matchingDevice && isConfirmedDeviceReplacement(device, matchingDevice)) {
       return matchingDevice;
     }
 
@@ -1576,7 +1576,9 @@ async function waitForDeviceShutdown(
 }
 
 /**
- * Whether two discovery observations describe the same booted runtime.
+ * Whether two discovery observations are positive evidence of the same booted
+ * runtime -- the CONTINUITY question, asked by callers deciding whether to
+ * retain live state (an attached observer, a bound session).
  *
  * A discovery listing carries no connection-epoch token, so this is platform +
  * serial + name and nothing more. An Android emulator serial is reused across
@@ -1586,12 +1588,61 @@ async function waitForDeviceShutdown(
  * leaves is deliberate: a same-serial restart of the SAME AVD between two
  * observations reads as continuity, so callers relying on this must self-heal
  * on failure rather than trust it as proof of an unbroken connection.
+ *
+ * An `Unknown (<serial>)` name is not an answer to this question. It means the
+ * emulator console did not report a name, so it is never evidence of continuity
+ * -- and, symmetrically, never evidence of a replacement (see
+ * {@link isConfirmedDeviceReplacement}). This is the uniform rule for the
+ * placeholder; a tool-level `force` escape hatch for callers that want to act
+ * without resolved identity is tracked as a separate follow-up.
  */
 function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevice): boolean {
   return (
     device.platform === candidate.platform &&
     device.deviceId === candidate.deviceId &&
-    device.name === candidate.name
+    device.name === candidate.name &&
+    !hasUnresolvedEmulatorRuntimeName(device) &&
+    !hasUnresolvedEmulatorRuntimeName(candidate)
+  );
+}
+
+/**
+ * Whether a device rediscovered on a serial is positive evidence that a
+ * DIFFERENT runtime now holds it -- the REPLACEMENT question, asked by the
+ * shutdown wait before it stops waiting and rebuilds the pool around the
+ * newcomer.
+ *
+ * Only a RESOLVED, different name declares a replacement. While an emulator
+ * shuts down, `adb devices` can keep listing its serial after the console has
+ * stopped answering `avd name`, so the device that is still present gets
+ * labelled `Unknown (<serial>)`; classifying that as a replacement would end the
+ * shutdown wait before disappearance and retirement, releasing the session and
+ * rebuilding the pool around a device that is still going away (#6863 review).
+ *
+ * This is NOT the negation of {@link isSameBootedDeviceIdentity}: an unresolved
+ * name answers neither question, so both predicates return false for it.
+ */
+function isConfirmedDeviceReplacement(device: BootedDevice, candidate: BootedDevice): boolean {
+  if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
+    return false;
+  }
+  if (hasUnresolvedEmulatorRuntimeName(device) || hasUnresolvedEmulatorRuntimeName(candidate)) {
+    return false;
+  }
+  return device.name !== candidate.name;
+}
+
+/**
+ * Whether this observation's name is the `Unknown (<serial>)` placeholder rather
+ * than a name read from the runtime. Guarded by {@link isAndroidEmulatorSerial}:
+ * a handset's name is `ro.product.model`, which is not unique and carries no
+ * identity anyway, so handsets keep serial-only identity.
+ */
+function hasUnresolvedEmulatorRuntimeName(device: BootedDevice): boolean {
+  return (
+    device.platform === "android" &&
+    isAndroidEmulatorSerial(device.deviceId) &&
+    isUnknownAndroidRuntimeName(device)
   );
 }
 
@@ -1664,7 +1715,7 @@ async function findReplacementAfterSessionRelease(
   const replacement = findDiscoveredDevice(discovery, device);
   if (
     replacement &&
-    (device.platform === "ios" || !isSameBootedDeviceIdentity(device, replacement))
+    (device.platform === "ios" || isConfirmedDeviceReplacement(device, replacement))
   ) {
     return replacement;
   }

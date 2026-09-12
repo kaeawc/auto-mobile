@@ -2352,6 +2352,64 @@ describe("killDevice handler", () => {
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
   });
 
+  // While an emulator shuts down, `adb devices` can keep listing its serial after
+  // the console has stopped answering `avd name`, so discovery labels the device
+  // that is STILL THERE `Unknown (<serial>)`. That placeholder is not evidence
+  // that a different AVD took the serial: reading it as a replacement would end
+  // the shutdown wait early and rebuild the pool around a device that is still
+  // going away (#6863 review).
+  test("does not treat an unresolved name during shutdown as a same-ID replacement", async () => {
+    const timer = new FakeTimer();
+    // The wait has to poll again instead of returning on the first observation,
+    // so the fake clock has to keep moving for the second discovery to happen.
+    timer.enableAutoAdvance();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const stillShuttingDown: BootedDevice = {
+      name: `Unknown (${image.deviceId!})`,
+      platform: "android",
+      deviceId: image.deviceId!,
+    };
+    const shutdownManager = new FirstReplacementThenEmptyDeviceManager(stillShuttingDown);
+    manager = shutdownManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => shutdownManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    shutdownManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      shutdownManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(tool.handler(tool.schema.parse({ device: { ...image } }))).resolves.toBeDefined();
+
+    // The wait ran on to actual absence, so the device is retired rather than
+    // rebuilt under a fresh incarnation labelled with the placeholder.
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+  });
+
   test("releases the shutdown reservation before post-shutdown cleanup", async () => {
     const timer = new FakeTimer();
     const image: DeviceInfo = {
@@ -2491,6 +2549,8 @@ describe("killDevice handler", () => {
       isRunning: false,
       source: "local",
     };
+    // The AVD this pool started, rediscovered on the serial after the kill --
+    // a different runtime from the one the caller observed before it.
     const replacement: BootedDevice = {
       name: image.name,
       platform: "android",
@@ -2534,15 +2594,18 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    // With no ADB transport id in the identity model, a same-serial
-    // replacement is recognized by its runtime name. The caller's pre-kill
-    // observation could not read the AVD name, so the resolved replacement
-    // name differs from it and the handoff is detected.
+    // With no ADB transport id in the identity model, a same-serial replacement
+    // is recognized by its runtime name -- and only by a RESOLVED one on both
+    // sides. Here the caller's pre-kill observation and the device found on the
+    // serial afterwards both name an AVD, and they differ, so the handoff is
+    // detected before the first shutdown poll. An `Unknown (<serial>)` on either
+    // side would assert nothing and the wait would run on instead (#6863
+    // review).
     await expect(
       tool.handler(
         tool.schema.parse({
           device: {
-            name: `Unknown (${image.deviceId!})`,
+            name: "Pixel 7 API 34",
             platform: "android",
             deviceId: image.deviceId!,
           },

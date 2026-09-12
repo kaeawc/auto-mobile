@@ -20,6 +20,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
@@ -35,6 +36,7 @@ import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBr
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   getDeviceSessionIdFromResult,
+  DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
 import {
@@ -1942,6 +1944,7 @@ export class DaemonMcpProxy {
     // values: only this proxy may add them after selecting its active binding.
     const callerArgs = { ...args };
     delete callerArgs[DAEMON_BOUND_SESSION_PARAM];
+    delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     // Device-session acquisition (including booted provisionDevice) mints a NEW
@@ -1953,11 +1956,11 @@ export class DaemonMcpProxy {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const routingArgs =
-      name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
-        ? callerArgs
-        : this.withBoundSessionUuid(callerArgs);
-    const forwardedArgs = this.withToolSelectionProfile(routingArgs);
+    const { forwardedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
+      name,
+      callerArgs,
+      isSessionAcquisition,
+    );
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -1967,7 +1970,10 @@ export class DaemonMcpProxy {
     // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
-    this.retainAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
+    const learnsResultSession = ["setActiveDevice", ...DEVICE_SESSION_ACQUISITION_TOOLS].includes(
+      name,
+    );
+    this.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
     if (progressToken !== undefined && onProgress) {
       this.progressListeners.set(progressToken, onProgress);
     }
@@ -1980,7 +1986,7 @@ export class DaemonMcpProxy {
         forwardedSessionUuid,
         // Acquisition is admitted while fenced; the terminal fence is cleared once
         // the result-minted session establishes a fresh binding.
-        isSessionAcquisition,
+        allowReleasedSession,
       );
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
@@ -2004,6 +2010,7 @@ export class DaemonMcpProxy {
       // being mistaken for idleness, so a later reconnect re-seeds the still-live
       // session instead of creating an unseeded transport (issue #4610).
       this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
+      this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
       return result;
     } catch (error) {
       // The success-only rememberSessionUuid above never runs when the handler
@@ -2031,14 +2038,95 @@ export class DaemonMcpProxy {
       throw error;
     } finally {
       this.releaseReleaseEpochReference(forwardedSessionUuid);
-      this.releaseAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
+      this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
       if (progressToken !== undefined) {
         this.progressListeners.delete(progressToken);
       }
     }
   }
 
-  private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+  private prepareToolRoutingArgs(
+    name: string,
+    callerArgs: Record<string, unknown>,
+    isSessionAcquisition: boolean,
+  ): { forwardedArgs: Record<string, unknown>; allowReleasedSession: boolean } {
+    const usesDeviceSelector =
+      this.toolTargetsDevice(name) &&
+      this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
+    const routingArgs =
+      name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
+        ? callerArgs
+        : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
+    const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
+    const forwardedArgs = this.withToolSelectionProfile(
+      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector && !isSessionAcquisition),
+    );
+    return { forwardedArgs, allowReleasedSession: isSessionAcquisition || canUseSurvivingSession };
+  }
+
+  private toolTargetsDevice(name: string): boolean {
+    if (name === "setActiveDevice") {
+      return true;
+    }
+    const schema =
+      this.cachedTools?.find((definition) => definition.name === name)?.inputSchema ??
+      this.staticToolDefinitionsProvider().find((definition) => definition.name === name)
+        ?.inputSchema;
+    // Device-targeting schemas expose the device-label contract. Plain
+    // platform filters do not have it and must retain their session policy.
+    return (
+      typeof schema?.properties === "object" &&
+      schema.properties !== null &&
+      "device" in schema.properties
+    );
+  }
+
+  private withOwnedSessionCapabilities(
+    args: Record<string, unknown>,
+    restore: boolean,
+  ): Record<string, unknown> {
+    if (!restore || this.sessionUuidFromArgs(args)) {
+      return args;
+    }
+    const retained = [...this.ownedDeviceSessions].filter(
+      (id) => id !== this.terminalBoundSession?.sessionUuid && id !== this.boundSessionUuid,
+    );
+    if (this.boundSessionUuid) {
+      retained.push(this.boundSessionUuid);
+    }
+    return retained.length ? { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: retained } : args;
+  }
+
+  private rememberActiveDeviceSession(name: string, result: unknown, releaseEpoch: number): void {
+    if (name !== "setActiveDevice") {
+      return;
+    }
+    const sessionUuid = getDeviceSessionIdFromResult(result);
+    if (sessionUuid) {
+      this.throwIfSessionReleasedSince(sessionUuid, releaseEpoch);
+      this.rememberSessionUuid(name, { sessionUuid }, releaseEpoch);
+    }
+  }
+
+  private hasImplicitDeviceSelector(
+    args: Record<string, unknown>,
+    selectingActiveDevice: boolean,
+  ): boolean {
+    if (this.initialSessionBindingConfigured || args.device) {
+      return false;
+    }
+    if (selectingActiveDevice) {
+      return true;
+    }
+    return (
+      typeof args.deviceId === "string" || args.platform === "android" || args.platform === "ios"
+    );
+  }
+
+  private withBoundSessionUuid(
+    args: Record<string, unknown>,
+    usesDeviceSelector = false,
+  ): Record<string, unknown> {
     // A daemon session released by ordinary heartbeat/idle expiry leaves this
     // remembered binding dangling; replaying its UUID on a later sessionless call
     // would silently recreate the session and reacquire a device without the
@@ -2046,18 +2134,14 @@ export class DaemonMcpProxy {
     // no forwarded call (explicit or implicit) refreshing the binding, treat it
     // as retired.
     const explicitSessionUuid = this.sessionUuidFromArgs(args);
-    this.throwIfBoundSessionUnavailable(explicitSessionUuid);
+    if (!this.canUseSurvivingSession(args, usesDeviceSelector)) {
+      this.throwIfBoundSessionUnavailable(explicitSessionUuid);
+    }
     const normalizedArgs =
       explicitSessionUuid && explicitSessionUuid !== args.sessionUuid
         ? { ...args, sessionUuid: explicitSessionUuid }
         : args;
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
-      if (explicitSessionUuid === this.boundSessionUuid && this.boundSessionUuid) {
-        return {
-          ...normalizedArgs,
-          [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
-        };
-      }
       return normalizedArgs;
     }
     if (explicitSessionUuid && this.initialSessionBindingConfigured) {
@@ -2069,11 +2153,30 @@ export class DaemonMcpProxy {
     if (explicitSessionUuid) {
       return normalizedArgs;
     }
+    // A caller's device selector must reach daemon autolock resolution without
+    // being disguised as an explicitly supplied session UUID (#6807).
+    if (usesDeviceSelector) {
+      return normalizedArgs;
+    }
     return {
       ...args,
       sessionUuid: this.boundSessionUuid,
       [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
     };
+  }
+
+  private canUseSurvivingSession(
+    args: Record<string, unknown>,
+    usesDeviceSelector: boolean,
+  ): boolean {
+    if (!this.terminalBoundSession || this.config.initialSessionUuid) {
+      return false;
+    }
+    const explicit = this.sessionUuidFromArgs(args);
+    const liveOwned = [...this.ownedDeviceSessions].filter(
+      (id) => id !== this.terminalBoundSession?.sessionUuid,
+    );
+    return explicit ? liveOwned.includes(explicit) : liveOwned.length > 0 && usesDeviceSelector;
   }
 
   private throwIfBoundSessionUnavailable(explicitSessionUuid?: string): void {
@@ -2590,6 +2693,13 @@ export class DaemonMcpProxy {
       rememberedSessionUuid &&
       (rememberedSessionUuid === this.boundSessionUuid || this.toolAcceptsSessionUuid(name))
     ) {
+      if (
+        this.terminalBoundSession &&
+        rememberedSessionUuid !== this.terminalBoundSession.sessionUuid &&
+        this.ownedDeviceSessions.has(rememberedSessionUuid)
+      ) {
+        this.terminalBoundSession = undefined;
+      }
       this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }

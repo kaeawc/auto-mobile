@@ -238,7 +238,12 @@ export async function resolveConfiguredHomePackage(
     if (packageName) {
       resolvedHomePackageCache.set(deviceId, {
         packageName,
-        resolvedAtMs: now,
+        // Stamp the entry with the clock AFTER the resolve, never the `now`
+        // read before it: the TTL measures the age of this ANSWER. A resolve
+        // slower than the (short) untokened lifetime would otherwise write an
+        // entry that is already expired, so the next verification retry
+        // re-resolves and eats the caller's remaining deadline (#6863 review).
+        resolvedAtMs: timer.now(),
         incarnationToken,
       });
     }

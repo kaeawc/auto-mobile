@@ -79,7 +79,7 @@ const RESOLVED_HOME_PACKAGE_TTL_MS = 30_000;
 
 /**
  * How long a resolved HOME launcher package stays valid when NO connection
- * epoch token is available (issue #6863 review). The 30-second TTL above is
+ * epoch token is available (#6863 review). The 30-second TTL above is
  * only safe because an incarnation change invalidates the entry; outside a
  * daemon -- direct mode, or any caller with no pool to ask -- the token is
  * always undefined, and two undefined tokens compare equal, so a same-serial

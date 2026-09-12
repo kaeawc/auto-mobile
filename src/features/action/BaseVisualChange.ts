@@ -612,7 +612,7 @@ export class BaseVisualChange {
     const verified = await this.readAndroidHomeForeground(options);
     if (!verified) {
       // Self-heal a launcher cache that may no longer describe this device
-      // (issue #6863 review). The cached configured-HOME package is
+      // (#6863 review). The cached configured-HOME package is
       // invalidated by a connection-epoch change, but in direct mode no
       // incarnation resolver is registered, so a reconnect or a reused serial
       // leaves the entry looking valid. A failed verification is the only

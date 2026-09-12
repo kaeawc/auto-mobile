@@ -233,7 +233,7 @@ describe("PressButton Android keycode dispatch", () => {
   // into the ADB keyevent fallback and the home-foreground verification reads.
   // A failed verification is the only signal available that the cached
   // configured-HOME package may no longer describe the device in front of us
-  // (issue #6863 review): in direct mode there is no incarnation token, so a
+  // (#6863 review): in direct mode there is no incarnation token, so a
   // reconnect or a reused serial leaves the cache looking valid. Evicting on
   // failure lets the next attempt re-resolve instead of reporting a real Home
   // press as failed for the rest of the cache window.

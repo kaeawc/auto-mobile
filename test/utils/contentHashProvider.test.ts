@@ -274,6 +274,40 @@ describe("CachingContentHashProvider", () => {
     );
     expect(computeCalls).toBe(2);
   });
+
+  test("an older completion cannot remove an in-flight replacement after invalidate", async () => {
+    let releaseStale: (value: string) => void = () => {};
+    let releaseFresh: (value: string) => void = () => {};
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        return new Promise<string>((resolve) => {
+          if (computeCalls === 1) {
+            releaseStale = resolve;
+          } else {
+            releaseFresh = resolve;
+          }
+        });
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    const stale = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    provider.invalidate("emu-1", "com.example.app");
+    const fresh = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(computeCalls).toBe(2);
+
+    releaseStale("sha256:STALE");
+    expect(await stale).toBe("sha256:STALE");
+
+    // The stale completion must leave the replacement flight available to callers.
+    const later = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(computeCalls).toBe(2);
+    releaseFresh("sha256:FRESH");
+    expect(await fresh).toBe("sha256:FRESH");
+    expect(await later).toBe("sha256:FRESH");
+  });
 });
 
 describe("parsePmPathOutput", () => {

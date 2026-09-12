@@ -13,8 +13,12 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import type { BootedDevice } from "../../src/models";
 
 describe("deviceIncarnationToken", () => {
+  // Reset the whole singleton, not just the resolver: a test that fails after
+  // initializing a pool would otherwise leave DaemonState holding that pool and
+  // session manager, and bun shares singleton state across test files, so a
+  // later file would observe it. `reset` clears the resolver too.
   afterEach(() => {
-    setDeviceIncarnationResolver(undefined);
+    DaemonState.getInstance().reset();
   });
 
   test("is undefined with no resolver registered", () => {

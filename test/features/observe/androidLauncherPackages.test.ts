@@ -173,7 +173,8 @@ describe("androidLauncherPackages", () => {
 
   // A process-lifetime cache means a user who changes their default HOME app
   // never sees it reflected until the daemon restarts. A bounded TTL fixes
-  // that.
+  // that. These cases all pass an incarnation token, so they exercise the
+  // FULL TTL -- the shorter untokened lifetime has its own describe below.
   describe("resolveConfiguredHomePackage cache TTL", () => {
     test("serves the cached package within the TTL window", async () => {
       const fakeTimer = new FakeTimer();
@@ -183,9 +184,9 @@ describe("androidLauncherPackages", () => {
         stderr: "",
       });
 
-      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
       fakeTimer.setCurrentTime(29_000);
-      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
 
       expect(first).toBe("com.launcher.a");
       expect(second).toBe("com.launcher.a");
@@ -201,7 +202,7 @@ describe("androidLauncherPackages", () => {
         stdout: "com.launcher.a/.Main",
         stderr: "",
       });
-      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
 
       // The user changes their default HOME app while the daemon keeps
       // running.
@@ -210,7 +211,7 @@ describe("androidLauncherPackages", () => {
         stderr: "",
       });
       fakeTimer.setCurrentTime(30_001);
-      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
 
       expect(first).toBe("com.launcher.a");
       expect(second).toBe("com.launcher.b");
@@ -226,12 +227,12 @@ describe("androidLauncherPackages", () => {
         stdout: "com.launcher.a/.Main",
         stderr: "",
       });
-      expect(await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer)).toBe(
-        true,
-      );
-      expect(await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer)).toBe(
-        false,
-      );
+      expect(
+        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+      ).toBe(true);
+      expect(
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+      ).toBe(false);
 
       fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
         stdout: "com.launcher.b/.Main",
@@ -239,18 +240,88 @@ describe("androidLauncherPackages", () => {
       });
       // Still within the TTL -- the stale cached value ("a") is still served.
       fakeTimer.setCurrentTime(10_000);
-      expect(await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer)).toBe(
-        false,
-      );
+      expect(
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+      ).toBe(false);
 
       // Past the TTL -- the new default HOME launcher ("b") is now accepted.
       fakeTimer.setCurrentTime(30_001);
-      expect(await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer)).toBe(
-        true,
-      );
-      expect(await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer)).toBe(
-        false,
-      );
+      expect(
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+      ).toBe(true);
+      expect(
+        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+      ).toBe(false);
+    });
+  });
+
+  // Direct mode (and any caller outside a daemon) registers no incarnation
+  // resolver, so the token is always undefined and two undefined tokens
+  // compare equal -- i.e. a same-serial reconnect within the full TTL would
+  // be served the PREVIOUS runtime's launcher. Without an epoch token the
+  // entry therefore only lives long enough to serve the retries of a single
+  // home-press verification.
+  describe("untokened cache lifetime", () => {
+    test("serves the cache across one verification's retries when no epoch token is available", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.setCurrentTime(0);
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.launcher.a/.Main",
+        stderr: "",
+      });
+
+      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+      fakeTimer.setCurrentTime(1_500);
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+
+      expect(first).toBe("com.launcher.a");
+      expect(second).toBe("com.launcher.a");
+      expect(
+        fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes(RESOLVE_HOME_PATTERN)).length,
+      ).toBe(1);
+    });
+
+    test("re-resolves well before the full TTL when no epoch token is available", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.setCurrentTime(0);
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.launcher.a/.Main",
+        stderr: "",
+      });
+      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+
+      // A reconnect (or a reused serial) hands the same deviceId to a
+      // different runtime. With no epoch token to notice it, only the short
+      // lifetime prevents the previous runtime's launcher being served.
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.launcher.b/.Main",
+        stderr: "",
+      });
+      fakeTimer.setCurrentTime(2_001);
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
+
+      expect(first).toBe("com.launcher.a");
+      expect(second).toBe("com.launcher.b");
+      expect(
+        fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes(RESOLVE_HOME_PATTERN)).length,
+      ).toBe(2);
+    });
+
+    test("keeps the full TTL once an epoch token IS available", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.setCurrentTime(0);
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.launcher.a/.Main",
+        stderr: "",
+      });
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      fakeTimer.setCurrentTime(2_001);
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+
+      expect(second).toBe("com.launcher.a");
+      expect(
+        fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes(RESOLVE_HOME_PATTERN)).length,
+      ).toBe(1);
     });
   });
 

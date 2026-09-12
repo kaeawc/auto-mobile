@@ -2215,62 +2215,36 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }
 
-    if (
-      emulator.name !== device.name ||
-      emulator.platform !== device.platform ||
-      (device.transportId !== undefined && emulator.transportId !== device.transportId)
-    ) {
+    if (emulator.name !== device.name || emulator.platform !== device.platform) {
       throw new ActionableError(
         `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
       );
     }
 
-    // A serial can be reused after discovery, so the checked ADB transport is
-    // the identity to trust. `adb emu` cannot be pinned to it: the console
-    // subcommand ignores `-t` and only selects via `-s`/ANDROID_SERIAL, so
-    // `adb -t <id> emu kill` fails with "more than one emulator detected; use
-    // -s" as soon as a second emulator is attached (issue #6845). Re-selecting
-    // the kill by serial only moves that window later: the checked emulator can
-    // exit and a replacement inherit its serial between the check and the kill,
-    // and `emu kill` would then terminate the replacement. `shell` does honour
-    // `-t`, and powering the guest off exits the emulator process, so verify the
-    // transport still resolves to the expected serial and then terminate through
-    // that same transport. adb never reuses a transport id, so a transport whose
-    // emulator has gone fails the command instead of selecting a replacement.
-    // Callers confirm disappearance. Older callers without an expected transport
-    // may still match a cold-boot AVD; a discovery that reports no transport at
-    // all keeps the legacy serial-scoped `emu kill`.
-    if (emulator.transportId) {
-      const transportAdb = this.adbFactory.create(null);
-      const serialResult = await transportAdb.execute(
-        ["-t", emulator.transportId, "get-serialno"],
-        {
-          timeoutMs: options.timeoutMs,
-          noRetry: true,
-          signal: options.signal,
-        },
-      );
-      const observedSerial = serialResult.stdout.trim();
-      if (observedSerial !== emulator.deviceId) {
-        throw new ActionableError(
-          `Emulator '${device.deviceId}' identity changed before termination; transport ${emulator.transportId} now reports '${observedSerial}'. Refusing to kill its replacement.`,
-        );
-      }
-      await transportAdb.execute(["-t", emulator.transportId, "shell", "reboot", "-p"], {
-        timeoutMs: options.timeoutMs,
-        noRetry: true,
-        signal: options.signal,
-        waitForProcessSettlementAfterAbort: true,
-      });
-    } else {
-      const adb = this.adbFactory.create(emulator);
-      await adb.execute(["emu", "kill"], {
-        timeoutMs: options.timeoutMs,
-        noRetry: true,
-        signal: options.signal,
-        waitForProcessSettlementAfterAbort: true,
-      });
-    }
+    // Terminate through the emulator console `emu kill`. Only the console
+    // shutdown lets the emulator write its quick-boot snapshot on exit; a guest
+    // `shell reboot -p` halts the OS without it, so the next quick-boot of the
+    // AVD resumes into a halted guest that never comes adb-online and burns the
+    // whole getAndroid readiness budget (issue #6849 regression of #6845). The
+    // console kill is therefore the only termination primitive here; there is
+    // no `reboot -p` path.
+    //
+    // `adb emu` selects a device by serial only — the console subcommand ignores
+    // `-t` and honours just `-s`/ANDROID_SERIAL, so `adb -t <id> emu kill` fails
+    // with "more than one emulator detected; use -s" as soon as a second
+    // emulator is attached (issue #6845). The kill is consequently always
+    // serial-scoped through the discovered emulator, which is what makes it
+    // correct with several emulators attached. Transport ids are not used for
+    // termination at all: the serial is the kill's identity, the discovery-time
+    // check above refuses a replacement AVD found on that serial, and callers
+    // confirm disappearance and incarnation afterwards.
+    const adb = this.adbFactory.create(emulator);
+    await adb.execute(["emu", "kill"], {
+      timeoutMs: options.timeoutMs,
+      noRetry: true,
+      signal: options.signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
 
     logger.info(`Requested termination of emulator '${device.name}'`);
     return emulator;

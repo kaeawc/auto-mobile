@@ -14,7 +14,10 @@ import {
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed
 // rationale: a fixed seed keeps CI deterministic while fast-check still prints
 // the seed and shrunk counterexample on failure.
-const RUN_OPTIONS = { seed: 0x50_72_6f_76, numRuns: 300 } as const;
+// numRuns is kept modest so each test clears the repo's 100ms unit-test budget
+// (scripts/validate-bun-test-timings.sh) even on a slow CI runner: the sha256
+// digest work in the "ignores operationId" case is the ceiling here.
+const RUN_OPTIONS = { seed: 0x50_72_6f_76, numRuns: 150 } as const;
 
 const shortString = fc.string({ maxLength: 24 });
 const displayCutout = fc.constantFrom<ProvisionDeviceArgs["device"]["spec"]["displayCutout"]>(

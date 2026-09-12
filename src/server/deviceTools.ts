@@ -782,7 +782,7 @@ export interface DeviceToolsDependencies {
    * Re-resolve an emulator's AVD name from the RUNTIME rather than from any
    * host-side cache (`emu avd name`). Resolves to undefined when the emulator
    * console cannot answer inside `timeoutMs`, which is the caller's REMAINING
-   * deadline, not an independent budget. See {@link verifyPooledAndroidAvdName}.
+   * deadline, not an independent budget. See {@link confirmPooledAvdIdentity}.
    */
   resolveRunningAndroidAvdName: (
     device: BootedDevice,
@@ -848,7 +848,7 @@ function releaseProvisionDeviceWaiter(
  * lifecycle lease and a wedged console must not turn a kill into a hang. It is a
  * ceiling and never a floor — the probe is bounded by whichever is smaller, this
  * or the caller's remaining teardown/kill deadline, and an unanswered probe
- * REFUSES the action (see {@link verifyPooledAndroidAvdName}).
+ * REFUSES the action (see {@link confirmPooledAvdIdentity}).
  */
 const POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS = 3_000;
 
@@ -2079,6 +2079,39 @@ async function retireShutdownOwnership(
   }
 }
 
+/**
+ * Resolve the device the platform kill command is actually issued against.
+ *
+ * Without a pooled capture that is the caller's own target. With one -- an
+ * emulator whose discovered name is `Unknown (<serial>)` -- the captured epoch
+ * is re-confirmed and the runtime is asked to name itself HERE, immediately
+ * before the kill, and the kill runs under the name the runtime gave. Any
+ * refusal throws: nothing destructive has run yet at this point.
+ */
+async function resolvePooledAvdKillTarget(
+  dependencies: DeviceToolsDependencies,
+  device: BootedDevice,
+  pooledAvdCapture: PooledAvdCapture | undefined,
+  devicePool: DevicePool | undefined,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+): Promise<BootedDevice> {
+  if (!pooledAvdCapture) {
+    return device;
+  }
+  const confirmation = await confirmPooledAvdIdentity(
+    device,
+    pooledAvdCapture,
+    devicePool,
+    dependencies.resolveRunningAndroidAvdName,
+    { timer: dependencies.timer, deadlineMs: shutdownDeadlineMs, signal: requestAbortSignal },
+  );
+  if ("refusal" in confirmation) {
+    throw new PooledAvdIdentityError(pooledAvdNameRefusalMessage(device, confirmation.refusal));
+  }
+  return { ...device, name: confirmation.confirmedAvdName };
+}
+
 async function killProcessAndRetireOwnership(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
@@ -2095,8 +2128,21 @@ async function killProcessAndRetireOwnership(
   ) => void,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  pooledAvdCapture?: PooledAvdCapture,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
+  // LAST thing before anything destructive: re-confirm the captured epoch and
+  // make the runtime name itself, then kill under the name it gave (#6863
+  // review). Ahead of `markIntentionalShutdown`, so a refusal leaves no marker
+  // behind on a device this daemon did not touch.
+  const killTarget = await resolvePooledAvdKillTarget(
+    dependencies,
+    device,
+    pooledAvdCapture,
+    devicePool,
+    shutdownDeadlineMs,
+    requestAbortSignal,
+  );
   if (device.platform === "android") {
     devicePool?.markIntentionalShutdown(device.deviceId);
   }
@@ -2114,9 +2160,11 @@ async function killProcessAndRetireOwnership(
       "platform shutdown command did not complete",
       requestAbortSignal,
       async (signal, timeoutMs) => {
-        platformShutdown = deviceManager.killDevice(device, { signal, timeoutMs }).finally(() => {
-          platformShutdownSettled = true;
-        });
+        platformShutdown = deviceManager
+          .killDevice(killTarget, { signal, timeoutMs })
+          .finally(() => {
+            platformShutdownSettled = true;
+          });
         return await platformShutdown;
       },
       timeoutMs,
@@ -2230,6 +2278,7 @@ async function shutdownDevice(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   retainLifecycleUntil?: (operation: Promise<unknown>) => void,
+  pooledAvdCapture?: PooledAvdCapture,
 ): Promise<ShutdownResult> {
   const perf = createPerformanceTracker(true);
   perf.serial(operationName);
@@ -2290,6 +2339,7 @@ async function shutdownDevice(
         },
         strictDeadline,
         timeoutMs,
+        pooledAvdCapture,
       );
 
       if (alreadyStoppedMessage !== undefined) {
@@ -2355,6 +2405,12 @@ type TeardownResolvedTarget =
       device: DeviceInfo;
       wasBooted: true;
       bootedDevice: BootedDevice;
+      /**
+       * The pooled AVD label + epoch captured at preflight, when this target was
+       * matched by a label the pool supplied rather than by a name the runtime
+       * gave. Re-confirmed immediately before the platform kill (#6863 review).
+       */
+      pooledAvdCapture?: PooledAvdCapture;
     };
 
 function isVirtualAndroidDevice(device: BootedDevice): boolean {
@@ -2397,14 +2453,15 @@ function resolveKillDeviceStableTarget(
  * faster than one discovery interval never reaches the pool, so the cached name
  * can belong to the previous occupant of the serial. Every DESTRUCTIVE caller
  * (killDevice, deleteDevice) must therefore run {@link
- * verifyPooledAndroidAvdName} first, which re-resolves the name from the
+ * capturePooledAvdIdentity} at preflight and {@link confirmPooledAvdIdentity}
+ * immediately before the platform kill, which re-resolves the name from the
  * runtime and fails closed on a mismatch -- and on a probe that does not
  * answer.
  */
-function getValidatedPooledAndroidAvdName(
+function getValidatedPooledAndroidEntry(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
-): string | undefined {
+): PooledDevice | undefined {
   if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
     return undefined;
   }
@@ -2413,13 +2470,49 @@ function getValidatedPooledAndroidAvdName(
     // substitute and nothing that would make a pooled label trustworthy.
     return undefined;
   }
-  const pooled = devicePool?.getDevice(device.deviceId);
-  return pooled?.avdName;
+  return devicePool?.getDevice(device.deviceId) ?? undefined;
+}
+
+function getValidatedPooledAndroidAvdName(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): string | undefined {
+  return getValidatedPooledAndroidEntry(device, devicePool)?.avdName;
 }
 
 type PooledAvdNameRefusal =
   | { reason: "conflict"; pooledAvdName: string; runtimeAvdName: string }
-  | { reason: "unresolved"; pooledAvdName: string };
+  | { reason: "unresolved"; pooledAvdName: string }
+  | { reason: "moved"; pooledAvdName: string };
+
+/**
+ * The pooled AVD label a destructive action would otherwise act on, pinned to
+ * the pool INCARNATION that label belongs to.
+ *
+ * Captured at PREFLIGHT and re-confirmed immediately before the platform kill.
+ * `reserveDeviceForShutdown` protects the captured entry from pool eviction,
+ * but it cannot stop the emulator behind the serial from disappearing and being
+ * replaced before discovery notices, so the epoch is re-read at the last
+ * possible moment and the runtime is asked to name itself there rather than at
+ * preflight (#6863 review).
+ */
+interface PooledAvdCapture {
+  avdName: string;
+  incarnation: number;
+}
+
+type PooledAvdCaptureResult =
+  | { kind: "none" }
+  | { kind: "capture"; capture: PooledAvdCapture }
+  | { kind: "refusal"; refusal: PooledAvdNameRefusal };
+
+/**
+ * An identity refusal raised from inside the shutdown path. It is an
+ * {@link ActionableError} so it travels through `rethrowShutdownFailure`
+ * unwrapped, and its own type lets `deleteDevice` report it as
+ * `target_identity_unresolved` instead of a generic operation failure.
+ */
+class PooledAvdIdentityError extends ActionableError {}
 
 /**
  * The caller's own deadline for the destructive action, which the verification
@@ -2432,20 +2525,56 @@ interface PooledAvdNameProbeBudget {
 }
 
 /**
- * Fail closed before a destructive action on an emulator whose discovered name
- * is `Unknown (<serial>)` and whose AVD name therefore comes from the pool.
+ * PREFLIGHT half of the identity check: pin the pooled label to its epoch.
  *
- * A different AVD can take over a reused serial before discovery observes the
- * previous one disappear, leaving the pool holding the OLD label — and a kill or
- * delete issued against that label would stop the NEW emulator (#6863 review).
- * So ask the runtime itself:
- *  - it names the SAME AVD -> identity verified, proceed;
- *  - it names a DIFFERENT AVD -> `conflict`; the caller refuses;
- *  - it cannot answer inside the bounded budget -> `unresolved`; the caller
- *    refuses too.
+ * Returns `none` for every target whose name did NOT come from the pool -- a
+ * runtime that named itself, and every physical handset, because
+ * `ro.product.model` is not an AVD name and is not unique.
+ *
+ * A budget that is already spent refuses right here: with no time left the
+ * runtime can never be asked to name itself, so the label can never be tied to
+ * the emulator running on the serial, and refusing with the identity message is
+ * strictly more actionable than the shutdown timeout that would otherwise
+ * follow.
+ */
+function capturePooledAvdIdentity(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+  budget: PooledAvdNameProbeBudget,
+): PooledAvdCaptureResult {
+  const pooled = getValidatedPooledAndroidEntry(device, devicePool);
+  const avdName = pooled?.avdName;
+  if (!pooled || !avdName) {
+    return { kind: "none" };
+  }
+  if (budget.deadlineMs - budget.timer.now() <= 0) {
+    return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName: avdName } };
+  }
+  return { kind: "capture", capture: { avdName, incarnation: pooled.incarnation } };
+}
+
+/**
+ * KILL-TIME half of the identity check, run immediately before the platform
+ * kill on an emulator whose discovered name is `Unknown (<serial>)` and whose
+ * AVD name therefore comes from the pool.
+ *
+ * Two things must still hold:
+ *  - the pool must still hold the CAPTURED incarnation under that label. A new
+ *    incarnation means the serial was re-allocated while this shutdown was
+ *    being set up, so the captured label no longer describes the target;
+ *  - the runtime must name the SAME AVD. A different AVD can take over a reused
+ *    serial before discovery observes the previous one disappear, leaving the
+ *    pool holding the OLD label -- and a kill issued against that label would
+ *    stop the NEW emulator (#6863 review).
+ *
+ * Returns the CONFIRMED name so the caller can put it in the kill target:
+ * `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses a
+ * target whose name differs from the discovered one, so handing it the
+ * `Unknown (<serial>)` placeholder would throw away the proof this probe just
+ * obtained.
  *
  * There is no fail-open branch. `Unknown (<serial>)` means "no information", and
- * a probe that does not answer leaves it that way — acting anyway would be
+ * a probe that does not answer leaves it that way -- acting anyway would be
  * acting on a label this daemon cannot tie to the runtime. The cost is that an
  * emulator whose console has wedged is not killable through the tool; the
  * message names `adb -s <serial> emu kill` as the manual escape, and a
@@ -2454,25 +2583,26 @@ interface PooledAvdNameProbeBudget {
  * The probe is bounded by whichever is smaller, the verification ceiling or the
  * caller's REMAINING deadline: it runs inside a lifecycle lease that is already
  * on the clock, so it must never start an independent timer that can outlast it.
- * A budget that is already spent refuses immediately without probing at all.
- *
- * Physical handsets never reach the probe: {@link
- * getValidatedPooledAndroidAvdName} returns nothing for a non-emulator serial,
- * because `ro.product.model` is not an AVD name and is not unique.
  */
-async function verifyPooledAndroidAvdName(
+async function confirmPooledAvdIdentity(
   device: BootedDevice,
+  capture: PooledAvdCapture,
   devicePool: DevicePool | undefined,
   resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
   budget: PooledAvdNameProbeBudget,
-): Promise<PooledAvdNameRefusal | undefined> {
-  const pooledAvdName = getValidatedPooledAndroidAvdName(device, devicePool);
-  if (!pooledAvdName) {
-    return undefined;
+): Promise<{ confirmedAvdName: string } | { refusal: PooledAvdNameRefusal }> {
+  const pooledAvdName = capture.avdName;
+  const pooled = devicePool?.getDevice(device.deviceId);
+  if (!pooled || pooled.incarnation !== capture.incarnation || pooled.avdName !== pooledAvdName) {
+    logger.warn(
+      `[DeviceTools] The pool no longer holds incarnation ${capture.incarnation} of ` +
+        `${device.deviceId} under AVD '${pooledAvdName}'; refusing the destructive action.`,
+    );
+    return { refusal: { reason: "moved", pooledAvdName } };
   }
   const remainingMs = budget.deadlineMs - budget.timer.now();
   if (remainingMs <= 0) {
-    return { reason: "unresolved", pooledAvdName };
+    return { refusal: { reason: "unresolved", pooledAvdName } };
   }
   const runtimeAvdName = await resolveRunningAvdName(
     device,
@@ -2484,14 +2614,22 @@ async function verifyPooledAndroidAvdName(
       `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
         "the emulator console did not report a name.",
     );
-    return { reason: "unresolved", pooledAvdName };
+    return { refusal: { reason: "unresolved", pooledAvdName } };
   }
   return runtimeAvdName === pooledAvdName
-    ? undefined
-    : { reason: "conflict", pooledAvdName, runtimeAvdName };
+    ? { confirmedAvdName: runtimeAvdName }
+    : { refusal: { reason: "conflict", pooledAvdName, runtimeAvdName } };
 }
 
 function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNameRefusal): string {
+  if (refusal.reason === "moved") {
+    return (
+      `Refusing to act on Android emulator '${device.deviceId}': this daemon had it recorded as ` +
+      `AVD '${refusal.pooledAvdName}', but that connection epoch was retired while this action ` +
+      "was being prepared, so the emulator now on that serial is a different run. Re-resolve " +
+      "the target and retry."
+    );
+  }
   if (refusal.reason === "conflict") {
     return (
       `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +
@@ -3002,29 +3140,31 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   // A booted emulator only matches this teardown by its POOLED AVD name when its
-  // runtime name is unknown; make the runtime confirm that name before the stop
-  // and the delete act on it (#6863 review).
-  for (const candidate of findMatchingBootedTeardownDevices(booted, context.args, devicePool)) {
-    const refusal = await verifyPooledAndroidAvdName(
-      candidate,
-      devicePool,
-      getDeviceToolsDependencies().resolveRunningAndroidAvdName,
-      {
+  // runtime name is unknown. Pin that label to its epoch here; the runtime is
+  // made to confirm it immediately before the stop's platform kill, which is
+  // also where `createBootedTeardownTarget` has already rewritten the target's
+  // name to the pooled label (#6863 review).
+  const [matchedBootedCandidate] = findMatchingBootedTeardownDevices(
+    booted,
+    context.args,
+    devicePool,
+  );
+  const pooledAvdCapture: PooledAvdCaptureResult = matchedBootedCandidate
+    ? capturePooledAvdIdentity(matchedBootedCandidate, devicePool, {
         timer: context.dependencies.timer,
         deadlineMs: context.deadlineMs,
         signal: context.requestAbortSignal,
-      },
-    );
-    if (refusal) {
-      return {
-        response: createTeardownFailureResponse(
-          context.args,
-          "precondition",
-          "target_identity_unresolved",
-          pooledAvdNameRefusalMessage(candidate, refusal),
-        ),
-      };
-    }
+      })
+    : { kind: "none" };
+  if (matchedBootedCandidate && pooledAvdCapture.kind === "refusal") {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_identity_unresolved",
+        pooledAvdNameRefusalMessage(matchedBootedCandidate, pooledAvdCapture.refusal),
+      ),
+    };
   }
   const bootedTarget = findBootedTeardownTarget(booted, context.args, devicePool);
   if (bootedTarget.conflict) {
@@ -3048,7 +3188,11 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
     };
   }
   if (bootedTarget.target) {
-    return await finalizeIosNameResolvedTeardownTarget(context, bootedTarget.target);
+    const resolvedTarget: TeardownResolvedTarget =
+      bootedTarget.target.wasBooted && pooledAvdCapture.kind === "capture"
+        ? { ...bootedTarget.target, pooledAvdCapture: pooledAvdCapture.capture }
+        : bootedTarget.target;
+    return await finalizeIosNameResolvedTeardownTarget(context, resolvedTarget);
   }
   const unresolvedAndroidRuntime = booted.devices.find(
     (device) =>
@@ -7096,16 +7240,18 @@ export function registerDeviceTools() {
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
     const daemonState = DaemonState.getInstance();
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
-    // Before anything destructive: if this target's AVD name comes from the pool
-    // rather than from the runtime, make the runtime confirm it (#6863 review).
-    const avdNameRefusal = await verifyPooledAndroidAvdName(
-      args.device,
-      devicePool,
-      deps.resolveRunningAndroidAvdName,
-      { timer: deps.timer, deadlineMs, signal: requestAbortSignal },
-    );
-    if (avdNameRefusal) {
-      throw new ActionableError(pooledAvdNameRefusalMessage(args.device, avdNameRefusal));
+    // Preflight: if this target's AVD name comes from the pool rather than from
+    // the runtime, pin the label to its epoch. The runtime is made to confirm it
+    // immediately before the platform kill, not here (#6863 review).
+    const pooledAvdCapture = capturePooledAvdIdentity(args.device, devicePool, {
+      timer: deps.timer,
+      deadlineMs,
+      signal: requestAbortSignal,
+    });
+    if (pooledAvdCapture.kind === "refusal") {
+      throw new PooledAvdIdentityError(
+        pooledAvdNameRefusalMessage(args.device, pooledAvdCapture.refusal),
+      );
     }
     const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
     const lifecycleLease = stableTarget
@@ -7144,6 +7290,7 @@ export function registerDeviceTools() {
         false,
         DEVICE_SHUTDOWN_TIMEOUT_MS,
         retainLifecycleUntil,
+        pooledAvdCapture.kind === "capture" ? pooledAvdCapture.capture : undefined,
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
     } finally {
@@ -7212,6 +7359,7 @@ export function registerDeviceTools() {
                 true,
                 context.timeoutMs,
                 retainLeaseUntil,
+                target.pooledAvdCapture,
               );
               stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
             } else {
@@ -7270,7 +7418,12 @@ export function registerDeviceTools() {
             return createTeardownFailureResponse(
               args,
               phase,
-              "operation_failed",
+              // The last-moment identity check refuses a target this daemon
+              // cannot tie to the runtime; that is an identity outcome, not a
+              // generic operation failure (#6863 review).
+              effectiveError instanceof PooledAvdIdentityError
+                ? "target_identity_unresolved"
+                : "operation_failed",
               String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
               state?.target.device,
             );

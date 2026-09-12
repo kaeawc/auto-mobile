@@ -44,6 +44,8 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
    * vacuously true. Assert against this instead.
    */
   readonly killedDeviceIds: string[] = [];
+  /** The full targets handed to the platform kill, so a test can assert the NAME it was given. */
+  readonly killedDeviceTargets: BootedDevice[] = [];
 
   constructor() {
     super();
@@ -62,6 +64,7 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
 
   override async killDevice(device: BootedDevice): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
     throw new Error("adb emu kill failed");
   }
 }
@@ -91,6 +94,7 @@ class DeadlineSpendingFakeTimer extends FakeTimer {
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(device: BootedDevice): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
     this.setBootedDevices(device.platform, []);
   }
 }
@@ -646,6 +650,51 @@ describe("killDevice handler", () => {
         /did not answer/,
       );
       expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // Confirming the runtime's AVD name and then killing under the
+    // `Unknown (<serial>)` placeholder throws the proof away:
+    // `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses to
+    // kill when the discovered name differs from the target's. The verified
+    // name has to travel into the kill target
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("hands the CONFIRMED AVD name to the platform kill", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+
+      expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual(["Pixel_8_Old"]);
+    });
+
+    // The shutdown reservation protects the CAPTURED pool entry from eviction,
+    // but it cannot stop the emulator behind the serial from going away and
+    // being replaced. Re-read the epoch immediately before the platform kill and
+    // refuse when a different incarnation now holds the serial
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("refuses when the pooled incarnation moves between preflight and the kill", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+      const pool = DaemonState.getInstance().getDevicePool();
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        // Runs immediately before the platform kill, which is where a
+        // same-serial replacement would land in production.
+        stopAndroidObservers: async () => {
+          const pooled = pool.getDevice("emulator-5554");
+          if (pooled) {
+            pooled.incarnation += 1;
+          }
+        },
+      });
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /emulator-5554[\s\S]*Pixel_8_Old/,
+      );
       expect(manager.killedDeviceIds).toEqual([]);
     });
 

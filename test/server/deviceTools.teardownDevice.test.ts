@@ -24,6 +24,7 @@ import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
+  teardownDeviceSchema,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -1085,6 +1086,54 @@ describe("deleteDevice handler", () => {
     expect(String(failure.message)).toContain("adb -s emulator-5556 emu kill");
     expect(manager.killedDevices).toEqual([]);
     expect(manager.destroyRequests).toEqual([]);
+  });
+
+  // The escape hatch for a wedged console (#6864): `force: true` skips the
+  // verification probe entirely, so a console that would never answer stops
+  // blocking the delete. The serial is acted on as given.
+  test("force skips the AVD name probe and tears the device down", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(booted, image);
+    manager.setBootedDevices("android", [booted]);
+    manager.setDeviceImages("android", [image]);
+    // The console is wedged: `runtimeAvdNames` has no answer for this serial.
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", pooledAvdName, pooledAvdName),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(runtimeAvdNameProbes).toEqual([]);
+    expect(manager.wasMethodCalled("killDevice")).toBe(true);
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({ platform: "android", name: pooledAvdName }),
+      }),
+    ]);
   });
 
   // The probe runs inside a lifecycle lease that is already on a deadline, so it
@@ -2183,5 +2232,25 @@ describe("deleteDevice handler", () => {
       success: false,
       error: expect.stringContaining("simctl delete failed"),
     });
+  });
+});
+
+// `teardownDeviceSchema` is `.strict()`, so `force` is unsendable until the
+// schema declares it (#6864).
+describe("deleteDevice input schema", () => {
+  const base = {
+    operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
+    target: { platform: "android" as const, isVirtual: true as const, stableId: "Pixel_8_API_35" },
+    mode: "destroy" as const,
+    verifyAbsence: true as const,
+  };
+
+  test("accepts force and defaults it to false when omitted", () => {
+    expect(teardownDeviceSchema.parse({ ...base, force: true }).force).toBe(true);
+    expect(teardownDeviceSchema.parse(base).force).toBe(false);
+  });
+
+  test("rejects a non-boolean force", () => {
+    expect(() => teardownDeviceSchema.parse({ ...base, force: "yes" })).toThrow();
   });
 });

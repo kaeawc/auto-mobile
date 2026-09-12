@@ -463,12 +463,23 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
   },
 );
 
+// Wording shared by killDevice and deleteDevice so the two escape hatches cannot
+// drift apart in what they promise (#6864).
+const FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION =
+  "Skip the emulator-console probe that confirms which AVD is running on this serial, and act on " +
+  "the serial as given. Use only when the console has wedged and the normal call refuses because " +
+  "the AVD name cannot be confirmed. This does not override the conflict check, it removes it: " +
+  "force means 'act on whatever emulator currently occupies this serial', including a different " +
+  "AVD that took the serial over. Android emulators only; accepted and ignored for iOS and " +
+  "physical devices.";
+
 export const killDeviceSchema = z.object({
   device: z.object({
     name: z.string().describe("Device image name"),
     deviceId: z.string(),
     platform: platformSchema,
   }),
+  force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
 });
 
 const TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN =
@@ -513,6 +524,7 @@ export const teardownDeviceSchema = z
       .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
       .describe("Total bounded teardown timeout in ms"),
+    force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
   })
   .strict();
 
@@ -653,6 +665,11 @@ export interface ProvisionDeviceArgs {
 
 export interface KillDeviceArgs {
   device: BootedDevice;
+  /**
+   * Skip the pooled-AVD-name verification probe and act on the serial as given
+   * (#6864). Defaults to false; see {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
+   */
+  force?: boolean;
 }
 
 export interface TeardownDeviceArgs {
@@ -666,6 +683,11 @@ export interface TeardownDeviceArgs {
   mode: "destroy";
   verifyAbsence: true;
   timeoutMs?: number;
+  /**
+   * Skip the pooled-AVD-name verification probe and act on the serial as given
+   * (#6864). Defaults to false; see {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
+   */
+  force?: boolean;
 }
 
 interface StableDeviceTarget {
@@ -2446,10 +2468,18 @@ interface PooledAvdNameProbeBudget {
  *
  * There is no fail-open branch. `Unknown (<serial>)` means "no information", and
  * a probe that does not answer leaves it that way — acting anyway would be
- * acting on a label this daemon cannot tie to the runtime. The cost is that an
- * emulator whose console has wedged is not killable through the tool; the
- * message names `adb -s <serial> emu kill` as the manual escape, and a
- * tool-level `force` option is tracked as a separate follow-up.
+ * acting on a label this daemon cannot tie to the runtime. The message names
+ * `adb -s <serial> emu kill` as the manual escape for a wedged console.
+ *
+ * `force` is the TOOL-level escape from that same dead end (#6864), for a client
+ * with no shell access. It does not override the `conflict` refusal, it removes
+ * the evidence a conflict is detected from: the probe never runs, so this
+ * function reports nothing and the caller acts on whatever emulator currently
+ * occupies the serial. That is the whole contract — "kill what is on this
+ * serial" — so it is logged at warn with the serial and the pooled label the
+ * daemon is declining to confirm. `force` reaches this function even when it
+ * changes nothing (a resolved runtime name, an iOS target, a handset): there is
+ * no pooled label to skip verifying, so it is accepted and silently ignored.
  *
  * The probe is bounded by whichever is smaller, the verification ceiling or the
  * caller's REMAINING deadline: it runs inside a lifecycle lease that is already
@@ -2465,9 +2495,20 @@ async function verifyPooledAndroidAvdName(
   devicePool: DevicePool | undefined,
   resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
   budget: PooledAvdNameProbeBudget,
+  force: boolean,
 ): Promise<PooledAvdNameRefusal | undefined> {
   const pooledAvdName = getValidatedPooledAndroidAvdName(device, devicePool);
   if (!pooledAvdName) {
+    return undefined;
+  }
+  if (force) {
+    logger.warn(
+      `[DeviceTools] force=true: skipping AVD-name verification for Android emulator ` +
+        `'${device.deviceId}', which this daemon has recorded as AVD '${pooledAvdName}'. ` +
+        "The emulator console was not asked which AVD is running there, so this acts on " +
+        `whatever now occupies '${device.deviceId}' — including a different AVD that took ` +
+        "the serial over.",
+    );
     return undefined;
   }
   const remainingMs = budget.deadlineMs - budget.timer.now();
@@ -2759,6 +2800,10 @@ function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
     mode: args.mode,
     verifyAbsence: args.verifyAbsence,
     timeoutMs: args.timeoutMs,
+    // A forced teardown is a materially different request from a verified one,
+    // so reusing an operationId across the two is a fingerprint mismatch rather
+    // than an idempotent replay of the other (#6864).
+    force: args.force ?? false,
   });
 }
 
@@ -3014,6 +3059,7 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
         deadlineMs: context.deadlineMs,
         signal: context.requestAbortSignal,
       },
+      context.args.force ?? false,
     );
     if (refusal) {
       return {
@@ -7103,6 +7149,7 @@ export function registerDeviceTools() {
       devicePool,
       deps.resolveRunningAndroidAvdName,
       { timer: deps.timer, deadlineMs, signal: requestAbortSignal },
+      args.force ?? false,
     );
     if (avdNameRefusal) {
       throw new ActionableError(pooledAvdNameRefusalMessage(args.device, avdNameRefusal));

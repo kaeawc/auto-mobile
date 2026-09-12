@@ -54,8 +54,16 @@ applies in all three places the name is read:
    bounded by the CALLER's remaining teardown/kill deadline — never an
    independent timer). A different name refuses; an unanswered probe also
    refuses (`target_identity_unresolved`), naming `adb -s <serial> emu kill` as
-   the manual escape. There is no fail-open branch. A tool-level `force` option
-   for an emulator whose console is wedged is tracked as a separate follow-up.
+   the manual escape. There is no fail-open branch by default. The tool-level
+   escape for a client with no shell access is `force: true` on either tool
+   (#6864): it skips the probe entirely — no console call — logs at warn with
+   the serial and the pooled label it is declining to confirm, and still runs
+   the post-kill disappearance/incarnation confirmation unchanged. `force` does
+   not override the `conflict` refusal, it removes the evidence one is detected
+   from: with no probe there is no conflict to see, so `force` means "act on
+   whatever emulator currently occupies this serial". It is Android-emulator
+   only; on iOS or a handset there is no pooled AVD label, so the flag is
+   accepted and ignored.
 3. **Publishing identity** (`DevicePool.describesPooledRuntime`, the booted-devices
    resource): the placeholder is not agreement, so the resource withholds BOTH
    the pooled epoch (`connectionId` falls back to the bare serial) and the

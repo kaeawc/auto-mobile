@@ -6,6 +6,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
+  killDeviceSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -647,6 +648,52 @@ describe("killDevice handler", () => {
       );
       expect(runtimeAvdNameProbes).toEqual([]);
       expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // The refusal is the DEFAULT, not the only behaviour: an explicit
+    // `force: false` must read exactly like omitting the flag (#6864).
+    test("refuses the kill when force is explicitly false", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator, force: false })).rejects.toThrow(
+        /adb -s emulator-5554 emu kill/,
+      );
+      expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // The escape hatch for a wedged console (#6864): with `force: true` the
+    // verification probe never runs at all, so the console never has to answer,
+    // and the kill lands on the serial as given.
+    test("force skips the verification probe and kills the serial as given", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      // The console is wedged: it would answer nothing at all.
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    // `force` does not "override the conflict refusal" — it removes the only
+    // evidence a conflict could ever be detected from. It means "kill whatever
+    // is on this serial", including an AVD that took the serial over (#6864).
+    test("force kills a serial that a different AVD has taken over", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_9_New");
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
     // A handset's name is `ro.product.model`, not an AVD, and two handsets of the
@@ -3813,4 +3860,21 @@ describe("killDevice handler", () => {
       }
     },
   );
+});
+
+// The escape hatch is a WIRE change, not just handler behaviour: a client that
+// cannot reach a shell has to be able to send it (#6864).
+describe("killDevice input schema", () => {
+  test("accepts force and defaults it to false when omitted", () => {
+    const device = { name: "Pixel_8", deviceId: "emulator-5554", platform: "android" as const };
+
+    expect(killDeviceSchema.parse({ device, force: true }).force).toBe(true);
+    expect(killDeviceSchema.parse({ device }).force).toBe(false);
+  });
+
+  test("rejects a non-boolean force", () => {
+    const device = { name: "Pixel_8", deviceId: "emulator-5554", platform: "android" as const };
+
+    expect(() => killDeviceSchema.parse({ device, force: "yes" })).toThrow();
+  });
 });

@@ -81,7 +81,19 @@ interface AutoMobileClient {
 
   fun observe(platform: String = "android"): ObserveResult
 
-  fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult
+  /**
+   * Stops a device.
+   *
+   * @param force skips the emulator-console AVD-name confirmation and acts on the serial as given
+   *   (auto-mobile #6864). Only meaningful for a wedged Android emulator; accepted and ignored for
+   *   iOS and physical devices. It does not override the conflict check, it removes it.
+   */
+  fun killDevice(
+    name: String,
+    deviceId: String,
+    platform: String,
+    force: Boolean = false,
+  ): KillDeviceResult
 
   fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 
@@ -530,4 +542,28 @@ internal fun <T> decodeResourceResponse(
     throw McpConnectionException(error)
   }
   return json.decodeFromJsonElement(serializer, element)
+}
+
+/**
+ * The `killDevice` tool arguments, shared by every transport so the three request builders cannot
+ * drift apart. The tool defaults `force` to false, so only a forced kill puts the field on the wire
+ * (auto-mobile #6864).
+ */
+internal fun killDeviceArguments(
+  name: String,
+  deviceId: String,
+  platform: String,
+  force: Boolean,
+): JsonObject = buildJsonObject {
+  put(
+    "device",
+    buildJsonObject {
+      put("name", JsonPrimitive(name))
+      put("deviceId", JsonPrimitive(deviceId))
+      put("platform", JsonPrimitive(platform))
+    },
+  )
+  if (force) {
+    put("force", JsonPrimitive(true))
+  }
 }

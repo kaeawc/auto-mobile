@@ -175,8 +175,9 @@ interface PoolDeviceInfo {
   recoveryEligibility: DeviceRecoveryEligibility;
   /**
    * The AVD this pool started on the serial, and the epoch of that allocation.
-   * Both are present ONLY when the pooled entry describes the runtime discovery
-   * just reported on the serial; see {@link getPoolDeviceInfo}.
+   * The whole {@link PoolDeviceContext} -- these two included -- exists ONLY
+   * when the pooled entry describes the runtime discovery just reported on the
+   * serial; see {@link resolvePoolDeviceContext}.
    */
   avdName?: string;
   incarnation?: number;
@@ -311,10 +312,9 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
-  poolInfo?: PoolDeviceInfo,
-  sessionInfo?: DeviceSessionInfo,
-  deviceSessionUuid?: string | null,
+  poolContext?: PoolDeviceContext,
 ): BootedDeviceInfo {
+  const poolInfo = poolContext?.poolInfo;
   const isVirtual = isVirtualDevice(device);
   const runtime = device.iosVersion ?? device.osVersion;
   const info: BootedDeviceInfo = {
@@ -330,8 +330,8 @@ function toBootedDeviceInfo(
     capabilities: { automation: null },
   };
 
-  if (deviceSessionUuid) {
-    info.deviceSessionUuid = deviceSessionUuid;
+  if (poolContext?.deviceSessionUuid) {
+    info.deviceSessionUuid = poolContext.deviceSessionUuid;
   }
   if (runtime) {
     info.runtime = runtime;
@@ -344,8 +344,8 @@ function toBootedDeviceInfo(
     info.assignedSession = poolInfo.assignedSession;
     info.recoveryEligibility = poolInfo.recoveryEligibility;
   }
-  if (sessionInfo) {
-    info.session = sessionInfo;
+  if (poolContext?.sessionInfo) {
+    info.session = poolContext.sessionInfo;
   }
   return info;
 }
@@ -386,39 +386,56 @@ function isVirtualDevice(device: BootedDevice): boolean {
   return device.deviceId.includes("-") && device.deviceId.length > 30;
 }
 
-function getPoolDeviceInfo(
+/**
+ * Everything the resource publishes about WHICH RUNTIME is on a serial, resolved
+ * as ONE unit so it can be withheld as one.
+ *
+ * The join to daemon state is by serial alone, and a different device can hold
+ * that serial before the pool refreshes -- or the emulator console can have gone
+ * quiet, leaving discovery with the `Unknown (<serial>)` placeholder, which
+ * asserts nothing either way. Naming the retired entry's epoch would tell
+ * consumers to keep state exactly when the new epoch is supposed to make them
+ * flush it; naming its AVD would publish the previous occupant's label as this
+ * runtime's `stableId`; and handing out the retired `deviceSessionUuid` would
+ * have the desktop subscribe to this runtime's streams under a dead epoch. So
+ * `describesPooledRuntime` gates the pool entry, the session and the registry
+ * epoch TOGETHER: on a mismatch the entry carries no pool context at all and its
+ * identity is built purely from discovery (#6863 review).
+ */
+interface PoolDeviceContext {
+  poolInfo: PoolDeviceInfo;
+  sessionInfo?: DeviceSessionInfo;
+  deviceSessionUuid?: string;
+}
+
+function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
   device: BootedDevice,
-): PoolDeviceInfo | undefined {
+  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null,
+  resolveDeviceSessionUuid: (deviceId: string) => string | null,
+): PoolDeviceContext | undefined {
   if (!devicePool) {
     return undefined;
   }
 
   const pooledDevice = devicePool.getDevice(device.deviceId);
-  if (!pooledDevice) {
+  if (!pooledDevice || !devicePool.describesPooledRuntime(device)) {
     return undefined;
   }
 
   const poolStatus: PoolDeviceStatus =
     pooledDevice.status === "busy" ? "assigned" : pooledDevice.status;
 
-  // Everything this entry claims about WHICH runtime is on the serial is
-  // published only when the entry describes the runtime discovery just reported
-  // there. The join is by serial alone, and a different device can hold that
-  // serial before the pool refreshes -- or the emulator console can have gone
-  // quiet, leaving discovery with the `Unknown (<serial>)` placeholder, which
-  // asserts nothing either way. Naming the retired entry's epoch would tell
-  // consumers to keep state exactly when the new epoch is supposed to make them
-  // flush it, and naming its AVD would publish the previous occupant's label as
-  // this runtime's `stableId` (#6863 review).
-  const describesRuntime = devicePool.describesPooledRuntime(device);
-
   return {
-    poolStatus,
-    assignedSession: pooledDevice.sessionId || undefined,
-    recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
-    avdName: describesRuntime ? pooledDevice.avdName : undefined,
-    incarnation: describesRuntime ? pooledDevice.incarnation : undefined,
+    poolInfo: {
+      poolStatus,
+      assignedSession: pooledDevice.sessionId || undefined,
+      recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
+      avdName: pooledDevice.avdName,
+      incarnation: pooledDevice.incarnation,
+    },
+    sessionInfo: sessionInfoByDeviceId?.get(device.deviceId),
+    deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
 }
 
@@ -541,9 +558,12 @@ async function discoverBootedDevicesForPlatform(
       devices: discovery.devices.map((device) =>
         toBootedDeviceInfo(
           device,
-          getPoolDeviceInfo(devicePool, device),
-          sessionInfoByDeviceId?.get(device.deviceId),
-          resolveDeviceSessionUuid(device.deviceId),
+          resolvePoolDeviceContext(
+            devicePool,
+            device,
+            sessionInfoByDeviceId,
+            resolveDeviceSessionUuid,
+          ),
         ),
       ),
       succeededPlatforms: complete ? new Set([platform]) : new Set(),

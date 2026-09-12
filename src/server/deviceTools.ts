@@ -2264,10 +2264,6 @@ type TeardownResolvedTarget =
       bootedDevice: BootedDevice;
     };
 
-function isAndroidEmulatorSerial(deviceId: string): boolean {
-  return deviceId.startsWith("emulator-");
-}
-
 function isVirtualAndroidDevice(device: BootedDevice): boolean {
   return device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);
 }

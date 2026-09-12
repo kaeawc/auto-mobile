@@ -1477,11 +1477,8 @@ describe("DevicePool", () => {
       });
     });
 
-    test("assigns a fresh incarnation per pooled connection and keeps it across a same-transport refresh", async () => {
-      const device = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
+    test("assigns a fresh incarnation per pooled connection and keeps it across a rediscovery", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       await initializeLiveDevices([device]);
       const first = devicePool.getDevice("emulator-5554");
       if (!first) {
@@ -1489,8 +1486,8 @@ describe("DevicePool", () => {
       }
       const firstIncarnation = first.incarnation;
 
-      // A refresh that rediscovers the same serial and transport reuses the
-      // entry — same incarnation, so an existing mark for it still applies.
+      // A refresh that rediscovers the same serial reuses the entry — same
+      // incarnation, so an existing mark for it still applies.
       await devicePool.refreshDevices();
       expect(devicePool.getDevice("emulator-5554")?.incarnation).toBe(firstIncarnation);
 
@@ -1504,7 +1501,7 @@ describe("DevicePool", () => {
       expect(second!.incarnation).toBeGreaterThan(firstIncarnation);
     });
 
-    test("replaces a fast same-serial transport reconnect with a new device session epoch", async () => {
+    test("mints a new device session epoch when a serial disappears and returns", async () => {
       const registry = new DeviceSessionRegistry(
         fakeTimer,
         new FakeIdGenerator(["uuid-a", "uuid-b"]),
@@ -1535,11 +1532,8 @@ describe("DevicePool", () => {
         undefined,
         (deviceId) => registry.onDeviceDisconnected(deviceId),
       );
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       await initializeLiveDevices([firstConnection]);
       devicePool.notifyDeviceReady(firstConnection.deviceId);
       const firstEpoch = registry.getByDeviceId(firstConnection.deviceId);
@@ -1548,6 +1542,10 @@ describe("DevicePool", () => {
         throw new Error("expected the first pooled connection epoch");
       }
 
+      // The pool observing the serial leave is the epoch boundary; the serial
+      // returning afterwards is a new incarnation even though adb reports the
+      // identical listing.
+      await devicePool.removeDevice(firstConnection.deviceId);
       fakeDeviceManager.bootedDevices = [reconnected];
 
       const added = await devicePool.refreshDevices();
@@ -1565,7 +1563,7 @@ describe("DevicePool", () => {
       ]);
     });
 
-    test("rekeys a same-serial transport reconnect before assigning an idle device", async () => {
+    test("rekeys a same-serial AVD replacement before assigning an idle device", async () => {
       const registry = new DeviceSessionRegistry(
         fakeTimer,
         new FakeIdGenerator(["uuid-a", "uuid-b"]),
@@ -1595,11 +1593,8 @@ describe("DevicePool", () => {
         undefined,
         (deviceId) => registry.onDeviceDisconnected(deviceId),
       );
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection, name: "Pixel 9" };
       await initializeLiveDevices([firstConnection]);
       devicePool.notifyDeviceReady(firstConnection.deviceId);
       const firstEpoch = registry.getByDeviceId(firstConnection.deviceId);
@@ -1610,19 +1605,16 @@ describe("DevicePool", () => {
       );
 
       expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
-        transportId: "2",
+        name: "Pixel 9",
         sessionId: "session-1",
       });
       expect(registry.getByDeviceId(reconnected.deviceId)?.deviceSessionUuid).toBe("uuid-b");
       expect(registry.getByUuid(firstEpoch!.deviceSessionUuid)).toBeUndefined();
     });
 
-    test("discards an older refresh snapshot after a newer transport replacement", async () => {
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+    test("discards an older refresh snapshot after a newer same-serial replacement", async () => {
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection, name: "Pixel 9" };
       const outOfOrderManager = new OutOfOrderRefreshFakeDeviceManager(
         [firstConnection],
         [reconnected],
@@ -1644,28 +1636,26 @@ describe("DevicePool", () => {
       outOfOrderManager.releaseFirstDiscovery();
       await olderRefresh;
 
-      expect(devicePool.getDevice(reconnected.deviceId)?.transportId).toBe("2");
+      expect(devicePool.getDevice(reconnected.deviceId)?.name).toBe("Pixel 9");
     });
 
-    test("preserves AutoMobile-owned emulator metadata across a transport rekey", async () => {
+    test("preserves AutoMobile-owned emulator metadata across a same-serial rediscovery", async () => {
       const sourceImage: DeviceInfo = {
         name: "Pixel 8",
         platform: "android",
         isRunning: false,
         source: "local",
       };
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       await devicePool.addDevice(firstConnection, sourceImage);
+      const incarnation = devicePool.getDevice(firstConnection.deviceId)?.incarnation;
       fakeDeviceManager.bootedDevices = [reconnected];
 
       await devicePool.refreshDevices();
 
       expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
-        transportId: "2",
+        incarnation,
         avdName: "Pixel 8",
         androidImage: sourceImage,
       });
@@ -1678,24 +1668,14 @@ describe("DevicePool", () => {
         isRunning: false,
         source: "local",
       };
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const replacement = {
-        ...firstConnection,
-        name: "Pixel 9",
-        transportId: "2",
-      };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const replacement = { ...firstConnection, name: "Pixel 9" };
       await devicePool.addDevice(firstConnection, sourceImage);
       fakeDeviceManager.bootedDevices = [replacement];
 
       await devicePool.refreshDevices();
 
-      expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({
-        name: "Pixel 9",
-        transportId: "2",
-      });
+      expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({ name: "Pixel 9" });
       expect(devicePool.getDevice(replacement.deviceId)?.androidImage).toBeUndefined();
       expect(devicePool.getDevice(replacement.deviceId)?.avdName).toBeUndefined();
     });
@@ -1707,23 +1687,22 @@ describe("DevicePool", () => {
         isRunning: false,
         source: "local",
       };
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const rediscoveredWithUnknownName = {
         ...firstConnection,
         name: "Unknown (emulator-5554)",
-        transportId: "2",
       };
       await devicePool.addDevice(firstConnection, sourceImage);
+      const incarnation = devicePool.getDevice(firstConnection.deviceId)?.incarnation;
       fakeDeviceManager.bootedDevices = [rediscoveredWithUnknownName];
 
       await devicePool.refreshDevices();
 
+      // The placeholder asserts nothing, so it neither evicts the live entry,
+      // starts a new epoch, nor overwrites the known AVD label.
       expect(devicePool.getDevice(firstConnection.deviceId)).toMatchObject({
-        name: "Unknown (emulator-5554)",
-        transportId: "2",
+        name: "Pixel 8",
+        incarnation,
         androidImage: sourceImage,
         avdName: "Pixel 8",
       });
@@ -1736,20 +1715,12 @@ describe("DevicePool", () => {
         isRunning: false,
         source: "local",
       };
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const rediscoveredWithUnknownName = {
         ...firstConnection,
         name: "Unknown (emulator-5554)",
-        transportId: "2",
       };
-      const differentAvd = {
-        ...firstConnection,
-        name: "Pixel 9",
-        transportId: "3",
-      };
+      const differentAvd = { ...firstConnection, name: "Pixel 9" };
       await devicePool.addDevice(firstConnection, sourceImage);
       fakeDeviceManager.bootedDevices = [rediscoveredWithUnknownName];
       await devicePool.refreshDevices();
@@ -1757,46 +1728,45 @@ describe("DevicePool", () => {
 
       await devicePool.refreshDevices();
 
-      expect(devicePool.getDevice(differentAvd.deviceId)).toMatchObject({
-        name: "Pixel 9",
-        transportId: "3",
-      });
+      expect(devicePool.getDevice(differentAvd.deviceId)).toMatchObject({ name: "Pixel 9" });
       expect(devicePool.getDevice(differentAvd.deviceId)?.androidImage).toBeUndefined();
       expect(devicePool.getDevice(differentAvd.deviceId)?.avdName).toBeUndefined();
     });
 
-    test("rekeys a transport-only mismatch before reserving startDevice readiness", async () => {
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+    test("reserves startDevice readiness for a runtime whose AVD name could not be read", async () => {
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const unreadable = { ...firstConnection, name: "Unknown (emulator-5554)" };
       await initializeLiveDevices([firstConnection]);
+      const incarnation = devicePool.getDevice(firstConnection.deviceId)?.incarnation;
 
       const releaseReservation = await devicePool.reserveDeviceForReadiness(
-        reconnected.deviceId,
-        reconnected,
+        unreadable.deviceId,
+        unreadable,
       );
 
-      expect(devicePool.getDevice(reconnected.deviceId)?.transportId).toBe("2");
+      // The placeholder must not read as an identity mismatch, and must not
+      // evict the entry whose readiness is being reserved.
+      expect(devicePool.getDevice(firstConnection.deviceId)).toMatchObject({
+        name: "Pixel 8",
+        incarnation,
+      });
       await releaseReservation();
     });
 
-    test("rekeys a non-emulator Android transport reconnect before allocation", async () => {
-      const firstConnection = {
-        ...createBootedDevice("R5CT123456", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+    test("allocates a rediscovered handset on its unique serial alone", async () => {
+      const firstConnection = createBootedDevice("R5CT123456", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       await initializeLiveDevices([firstConnection]);
+      const incarnation = devicePool.getDevice(firstConnection.deviceId)?.incarnation;
       fakeDeviceManager.bootedDevices = [reconnected];
 
       await expect(devicePool.assignDeviceToSession("session-usb", "android")).resolves.toBe(
         reconnected.deviceId,
       );
 
+      // A handset serial is never reassigned, so rediscovery is continuity.
       expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
-        transportId: "2",
+        incarnation,
         sessionId: "session-usb",
       });
     });
@@ -1819,6 +1789,96 @@ describe("DevicePool", () => {
       } finally {
         await releaseReservation();
       }
+    });
+
+    test("adopts the started AVD name once discovery replaces the unknown-name placeholder", async () => {
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      const started = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
+      await devicePool.addDevice(started, sourceImage);
+      const incarnation = devicePool.getDevice(started.deviceId)?.incarnation;
+      fakeDeviceManager.bootedDevices = [{ ...started, name: "Pixel 8" }];
+
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice(started.deviceId)).toMatchObject({
+        name: "Pixel 8",
+        avdName: "Pixel 8",
+        incarnation,
+      });
+    });
+
+    test("does not adopt a resolved name that contradicts the AVD this pool started", async () => {
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      const started = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
+      await devicePool.addDevice(started, sourceImage);
+      const incarnation = devicePool.getDevice(started.deviceId)?.incarnation;
+      fakeDeviceManager.bootedDevices = [{ ...started, name: "Pixel 9" }];
+
+      await devicePool.refreshDevices();
+
+      const replaced = devicePool.getDevice(started.deviceId);
+      expect(replaced?.name).toBe("Pixel 9");
+      expect(replaced?.incarnation).not.toBe(incarnation);
+      expect(replaced?.androidImage).toBeUndefined();
+      expect(replaced?.avdName).toBeUndefined();
+    });
+
+    test("documented blind spot: a same-serial restart inside one discovery interval keeps its incarnation", async () => {
+      // Without a discovery-level epoch token there is nothing in an adb
+      // listing that distinguishes "still the same emulator process" from "the
+      // same AVD restarted between two discovery sweeps". The pool never
+      // observed the disappearance, so the incarnation — the only epoch token
+      // left — is unchanged, and every cache keyed on it must self-heal on use
+      // rather than rely on invalidation. Asserted here so the gap stays
+      // deliberate instead of becoming a surprise.
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await initializeLiveDevices([device]);
+      const incarnation = devicePool.getDevice(device.deviceId)?.incarnation;
+
+      fakeDeviceManager.bootedDevices = [{ ...device }];
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice(device.deviceId)?.incarnation).toBe(incarnation);
+    });
+
+    test("starts a new incarnation once the serial is observed to disappear and return", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await initializeLiveDevices([device]);
+      const incarnation = devicePool.getDevice(device.deviceId)?.incarnation;
+
+      await devicePool.removeDevice(device.deviceId);
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice(device.deviceId)?.incarnation).toBeGreaterThan(incarnation!);
+    });
+
+    test("never conflates two same-model handsets that share a display name", async () => {
+      const firstPhone = createBootedDevice("R5CT123456", "android", "Pixel 8");
+      const secondPhone = createBootedDevice("R5CT654321", "android", "Pixel 8");
+      await initializeLiveDevices([firstPhone, secondPhone]);
+      const firstIncarnation = devicePool.getDevice(firstPhone.deviceId)?.incarnation;
+      const secondIncarnation = devicePool.getDevice(secondPhone.deviceId)?.incarnation;
+
+      // Handset names are `ro.product.model` and are not unique, so identity
+      // for a non-emulator serial stays serial-only.
+      expect(firstIncarnation).not.toBe(secondIncarnation);
+      await devicePool.removeDevice(firstPhone.deviceId);
+      fakeDeviceManager.bootedDevices = [secondPhone];
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice(firstPhone.deviceId)).toBeNull();
+      expect(devicePool.getDevice(secondPhone.deviceId)?.incarnation).toBe(secondIncarnation);
     });
 
     test("reserves a verified AVD name when the running emulator lacks AVD metadata", async () => {
@@ -1935,7 +1995,7 @@ describe("DevicePool", () => {
       const originalIncarnation = devicePool.getDevice(original.deviceId)?.incarnation;
 
       await devicePool.removeDevice(original.deviceId);
-      const replacement = { ...original, transportId: "2" };
+      const replacement = { ...original };
       fakeDeviceManager.bootedDevices = [replacement];
       await devicePool.addDevice(replacement, sourceImage);
 
@@ -3619,13 +3679,11 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
     });
 
-    test("binds a same-serial transport reconnect without requiring a retry", async () => {
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+    test("binds a rediscovered same-serial emulator without requiring a retry", async () => {
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       await initializeLiveDevices([firstConnection]);
+      const incarnation = devicePool.getDevice(firstConnection.deviceId)?.incarnation;
       fakeDeviceManager.bootedDevices = [reconnected];
 
       await expect(
@@ -3633,20 +3691,17 @@ describe("DevicePool", () => {
       ).resolves.toBe("session-1");
 
       expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
-        transportId: "2",
+        incarnation,
         sessionId: "session-1",
         status: "busy",
       });
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(reconnected.deviceId);
     });
 
-    test("autolocks a same-serial transport reconnect without reacquiring the assignment mutex", async () => {
+    test("autolocks a rediscovered same-serial emulator without reacquiring the assignment mutex", async () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       try {
         process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
         await initializeLiveDevices([firstConnection]);
@@ -3656,10 +3711,7 @@ describe("DevicePool", () => {
           devicePool.autolockDevice(reconnected.deviceId, "android", "mcp-session-1"),
         ).resolves.toBeDefined();
 
-        expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
-          transportId: "2",
-          status: "busy",
-        });
+        expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({ status: "busy" });
       } finally {
         if (originalAutolock === undefined) {
           delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
@@ -3670,11 +3722,8 @@ describe("DevicePool", () => {
     });
 
     test("assigns the current replacement after liveness discovery supersedes a captured device", async () => {
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       const manager = new DeferredReconnectionDiscoveryFakeDeviceManager(
         [reconnected],
         [reconnected],
@@ -3698,7 +3747,6 @@ describe("DevicePool", () => {
 
       await expect(assignment).resolves.toBe(reconnected.deviceId);
       expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
-        transportId: "2",
         sessionId: "session-1",
         status: "busy",
       });
@@ -3807,11 +3855,8 @@ describe("DevicePool", () => {
 
   describe("assignMultipleDevices", () => {
     test("does not evict a session claimed while preflight reconnect discovery is pending", async () => {
-      const firstConnection = {
-        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
-        transportId: "1",
-      };
-      const reconnected = { ...firstConnection, transportId: "2" };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const reconnected = { ...firstConnection };
       const deferredDeviceManager = new DeferredReconnectionDiscoveryFakeDeviceManager(
         [reconnected],
         [firstConnection],
@@ -3845,7 +3890,6 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice(firstConnection.deviceId)).toMatchObject({
         sessionId: "concurrent-session",
         status: "busy",
-        transportId: "1",
       });
     });
 

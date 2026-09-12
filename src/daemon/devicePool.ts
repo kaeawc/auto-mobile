@@ -30,6 +30,7 @@ import {
 } from "./DeviceCriteriaMatcher";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { hasMutableDisplayName, isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
@@ -139,6 +140,15 @@ export type DeviceRecoveryEligibility =
  * mutex was acquired.
  */
 type MutableMetadataSource = "refresh" | "snapshot";
+
+/**
+ * The display name Android discovery falls back to when the emulator console
+ * could not answer `avd name`. It is a placeholder, not an identity claim —
+ * see {@link DevicePool.namesAgreeOnIdentity}.
+ */
+function unknownAndroidRuntimeName(deviceId: string): string {
+  return `Unknown (${deviceId})`;
+}
 
 export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
@@ -853,24 +863,18 @@ export class DevicePool {
 
   /**
    * Replace a pooled connection whose stable serial now identifies a different
-   * runtime. Preserve AutoMobile-owned emulator state because the process and
-   * AVD did not change; only the ADB connection incarnation did.
+   * runtime.
+   *
+   * Reaching here means the discovered name genuinely disagrees with the pooled
+   * one (see {@link matchesRuntimeIdentity}, which tolerates the placeholder an
+   * unreadable AVD name produces), so a different AVD has taken this serial.
+   * AutoMobile-owned emulator state belongs to the AVD that is gone and must not
+   * be carried across.
    */
   private async replacePooledDeviceForRuntimeIdentity(
     pooledDevice: PooledDevice,
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
-    const preserveAutoMobileOwnership = this.hasTransportOnlyIdentityChange(
-      pooledDevice,
-      bootedDevice,
-    );
-    const sourceImage = preserveAutoMobileOwnership ? pooledDevice.androidImage : undefined;
-    const startedProcess = preserveAutoMobileOwnership
-      ? this.startedDeviceProcesses.get(pooledDevice.id)
-      : undefined;
-    const startedProcessOutput = preserveAutoMobileOwnership
-      ? this.startedDeviceProcessOutput.get(pooledDevice.id)
-      : undefined;
     await this.evictMissingPooledDevice(
       pooledDevice,
       `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
@@ -878,13 +882,7 @@ export class DevicePool {
     if (this.devices.has(bootedDevice.deviceId)) {
       return false;
     }
-    await this.addDevice(bootedDevice, sourceImage);
-    if (startedProcess) {
-      this.startedDeviceProcesses.set(bootedDevice.deviceId, startedProcess);
-    }
-    if (startedProcessOutput) {
-      this.startedDeviceProcessOutput.set(bootedDevice.deviceId, startedProcessOutput);
-    }
+    await this.addDevice(bootedDevice);
     return true;
   }
 
@@ -2128,11 +2126,16 @@ export class DevicePool {
     return evicted;
   }
 
+  /**
+   * Whether a pooled entry must be re-proved present before it is handed out.
+   *
+   * Emulator console ports are the reused identifiers: `emulator-5554` is
+   * handed to whichever AVD boots into that console slot next, so a pooled
+   * entry for one can be silently stale. A handset serial is globally unique
+   * and never reassigned, so the ordinary refresh prune is sufficient there.
+   */
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return (
-      device.platform === "android" &&
-      (consolePortFromSerial(device.id) !== null || device.transportId !== undefined)
-    );
+    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
   }
 
   private async ensurePooledDevicePresentForUse(
@@ -2154,18 +2157,8 @@ export class DevicePool {
     }
 
     const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
-    if (bootedDevice && this.matchesRuntimeIdentity(device, bootedDevice)) {
-      this.refreshMissingDeviceMisses.delete(device.id);
-      return true;
-    }
-
     if (bootedDevice) {
-      const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
-        device,
-        bootedDevice,
-        assignmentLockHeld,
-      );
-      return !replaced && this.devices.get(device.id) === device;
+      return await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld);
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -2180,6 +2173,38 @@ export class DevicePool {
     }
     await this.evictMissingPooledDevice(device, "not present in adb devices", true);
     return false;
+  }
+
+  /**
+   * Settle a liveness check for a serial discovery still reports as booted:
+   * either the pooled entry is the runtime that answered, or a different one
+   * has taken the serial and the entry must be replaced.
+   */
+  private async reconcileDiscoveredPooledDevice(
+    device: PooledDevice,
+    bootedDevice: BootedDevice,
+    assignmentLockHeld: boolean,
+  ): Promise<boolean> {
+    if (this.matchesRuntimeIdentity(device, bootedDevice)) {
+      if (this.devices.get(device.id) !== device) {
+        // A concurrent re-add replaced this entry while discovery was in
+        // flight. Serial, platform and name cannot tell the incarnations
+        // apart — only the pool's own entry identity can — so the captured
+        // object is a previous incarnation and must not be handed out.
+        logger.debug(
+          `Rejecting superseded pooled incarnation of ${device.id} after liveness check`,
+        );
+        return false;
+      }
+      this.refreshMissingDeviceMisses.delete(device.id);
+      return true;
+    }
+    const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
+      device,
+      bootedDevice,
+      assignmentLockHeld,
+    );
+    return !replaced && this.devices.get(device.id) === device;
   }
 
   private async replaceIdlePooledDeviceForLivenessCheck(
@@ -5003,10 +5028,7 @@ export class DevicePool {
    */
   async reserveDeviceForReadiness(
     deviceId: string,
-    expectedIdentity: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "transportId" | "observedAt"
-    >,
+    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
     autolockClient?: AutolockClient,
@@ -5027,11 +5049,7 @@ export class DevicePool {
         // Acquisition may reboot a device during readiness recovery. Prove
         // ownership before reserving it or beginning those side effects.
         this.getOwnedAutolockSession(pooled, autolockClient);
-        if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
-          await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
-        } else {
-          this.assertRuntimeIdentity(pooled, expectedIdentity);
-        }
+        this.assertRuntimeIdentity(pooled, expectedIdentity);
       }
       throwIfRequestAborted();
       const current = this.devices.get(deviceId);
@@ -5602,9 +5620,7 @@ export class DevicePool {
 
   private assertRuntimeIdentity(
     pooled: PooledDevice,
-    expected:
-      | Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId" | "observedAt">
-      | undefined,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt"> | undefined,
   ): void {
     if (!expected || this.matchesRuntimeIdentity(pooled, expected)) {
       // A tolerated match is still an opportunity to reconcile: every caller
@@ -5618,21 +5634,64 @@ export class DevicePool {
     }
     throw new ActionableError(
       `Device pool identity mismatch for '${expected.deviceId}': ` +
-        `resolved=[${expected.name} platform=${expected.platform} transportId=${expected.transportId}] ` +
-        `pooled=[${pooled.name} platform=${pooled.platform} transportId=${pooled.transportId}].`,
+        `resolved=[${expected.name} platform=${expected.platform}] ` +
+        `pooled=[${pooled.name} platform=${pooled.platform} incarnation=${pooled.incarnation}].`,
     );
   }
 
+  /**
+   * Whether a discovery observation describes the same runtime as a pooled
+   * entry.
+   *
+   * A discovery listing carries no connection-epoch token, so serial, platform
+   * and name are all there is to compare; the pool's own `incarnation` is the
+   * only epoch boundary, and it is minted when the pool re-creates an entry
+   * (see `daemon/deviceSessionRegistry.ts`). Name handling is delegated to
+   * {@link namesAgreeOnIdentity}.
+   */
   private matchesRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
   ): boolean {
     return (
       pooled.id === expected.deviceId &&
-      (this.hasMutableDisplayName(pooled) || pooled.name === expected.name) &&
       pooled.platform === expected.platform &&
-      (expected.transportId === undefined || pooled.transportId === expected.transportId)
+      this.namesAgreeOnIdentity(pooled, expected)
     );
+  }
+
+  /**
+   * Whether a pooled label and a freshly-discovered name can be the same
+   * runtime.
+   *
+   * Name equality is the rule, with two documented tolerances:
+   *  - a device class whose name is mutable metadata (iOS physical) never
+   *    carries identity in its name at all;
+   *  - `Unknown (<serial>)` is the placeholder Android discovery emits when the
+   *    emulator console could not answer `avd name`. It asserts nothing, so
+   *    reading it as "a different AVD took this serial" would evict a live
+   *    pooled emulator — and its AutoMobile ownership — on a transient console
+   *    read. The tolerance is guarded by {@link isAndroidEmulatorSerial}
+   *    because a handset's name is `ro.product.model`, which is not unique;
+   *    handsets stay on strict name equality behind their unique serial.
+   */
+  private namesAgreeOnIdentity(
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "name">,
+  ): boolean {
+    if (this.hasMutableDisplayName(pooled) || pooled.name === expected.name) {
+      return true;
+    }
+    if (pooled.platform !== "android" || !isAndroidEmulatorSerial(pooled.id)) {
+      return false;
+    }
+    const placeholder = unknownAndroidRuntimeName(pooled.id);
+    if (expected.name === placeholder) {
+      return true;
+    }
+    // The pooled label is the placeholder. Accept a resolved name only when the
+    // AVD this pool started says so — never on the strength of a name alone.
+    return pooled.name === placeholder && pooled.avdName === expected.name;
   }
 
   /**
@@ -5642,6 +5701,34 @@ export class DevicePool {
    */
   private hasMutableDisplayName(pooled: PooledDevice): boolean {
     return hasMutableDisplayName(pooled.platform, pooled.id);
+  }
+
+  /**
+   * Upgrade a pooled emulator still labelled `Unknown (<serial>)` to the AVD
+   * name a later discovery managed to read.
+   *
+   * {@link namesAgreeOnIdentity} tolerates the placeholder in both directions so
+   * an unreadable console never evicts a live entry; without this the tolerated
+   * match would also leave the pooled label stuck on the placeholder, and
+   * name-based pool consumers (DeviceCriteriaMatcher.filterDevices) would never
+   * match the real AVD. Only a name the pool already vouches for through
+   * `avdName` is adopted, so this cannot rename an entry onto a different AVD.
+   */
+  private resolvePlaceholderEmulatorName(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "name">,
+  ): void {
+    if (
+      pooled.platform !== "android" ||
+      !isAndroidEmulatorSerial(pooled.id) ||
+      pooled.name !== unknownAndroidRuntimeName(pooled.id) ||
+      pooled.avdName === undefined ||
+      pooled.avdName !== discovered.name
+    ) {
+      return;
+    }
+    logger.info(`Device ${pooled.id} resolved its AVD name to '${discovered.name}'`);
+    pooled.name = discovered.name;
   }
 
   /**
@@ -5655,6 +5742,7 @@ export class DevicePool {
     discovered: Pick<BootedDevice, "name" | "observedAt">,
     source: MutableMetadataSource,
   ): void {
+    this.resolvePlaceholderEmulatorName(pooled, discovered);
     if (!this.hasMutableDisplayName(pooled)) {
       return;
     }
@@ -5694,35 +5782,6 @@ export class DevicePool {
       delete pooled.nameObservedAt;
       pooled.nameRefreshGeneration = this.refreshGeneration;
     }
-  }
-
-  private hasTransportOnlyIdentityChange(
-    pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
-  ): boolean {
-    return (
-      pooled.id === expected.deviceId &&
-      pooled.platform === expected.platform &&
-      this.hasSameOrUnknownEmulatorName(pooled, expected) &&
-      !this.matchesRuntimeIdentity(pooled, expected)
-    );
-  }
-
-  private hasSameOrUnknownEmulatorName(
-    pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name">,
-  ): boolean {
-    if (pooled.name === expected.name) {
-      return true;
-    }
-    if (!pooled.id.startsWith("emulator-")) {
-      return false;
-    }
-    const unknownName = `Unknown (${pooled.id})`;
-    return (
-      expected.name === unknownName ||
-      (pooled.name === unknownName && pooled.avdName === expected.name)
-    );
   }
 
   /**

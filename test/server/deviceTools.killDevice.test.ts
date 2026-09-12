@@ -82,7 +82,7 @@ class ShutdownDiscoveryOptionsDeviceManager extends SuccessfulKillDeviceManager 
   }
 }
 
-class CurrentTransportKillDeviceManager extends FailingKillDeviceManager {
+class CurrentRuntimeKillDeviceManager extends FailingKillDeviceManager {
   private shutdownPollsStarted = false;
   private shutdownPollCount = 0;
 
@@ -1050,7 +1050,7 @@ describe("killDevice handler", () => {
     );
   });
 
-  test("waits for the transport that the Android kill preflight actually selected", async () => {
+  test("waits for the runtime the Android kill preflight actually resolved", async () => {
     const timer = new FakeTimer();
     const image: DeviceInfo = {
       name: "Pixel 8",
@@ -1063,26 +1063,25 @@ describe("killDevice handler", () => {
       name: image.name,
       platform: "android",
       deviceId: image.deviceId!,
-      transportId: "2",
     };
-    const currentTransportManager = new CurrentTransportKillDeviceManager(currentDevice);
-    manager = currentTransportManager;
+    const currentRuntimeManager = new CurrentRuntimeKillDeviceManager(currentDevice);
+    manager = currentRuntimeManager;
     const deviceSessionRepository = new FakeDeviceSessionRepository();
     setDeviceToolsDependencies({
-      deviceManagerFactory: () => currentTransportManager,
+      deviceManagerFactory: () => currentRuntimeManager,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
       timer,
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
-    currentTransportManager.setDeviceImages("android", [image]);
+    currentRuntimeManager.setDeviceImages("android", [image]);
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
       timer,
       new FakeInstalledAppsRepository(),
-      currentTransportManager,
+      currentRuntimeManager,
       new DefaultRetryExecutor(timer),
       deviceSessionRepository,
     );
@@ -1093,14 +1092,17 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    currentTransportManager.beginShutdownPolls();
+    currentRuntimeManager.beginShutdownPolls();
+    // The caller's identity is stale: killDevice resolves the live runtime and
+    // must wait for THAT one to leave. Waiting on the caller's stale name would
+    // read the very first poll as "something else already took this serial" and
+    // retire the pool entry before the device physically exited.
     const result = tool.handler(
       tool.schema.parse({
         device: {
-          name: image.name,
+          name: "Stale AVD",
           platform: "android",
           deviceId: image.deviceId!,
-          transportId: "1",
         },
       }),
     );
@@ -1486,7 +1488,6 @@ describe("killDevice handler", () => {
       name: "Pixel 8",
       platform: "android",
       deviceId: "emulator-5554",
-      transportId: "1",
     };
     delayedManager.setBootedDevices("android", [device]);
     const tool = ToolRegistry.getTool("killDevice");
@@ -1567,7 +1568,6 @@ describe("killDevice handler", () => {
       name: "Pixel 8",
       platform: "android",
       deviceId: "emulator-5554",
-      transportId: "1",
     };
     const transientManager = new TransientAbsenceThenSameIncarnationDeviceManager(device);
     manager = transientManager;
@@ -1837,7 +1837,6 @@ describe("killDevice handler", () => {
       name: "Current AVD",
       platform: "android",
       deviceId: "emulator-5554",
-      transportId: "2",
     };
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
@@ -2244,7 +2243,6 @@ describe("killDevice handler", () => {
       name: "Pixel 8 replacement",
       platform: "android",
       deviceId: image.deviceId!,
-      transportId: "2",
     };
     const replacementManager = new FirstReplacementThenEmptyDeviceManager(replacement);
     manager = replacementManager;
@@ -2286,7 +2284,7 @@ describe("killDevice handler", () => {
 
     const result = tool.handler(
       tool.schema.parse({
-        device: { ...image, transportId: "1" },
+        device: { ...image },
       }),
     );
     await cleanupStarted;
@@ -2375,7 +2373,6 @@ describe("killDevice handler", () => {
       name: image.name,
       platform: "android",
       deviceId: image.deviceId!,
-      transportId: "2",
     };
     const replacementManager = new ReplacementBeforeShutdownWaitDeviceManager(replacement);
     manager = replacementManager;
@@ -2415,14 +2412,17 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
+    // With no ADB transport id in the identity model, a same-serial
+    // replacement is recognized by its runtime name. The caller's pre-kill
+    // observation could not read the AVD name, so the resolved replacement
+    // name differs from it and the handoff is detected.
     await expect(
       tool.handler(
         tool.schema.parse({
           device: {
-            name: image.name,
+            name: `Unknown (${image.deviceId!})`,
             platform: "android",
             deviceId: image.deviceId!,
-            transportId: "1",
           },
         }),
       ),
@@ -2453,7 +2453,6 @@ describe("killDevice handler", () => {
       name: "Pixel 8 replacement",
       platform: "android",
       deviceId: image.deviceId!,
-      transportId: "2",
     };
     const replacementManager = new FirstReplacementThenEmptyDeviceManager(replacement);
     manager = replacementManager;
@@ -2486,7 +2485,7 @@ describe("killDevice handler", () => {
     await expect(
       tool.handler(
         tool.schema.parse({
-          device: { ...image, transportId: "1" },
+          device: { ...image },
         }),
       ),
     ).resolves.toBeDefined();
@@ -2508,7 +2507,6 @@ describe("killDevice handler", () => {
       name: "Pixel 8 replacement",
       platform: "android",
       deviceId: image.deviceId!,
-      transportId: "2",
     };
     const replacementManager = new FailedDiscoveryThenReplacementDeviceManager(replacement);
     manager = replacementManager;
@@ -2647,7 +2645,6 @@ describe("killDevice handler", () => {
       name: "Pixel 8 replacement",
       platform: "android",
       deviceId: image.deviceId!,
-      transportId: "2",
     };
     const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
       deadlineManager.setBootedDevices("android", [replacement]);
@@ -3188,7 +3185,9 @@ describe("killDevice handler", () => {
         deviceId: "emulator-5554",
         transportId: "1",
       };
-      const replacement: BootedDevice = { ...device, transportId: "2" };
+      // A different AVD taking the serial is the detectable replacement now
+      // that the identity model carries no ADB transport id.
+      const replacement: BootedDevice = { ...device, name: "Pixel 9" };
       const replacementManager = new ReplacementAfterObserverReconnectDeviceManager(
         device,
         replacement,
@@ -3459,7 +3458,7 @@ describe("killDevice handler", () => {
   );
 
   test.skipIf(process.platform === "win32")(
-    "does not restore an observer onto a same-ID Android replacement when the original transport is unknown",
+    "does not restore an observer onto a different AVD that took the same serial",
     async () => {
       const timer = new FakeTimer();
       const device: BootedDevice = {
@@ -3467,10 +3466,7 @@ describe("killDevice handler", () => {
         platform: "android",
         deviceId: "emulator-5554",
       };
-      const replacement: BootedDevice = {
-        ...device,
-        transportId: "2",
-      };
+      const replacement: BootedDevice = { ...device, name: "Pixel 9" };
       manager.setBootedDevices("android", [replacement]);
       setDeviceToolsDependencies({
         deviceManagerFactory: () => manager,
@@ -3493,6 +3489,52 @@ describe("killDevice handler", () => {
         expect(closeSpy).toHaveBeenCalledTimes(1);
         expect(getInstanceSpy).not.toHaveBeenCalled();
         expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "documented blind spot: a same-AVD restart on the same serial reads as the surviving incarnation",
+    async () => {
+      // Identity is platform + serial + name, so an emulator that restarted the
+      // SAME AVD under the same serial between two observations is
+      // indistinguishable from one that never left. The observer is restored
+      // onto it; recovery depends on the observer's own post-connect identity
+      // check and its reconnect failures, not on this comparison. Asserted so
+      // the gap stays deliberate rather than becoming a surprise.
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const restarted: BootedDevice = { ...device };
+      manager.setBootedDevices("android", [restarted]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => originalGetInstance(target, new FakeAdbClientFactory()),
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
+
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+
+        expect(getInstanceSpy).toHaveBeenCalled();
       } finally {
         getInstanceSpy.mockRestore();
         closeSpy.mockRestore();

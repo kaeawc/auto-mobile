@@ -928,7 +928,6 @@ describe("deleteDevice handler", () => {
       platform: "android",
       name: "Pixel_8_API_35",
       deviceId: "emulator-5556",
-      transportId: "7",
     };
     manager.setBootedDevices("android", [device]);
     manager.setDeviceImages("android", [
@@ -946,7 +945,7 @@ describe("deleteDevice handler", () => {
     expect(manager.wasMethodCalled("killDevice")).toBe(true);
     expect(manager.killedDevices).toEqual([
       expect.objectContaining({
-        transportId: device.transportId,
+        deviceId: device.deviceId,
       }),
     ]);
     expect(manager.destroyRequests).toEqual([
@@ -966,7 +965,6 @@ describe("deleteDevice handler", () => {
       platform: "android",
       name: "Unknown (emulator-5556)",
       deviceId: "emulator-5556",
-      transportId: "42",
     };
     const image: DeviceInfo = {
       platform: "android",
@@ -1009,7 +1007,6 @@ describe("deleteDevice handler", () => {
       platform: "android",
       name: "Pixel_8_New",
       deviceId: "emulator-5556",
-      transportId: "43",
     };
     const sessionManager = new SessionManager(timer);
     const pool = new DevicePool(
@@ -1025,7 +1022,6 @@ describe("deleteDevice handler", () => {
       {
         ...replacement,
         name: "Unknown (emulator-5556)",
-        transportId: "42",
       },
       { platform: "android", name: staleAvdName, isRunning: true },
     );
@@ -1117,12 +1113,10 @@ describe("deleteDevice handler", () => {
       platform: "android",
       name: "Pixel_8_API_35",
       deviceId: "emulator-5554",
-      transportId: "1",
     };
     manager.replacementAfterKill = {
       ...device,
       deviceId: "emulator-5556",
-      transportId: "2",
     };
     manager.setBootedDevices("android", [device]);
     manager.setDeviceImages("android", [
@@ -1151,13 +1145,11 @@ describe("deleteDevice handler", () => {
       platform: "android",
       name: "Pixel_8_API_35",
       deviceId: "emulator-5554",
-      transportId: "1",
     };
     manager.replacementAfterKill = {
       ...device,
       name: "Unknown (emulator-5556)",
       deviceId: "emulator-5556",
-      transportId: "2",
     };
     manager.setBootedDevices("android", [device]);
     manager.setDeviceImages("android", [
@@ -1184,12 +1176,10 @@ describe("deleteDevice handler", () => {
       platform: "android",
       name: "Pixel_8_API_35",
       deviceId: "emulator-5554",
-      transportId: "1",
     };
     manager.replacementAfterKill = {
       ...device,
       name: "Unknown (emulator-5554)",
-      transportId: "2",
     };
     manager.setBootedDevices("android", [device]);
     manager.setDeviceImages("android", [

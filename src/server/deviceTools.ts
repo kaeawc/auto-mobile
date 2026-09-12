@@ -141,6 +141,7 @@ import {
 import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { classifyDisplayCutout, DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
 
 // Schema definitions
@@ -1030,12 +1031,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   const observerState: AndroidObserverShutdownState = {
     hadActiveObserver: activeObserver !== null,
     boundSessionId: activeObserver?.getBoundSessionId() ?? null,
-    deviceIdentity: activeDeviceIdentity
-      ? {
-          ...activeDeviceIdentity,
-          transportId: activeDeviceIdentity.transportId ?? context.device.transportId,
-        }
-      : null,
+    deviceIdentity: activeDeviceIdentity ?? null,
   };
   let stop: Promise<void> | undefined;
   perf.startOperation("stopAndroidCtrlProxy");
@@ -1225,8 +1221,7 @@ async function revalidateReconnectedAndroidObserver(
     const reconnectedDevice = findDiscoveredDevice(discovery, device);
     return (
       reconnectedDevice !== undefined &&
-      observerState.deviceIdentity?.transportId !== undefined &&
-      reconnectedDevice.transportId !== undefined &&
+      observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, reconnectedDevice)
     );
   } catch (error) {
@@ -1269,8 +1264,7 @@ async function restoreAndroidObserverAfterCommandFailure(
     const survivingDevice = findDiscoveredDevice(discovery, device);
     if (
       survivingDevice &&
-      observerState.deviceIdentity?.transportId !== undefined &&
-      survivingDevice.transportId !== undefined &&
+      observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
@@ -1546,18 +1540,24 @@ async function waitForDeviceShutdown(
   }
 }
 
+/**
+ * Whether two discovery observations describe the same booted runtime.
+ *
+ * A discovery listing carries no connection-epoch token, so this is platform +
+ * serial + name and nothing more. An Android emulator serial is reused across
+ * boots, and its AVD name is what distinguishes one occupant of that serial
+ * from the next; a handset serial is globally unique, so its (non-unique)
+ * `ro.product.model` name can never conflate two handsets. The blind spot this
+ * leaves is deliberate: a same-serial restart of the SAME AVD between two
+ * observations reads as continuity, so callers relying on this must self-heal
+ * on failure rather than trust it as proof of an unbroken connection.
+ */
 function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevice): boolean {
-  if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
-    return false;
-  }
-  if (
-    device.platform === "android" &&
-    device.transportId !== undefined &&
-    candidate.transportId !== undefined
-  ) {
-    return device.transportId === candidate.transportId;
-  }
-  return device.name === candidate.name;
+  return (
+    device.platform === candidate.platform &&
+    device.deviceId === candidate.deviceId &&
+    device.name === candidate.name
+  );
 }
 
 function findDiscoveredDevice(
@@ -2287,6 +2287,27 @@ function resolveKillDeviceStableTarget(
   return pooledAvdName ? { platform: "android", stableId: pooledAvdName } : undefined;
 }
 
+/**
+ * The AVD name the pool holds for an emulator whose runtime name could not be
+ * read (`Unknown (<serial>)`), or undefined when the pool cannot vouch for one.
+ *
+ * The rule, now that the identity model has no ADB transport id:
+ *  1. the serial must be an emulator serial (`isAndroidEmulatorSerial`) — a
+ *     handset's name is `ro.product.model` and there is no AVD to substitute;
+ *  2. the pool must still hold a LIVE entry for that serial. The pool evicts an
+ *     entry the moment discovery observes the serial disappear and re-adds it
+ *     under a fresh `incarnation`, so a surviving entry is the pool's statement
+ *     that it has observed no boundary for this serial — the only continuity
+ *     evidence left;
+ *  3. that entry must carry an `avdName`, which the pool writes only from the
+ *     AVD it itself started (`recordSourceAndroidAvd`), never from discovery.
+ *
+ * Blind spot, accepted deliberately: a same-serial restart faster than one
+ * discovery interval never reaches the pool, so the cached AVD name can name
+ * the previous occupant. Callers must therefore treat this as a best-effort
+ * label and re-resolve the runtime name (`emu avd name`) rather than take it as
+ * proof of identity before a destructive action.
+ */
 function getValidatedPooledAndroidAvdName(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
@@ -2294,16 +2315,13 @@ function getValidatedPooledAndroidAvdName(
   if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
     return undefined;
   }
-  const pooled = devicePool?.getDevice(device.deviceId);
-  if (
-    !pooled?.avdName ||
-    !pooled.transportId ||
-    !device.transportId ||
-    pooled.transportId !== device.transportId
-  ) {
+  if (!isAndroidEmulatorSerial(device.deviceId)) {
+    // A handset's name is `ro.product.model`, not an AVD; there is nothing to
+    // substitute and nothing that would make a pooled label trustworthy.
     return undefined;
   }
-  return pooled.avdName;
+  const pooled = devicePool?.getDevice(device.deviceId);
+  return pooled?.avdName;
 }
 
 function getBootedAndroidStableName(
@@ -2909,7 +2927,6 @@ async function retireTeardownPooledOwnership(
     platform: expectedPooledDevice.platform,
     name,
     deviceId: expectedPooledDevice.id,
-    ...(expectedPooledDevice.transportId ? { transportId: expectedPooledDevice.transportId } : {}),
   };
   try {
     await stopVideoRecordingsBeforeShutdown(

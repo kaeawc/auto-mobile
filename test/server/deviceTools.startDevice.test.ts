@@ -350,7 +350,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
-    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const discoveredDevice = { ...androidDevice };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
@@ -367,7 +367,6 @@ describe("startDevice handler", () => {
     expect(result.source).toBe("cold-boot");
     expect(result.sessionUuid).toBeDefined();
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
-      transportId: "23",
       sessionId: result.sessionUuid,
     });
     expect(childProcess.killed).toBe(false);
@@ -1934,7 +1933,6 @@ describe("startDevice handler", () => {
       platform: "android",
       name: "Pixel 8",
       deviceId: "R5CT123456A",
-      transportId: "42",
     };
     fakeDeviceUtils.setBootedDevices("android", [physicalDevice]);
     fakeDeviceUtils.getDeviceImagesDetailed = async () => ({

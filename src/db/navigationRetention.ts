@@ -401,6 +401,12 @@ export class NavigationRetention {
         protectedIds = await computeProtectedBuildKeyIds(this.db);
       }
 
+      // A changed active build can make every row in the selected snapshot
+      // ineligible while exposing rows hidden by the prior snapshot. Re-select
+      // once against the refreshed protection set before deciding the tier is done.
+      if (batchResult.clearedCount === 0 && batchResult.activeBuildChanged) {
+        continue;
+      }
       if (!batchResult.isFullBatch || batchResult.clearedCount === 0) {
         break;
       }
@@ -517,6 +523,9 @@ export class NavigationRetention {
       const overflow = count - this.config.perAppMaxObservations;
       if (overflow > 0) {
         await this.evictOldest(appId, overflow, summary);
+        // A one-batch pass never reaches evictOldest's internal yield. Give
+        // arrivals a turn before starting the next app's synchronous SQLite work.
+        await this.yieldBetweenBatches();
       }
     }
 
@@ -556,13 +565,13 @@ export class NavigationRetention {
     let remaining = count;
     // Reuse a whole-database protected-build snapshot for this eviction pass.
     // Every selected batch revalidates only its own candidate apps before delete.
-    const protectedIds = await computeProtectedBuildKeyIds(this.db);
+    let protectedIds = await computeProtectedBuildKeyIds(this.db);
     while (remaining > 0) {
       const batch = Math.min(remaining, this.config.evictionChunkSize);
-      const evictedCount = await this.db.transaction().execute(async (trx) => {
+      const batchResult = await this.db.transaction().execute(async (trx) => {
         const victims = await collectOldestEvictable(trx, appId, protectedIds, batch);
         if (victims.length === 0) {
-          return 0;
+          return { evictedCount: 0, protectionChanged: false };
         }
 
         const candidateBuildKeys = await loadBuildKeysByIds(
@@ -585,7 +594,10 @@ export class NavigationRetention {
             victim.lastSeenAt < (maxSeen.get(victim.buildKeyId) ?? Number.NEGATIVE_INFINITY),
         );
         if (eligibleVictims.length === 0) {
-          return 0;
+          return {
+            evictedCount: 0,
+            protectionChanged: currentProtectedIds.some((id) => !protectedIds.includes(id)),
+          };
         }
 
         const nodeIds = eligibleVictims.filter((v) => v.isNode).map((v) => v.id);
@@ -604,13 +616,17 @@ export class NavigationRetention {
             .executeTakeFirst();
           summary.edgeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
         }
-        return eligibleVictims.length;
+        return { evictedCount: eligibleVictims.length, protectionChanged: false };
       });
 
-      if (evictedCount === 0) {
+      if (batchResult.evictedCount === 0) {
+        if (batchResult.protectionChanged) {
+          protectedIds = await computeProtectedBuildKeyIds(this.db);
+          continue;
+        }
         return;
       }
-      remaining -= evictedCount;
+      remaining -= batchResult.evictedCount;
       if (remaining > 0) {
         await this.yieldBetweenBatches();
       }
@@ -627,25 +643,45 @@ export class NavigationRetention {
    * transaction (#6650) with the protected set read fresh inside it.
    */
   private async pruneOrphanBuildKeys(summary: NavigationRetentionSummary): Promise<void> {
-    await this.db.transaction().execute(async (trx) => {
-      const protectedIds = await computeProtectedBuildKeyIds(trx);
+    const chunk = this.config.evictionChunkSize;
+    for (;;) {
+      const deleted = await this.db.transaction().execute(async (trx) => {
+        const protectedIds = await computeProtectedBuildKeyIds(trx);
 
-      let query = trx
-        .deleteFrom("navigation_build_keys")
-        .where("id", "not in", (eb) =>
-          eb.selectFrom("navigation_node_observations").select("build_key_id"),
-        )
-        .where("id", "not in", (eb) =>
-          eb.selectFrom("navigation_edge_observations").select("build_key_id"),
-        );
+        let query = trx
+          .selectFrom("navigation_build_keys")
+          .select("id")
+          .where("id", "not in", (eb) =>
+            eb.selectFrom("navigation_node_observations").select("build_key_id"),
+          )
+          .where("id", "not in", (eb) =>
+            eb.selectFrom("navigation_edge_observations").select("build_key_id"),
+          );
 
-      if (protectedIds.length > 0) {
-        query = query.where("id", "not in", protectedIds);
+        if (protectedIds.length > 0) {
+          query = query.where("id", "not in", protectedIds);
+        }
+
+        const rows = await query.limit(chunk).execute();
+        if (rows.length === 0) {
+          return 0;
+        }
+        const result = await trx
+          .deleteFrom("navigation_build_keys")
+          .where(
+            "id",
+            "in",
+            rows.map((row) => row.id),
+          )
+          .executeTakeFirst();
+        return Number(result.numDeletedRows ?? 0);
+      });
+      summary.buildKeysDeleted += deleted;
+      if (deleted < chunk) {
+        return;
       }
-
-      const deleted = await query.executeTakeFirst();
-      summary.buildKeysDeleted += Number(deleted.numDeletedRows ?? 0);
-    });
+      await this.yieldBetweenBatches();
+    }
   }
 }
 

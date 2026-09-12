@@ -370,6 +370,28 @@ describe("NavigationRetention prune", () => {
     await expect(readAfterFirstYield).resolves.toHaveLength(2);
   });
 
+  test("yields between one-batch per-app cap passes", async () => {
+    for (const appId of ["com.example.one", "com.example.two"]) {
+      await repo.getOrCreateApp(appId);
+      const node = await repo.getOrCreateNode(appId, "Home", 1);
+      const build = await repo.getOrCreateBuildKey(appId, 1, `hash-${appId}`);
+      for (let index = 0; index < 3; index += 1) {
+        await repo.recordNodeObservation(node.id, build.id, "device-1", `${appId}-${index}`, index);
+      }
+    }
+
+    let yields = 0;
+    const summary = await retention(
+      { ...CONFIG, structureTtlMs: 10_000_000, perAppMaxObservations: 2, evictionChunkSize: 5 },
+      async () => {
+        yields += 1;
+      },
+    ).prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(2);
+    expect(yields).toBeGreaterThanOrEqual(2);
+  });
+
   // ---- LRU size cap (backstop) ----
 
   test("per-app LRU cap evicts oldest observations by last_seen, keeps the active row", async () => {
@@ -525,6 +547,23 @@ describe("NavigationRetention prune", () => {
     expect(summary.buildKeysDeleted).toBe(1);
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
     expect(keys.map((k) => k.id)).toEqual([bkNew]);
+  });
+
+  test("sweeps orphan build keys in bounded batches", async () => {
+    await repo.getOrCreateApp(APP);
+    for (let version = 1; version <= 5; version += 1) {
+      await repo.getOrCreateBuildKey(APP, version, `orphan-${version}`);
+    }
+
+    let yields = 0;
+    const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
+      yields += 1;
+    }).prune(1_000_000);
+
+    expect(summary.buildKeysDeleted).toBe(4);
+    expect(yields).toBeGreaterThan(0);
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys).toHaveLength(1);
   });
 
   test("is idempotent: a second pass at the same clock deletes nothing", async () => {

@@ -177,7 +177,7 @@ export class IOSCtrlProxyBuilder {
    * load is honored.
    */
   private static readonly DEFAULT_DERIVED_DATA_SUBDIR = "derived-data";
-  private static readonly DEFAULT_SCHEME = "CtrlProxyApp";
+  private static readonly DEFAULT_SCHEME = "AutoMobileTest";
   private static readonly DEFAULT_DESTINATION = "generic/platform=iOS Simulator";
   private static readonly DEFAULT_BUNDLE_CACHE_DIR = path.join(
     os.homedir(),
@@ -237,6 +237,20 @@ export class IOSCtrlProxyBuilder {
    * swap even though there is no release-pinned baseline to compare against.
    */
   private derivedLocalRunnerSha256: Map<IOSCtrlProxyPlatform, string> = new Map();
+  /**
+   * Single-flight guard for {@link build}. `IOSCtrlProxyBuilder` is a
+   * process-wide singleton shared by every `IOSCtrlProxyManager` device
+   * instance (issue #6417): with no in-flight guard, two devices whose
+   * `needsRebuild()` both observe `true` before either has finished would
+   * each independently download-then-extract into the same
+   * `derivedDataPath`, and the second extraction's destructive
+   * `fs.rm(destination, { recursive: true, force: true })` (see
+   * `IOSCtrlProxyBundleDownloader.extractBundle`) would wipe out the tree the
+   * first just populated. Mirrors the existing static `prefetchPromise` idiom
+   * below, but scoped per-instance since `build()` is an instance method.
+   */
+  private buildInFlight: Promise<CtrlProxyIosBuildResult> | null = null;
+  private buildWaiters = 0;
 
   private constructor(
     config: Partial<CtrlProxyIosBuildConfig> = {},
@@ -478,8 +492,12 @@ export class IOSCtrlProxyBuilder {
 
       const injected = injectUITestEnvironment(root as Map<string, PlistValue>, env);
       if (injected === 0) {
+        const metadata = (root as Map<string, PlistValue>).get("__xctestrun_metadata__");
+        const formatVersion = metadata instanceof Map ? metadata.get("FormatVersion") : undefined;
+        const observedFormat = formatVersion === undefined ? "unknown" : String(formatVersion);
         throw new Error(
-          "xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner environment",
+          `xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner ` +
+            `environment (observed __xctestrun_metadata__.FormatVersion: ${observedFormat})`,
         );
       }
 
@@ -616,6 +634,39 @@ export class IOSCtrlProxyBuilder {
     platform?: IOSCtrlProxyPlatform,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<CtrlProxyIosBuildResult> {
+    // Keep the shared artifact flight alive until every waiter has resolved
+    // its platform paths, so another extraction cannot race those reads.
+    this.buildWaiters++;
+    this.buildInFlight ??= this.doBuild(perf);
+    try {
+      const shared = await this.buildInFlight;
+      if (!shared.success) {
+        return shared;
+      }
+      const buildPath = await this.getBuildProductsPath(platform ?? "simulator");
+      const xctestrunPath = await this.getXctestrunPath(platform);
+      if (!xctestrunPath) {
+        return {
+          success: false,
+          message: "Downloaded CtrlProxy bundle missing xctestrun",
+          error: "No .xctestrun file found after extraction",
+        };
+      }
+      return { ...shared, buildPath: buildPath || undefined, xctestrunPath };
+    } catch (error) {
+      return {
+        success: false,
+        message: "CtrlProxy artifact discovery failed",
+        error: errorMessage(error),
+      };
+    } finally {
+      if (--this.buildWaiters === 0) {
+        this.buildInFlight = null;
+      }
+    }
+  }
+
+  private async doBuild(perf: PerformanceTracker): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
     if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
@@ -642,24 +693,10 @@ export class IOSCtrlProxyBuilder {
 
       await this.cleanStaleXctestrunFiles();
 
-      const buildPath = await this.getBuildProductsPath(platform ?? "simulator");
-      const xctestrunPath = await this.getXctestrunPath(platform);
-
-      if (!xctestrunPath) {
-        perf.end();
-        return {
-          success: false,
-          message: "Downloaded CtrlProxy bundle missing xctestrun",
-          error: "No .xctestrun file found after extraction",
-        };
-      }
-
       perf.end();
       return {
         success: true,
         message: "CtrlProxy downloaded and extracted successfully",
-        buildPath: buildPath || undefined,
-        xctestrunPath: xctestrunPath || undefined,
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -815,16 +852,17 @@ export class IOSCtrlProxyBuilder {
     if (!buildPath) {
       return null;
     }
-    const appPath = path.join(buildPath, "CtrlProxyApp.app");
-    try {
-      await fs.access(appPath);
-      return appPath;
-    } catch (error) {
-      // App bundle isn't present in the build products dir; null signals "not built"
-      // so callers can decide to (re)build instead of treating this as fatal.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
-      return null;
+    // Older published archives retain the fixture app's previous product name.
+    for (const appName of ["AutoMobileTest.app", "CtrlProxyApp.app"]) {
+      const appPath = path.join(buildPath, appName);
+      try {
+        await fs.access(appPath);
+        return appPath;
+      } catch (error) {
+        logger.debug(`[IOSCtrlProxyBuilder] Fixture app not found at ${appPath}: ${error}`, error);
+      }
     }
+    return null;
   }
 
   public async getAppBundleHash(
@@ -1198,9 +1236,12 @@ export class IOSCtrlProxyBuilder {
     }
 
     const requiredPaths = [
-      path.join(buildDir, "CtrlProxyApp.app"),
+      (await this.getAppBundlePath(platform)) ?? path.join(buildDir, "AutoMobileTest.app"),
       path.join(buildDir, "CtrlProxyUITests-Runner.app"),
-      path.join(buildDir, "CtrlProxyTests.xctest"),
+      // The reference `CtrlProxyTests` unit-test target was retired in Phase 7E, so the
+      // re-cut archive no longer carries a top-level CtrlProxyTests.xctest. The sole test
+      // bundle is now CtrlProxyUITests.xctest, embedded in the runner app's PlugIns dir.
+      path.join(buildDir, "CtrlProxyUITests-Runner.app", "PlugIns", "CtrlProxyUITests.xctest"),
     ];
 
     for (const requiredPath of requiredPaths) {

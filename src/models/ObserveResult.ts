@@ -186,6 +186,8 @@ export interface ObserveResult {
    * never `tapOn`/`inputText`/etc.
    */
   skeleton?: SkeletonElement[];
+  /** Observed Android IME window, replacing its individual keys in compact output. */
+  keyboard?: { visible: true; package: string };
 
   /**
    * Non-actionable rows from the same projection that produces `skeleton`

@@ -21,7 +21,16 @@ export interface DeviceMatcher {
 }
 
 export interface ParsedDeviceVersion {
-  components: number[];
+  /**
+   * The dotted numeric components, kept as their raw digit strings rather than
+   * `number`s. The parser's `\d+` accepts a run of any length, and coercing a
+   * long-enough run through `Number()` overflows to `Infinity`, which makes the
+   * old subtraction-based comparison return `NaN` and falsifies the total-order
+   * contract (#6321). Digit strings are compared without precision loss
+   * (length-then-lexicographic), so the relation stays reflexive, antisymmetric
+   * and transitive over every input this parser accepts.
+   */
+  components: string[];
   /**
    * A trailing alphabetic release qualifier, uppercased. A single letter
    * covers the shipped cases (Android 12L's "L", #6132 follow-up); the parser
@@ -30,7 +39,8 @@ export interface ParsedDeviceVersion {
    * degrading to a NaN comparison (#6326).
    */
   letter?: string;
-  qpr?: number;
+  /** The QPR suffix as its raw digit string, compared precision-safely like a component (#6321). */
+  qpr?: string;
 }
 
 function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
@@ -39,16 +49,37 @@ function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
     return null;
   }
   return {
-    components: match[1].split(".").map(Number),
+    components: match[1].split("."),
     ...(match[2] === undefined ? {} : { letter: match[2].toUpperCase() }),
-    ...(match[3] === undefined ? {} : { qpr: Number(match[3]) }),
+    ...(match[3] === undefined ? {} : { qpr: match[3] }),
   };
 }
 
-function compareParsedVersions(partsA: number[], partsB: number[]): number {
+/**
+ * Compares two runs of decimal digits as non-negative integers without
+ * precision loss: leading zeros are ignored (so "08" equals "8" and "12.0"
+ * equals "12"), then a longer digit run is the larger number, and equal-length
+ * runs compare lexicographically. Returns a sign (-1, 0, 1). This never returns
+ * `NaN` for any `\d+` run the parser accepts, however long -- the fix for the
+ * `Number()`-overflow-to-`Infinity` defect that made `compareVersions` not a
+ * total order (#6321).
+ */
+function compareNumericComponent(a: string, b: string): number {
+  const trimmedA = a.replace(/^0+(?=\d)/, "");
+  const trimmedB = b.replace(/^0+(?=\d)/, "");
+  if (trimmedA.length !== trimmedB.length) {
+    return trimmedA.length < trimmedB.length ? -1 : 1;
+  }
+  if (trimmedA === trimmedB) {
+    return 0;
+  }
+  return trimmedA < trimmedB ? -1 : 1;
+}
+
+function compareParsedVersions(partsA: string[], partsB: string[]): number {
   const length = Math.max(partsA.length, partsB.length);
   for (let index = 0; index < length; index++) {
-    const delta = (partsA[index] ?? 0) - (partsB[index] ?? 0);
+    const delta = compareNumericComponent(partsA[index] ?? "0", partsB[index] ?? "0");
     if (delta !== 0) {
       return delta;
     }
@@ -87,7 +118,7 @@ export function compareStrictNumericVersions(a: string, b: string): number {
   ) {
     return Number.NaN;
   }
-  return compareParsedVersions(a.split(".").map(Number), b.split(".").map(Number));
+  return compareParsedVersions(a.split("."), b.split("."));
 }
 
 /**
@@ -99,9 +130,9 @@ export function compareStrictNumericVersions(a: string, b: string): number {
  * qualifier order against each other (#6182).
  */
 function compareComponentsThenLetter(
-  componentsA: number[],
+  componentsA: string[],
   letterA: string | undefined,
-  componentsB: number[],
+  componentsB: string[],
   letterB: string | undefined,
 ): number {
   const componentsDelta = compareParsedVersions(componentsA, componentsB);
@@ -132,7 +163,7 @@ export function compareReleaseQualifiers(a: ParsedDeviceVersion, b: ParsedDevice
   if (delta !== 0) {
     return delta;
   }
-  return (a.qpr ?? 0) - (b.qpr ?? 0);
+  return compareNumericComponent(a.qpr ?? "0", b.qpr ?? "0");
 }
 
 export function compareVersions(a: string, b: string): number {
@@ -247,7 +278,7 @@ function compareVersionToBound(version: string, bound: string, platform: Platfor
     if (parsedBound.qpr === undefined) {
       return 0;
     }
-    return (parsedVersion.qpr ?? 0) - parsedBound.qpr;
+    return compareNumericComponent(parsedVersion.qpr ?? "0", parsedBound.qpr);
   }
   return compareVersions(version, bound);
 }

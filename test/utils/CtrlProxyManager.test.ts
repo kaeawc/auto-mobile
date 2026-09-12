@@ -99,6 +99,50 @@ describe("CtrlProxyManager", function () {
       process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwdEnv;
     }
   });
+
+  describe("framework boot failures", () => {
+    for (const { method, command, service, readyOutput } of [
+      {
+        method: "isInstalled" as const,
+        command: `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        service: "package",
+        readyOutput: `package:${AndroidCtrlProxyManager.PACKAGE}`,
+      },
+      {
+        method: "isEnabled" as const,
+        command: "shell settings get secure enabled_accessibility_services",
+        service: "settings",
+        readyOutput: `${AndroidCtrlProxyManager.PACKAGE}/.CtrlProxy`,
+      },
+    ]) {
+      test.each(["stdout", "stderr"] as const)(
+        `${method} preserves missing service output from %s and recovers`,
+        async (stream) => {
+          const diagnostic = `cmd: Can't find service: ${service}`;
+          fakeAdb.setCommandResponseSequence(command, [
+            { stdout: "", stderr: "", [stream]: diagnostic },
+            { stdout: readyOutput, stderr: "" },
+          ]);
+
+          await expect(accessibilityServiceClient[method]()).rejects.toThrow(diagnostic);
+          await expect(accessibilityServiceClient[method]()).resolves.toBe(true);
+        },
+      );
+
+      test(`${method} preserves a thrown missing service error`, async () => {
+        const diagnostic = `Can't find service: ${service}`;
+        fakeAdb.setCommandError(command, new Error(diagnostic));
+
+        await expect(accessibilityServiceClient[method]()).rejects.toThrow(diagnostic);
+      });
+
+      test(`${method} retains the false result for permission failures`, async () => {
+        fakeAdb.setCommandError(command, new Error("Permission denied"));
+
+        await expect(accessibilityServiceClient[method]()).resolves.toBe(false);
+      });
+    }
+  });
   describe("isInstalled", function () {
     test("should return true when accessibility service package is installed", async function () {
       fakeAdb.setCommandResponse(

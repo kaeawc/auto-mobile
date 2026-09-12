@@ -537,7 +537,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         } else if (
           shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
         ) {
-          const diff = diffObserveResult(baseline, sanitized);
+          const diff = diffObserveResult(baseline, sanitized, {
+            collapseKeyboard: servedObservation.skeleton !== undefined,
+          });
           // Always attach a usable selector surface alongside the diff (issue #6221
           // item 4.1): a client that gets a diff must never be left with no
           // `skeleton` to act on — including when the request is `raw:true` /
@@ -559,6 +561,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             payload.observation as ObserveResult,
             cfg,
           );
+          diff.keyboard =
+            servedObservation.skeleton !== undefined
+              ? servedObservation.keyboard
+              : sanitizeObserveResult(payload.observation as ObserveResult, {
+                  ...cfg,
+                  project: "skeleton",
+                }).keyboard;
           // Issue #6258: a diff must not silently drop `activeWindow`/`freshness`
           // either — see resolveDiffScreenState. Both fields come through as
           // `undefined` when the underlying observation lacks them, which drops

@@ -49,10 +49,10 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
       extractionRoot,
       "Build",
       "Products",
-      "CtrlProxyApp_iphonesimulator.xctestrun",
+      "AutoMobileTest_iphonesimulator.xctestrun",
     );
     await fs.writeFile(xctestrunFile, "fake xctestrun");
-    await fs.mkdir(path.join(productsDir, "CtrlProxyApp.app"), { recursive: true });
+    await fs.mkdir(path.join(productsDir, "AutoMobileTest.app"), { recursive: true });
     const runnerDir = path.join(productsDir, "CtrlProxyUITests-Runner.app");
     await fs.mkdir(runnerDir, { recursive: true });
     await fs.writeFile(path.join(runnerDir, "CtrlProxyUITests-Runner"), "fake runner");
@@ -64,7 +64,6 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     );
     await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
     await fs.writeFile(xctestBinary, "fake CtrlProxy code");
-    await fs.mkdir(path.join(productsDir, "CtrlProxyTests.xctest"), { recursive: true });
 
     if (this.includeDeviceProducts) {
       const deviceDir = path.join(extractionRoot, "Build", "Products", "Debug-iphoneos");
@@ -73,10 +72,10 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
         extractionRoot,
         "Build",
         "Products",
-        "CtrlProxyApp_iphoneos.xctestrun",
+        "AutoMobileTest_iphoneos.xctestrun",
       );
       await fs.writeFile(deviceXctestrun, "fake device xctestrun");
-      await fs.mkdir(path.join(deviceDir, "CtrlProxyApp.app"), { recursive: true });
+      await fs.mkdir(path.join(deviceDir, "AutoMobileTest.app"), { recursive: true });
       const deviceRunnerDir = path.join(deviceDir, "CtrlProxyUITests-Runner.app");
       await fs.mkdir(deviceRunnerDir, { recursive: true });
       await fs.writeFile(
@@ -91,7 +90,6 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
       );
       await fs.mkdir(path.dirname(deviceXctestBinary), { recursive: true });
       await fs.writeFile(deviceXctestBinary, "fake device CtrlProxy code");
-      await fs.mkdir(path.join(deviceDir, "CtrlProxyTests.xctest"), { recursive: true });
     }
   }
 }

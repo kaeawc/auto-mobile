@@ -104,28 +104,62 @@ export interface PerformanceTracker {
    * @param name - Operation name (must match startOperation)
    */
   endOperation(name: string): void;
+
+  /**
+   * Return an independent branch-scoped tracker anchored to the block that
+   * is current right now. Call this before spawning concurrent work (e.g.
+   * one of several `Promise.all` branches) that may open or close its own
+   * nested `serial`/`parallel` blocks.
+   *
+   * Without forking, every branch shares one mutable cursor: one branch
+   * opening a nested block moves where a sibling branch's `track()`/`end()`
+   * lands, misparenting timings or letting one branch pop a block another
+   * branch opened (issue #6706). A fork's own `serial`/`parallel`/`track`/
+   * `end` calls move only its own cursor -- entries recorded through the
+   * fork are appended to the same shared parent block, but nesting further
+   * inside the fork never affects the tracker that produced it (or any of
+   * its other forks).
+   */
+  fork(): PerformanceTracker;
 }
 
 /**
  * Default implementation of performance tracking
  */
 export class DefaultPerformanceTracker implements PerformanceTracker {
-  private root: TimingBlock;
   private current: TimingBlock;
   private timer: Timer;
+  /**
+   * The block this instance must never close past. For the top-level
+   * tracker this is the implicit root (`parent === null`), so it never
+   * changes existing behavior. For a `fork()`, it is the block that was
+   * current at fork time -- `end()`/`getTimings()` on the fork stop there
+   * instead of climbing (and closing) blocks that belong to the tracker it
+   * was forked from.
+   */
+  private readonly floor: TimingBlock;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(timer: Timer = defaultTimer, anchor?: TimingBlock) {
     this.timer = timer;
-    const startMs = this.timer.now();
-    // Initialize with a root serial block
-    this.root = {
-      name: "root",
-      type: "serial",
-      startMs,
-      entries: [],
-      parent: null,
-    };
-    this.current = this.root;
+    if (anchor) {
+      this.floor = anchor;
+      this.current = anchor;
+    } else {
+      // Initialize with a root serial block
+      const root: TimingBlock = {
+        name: "root",
+        type: "serial",
+        startMs: this.timer.now(),
+        entries: [],
+        parent: null,
+      };
+      this.floor = root;
+      this.current = root;
+    }
+  }
+
+  fork(): PerformanceTracker {
+    return new DefaultPerformanceTracker(this.timer, this.current);
   }
 
   serial(name: string): PerformanceTracker {
@@ -154,42 +188,50 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
 
   async track<T>(name: string, fn: () => Promise<T>): Promise<T> {
     const startMs = this.timer.now();
+    // Capture the parent block NOW, synchronously, rather than reading
+    // `this.current` again once `fn` settles. `this.current` is mutable
+    // ambient state; if another concurrent branch on this same instance (or
+    // a caller that forgot to fork) opens/closes blocks while `fn` is
+    // in-flight, the block that was current at settle time may no longer be
+    // the one this call actually started under (issue #6706).
+    const parentBlock = this.current;
     try {
       return await fn();
     } finally {
       const durationMs = this.timer.now() - startMs;
       const entry: TimingEntry = { name, durationMs };
 
-      if (Array.isArray(this.current.entries)) {
+      if (Array.isArray(parentBlock.entries)) {
         // Serial block - push to array
-        this.current.entries.push(entry);
+        parentBlock.entries.push(entry);
       } else {
         // Parallel block - add to object
-        this.current.entries[name] = entry;
+        parentBlock.entries[name] = entry;
       }
     }
   }
 
   trackSync<T>(name: string, fn: () => T): T {
     const startMs = this.timer.now();
+    const parentBlock = this.current;
     try {
       return fn();
     } finally {
       const durationMs = this.timer.now() - startMs;
       const entry: TimingEntry = { name, durationMs };
 
-      if (Array.isArray(this.current.entries)) {
+      if (Array.isArray(parentBlock.entries)) {
         // Serial block - push to array
-        this.current.entries.push(entry);
+        parentBlock.entries.push(entry);
       } else {
         // Parallel block - add to object
-        this.current.entries[name] = entry;
+        parentBlock.entries[name] = entry;
       }
     }
   }
 
   end(): PerformanceTracker {
-    if (this.current.parent) {
+    if (this.current !== this.floor && this.current.parent) {
       const durationMs = this.timer.now() - this.current.startMs;
       const entry: TimingEntry = {
         name: this.current.name,
@@ -209,13 +251,16 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
   }
 
   getTimings(): TimingData | null {
-    // Close any unclosed blocks
-    while (this.current.parent) {
+    // Close any unclosed blocks, but never past this instance's floor: a
+    // fork must not finalize blocks owned by the tracker it was forked
+    // from (or by a sibling fork).
+    while (this.current !== this.floor && this.current.parent) {
       this.end();
     }
 
-    // Return the root's entries
-    return this.root.entries as TimingData;
+    // Return the floor's entries (the true root for the top-level tracker;
+    // the anchor block for a fork).
+    return this.floor.entries as TimingData;
   }
 
   isEnabled(): boolean {
@@ -316,6 +361,11 @@ export class NoOpPerformanceTracker implements PerformanceTracker {
 
   endOperation(_name: string): void {
     // No-op
+  }
+
+  fork(): PerformanceTracker {
+    // No state to isolate -- every method above is already a pass-through.
+    return this;
   }
 }
 

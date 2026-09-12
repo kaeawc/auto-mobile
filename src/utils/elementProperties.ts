@@ -4,6 +4,16 @@ export function isTruthyFlag(value: unknown): boolean {
   return value === true || value === "true";
 }
 
+/** A named toggle exposes its identity in content-desc and its mutable state in text. */
+export function getToggleContentDescription(props: Record<string, unknown>): string | undefined {
+  const description = props["content-desc"];
+  return isTruthyFlag(props.checkable) &&
+    typeof description === "string" &&
+    description.trim() !== ""
+    ? description
+    : undefined;
+}
+
 export function hasAccessibilityAction(value: unknown, action: string): boolean {
   return Array.isArray(value) && value.some((item) => item === action);
 }

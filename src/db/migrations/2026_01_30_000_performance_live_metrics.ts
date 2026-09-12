@@ -82,27 +82,21 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     .execute();
 
   // Copy data to backup
-  await db.executeQuery(
-    db
-      .raw(`
-      INSERT INTO performance_audit_results_backup
-      SELECT id, device_id, session_id, package_name, timestamp, passed,
-             p50_ms, p90_ms, p95_ms, p99_ms, jank_count, missed_vsync_count,
-             slow_ui_thread_count, frame_deadline_missed_count, cpu_usage_percent,
-             touch_latency_ms, diagnostics_json, created_at
-      FROM performance_audit_results
-    `)
-      .compile(db),
-  );
+  await sql`
+    INSERT INTO performance_audit_results_backup
+    SELECT id, device_id, session_id, package_name, timestamp, passed,
+           p50_ms, p90_ms, p95_ms, p99_ms, jank_count, missed_vsync_count,
+           slow_ui_thread_count, frame_deadline_missed_count, cpu_usage_percent,
+           touch_latency_ms, diagnostics_json, created_at
+    FROM performance_audit_results
+  `.execute(db);
 
   // Drop original table
   await db.schema.dropTable("performance_audit_results").execute();
 
   // Rename backup to original
-  await db.executeQuery(
-    db
-      .raw("ALTER TABLE performance_audit_results_backup RENAME TO performance_audit_results")
-      .compile(db),
+  await sql`ALTER TABLE performance_audit_results_backup RENAME TO performance_audit_results`.execute(
+    db,
   );
 
   // Recreate original index

@@ -1,7 +1,8 @@
-import { expect, describe, test, spyOn } from "bun:test";
+import { expect, describe, test } from "bun:test";
 import { Element } from "../../../src/models";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
+import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import {
   isPermissionDialog,
   isLoginScreen,
@@ -11,8 +12,9 @@ import {
   handlePermissionDialog,
   isPermissionDenyElement,
 } from "../../../src/features/navigation/ExploreBlockerDetection";
-import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { defaultTimer } from "../../../src/utils/SystemTimer";
+import type { BlockerHandlerDeps } from "../../../src/features/navigation/ExploreBlockerDetection";
+import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("ExploreBlockerDetection", () => {
   function createMockElement(overrides: Partial<Element> = {}): Element {
@@ -394,23 +396,22 @@ describe("ExploreBlockerDetection", () => {
     // TapOnElement.validateOptions rejects a call carrying both text and
     // elementId, so an Allow / dismiss button that has both must be tapped
     // with exactly one selector (issue #6121). The handlers hard-sleep 1s
-    // after a tap via defaultTimer, so that is stubbed to keep the test fast.
-    function captureTapOptions(): { calls: unknown[]; restore: () => void } {
-      const calls: unknown[] = [];
-      const tapSpy = spyOn(TapOnElement.prototype, "execute").mockImplementation(
-        async (options: unknown) => {
-          calls.push(options);
-          return { success: true, action: "tap" } as never;
-        },
-      );
-      const sleepSpy = spyOn(defaultTimer, "sleep").mockResolvedValue(undefined);
-      return {
-        calls,
-        restore: () => {
-          tapSpy.mockRestore();
-          sleepSpy.mockRestore();
-        },
-      };
+    // after a tap; a FakeTimer in auto-advance mode resolves that sleep
+    // immediately (and records it) so the test stays fast and deterministic.
+    //
+    // Injecting a FakeDialogTapAction + FakeTimer through the handler's `deps`
+    // seam replaces the former `spyOn(TapOnElement.prototype, "execute")` /
+    // `spyOn(defaultTimer, "sleep")` global spies (issue #6191): nothing global
+    // is patched, so there is nothing to restore between tests.
+    function captureTapOptions(): {
+      calls: TapOnElementOptions[];
+      timer: FakeTimer;
+      deps: BlockerHandlerDeps;
+    } {
+      const tap = new FakeDialogTapAction();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      return { calls: tap.calls, timer, deps: { tapActionFactory: tap.factory, timer } };
     }
 
     const androidDevice = { deviceId: "emulator-5554", platform: "android" } as BootedDevice;
@@ -437,7 +438,7 @@ describe("ExploreBlockerDetection", () => {
     }
 
     test("handlePermissionDialog taps an Allow button with text and resource-id by id only", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Allow camera access?", clickable: false }),
         createMockElement({
@@ -446,17 +447,14 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([
@@ -472,7 +470,7 @@ describe("ExploreBlockerDetection", () => {
     // if they were the dialog's Allow button, before a genuine "OK" was ever
     // reached.
     test("handlePermissionDialog skips 'ok'-substring buttons and taps the real OK button", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Bookmarks", "resource-id": "com.test:id/bookmarks" }),
         createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
@@ -480,40 +478,34 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "OK", "resource-id": "com.test:id/ok_button" }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
     });
 
     test("handlePermissionDialog does not tap when only 'ok'-substring buttons are present", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Bookmarks", "resource-id": "com.test:id/bookmarks" }),
         createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(false);
       expect(calls).toEqual([]);
@@ -525,7 +517,7 @@ describe("ExploreBlockerDetection", () => {
     // substring check accepted them.
     test("handlePermissionDialog taps machine-style 'ok_button'/'allow_button'/'ok.button' content-desc ids", async () => {
       for (const machineId of ["ok_button", "allow_button", "ok.button"]) {
-        const { calls, restore } = captureTapOptions();
+        const { calls, deps } = captureTapOptions();
         const elements = [
           createMockElement({
             text: "",
@@ -534,17 +526,14 @@ describe("ExploreBlockerDetection", () => {
           }),
         ];
 
-        let handled: boolean;
-        try {
-          handled = await handlePermissionDialog(
-            elements,
-            hierarchyOf(elements),
-            androidDevice,
-            null,
-          );
-        } finally {
-          restore();
-        }
+        const handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+          undefined,
+          deps,
+        );
 
         expect(handled).toBe(true);
         expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
@@ -558,20 +547,17 @@ describe("ExploreBlockerDetection", () => {
     // affirmative keyword (tokenizes to ["okay"], distinct from "ok").
     test("handlePermissionDialog taps camelCase 'okButton'/'allowButton' content-desc ids and a genuine 'Okay' button", async () => {
       for (const text of ["okButton", "allowButton", "Okay"]) {
-        const { calls, restore } = captureTapOptions();
+        const { calls, deps } = captureTapOptions();
         const elements = [createMockElement({ text, "resource-id": "com.test:id/ok_button" })];
 
-        let handled: boolean;
-        try {
-          handled = await handlePermissionDialog(
-            elements,
-            hierarchyOf(elements),
-            androidDevice,
-            null,
-          );
-        } finally {
-          restore();
-        }
+        const handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+          undefined,
+          deps,
+        );
 
         expect(handled).toBe(true);
         expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
@@ -584,22 +570,19 @@ describe("ExploreBlockerDetection", () => {
     // otherwise it tokenizes as a single "okbutton" token that matches
     // nothing.
     test("handlePermissionDialog taps acronym-prefixed camelCase 'OKButton' content-desc", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "OKButton", "resource-id": "com.test:id/ok_button" }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
@@ -613,7 +596,7 @@ describe("ExploreBlockerDetection", () => {
     // grant. The deny-exclusion set must skip "Don't allow" and tap the real
     // grant button that follows it.
     test("handlePermissionDialog taps the grant button, never 'Don't allow', when deny precedes grant", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({
           text: "Don't allow",
@@ -626,17 +609,14 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([
@@ -659,23 +639,20 @@ describe("ExploreBlockerDetection", () => {
     ])(
       "handlePermissionDialog excludes deny label %p and taps the affirmative option",
       async (denyText: string) => {
-        const { calls, restore } = captureTapOptions();
+        const { calls, deps } = captureTapOptions();
         const elements = [
           createMockElement({ text: denyText, "resource-id": "com.test:id/deny" }),
           createMockElement({ text: "Only this time", "resource-id": "com.test:id/allow" }),
         ];
 
-        let handled: boolean;
-        try {
-          handled = await handlePermissionDialog(
-            elements,
-            hierarchyOf(elements),
-            androidDevice,
-            null,
-          );
-        } finally {
-          restore();
-        }
+        const handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+          undefined,
+          deps,
+        );
 
         expect(handled).toBe(true);
         expect(calls).toEqual([{ elementId: "com.test:id/allow", action: "tap" }]);
@@ -702,22 +679,19 @@ describe("ExploreBlockerDetection", () => {
     ])(
       "handlePermissionDialog does not tap when only a deny control %p is present",
       async (denyText: string) => {
-        const { calls, restore } = captureTapOptions();
+        const { calls, deps } = captureTapOptions();
         const elements = [
           createMockElement({ text: denyText, "resource-id": "com.test:id/deny_button" }),
         ];
 
-        let handled: boolean;
-        try {
-          handled = await handlePermissionDialog(
-            elements,
-            hierarchyOf(elements),
-            androidDevice,
-            null,
-          );
-        } finally {
-          restore();
-        }
+        const handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+          undefined,
+          deps,
+        );
 
         expect(handled).toBe(false);
         expect(calls).toEqual([]);
@@ -727,7 +701,7 @@ describe("ExploreBlockerDetection", () => {
     // A "Blocked" label in one field must veto an "allow" token carried in the
     // other, so a mixed control is never treated as an affirmative grant.
     test("handlePermissionDialog does not tap a control mixing an allow token with 'Blocked'", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({
           text: "Allow",
@@ -736,17 +710,14 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(false);
       expect(calls).toEqual([]);
@@ -771,7 +742,7 @@ describe("ExploreBlockerDetection", () => {
     ])(
       "handlePermissionDialog does not tap machine-form negative content-desc %p",
       async (denyContentDesc: string) => {
-        const { calls, restore } = captureTapOptions();
+        const { calls, deps } = captureTapOptions();
         const elements = [
           createMockElement({
             text: "",
@@ -780,17 +751,14 @@ describe("ExploreBlockerDetection", () => {
           }),
         ];
 
-        let handled: boolean;
-        try {
-          handled = await handlePermissionDialog(
-            elements,
-            hierarchyOf(elements),
-            androidDevice,
-            null,
-          );
-        } finally {
-          restore();
-        }
+        const handled = await handlePermissionDialog(
+          elements,
+          hierarchyOf(elements),
+          androidDevice,
+          null,
+          undefined,
+          deps,
+        );
 
         expect(handled).toBe(false);
         expect(calls).toEqual([]);
@@ -844,7 +812,7 @@ describe("ExploreBlockerDetection", () => {
     // The canonical modern layout (grant first, deny last) must keep working:
     // the grant button is tapped and the trailing "Don't allow" is ignored.
     test("handlePermissionDialog taps 'Allow' and ignores a trailing 'Don't allow'", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({
           text: "Allow",
@@ -856,17 +824,14 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      let handled: boolean;
-      try {
-        handled = await handlePermissionDialog(
-          elements,
-          hierarchyOf(elements),
-          androidDevice,
-          null,
-        );
-      } finally {
-        restore();
-      }
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([
@@ -878,7 +843,7 @@ describe("ExploreBlockerDetection", () => {
     });
 
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
@@ -888,18 +853,15 @@ describe("ExploreBlockerDetection", () => {
           elements.map((element, index) => ({ element, index, depth: 0 })),
       } as unknown as ElementParser;
 
-      let handled: boolean;
-      try {
-        handled = await detectAndHandleBlockers(
-          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
-          androidDevice,
-          null,
-          parser,
-          async () => {},
-        );
-      } finally {
-        restore();
-      }
+      const handled = await detectAndHandleBlockers(
+        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        androidDevice,
+        null,
+        parser,
+        async () => {},
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
@@ -911,7 +873,7 @@ describe("ExploreBlockerDetection", () => {
     // Word-boundary matching must reject both while still accepting a
     // genuine "Skip" button — reverting to substring matching turns this red.
     test("dismissDialog does not tap 'close'/'skip' substrings but taps a genuine Skip button", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
@@ -923,18 +885,15 @@ describe("ExploreBlockerDetection", () => {
           elements.map((element, index) => ({ element, index, depth: 0 })),
       } as unknown as ElementParser;
 
-      let handled: boolean;
-      try {
-        handled = await detectAndHandleBlockers(
-          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
-          androidDevice,
-          null,
-          parser,
-          async () => {},
-        );
-      } finally {
-        restore();
-      }
+      const handled = await detectAndHandleBlockers(
+        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        androidDevice,
+        null,
+        parser,
+        async () => {},
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/skip_button", action: "tap" }]);
@@ -944,7 +903,7 @@ describe("ExploreBlockerDetection", () => {
     // separators must still be tapped as dismiss buttons.
     test("dismissDialog taps machine-style 'not_now'/'skip-action'/'skip.action'/'notNow'/'skipAction' content-desc ids", async () => {
       for (const machineId of ["not_now", "skip-action", "skip.action", "notNow", "skipAction"]) {
-        const { calls, restore } = captureTapOptions();
+        const { calls, deps } = captureTapOptions();
         const elements = [
           createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
           createMockElement({
@@ -958,18 +917,15 @@ describe("ExploreBlockerDetection", () => {
             elements.map((element, index) => ({ element, index, depth: 0 })),
         } as unknown as ElementParser;
 
-        let handled: boolean;
-        try {
-          handled = await detectAndHandleBlockers(
-            { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
-            androidDevice,
-            null,
-            parser,
-            async () => {},
-          );
-        } finally {
-          restore();
-        }
+        const handled = await detectAndHandleBlockers(
+          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+          androidDevice,
+          null,
+          parser,
+          async () => {},
+          undefined,
+          deps,
+        );
 
         expect(handled).toBe(true);
         expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
@@ -977,7 +933,7 @@ describe("ExploreBlockerDetection", () => {
     });
 
     test("dismissDialog does not tap when only 'close'/'skip' substrings are present", async () => {
-      const { calls, restore } = captureTapOptions();
+      const { calls, deps } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
@@ -988,18 +944,15 @@ describe("ExploreBlockerDetection", () => {
           elements.map((element, index) => ({ element, index, depth: 0 })),
       } as unknown as ElementParser;
 
-      let handled: boolean;
-      try {
-        handled = await detectAndHandleBlockers(
-          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
-          androidDevice,
-          null,
-          parser,
-          async () => {},
-        );
-      } finally {
-        restore();
-      }
+      const handled = await detectAndHandleBlockers(
+        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        androidDevice,
+        null,
+        parser,
+        async () => {},
+        undefined,
+        deps,
+      );
 
       expect(handled).toBe(false);
       expect(calls).toEqual([]);
@@ -1012,7 +965,7 @@ describe("ExploreBlockerDetection", () => {
     // label. Exact-token matching must reject this while still accepting a
     // genuine "Not now".
     test("dismissDialog does not tap a 'Notes now' false positive but taps a genuine 'Not now'", async () => {
-      const { calls: notesCalls, restore: restoreNotes } = captureTapOptions();
+      const { calls: notesCalls, deps: notesDeps } = captureTapOptions();
       const notesElements = [
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Notes now", "resource-id": "com.test:id/notes_now" }),
@@ -1022,23 +975,20 @@ describe("ExploreBlockerDetection", () => {
           notesElements.map((element, index) => ({ element, index, depth: 0 })),
       } as unknown as ElementParser;
 
-      let notesHandled: boolean;
-      try {
-        notesHandled = await detectAndHandleBlockers(
-          { viewHierarchy: hierarchyOf(notesElements) } as unknown as ObserveResult,
-          androidDevice,
-          null,
-          notesParser,
-          async () => {},
-        );
-      } finally {
-        restoreNotes();
-      }
+      const notesHandled = await detectAndHandleBlockers(
+        { viewHierarchy: hierarchyOf(notesElements) } as unknown as ObserveResult,
+        androidDevice,
+        null,
+        notesParser,
+        async () => {},
+        undefined,
+        notesDeps,
+      );
 
       expect(notesHandled).toBe(false);
       expect(notesCalls).toEqual([]);
 
-      const { calls: genuineCalls, restore: restoreGenuine } = captureTapOptions();
+      const { calls: genuineCalls, deps: genuineDeps } = captureTapOptions();
       const genuineElements = [
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
@@ -1048,18 +998,15 @@ describe("ExploreBlockerDetection", () => {
           genuineElements.map((element, index) => ({ element, index, depth: 0 })),
       } as unknown as ElementParser;
 
-      let genuineHandled: boolean;
-      try {
-        genuineHandled = await detectAndHandleBlockers(
-          { viewHierarchy: hierarchyOf(genuineElements) } as unknown as ObserveResult,
-          androidDevice,
-          null,
-          genuineParser,
-          async () => {},
-        );
-      } finally {
-        restoreGenuine();
-      }
+      const genuineHandled = await detectAndHandleBlockers(
+        { viewHierarchy: hierarchyOf(genuineElements) } as unknown as ObserveResult,
+        androidDevice,
+        null,
+        genuineParser,
+        async () => {},
+        undefined,
+        genuineDeps,
+      );
 
       expect(genuineHandled).toBe(true);
       expect(genuineCalls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);

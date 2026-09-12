@@ -26,6 +26,21 @@ describe("IOSCtrlProxyBuilder", function () {
   let originalRunnerSha256Target: string | undefined;
   let tempDir: string;
 
+  test("finds legacy fixture bundles and prefers the renamed product", async () => {
+    const builder = IOSCtrlProxyBuilder.getInstance();
+    const products = spyOn(builder, "getBuildProductsPath").mockResolvedValue(tempDir);
+    try {
+      const legacy = path.join(tempDir, "CtrlProxyApp.app");
+      const renamed = path.join(tempDir, "AutoMobileTest.app");
+      await fs.mkdir(legacy);
+      expect(await builder.getAppBundlePath()).toBe(legacy);
+      await fs.mkdir(renamed);
+      expect(await builder.getAppBundlePath()).toBe(renamed);
+    } finally {
+      products.mockRestore();
+    }
+  });
+
   beforeEach(async function () {
     // Save original environment
     originalProjectRoot = process.env.AUTOMOBILE_PROJECT_ROOT;
@@ -142,7 +157,7 @@ describe("IOSCtrlProxyBuilder", function () {
       const builder = IOSCtrlProxyBuilder.getInstance();
       const config = builder.getConfig();
 
-      expect(config.scheme).toBe("CtrlProxyApp");
+      expect(config.scheme).toBe("AutoMobileTest");
       expect(config.destination).toBe("generic/platform=iOS Simulator");
       // Off the world-writable /tmp default onto a uid-private ~/.auto-mobile
       // subdir (issue #4759). Compare against getTempDir() so the assertion is
@@ -266,7 +281,10 @@ describe("IOSCtrlProxyBuilder", function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const productsDir = path.join(derivedDataPath, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+      await fs.writeFile(
+        path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+        "mock",
+      );
 
       const cacheDir = path.join(tempDir, "cache");
       await fs.mkdir(cacheDir, { recursive: true });
@@ -299,7 +317,7 @@ describe("IOSCtrlProxyBuilder", function () {
         const productsDir = path.join(derivedDataPath, "Build", "Products");
         await fs.mkdir(productsDir, { recursive: true });
         await fs.writeFile(
-          path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"),
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
           "mock",
         );
         const cacheDir = path.join(tempDir, "cache");
@@ -343,7 +361,7 @@ describe("IOSCtrlProxyBuilder", function () {
         const productsDir = path.join(derivedDataPath, "Build", "Products");
         await fs.mkdir(productsDir, { recursive: true });
         await fs.writeFile(
-          path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"),
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
           "mock",
         );
         const cacheDir = path.join(tempDir, "cache");
@@ -443,7 +461,7 @@ describe("IOSCtrlProxyBuilder", function () {
       const buildDir = path.join(productsDir, "Debug-iphonesimulator");
       await fs.mkdir(buildDir, { recursive: true });
 
-      const xctestrunFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
+      const xctestrunFile = path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun");
       await fs.writeFile(xctestrunFile, "mock xctestrun content");
 
       const builder = IOSCtrlProxyBuilder.getInstance({
@@ -461,11 +479,11 @@ describe("IOSCtrlProxyBuilder", function () {
 
       const oldFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.0-arm64-x86_64.xctestrun",
       );
       const newFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(oldFile, "old content");
       await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
@@ -514,7 +532,7 @@ describe("IOSCtrlProxyBuilder", function () {
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
@@ -547,7 +565,7 @@ describe("IOSCtrlProxyBuilder", function () {
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
@@ -564,7 +582,7 @@ describe("IOSCtrlProxyBuilder", function () {
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
       // Make the source older so a naive newest-mtime pick would prefer the copy.
@@ -586,7 +604,7 @@ describe("IOSCtrlProxyBuilder", function () {
     test("sanitizes the device id used in the copy filename", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphoneos.xctestrun");
+      const sourcePath = path.join(productsDir, "AutoMobileTest_iphoneos.xctestrun");
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
@@ -598,10 +616,10 @@ describe("IOSCtrlProxyBuilder", function () {
       expect(path.basename(outputPath)).toBe("automobile-runner-00008030-001E_28C1_1E.xctestrun");
     });
 
-    test("throws an actionable error when the xctestrun has no UI-test bundle (EC4)", async function () {
+    test("throws an actionable error naming the observed FormatVersion when the xctestrun has no UI-test bundle (EC4)", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
+      const sourcePath = path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun");
       await fs.writeFile(
         sourcePath,
         [
@@ -610,6 +628,8 @@ describe("IOSCtrlProxyBuilder", function () {
           "<dict>",
           "\t<key>CtrlProxyTests</key>",
           "\t<dict><key>IsUITestBundle</key><false/></dict>",
+          "\t<key>__xctestrun_metadata__</key>",
+          "\t<dict><key>FormatVersion</key><integer>1</integer></dict>",
           "</dict>",
           "</plist>",
         ].join("\n"),
@@ -619,6 +639,61 @@ describe("IOSCtrlProxyBuilder", function () {
       await expect(
         builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM"),
       ).rejects.toThrow("no UI-test bundle");
+      await expect(
+        builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM"),
+      ).rejects.toThrow("FormatVersion: 1");
+    });
+
+    test("injects into a FormatVersion 2 (TestConfigurations[].TestTargets[]) xctestrun", async function () {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
+      const V2_XCTESTRUN = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<plist version="1.0">',
+        "<dict>",
+        "\t<key>TestConfigurations</key>",
+        "\t<array>",
+        "\t\t<dict>",
+        "\t\t\t<key>TestTargets</key>",
+        "\t\t\t<array>",
+        "\t\t\t\t<dict>",
+        "\t\t\t\t\t<key>BlueprintName</key>",
+        "\t\t\t\t\t<string>CtrlProxyUITests</string>",
+        "\t\t\t\t\t<key>IsUITestBundle</key>",
+        "\t\t\t\t\t<true/>",
+        "\t\t\t\t\t<key>EnvironmentVariables</key>",
+        "\t\t\t\t\t<dict><key>TERM</key><string>dumb</string></dict>",
+        "\t\t\t\t</dict>",
+        "\t\t\t</array>",
+        "\t\t</dict>",
+        "\t</array>",
+        "\t<key>__xctestrun_metadata__</key>",
+        "\t<dict><key>FormatVersion</key><integer>2</integer></dict>",
+        "</dict>",
+        "</plist>",
+      ].join("\n");
+      await fs.writeFile(sourcePath, V2_XCTESTRUN);
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      const outputPath = await builder.writeRunnerEnvironment(
+        sourcePath,
+        { CTRL_PROXY_IOS_PORT: "8767" },
+        "SIM-UUID",
+      );
+
+      const xml = await fs.readFile(outputPath, "utf-8");
+      const root = (await parsePlist(xml)) as Map<string, unknown>;
+      const configurations = root.get("TestConfigurations") as unknown[];
+      const configuration = configurations[0] as Map<string, unknown>;
+      const testTargets = configuration.get("TestTargets") as unknown[];
+      const uiTarget = testTargets[0] as Map<string, unknown>;
+      const env = uiTarget.get("EnvironmentVariables") as Map<string, unknown>;
+      expect(env.get("CTRL_PROXY_IOS_PORT")).toBe("8767");
+      expect(env.get("TERM")).toBe("dumb");
     });
   });
 
@@ -629,11 +704,11 @@ describe("IOSCtrlProxyBuilder", function () {
 
       const oldFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.0-arm64-x86_64.xctestrun",
       );
       const newFile = path.join(
         productsDir,
-        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+        "AutoMobileTest_iphonesimulator26.2-arm64-x86_64.xctestrun",
       );
       await fs.writeFile(oldFile, "old content");
       await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
@@ -721,7 +796,7 @@ describe("IOSCtrlProxyBuilder", function () {
 
       expect(result.success).toBe(true);
       expect(result.xctestrunPath).toBe(
-        path.join(derivedDataPath, "Build", "Products", "CtrlProxyApp_iphonesimulator.xctestrun"),
+        path.join(derivedDataPath, "Build", "Products", "AutoMobileTest_iphonesimulator.xctestrun"),
       );
       expect(downloader.downloadedUrls.length).toBe(1);
       expect(downloader.extractedPaths[0]).toBe(derivedDataPath);
@@ -1366,7 +1441,10 @@ describe("IOSCtrlProxyBuilder", function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const productsDir = path.join(derivedDataPath, "Build", "Products");
       await fs.mkdir(path.join(productsDir, "Debug-iphonesimulator"), { recursive: true });
-      await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+      await fs.writeFile(
+        path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+        "mock",
+      );
 
       const cacheDir = path.join(tempDir, "cache");
       await fs.mkdir(cacheDir, { recursive: true });
@@ -1492,6 +1570,178 @@ describe("IOSCtrlProxyBuilder", function () {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("runner binary SHA256 mismatch");
+    });
+
+    test("concurrent build() calls single-flight: only one download/extract happens (#6417)", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+
+      let resolveDownload: (() => void) | undefined;
+      const downloadGate = new Promise<void>((resolve) => {
+        resolveDownload = resolve;
+      });
+
+      class DeferredDownloader extends FakeIOSCtrlProxyBundleDownloader {
+        public override async download(url: string, destination: string): Promise<void> {
+          await downloadGate;
+          await super.download(url, destination);
+        }
+      }
+
+      const downloader = new DeferredDownloader();
+      downloader.checksum = "expected-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      // Both calls start before either has resolved the download, so the
+      // second call must observe (and reuse) the first call's in-flight promise.
+      const firstBuild = builder.build("simulator");
+      const secondBuild = builder.build("simulator");
+
+      resolveDownload!();
+
+      const [firstResult, secondResult] = await Promise.all([firstBuild, secondBuild]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(true);
+      expect(secondResult).toEqual(firstResult);
+      expect(downloader.downloadedUrls.length).toBe(1);
+      expect(downloader.extractedPaths.length).toBe(1);
+    });
+
+    test.each([false, true])(
+      "mixed platform callers resolve independently (device products: %s)",
+      async function (includeDeviceProducts) {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const cacheDir = path.join(tempDir, "cache");
+
+        let resolveDownload: (() => void) | undefined;
+        const downloadGate = new Promise<void>((resolve) => {
+          resolveDownload = resolve;
+        });
+
+        class DeferredDownloader extends FakeIOSCtrlProxyBundleDownloader {
+          public override async download(url: string, destination: string): Promise<void> {
+            await downloadGate;
+            await super.download(url, destination);
+          }
+        }
+
+        const downloader = new DeferredDownloader();
+        downloader.checksum = "expected-checksum";
+        downloader.includeDeviceProducts = includeDeviceProducts;
+
+        IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        const builder = IOSCtrlProxyBuilder.getInstance(
+          { derivedDataPath, bundleCacheDir: cacheDir },
+          { downloader },
+        );
+
+        // Both calls start before either has resolved the download, so the
+        // second call must observe (and reuse) the first call's in-flight promise.
+        const firstBuild = builder.build("device");
+        const secondBuild = builder.build("simulator");
+
+        resolveDownload!();
+
+        const [firstResult, secondResult] = await Promise.all([firstBuild, secondBuild]);
+
+        expect(firstResult.success).toBe(includeDeviceProducts);
+        expect(secondResult.success).toBe(true);
+        expect(secondResult.buildPath).toContain("Debug-iphonesimulator");
+        if (includeDeviceProducts) {
+          expect(firstResult.buildPath).toContain("Debug-iphoneos");
+        }
+        expect(downloader.downloadedUrls.length).toBe(1);
+        expect(downloader.extractedPaths.length).toBe(1);
+      },
+    );
+
+    test("a second concurrent build() call never invokes the downloader's destructive extractBundle a second time (#6417)", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+
+      let resolveDownload: (() => void) | undefined;
+      const downloadGate = new Promise<void>((resolve) => {
+        resolveDownload = resolve;
+      });
+
+      // Mirrors the real DefaultIOSCtrlProxyBundleDownloader's destructive
+      // `fs.rm(destination, { recursive: true, force: true })` before
+      // extracting (src/utils/IOSCtrlProxyBundleDownloader.ts:67-68). Counting
+      // invocations proves the shared derived-data tree is torn down and
+      // rebuilt at most once for a pair of overlapping build() calls, which is
+      // the property that protects a live runner's on-disk bundle and any
+      // per-device runner-<deviceId>.xctestrun another caller wrote in between.
+      class DestructiveDeferredDownloader extends FakeIOSCtrlProxyBundleDownloader {
+        public rmCount = 0;
+
+        public override async download(url: string, destination: string): Promise<void> {
+          await downloadGate;
+          await super.download(url, destination);
+        }
+
+        public override async extractBundle(
+          bundlePath: string,
+          destination: string,
+        ): Promise<void> {
+          this.rmCount += 1;
+          await fs.rm(destination, { recursive: true, force: true });
+          await super.extractBundle(bundlePath, destination);
+        }
+      }
+
+      const downloader = new DestructiveDeferredDownloader();
+      downloader.checksum = "expected-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      // Both calls start before either has resolved the download, so the
+      // second call must observe (and reuse) the first call's in-flight promise
+      // instead of running its own independent rm-rf + re-extract.
+      const firstBuild = builder.build("simulator");
+      const secondBuild = builder.build("simulator");
+
+      resolveDownload!();
+      const [firstResult, secondResult] = await Promise.all([firstBuild, secondBuild]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(true);
+      expect(downloader.rmCount).toBe(1);
+      expect(downloader.extractedPaths.length).toBe(1);
+    });
+    test("a failed shared download allows a subsequent build", async function () {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      const download = downloader.download.bind(downloader);
+      downloader.download = async () => {
+        throw new Error("download unavailable");
+      };
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        {
+          derivedDataPath: path.join(tempDir, "DerivedData"),
+          bundleCacheDir: path.join(tempDir, "cache"),
+        },
+        { downloader },
+      );
+      const [first, second] = await Promise.all([
+        builder.build("device"),
+        builder.build("simulator"),
+      ]);
+      expect(first.success).toBe(false);
+      expect(second.success).toBe(false);
+      downloader.download = download;
+      expect((await builder.build("simulator")).success).toBe(true);
+      expect(downloader.extractedPaths).toHaveLength(1);
     });
   });
 });

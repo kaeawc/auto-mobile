@@ -124,6 +124,36 @@ describe("compareVersions", () => {
     expect(compareVersions("12LA-QPR1", "12LA")).toBeGreaterThan(0);
     expect(compareVersions("12LA-QPR2", "12LB")).toBeLessThan(0);
   });
+
+  it("stays a total order for a long numeric component the parser accepts (#6321)", () => {
+    // `Number("9".repeat(400)) === Infinity`, so the previous subtraction-based
+    // comparison returned `Infinity - Infinity = NaN` -- neither reflexive nor
+    // total, even though `parseDeviceVersion`'s `\d+` accepts the run.
+    // (Guard against `Object.is(NaN, NaN) === true`: assert via `Number.isNaN`,
+    // not `.toBe(NaN)`.)
+    const huge = "9".repeat(400);
+    expect(compareVersions(huge, huge)).toBe(0);
+    expect(Number.isNaN(compareVersions("1" + huge, "2" + huge))).toBe(false);
+    // Digit strings compare by magnitude without precision loss: the two runs
+    // are distinguishable even though both overflow `Number()` to `Infinity`.
+    expect(compareVersions("1" + huge, "2" + huge)).toBeLessThan(0);
+    expect(compareVersions("2" + huge, "1" + huge)).toBeGreaterThan(0);
+    // A longer run is the larger number.
+    expect(compareVersions(huge, "9".repeat(399))).toBeGreaterThan(0);
+  });
+
+  it("stays a total order for a long QPR suffix the parser accepts (#6321)", () => {
+    const bigQpr = "9".repeat(400);
+    expect(compareVersions("14-QPR" + bigQpr, "14-QPR" + bigQpr)).toBe(0);
+    expect(Number.isNaN(compareVersions("14-QPR" + bigQpr, "14-QPR1"))).toBe(false);
+    expect(compareVersions("14-QPR" + bigQpr, "14-QPR1")).toBeGreaterThan(0);
+  });
+
+  it("ignores leading zeros in numeric components and QPR suffixes", () => {
+    expect(compareVersions("14", "014")).toBe(0);
+    expect(compareVersions("12.08", "12.8")).toBe(0);
+    expect(compareVersions("14-QPR01", "14-QPR1")).toBe(0);
+  });
 });
 
 describe("compareVersions cross-checked against the canonical release table (#6326)", () => {

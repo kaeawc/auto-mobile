@@ -2,10 +2,43 @@ import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ProgressCallback } from "../action/BaseVisualChange";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import { TapOnElement } from "../action/TapOnElement";
 import { logger } from "../../utils/logger";
 import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
+
+/**
+ * Minimal tap-action seam consumed by the blocker handlers. Only `execute`
+ * is used, and its result is ignored (the handlers just need the tap to fire),
+ * so this exposes exactly that (YAGNI). `TapOnElement` satisfies it directly.
+ */
+export interface DialogTapAction {
+  execute(options: TapOnElementOptions, progress?: ProgressCallback): Promise<unknown>;
+}
+
+/**
+ * Builds a {@link DialogTapAction} for a device/adb pair. Injecting the factory
+ * (rather than `new TapOnElement(...)` at the call site) lets tests substitute
+ * a fake instead of spying on `TapOnElement.prototype`.
+ */
+export type DialogTapActionFactory = (
+  device: BootedDevice,
+  adb: AdbExecutor | null,
+) => DialogTapAction;
+
+/**
+ * Injectable dependencies for the blocker handlers. Both are optional and
+ * default to production singletons, so every existing call site is unchanged
+ * and behavior is identical unless a caller (or a test) injects a fake.
+ */
+export interface BlockerHandlerDeps {
+  tapActionFactory?: DialogTapActionFactory;
+  timer?: Timer;
+}
+
+const defaultTapActionFactory: DialogTapActionFactory = (device, adb) =>
+  new TapOnElement(device, adb);
 
 /**
  * Normalized, lowercased text for an element.
@@ -364,7 +397,10 @@ export async function handlePermissionDialog(
   device: BootedDevice,
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
+  deps: BlockerHandlerDeps = {},
 ): Promise<boolean> {
+  const tapActionFactory = deps.tapActionFactory ?? defaultTapActionFactory;
+  const timer = deps.timer ?? defaultTimer;
   for (const element of elements) {
     if (!element.clickable) {
       continue;
@@ -376,9 +412,9 @@ export async function handlePermissionDialog(
         continue;
       }
       try {
-        const tapOn = new TapOnElement(device, adb);
+        const tapOn = tapActionFactory(device, adb);
         await tapOn.execute({ ...selector, action: "tap" }, progress);
-        await defaultTimer.sleep(1000);
+        await timer.sleep(1000);
         return true;
       } catch (error) {
         logger.warn(`[Explore] Failed to handle permission dialog: ${error}`);
@@ -402,7 +438,10 @@ async function dismissDialog(
   device: BootedDevice,
   adb: AdbExecutor | null,
   progress?: ProgressCallback,
+  deps: BlockerHandlerDeps = {},
 ): Promise<boolean> {
+  const tapActionFactory = deps.tapActionFactory ?? defaultTapActionFactory;
+  const timer = deps.timer ?? defaultTimer;
   for (const element of elements) {
     if (!element.clickable) {
       continue;
@@ -414,9 +453,9 @@ async function dismissDialog(
         continue;
       }
       try {
-        const tapOn = new TapOnElement(device, adb);
+        const tapOn = tapActionFactory(device, adb);
         await tapOn.execute({ ...selector, action: "tap" }, progress);
-        await defaultTimer.sleep(1000);
+        await timer.sleep(1000);
         return true;
       } catch (error) {
         logger.warn(`[Explore] Failed to dismiss dialog: ${error}`);
@@ -442,6 +481,7 @@ export async function detectAndHandleBlockers(
   elementParser: ElementParser,
   handleDeadEnd: DeadEndHandler,
   progress?: ProgressCallback,
+  deps: BlockerHandlerDeps = {},
 ): Promise<boolean> {
   const viewHierarchy = observation.viewHierarchy;
   if (!viewHierarchy || viewHierarchy.hierarchy.error) {
@@ -454,7 +494,7 @@ export async function detectAndHandleBlockers(
   // Check for permission dialogs
   if (isPermissionDialog(elements)) {
     logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    return await handlePermissionDialog(elements, viewHierarchy, device, adb, progress);
+    return await handlePermissionDialog(elements, viewHierarchy, device, adb, progress, deps);
   }
 
   // Check for login/signup screens
@@ -467,7 +507,7 @@ export async function detectAndHandleBlockers(
   // Check for app rating/review dialogs
   if (isRatingDialog(elements)) {
     logger.info("[Explore] Detected rating dialog, attempting to dismiss");
-    return await dismissDialog(elements, viewHierarchy, device, adb, progress);
+    return await dismissDialog(elements, viewHierarchy, device, adb, progress, deps);
   }
 
   return false;

@@ -59,7 +59,7 @@ export class IOSCtrlProxyProcessClient {
       if (!process || !process.command.includes("CtrlProxy")) {
         continue;
       }
-      if (this.isDaemonManagedSimulatorXcodebuildProcess(process)) {
+      if (await this.isDaemonManagedSimulatorXcodebuildProcess(process)) {
         continue;
       }
       if (!this.hasDeviceIdentity(`${process.command} ${process.environment ?? ""}`, deviceId)) {
@@ -161,7 +161,11 @@ export class IOSCtrlProxyProcessClient {
     );
   }
 
-  async findDescendantProcessIds(rootPid: number, deadline?: number): Promise<number[]> {
+  async findDescendantProcessIds(
+    rootPid: number,
+    deadline?: number,
+    options: { throwOnError?: boolean } = {},
+  ): Promise<number[]> {
     try {
       const { stdout } = await this.executeCommand("ps", ["-axo", "pid=,ppid="], deadline);
       const children = new Map<number, number[]>();
@@ -189,20 +193,58 @@ export class IOSCtrlProxyProcessClient {
       return descendants;
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to enumerate descendants of PID ${rootPid}: ${error}`);
+      if (options.throwOnError) {
+        throw error;
+      }
       return [];
     }
   }
 
-  async terminateProcessTree(pid: number, deadline?: number): Promise<void> {
-    const descendants = await this.findDescendantProcessIds(pid, deadline);
-    const targets = [...descendants].reverse().concat(pid);
-    await this.signalGroup(pid, "TERM", deadline);
-    await this.signalPids(targets, "TERM", deadline);
-    if (await this.waitForExit([pid, ...descendants], deadline)) {
-      return;
+  async terminateProcessTree(
+    pid: number,
+    deadline?: number,
+    options: { skipGraceful?: boolean } = {},
+  ): Promise<void> {
+    let descendants: number[];
+    if (options.skipGraceful) {
+      // Snapshot before root exit can reparent children, but reserve at least
+      // half the remaining budget for signals. Never spend over 50ms discovering.
+      const discoveryBudgetMs = Math.min(50, (this.remainingTimeoutMs(deadline) ?? 100) / 2);
+      let discoveryError: unknown;
+      try {
+        descendants = await this.findDescendantProcessIds(
+          pid,
+          this.timer.now() + discoveryBudgetMs,
+          { throwOnError: true },
+        );
+      } catch (error) {
+        descendants = [];
+        discoveryError = error;
+      }
+      await this.signalGroup(pid, "KILL", deadline);
+      await this.signalPids([pid], "KILL", deadline);
+      if (discoveryError !== undefined) {
+        throw new Error(`CtrlProxy descendant discovery failed for PID ${pid}`, {
+          cause: discoveryError,
+        });
+      }
+    } else {
+      descendants = await this.findDescendantProcessIds(pid, deadline);
     }
-    await this.signalGroup(pid, "KILL", deadline);
-    await this.signalPids(targets, "KILL", deadline);
+    const targets = [...descendants].reverse().concat(pid);
+    if (!options.skipGraceful) {
+      await this.signalGroup(pid, "TERM", deadline);
+      await this.signalPids(targets, "TERM", deadline);
+      if (await this.waitForExit([pid, ...descendants], deadline)) {
+        return;
+      }
+    }
+    if (options.skipGraceful) {
+      await this.signalPids([...descendants].reverse(), "KILL", deadline);
+    } else {
+      await this.signalGroup(pid, "KILL", deadline);
+      await this.signalPids(targets, "KILL", deadline);
+    }
     if (!(await this.waitForExit([pid, ...descendants], deadline))) {
       throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);
     }
@@ -239,20 +281,62 @@ export class IOSCtrlProxyProcessClient {
     return command.includes("CtrlProxyUITests-Runner");
   }
 
-  isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): boolean {
+  /**
+   * The single source of truth for identifying a daemon-managed
+   * `xcodebuild test-without-building` runner, as opposed to an externally
+   * (e.g. hot-reload) launched xcodebuild process. A process matches when its
+   * command has the daemon shape AND either:
+   *  - it is already reparented to PID 1 (the common orphaned-root case), or
+   *  - its immediate parent is an orphaned shell wrapping the same shape
+   *    (the daemon launches the runner through `sh -c`, so the shell -
+   *    not the runner itself - is what gets reparented to PID 1), or
+   *  - its own environment carries none of the external-xcodebuild identity
+   *    markers.
+   */
+  async isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): Promise<boolean> {
     const command = process.command;
-    const shape =
+    if (!IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
+      return false;
+    }
+    if (process.ppid === 1) {
+      return true;
+    }
+    if (await this.hasOrphanedDaemonManagedShellParent(process.ppid)) {
+      return true;
+    }
+    return !this.hasExternalXcodebuildIdentity(process.environment ?? "");
+  }
+
+  private async hasOrphanedDaemonManagedShellParent(
+    parentPid: number | undefined,
+  ): Promise<boolean> {
+    if (parentPid === undefined || parentPid <= 1) {
+      return false;
+    }
+    const parentInfo = await this.getProcessInfo(parentPid);
+    if (!parentInfo || parentInfo.ppid !== 1) {
+      return false;
+    }
+    return (
+      IOSCtrlProxyProcessClient.isShellCommand(parentInfo.command) &&
+      IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
+    );
+  }
+
+  static isDaemonManagedSimulatorXcodebuildCommandShape(command: string): boolean {
+    return (
       command.includes("xcodebuild") &&
       command.includes("test-without-building") &&
       command.includes("-xctestrun") &&
       command.includes("platform=iOS Simulator") &&
       command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
       !command.includes("CTRL_PROXY_IOS_PORT=") &&
-      !command.includes("AUTOMOBILE_DEVICE_ID=");
-    return (
-      shape &&
-      (process.ppid === 1 || !this.hasExternalXcodebuildIdentity(process.environment ?? ""))
+      !command.includes("AUTOMOBILE_DEVICE_ID=")
     );
+  }
+
+  static isShellCommand(command: string): boolean {
+    return /(?:^|\/)(?:ba|z|c|t?c|k)?sh(?:\s|$)/.test(command);
   }
 
   private async findPids(pattern: string, exact: boolean, deadline?: number): Promise<number[]> {
@@ -294,7 +378,7 @@ export class IOSCtrlProxyProcessClient {
     return match ? Number.parseInt(match[1], 10) : null;
   }
 
-  private hasExternalXcodebuildIdentity(environment: string): boolean {
+  hasExternalXcodebuildIdentity(environment: string): boolean {
     return (
       environment.includes("CTRL_PROXY_IOS_PORT=") ||
       environment.includes("AUTOMOBILE_DEVICE_ID=") ||

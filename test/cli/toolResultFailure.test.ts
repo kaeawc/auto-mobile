@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import {
   isCliToolFailure,
   resetDaemonProxyFactoryForTesting,
@@ -14,6 +15,29 @@ describe("isCliToolFailure (issue #6017)", () => {
     process.exit = originalProcessExit;
     console.error = originalConsoleError;
     resetDaemonProxyFactoryForTesting();
+  });
+
+  test("reports version skew as preflight rather than an interrupted tool", async () => {
+    const messages: string[] = [];
+    process.exit = (() => {}) as typeof process.exit;
+    console.error = (...args: unknown[]) => {
+      messages.push(args.join(" "));
+    };
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async () => {
+        throw new DaemonVersionMismatchError({
+          clientVersion: "0.0.70",
+          daemonVersion: "0.0.68",
+          reason: "autoStartDisabled",
+          detail: "auto-start is disabled",
+        });
+      },
+      close: async () => {},
+    }));
+    await runCliCommand(["listDevices"]);
+    expect(messages.join("\n")).toContain("Daemon preflight failed; no device operation started");
+    expect(messages.join("\n")).toContain("daemon=0.0.68, client=0.0.70");
+    expect(messages.join("\n")).not.toContain("became unavailable during tool execution");
   });
 
   test("recognizes an in-band session ownership error envelope", () => {

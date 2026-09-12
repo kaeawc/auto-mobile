@@ -97,7 +97,7 @@ describe("issue #6154: platform is optional wherever deviceId/session resolves i
     const result = highlightSchema.parse({
       sessionUuid: "session-123",
       shape: {
-        type: "box",
+        type: "circle",
         bounds: { x: 0, y: 0, width: 10, height: 10 },
       },
     });

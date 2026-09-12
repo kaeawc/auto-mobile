@@ -1,4 +1,6 @@
 import { errorMessage } from "./describeUnknownError";
+import { toActionableError } from "../models/ActionableError";
+import { isAndroidFrameworkUnavailable } from "./android-cmdline-tools/isAndroidFrameworkUnavailable";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -732,6 +734,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         undefined,
         true,
       );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
       const isInstalled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
@@ -745,6 +751,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return isInstalled;
     } catch (error) {
+      // Preserve boot failures for the readiness retry loop; false means that
+      // inspection completed without finding the installed runner.
+      if (isAndroidFrameworkUnavailable(error)) {
+        throw toActionableError(error, "Android framework unavailable");
+      }
       logger.warn(`[CTRL_PROXY] Error checking installation status: ${error}`);
       return false;
     }
@@ -772,6 +783,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const result = await this.adb.executeCommand(
         "shell settings get secure enabled_accessibility_services",
       );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
@@ -785,6 +800,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return isEnabled;
     } catch (error) {
+      // A missing settings service during boot is not a disabled runner.
+      if (isAndroidFrameworkUnavailable(error)) {
+        throw toActionableError(error, "Android framework unavailable");
+      }
       logger.warn(`[CTRL_PROXY] Error checking enabled status: ${error}`);
       return false;
     }

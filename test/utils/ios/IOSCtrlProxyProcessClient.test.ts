@@ -18,6 +18,97 @@ function result(stdout = "", stderr = "") {
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
+  test("force termination retains a separate-group child after the root exits", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let rootAlive = true;
+    let childAlive = true;
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        if (file === "ps") {
+          return result(rootAlive ? "42 1\n43 42\n" : "43 1\n");
+        }
+        if (args.includes("--")) {
+          throw new Error("not a process group leader");
+        }
+        if (args[0] === "-KILL") {
+          if (args[1] === "42") {
+            rootAlive = false;
+          }
+          if (args[1] === "43") {
+            childAlive = false;
+          }
+        }
+        if (args[0] === "-0" && !(args[1] === "42" ? rootAlive : childAlive)) {
+          throw new Error("No such process");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await client.terminateProcessTree(42, 250, { skipGraceful: true });
+
+    expect(rootAlive).toBe(false);
+    expect(childAlive).toBe(false);
+  });
+
+  test("force termination reserves signaling time when discovery times out", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const commands: string[] = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args, options) {
+        commands.push([file, ...args].join(" "));
+        if (file === "ps") {
+          await timer.sleep(options!.timeoutMs!);
+          throw new Error("process discovery timed out");
+        }
+        if (args.includes("--")) {
+          throw new Error("root is not a process group leader");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
+      "descendant discovery failed",
+    );
+
+    expect(commands).toEqual(["ps -axo pid=,ppid=", "kill -KILL -- -42", "kill -KILL 42"]);
+    expect(timer.now()).toBe(50);
+  });
+
+  test("force termination skips TERM and bounds commands and exit waiting by its deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const commands: string[] = [];
+    const timeouts: Array<number | undefined> = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args, options) {
+        commands.push([file, ...args].join(" "));
+        timeouts.push(options?.timeoutMs);
+        return result(file === "ps" ? "42 1\n43 42\n" : "");
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
+      "deadline elapsed",
+    );
+
+    expect(commands).toEqual([
+      "ps -axo pid=,ppid=",
+      "kill -KILL -- -42",
+      "kill -KILL 42",
+      "kill -KILL 43",
+      "kill -0 42",
+    ]);
+    expect(timeouts).toEqual([50, 250, 250, 250, 250]);
+    expect(timer.now()).toBe(250);
+  });
+
   test("bounds startup candidate discovery by the supplied deadline", async () => {
     const timer = new FakeTimer();
     const options: Array<HostCommandOptions | undefined> = [];
@@ -51,6 +142,33 @@ describe("IOSCtrlProxyProcessClient", () => {
     expect(process).toEqual({ pid: 42, port: 8765 });
     expect(host.getExecutedCommands()).toContain("pgrep -x xcodebuild");
     expect(host.getExecutedCommands()).toContain("ps -p 42 -o ppid= -o args=");
+  });
+
+  test("does not report a daemon-managed runner behind an orphaned shell as external, even when its own environment carries a device identity marker (#6372 predicate-divergence regression)", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("pgrep -x xcodebuild", result("42\n"));
+    host.setCommandResponse(
+      "ps -p 42 -o ppid= -o args=",
+      result(
+        "500 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+      ),
+    );
+    // The runner's own environment carries AUTOMOBILE_DEVICE_ID=, which in
+    // isolation looks like an externally (hot-reload) launched xcodebuild.
+    host.setCommandResponse("ps eww -p 42 -o command=", result("AUTOMOBILE_DEVICE_ID=DEVICE-1"));
+    // But its immediate parent is an orphaned shell wrapping the same
+    // daemon-managed xcodebuild shape, so the runner is still daemon-owned.
+    host.setCommandResponse(
+      "ps -p 500 -o ppid= -o args=",
+      result(
+        "1 /bin/sh -c xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+      ),
+    );
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    const process = await client.findExternalXcodebuildCtrlProxyProcess("DEVICE-1");
+
+    expect(process).toBeNull();
   });
 
   test("does not identify a recycled PID as a CtrlProxy runner", async () => {

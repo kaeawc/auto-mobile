@@ -23,7 +23,7 @@ setup() {
   cat > "$DECLARATION_ORDER" <<'EOF'
 		projectRoot = "";
 		targets = (
-			829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+			829FFB06AC273BEE7049A7F2 /* AutoMobileTest */,
 			E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
 			61A21F82A43E4D436CD13CCD /* CtrlProxy */,
 			D665478F817F2DF283B43BFB /* CtrlProxyTests */,
@@ -36,7 +36,7 @@ EOF
 		projectRoot = "";
 		targets = (
 			61A21F82A43E4D436CD13CCD /* CtrlProxy */,
-			829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+			829FFB06AC273BEE7049A7F2 /* AutoMobileTest */,
 			D665478F817F2DF283B43BFB /* CtrlProxyTests */,
 			2B5458099134F47AA1A7C4DA /* CtrlProxyUITests */,
 			E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,

@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
@@ -34,6 +33,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
 import {
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
+  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   DAEMON_STARTUP_TIMEOUT_MS,
 } from "../../src/daemon/constants";
 

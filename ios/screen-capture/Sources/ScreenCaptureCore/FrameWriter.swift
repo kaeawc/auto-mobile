@@ -39,7 +39,12 @@ public struct FrameWriterMetrics: Codable, Equatable {
 /// Writes framed BGRA records to a `FrameSink` without blocking the capture
 /// callback. Pixel data is copied while the caller holds its CVPixelBuffer lock,
 /// then a serial output worker writes only the newest pending frame.
-public final class FrameWriter {
+///
+/// `@unchecked Sendable`: every mutable field is confined to `stateLock`, and the
+/// serial `outputQueue` is the only writer thread (it takes records under the lock
+/// and calls `sink.write` off the lock so a slow consumer never blocks producers).
+/// This matches the package's lock-confined-`Sendable` idiom (see `ForceKeyFrameLatch`).
+public final class FrameWriter: @unchecked Sendable {
     public struct Configuration {
         /// Enough for current iPhone and iPad BGRA captures, while bounding raw
         /// buffering to one frame when stdout's consumer is slow.
@@ -87,6 +92,9 @@ public final class FrameWriter {
     private let configuration: Configuration
     private let stateLock = NSLock()
     private let outputQueue = DispatchQueue(label: "automobile.screen-capture.stdout")
+    /// Recycles the large raw-frame payload slabs so a steady capture reuses buffers
+    /// instead of malloc/free-ing a multi-MB BGRA slab per frame (raw path only).
+    private let framePool = FrameBufferPool()
     private var pendingFrame: PendingRecord?
     private var pendingAudio: [PendingRecord] = []
     private var pendingAudioBytes = 0
@@ -146,9 +154,12 @@ public final class FrameWriter {
             bytesPerRow: headerBytesPerRow,
             timestampMs: captureTimestampMs
         ))
-        // The capture callback owns the pixel-buffer lock. This one copy lets it
-        // release that lock before stdout can block on a slow Node consumer.
-        let payload = Data(bytes: baseAddress, count: payloadLength)
+        // The capture callback owns the pixel-buffer lock. This one copy lets it release
+        // that lock before stdout can block on a slow Node consumer; the slab it copies
+        // into is drawn from `framePool` and returned when the record is done, so a
+        // steady capture avoids malloc/free-ing (and page-faulting) a fresh multi-MB
+        // buffer every frame.
+        let payload = framePool.makeData(copyingFrom: baseAddress, count: payloadLength)
         let record = PendingRecord(
             header: header,
             payload: payload,

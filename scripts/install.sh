@@ -3580,6 +3580,11 @@ migrate_stale_daemon() {
     # Note: this only checks the default socket path. Daemons started with
     # AUTOMOBILE_DAEMON_SOCKET_PATH overrides (benchmarks, XCTest) manage
     # their own lifecycle and are not affected by the installer.
+    if [[ "${AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION:-false}" == "true" ]]; then
+        log_info "Skipping stale daemon migration (AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION=true)"
+        return 0
+    fi
+
     if ! is_daemon_running; then
         return 0
     fi

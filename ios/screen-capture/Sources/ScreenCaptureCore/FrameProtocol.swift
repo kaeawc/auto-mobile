@@ -86,7 +86,9 @@ public enum FrameProtocol {
             base.advanced(by: 16).storeBytes(of: header.bytesPerRow.littleEndian, as: UInt32.self)
             base.advanced(by: 20).storeBytes(of: header.timestampMs.littleEndian, as: UInt32.self)
         }
-        let checksum = crc32(data.subdata(in: fieldsOffset..<headerSize))
+        // CRC over a no-copy slice of the header's field bytes rather than a fresh
+        // `subdata` allocation — this runs once per emitted record (every frame).
+        let checksum = crc32(data[fieldsOffset..<headerSize])
         data.withUnsafeMutableBytes { ptr in
             let base = ptr.baseAddress!  // swiftlint:disable:this force_unwrapping
             base.advanced(by: 4).storeBytes(of: checksum.littleEndian, as: UInt32.self)

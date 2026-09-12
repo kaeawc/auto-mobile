@@ -121,6 +121,21 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
 }
 
+@test "portable PR matrices leave macOS coverage to nightly" {
+  wiring_requires_yq
+  local job expected
+  for job in bats-tests bats-integration-tests; do
+    run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
+    [ "$status" -eq 0 ]
+    [ "$output" = "ubuntu-latest" ]
+  done
+  for job in node-unit-tests node-host-integration-tests; do
+    run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
+    [ "$status" -eq 0 ]
+    [ "$output" = $'ubuntu-latest\nwindows-latest' ]
+  done
+}
+
 @test "unit, integration, and stress jobs invoke their canonical lanes" {
   local unit host bats_unit bats_integration
   unit="$(job_block node-unit-tests)"
@@ -143,6 +158,42 @@ wiring_requires_yq() {
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$(job_block bats-tests "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]
   [[ "$(job_block bats-integration-tests "$workflow")" == *"scripts/ci/run-bats.sh integration"* ]]
+}
+
+@test "macOS MCP build coverage runs after merge instead of on pull requests" {
+  wiring_requires_yq
+  local pr_mcp merge_mcp
+  pr_mcp="$(job_block mcp-build-and-test)"
+  merge_mcp="$(job_block mcp-build-and-test .github/workflows/merge.yml)"
+
+  [[ "$pr_mcp" == *"windows-latest"* ]]
+  [[ "$pr_mcp" != *"macos-latest"* ]]
+  [[ "$merge_mcp" == *"macos-latest"* ]]
+  [[ "$merge_mcp" == *"scripts/ci/install-bun-deps.sh"* ]]
+  [[ "$merge_mcp" == *"bash scripts/test-ts.sh unit"* ]]
+
+  run yq -r '.jobs.mcp-build-and-test.strategy.matrix.os[]' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "windows-latest" ]
+}
+
+@test "nightly preserves the moved macOS portable test lanes" {
+  local workflow=".github/workflows/nightly.yml"
+  local bats_unit bats_integration unit host
+  bats_unit="$(job_block macos-bats-tests "$workflow")"
+  bats_integration="$(job_block macos-bats-integration-tests "$workflow")"
+  unit="$(job_block macos-node-unit-tests "$workflow")"
+  host="$(job_block macos-node-host-integration-tests "$workflow")"
+
+  for block in "$bats_unit" "$bats_integration" "$unit" "$host"; do
+    [[ "$block" == *"runs-on: macos-latest"* ]]
+    [[ "$block" == *"scripts/ci/install-bun-deps.sh"* ]]
+  done
+  [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
+  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
 }
 
 @test "development installer jobs are removed from PR and merge workflows" {

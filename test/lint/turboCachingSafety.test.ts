@@ -26,6 +26,7 @@ describe("turbo caching safety (#5124)", () => {
     const inputs: string[] = task.inputs ?? [];
     const required = [
       "src/**",
+      "test/**/*.typecheck.ts",
       "tsconfig.json",
       "scripts/typecheck-baseline.sh",
       "scripts/typecheck-baseline.txt",

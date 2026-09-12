@@ -49,7 +49,11 @@ import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
-import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
+import {
+  getToggleContentDescription,
+  hasAccessibilityAction,
+  isTruthyFlag,
+} from "../../utils/elementProperties";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -151,6 +155,7 @@ export class TapOnElement extends BaseVisualChange {
   private strategy: TapStrategy;
   private longPressMetadataDetector: LongPressMetadataDetector;
   private readonly waitForCondition: WaitForCondition;
+  private static readonly SEARCH_POLL_INTERVAL_MS = 50;
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
@@ -1140,20 +1145,33 @@ export class TapOnElement extends BaseVisualChange {
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
+    throwIfAborted(signal);
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
+    if (effectiveTimeoutMs === 0) {
+      return null;
+    }
     switch (this.device.platform) {
       case "android": {
         const rawHierarchy = await refreshAndroidViewHierarchy(
           this.accessibilityService,
           effectiveTimeoutMs,
           signal,
+          { adb: this.adb, timer: this.timer },
         );
 
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       case "ios": {
         const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
+        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+          effectiveTimeoutMs,
+        );
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       default:
@@ -1399,8 +1417,21 @@ export class TapOnElement extends BaseVisualChange {
         offScreenRejections += 1;
       }
       const deadline = startTime + searchDurationMs;
-      while (this.timer.now() < deadline) {
+      // Fast cached iOS responses must yield just like device round-trips.
+      // Keep an independent request ceiling even if the wall clock moves backward.
+      const maxRequests = Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS);
+      let nextPollAt = startTime;
+      while (this.timer.now() < deadline && requestCount < maxRequests) {
         throwIfAborted(signal);
+        const delayMs = Math.min(nextPollAt, deadline) - this.timer.now();
+        if (delayMs > 0) {
+          await this.timer.sleep(delayMs);
+          throwIfAborted(signal);
+        }
+        if (this.timer.now() >= deadline) {
+          break;
+        }
+        nextPollAt = this.timer.now() + TapOnElement.SEARCH_POLL_INTERVAL_MS;
         const remainingTimeMs = Math.max(0, deadline - this.timer.now());
         const refreshedHierarchy = await this.refreshViewHierarchy(
           remainingTimeMs,
@@ -1479,13 +1510,14 @@ export class TapOnElement extends BaseVisualChange {
     const bounds = selection.element.bounds;
     const center = this.geometry.getElementCenter(selection.element);
     const text =
-      typeof selection.element.text === "string" && selection.element.text.length > 0
+      getToggleContentDescription(selection.element) ??
+      (typeof selection.element.text === "string" && selection.element.text.length > 0
         ? selection.element.text
         : typeof selection.element["content-desc"] === "string"
           ? selection.element["content-desc"]
           : typeof selection.element["ios-accessibility-label"] === "string"
             ? selection.element["ios-accessibility-label"]
-            : "";
+            : "");
     const resourceId =
       typeof selection.element["resource-id"] === "string" ? selection.element["resource-id"] : "";
     const testTag =
@@ -1552,6 +1584,10 @@ export class TapOnElement extends BaseVisualChange {
       baseError = `Element not found with provided text '${options.text}'${containerHint}`;
     } else if (options.textAny) {
       baseError = `Element not found with any provided text '${options.textAny.join("', '")}'${containerHint}`;
+    } else if (options.testTag) {
+      baseError = `Element not found with provided testTag '${options.testTag}'${containerHint}`;
+    } else if (options.accessibilityLink) {
+      baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
     } else {
       baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
     }
@@ -2161,6 +2197,13 @@ export class TapOnElement extends BaseVisualChange {
     options?: TapOnElementOptions,
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    // XML-only candidates have no CtrlProxy node identity, even if their resource
+    // ID also exists in the incomplete native tree. Never retarget semantic actions.
+    if (element["hierarchy-source"] === "uiautomator") {
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
+      return undefined;
+    }
+
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
       typeof isTalkBackEnabled === "boolean"
@@ -2233,11 +2276,18 @@ export class TapOnElement extends BaseVisualChange {
       return false;
     }
     try {
-      if (!(await this.accessibilityService.supportsNodeActionSelectors())) {
+      if (!(await this.accessibilityService.supportsNodeActionSelectors(undefined, signal))) {
         return false;
       }
       throwIfAborted(signal);
-      const result = await this.accessibilityService.requestNodeAction("click", selector);
+      const result = await this.accessibilityService.requestNodeAction(
+        "click",
+        selector,
+        undefined,
+        undefined,
+        signal,
+      );
+      throwIfAborted(signal);
       return result.success;
     } catch (error) {
       throwIfAborted(signal);

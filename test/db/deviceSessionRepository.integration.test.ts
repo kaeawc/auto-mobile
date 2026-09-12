@@ -137,6 +137,40 @@ describe("DeviceSessionRepository", () => {
     expect(currentRow!.released_at_ms).toBeNull();
   });
 
+  test.each(["released", "expired"] as const)(
+    "delayed autolock metadata cannot reactivate a %s session",
+    async (status) => {
+      await repo.upsertActiveSession({
+        sessionUuid: "cancelled-autolock",
+        deviceId: "emulator-5554",
+        platform: "android",
+        source: "session-manager",
+        createdAtMs: 1000,
+        lastUsedAtMs: 1000,
+        expiresAtMs: 61_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: false,
+      });
+      const pendingMetadata = Promise.withResolvers<void>();
+      const lateWrite = pendingMetadata.promise.then(() =>
+        repo.markAutolockSession("cancelled-autolock", {
+          mcpSessionId: "late-mcp",
+          daemonSessionId: "daemon-1",
+          lastUsedAtMs: 3000,
+          expiresAtMs: 63_000,
+        }),
+      );
+      await repo.markReleased("cancelled-autolock", status, 2000, "session-creation-cancelled");
+      const released = await repo.getSession("cancelled-autolock");
+      pendingMetadata.resolve();
+      await lateWrite;
+      expect(await repo.getSession("cancelled-autolock")).toEqual(released);
+      expect(released?.status).toBe(status);
+      expect(released?.release_reason).toBe("session-creation-cancelled");
+    },
+  );
+
   test("late activity does not reactivate released sessions", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",

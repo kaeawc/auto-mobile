@@ -13,15 +13,27 @@ const preferenceScopeSchema = z.enum(["systemProperty", "sharedPreferences", "us
 const preferenceValueTypeSchema = z.enum(["string", "bool", "int", "float"]);
 const preferenceValueSchema = z.union([z.string(), z.boolean(), z.number()]);
 
-const getPreferenceBaseSchema = z.object({
-  scope: preferenceScopeSchema.describe("Preference scope"),
-  appId: z.string().optional().describe("App package or bundle id"),
-  suite: z
-    .string()
-    .optional()
-    .describe("SharedPreferences file name or UserDefaults suite/app group"),
-  key: z.string().min(1).describe("Preference key or Android system property name"),
-});
+// #6348: the advertised `additionalProperties: false` was not enforced at
+// runtime — a plain z.object silently DROPPED undeclared keys. The concrete
+// harm: `fileName` (the file selector on the sibling setKeyValue/removeKeyValue
+// tools, but NOT here — this surface's selector is `suite`) was ignored,
+// setPreference wrote the DEFAULT prefs file, and still reported verified:true.
+// `.strict()` rejects unknown keys the way enum/type validation already does.
+// `withAppIdAliases` runs its `z.preprocess` normalization (packageName -> appId,
+// alias deleted) before this schema ever parses, so documented aliases still
+// work under strict mode; `.extend()` (below and in addDeviceTargetingToSchema)
+// preserves strict while widening the accepted key set.
+const getPreferenceBaseSchema = z
+  .object({
+    scope: preferenceScopeSchema.describe("Preference scope"),
+    appId: z.string().optional().describe("App package or bundle id"),
+    suite: z
+      .string()
+      .optional()
+      .describe("SharedPreferences file name or UserDefaults suite/app group"),
+    key: z.string().min(1).describe("Preference key or Android system property name"),
+  })
+  .strict();
 
 const setPreferenceBaseSchema = getPreferenceBaseSchema.extend({
   value: preferenceValueSchema.describe("Value to write"),

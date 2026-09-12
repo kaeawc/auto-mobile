@@ -509,6 +509,7 @@ export function registerUtilityTools() {
         if (!pooledDevice) {
           throw new ActionableError(`Device '${args.deviceId}' not found in device pool`);
         }
+        devicePool.assertDeviceCleanupComplete(args.deviceId);
         if (pooledDevice.sessionId && pooledDevice.sessionId !== args.sessionUuid) {
           const owningSession = sessionManager.getSession(pooledDevice.sessionId);
           if (owningSession) {

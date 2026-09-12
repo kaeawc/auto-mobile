@@ -4,8 +4,8 @@
 #
 # Why (issue #4080): XcodeGen 2.46.0 emits the PBXProject `targets` array in one
 # of two stable-but-environment-dependent orders for the same spec + version --
-# declaration order (CtrlProxyApp, ObjCExceptionCatcher, CtrlProxy, ...) on some
-# runners and alphabetical order (CtrlProxy, CtrlProxyApp, ...) on others. The
+# declaration order (AutoMobileTest, ObjCExceptionCatcher, CtrlProxy, ...) on some
+# runners and alphabetical order (CtrlProxy, AutoMobileTest, ...) on others. The
 # committed file flip-flopped between the two across #3969/#3983/#3981, and the
 # drift check reported each pure reorder as staleness even though not one byte of
 # real content changed. Pinning the XcodeGen *version* did not fix it because

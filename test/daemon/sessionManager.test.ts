@@ -1,3 +1,4 @@
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
@@ -229,6 +230,68 @@ describe("SessionManager", () => {
         repository.finishUpsert();
         await creating;
       } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("fences session publication when persistence outlives acquisition cancellation", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      const controller = new AbortController();
+      try {
+        repository.deferNextUpsert();
+        const creating = runWithAbortSignal(controller.signal, () =>
+          manager.createSession("expired-acquisition", "emulator-5554", "android"),
+        );
+        await repository.waitForUpsert();
+        controller.abort(new Error("provision deadline exhausted"));
+        repository.finishUpsert();
+        await expect(creating).rejects.toThrow("provision deadline exhausted");
+        expect(manager.getSession("expired-acquisition")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+        expect(manager.getTerminalReleaseSnapshot("expired-acquisition")).toMatchObject({
+          releaseReason: "session-creation-cancelled",
+          terminal: true,
+        });
+      } finally {
+        repository.finishUpsert();
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("terminally rejects a creation whose persistence outlives the shutdown fence", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      const releaseReasons: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => {
+        releaseReasons.push(reason);
+      });
+
+      try {
+        repository.deferNextUpsert();
+        const creating = manager.createSession(
+          "persisting-during-shutdown",
+          "emulator-5554",
+          "android",
+        );
+        await repository.waitForUpsert();
+
+        manager.stopAcceptingSessionCreations();
+        repository.finishUpsert();
+
+        await expect(creating).rejects.toMatchObject({
+          sessionUuid: "persisting-during-shutdown",
+          release: expect.objectContaining({ releaseReason: "daemon-shutdown" }),
+        });
+        expect(manager.getSession("persisting-during-shutdown")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+        expect(manager.getTerminalReleaseSnapshot("persisting-during-shutdown")).toMatchObject({
+          releaseReason: "daemon-shutdown",
+          terminal: true,
+        });
+        expect(releaseReasons).toEqual(["daemon-shutdown"]);
+      } finally {
+        repository.finishUpsert();
         manager.stopCleanupTimer();
       }
     });

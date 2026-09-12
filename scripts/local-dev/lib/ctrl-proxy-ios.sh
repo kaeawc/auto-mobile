@@ -61,7 +61,7 @@ list_watch_files() {
   local watch_dirs=(
     "${CTRL_PROXY_IOS_DIR}/Sources"
     "${CTRL_PROXY_IOS_DIR}/Tests"
-    "${CTRL_PROXY_IOS_DIR}/CtrlProxyApp"
+    "${CTRL_PROXY_IOS_DIR}/AutoMobileTest"
   )
   local extra_files=(
     "${CTRL_PROXY_IOS_DIR}/project.yml"
@@ -141,7 +141,7 @@ build_ctrl_proxy_ios() {
 
   log_info "Building CtrlProxy iOS (build-for-testing)..."
   if ! (cd "${CTRL_PROXY_IOS_DIR}" && xcodebuild build-for-testing \
-      -scheme CtrlProxyApp \
+      -scheme AutoMobileTest \
       -destination "generic/platform=iOS Simulator" \
       -derivedDataPath "${DERIVED_DATA_PATH}" \
       -quiet); then
@@ -199,17 +199,34 @@ start_ctrl_proxy_ios() {
 
   runner_xctestrun_path="$(dirname "${xctestrun_path}")/automobile-runner-${simulator_id}.xctestrun"
   cp "${xctestrun_path}" "${runner_xctestrun_path}"
-  plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" \
-    -string "${port}" "${runner_xctestrun_path}"
-  plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" \
-    -string "${simulator_id}" "${runner_xctestrun_path}"
+  # plutil fails when the xctestrun does not carry the top-level
+  # CtrlProxyUITests key it expects (e.g. a FormatVersion 2 layout produced by
+  # a scheme with a test plan) — an unpatched xctestrun would silently launch
+  # the runner on the wrong port (issue #2731), so a patch failure must be a
+  # hard failure rather than a swallowed one.
+  if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" \
+      -string "${port}" "${runner_xctestrun_path}"; then
+    log_error "Failed to patch CTRL_PROXY_IOS_PORT into runner xctestrun (CtrlProxyUITests.EnvironmentVariables keypath not found — FormatVersion 2 or unsupported xctestrun layout)."
+    return 1
+  fi
+  if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" \
+      -string "${simulator_id}" "${runner_xctestrun_path}"; then
+    log_error "Failed to patch AUTOMOBILE_DEVICE_ID into runner xctestrun."
+    return 1
+  fi
   if [[ -n "${CTRL_PROXY_IOS_BUNDLE_ID:-}" ]]; then
-    plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_BUNDLE_ID" \
-      -string "${CTRL_PROXY_IOS_BUNDLE_ID}" "${runner_xctestrun_path}"
+    if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_BUNDLE_ID" \
+        -string "${CTRL_PROXY_IOS_BUNDLE_ID}" "${runner_xctestrun_path}"; then
+      log_error "Failed to patch CTRL_PROXY_IOS_BUNDLE_ID into runner xctestrun."
+      return 1
+    fi
   fi
   if [[ -n "${CTRL_PROXY_IOS_TIMEOUT:-}" ]]; then
-    plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_TIMEOUT" \
-      -string "${CTRL_PROXY_IOS_TIMEOUT}" "${runner_xctestrun_path}"
+    if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_TIMEOUT" \
+        -string "${CTRL_PROXY_IOS_TIMEOUT}" "${runner_xctestrun_path}"; then
+      log_error "Failed to patch CTRL_PROXY_IOS_TIMEOUT into runner xctestrun."
+      return 1
+    fi
   fi
 
   local cmd=(

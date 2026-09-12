@@ -19,13 +19,17 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 type InteractionListener = (event: { type: string; [key: string]: unknown }) => void;
 
 class FakeGestureEmitter implements GestureEmitter {
+  startCount = 0;
+  stopCount = 0;
   private onGestureHandler?: (event: GestureEvent) => void;
 
   start(onGesture: (event: GestureEvent) => void, _onError?: (err: Error) => void): void {
+    this.startCount++;
     this.onGestureHandler = onGesture;
   }
 
   stop(): void {
+    this.stopCount++;
     this.onGestureHandler = undefined;
   }
 
@@ -35,21 +39,34 @@ class FakeGestureEmitter implements GestureEmitter {
 }
 
 class FakeA11ySource implements A11ySource {
+  capabilityError: Error | undefined;
+  connectionError: Error | undefined;
+  connected = true;
+  subscriptionCount = 0;
+  unsubscribeCount = 0;
   private listener?: InteractionListener;
 
   constructor(private readonly supportedCommands: string[] | null = ["request_insert_text"]) {}
 
   async ensureConnected(): Promise<boolean> {
-    return true;
+    if (this.connectionError) {
+      throw this.connectionError;
+    }
+    return this.connected;
   }
 
   async getSupportedCommands(): Promise<string[] | null> {
+    if (this.capabilityError) {
+      throw this.capabilityError;
+    }
     return this.supportedCommands;
   }
 
   onInteraction(listener: InteractionListener): () => void {
+    this.subscriptionCount++;
     this.listener = listener;
     return () => {
+      this.unsubscribeCount++;
       this.listener = undefined;
     };
   }
@@ -260,6 +277,38 @@ describe("DualTrackRecorder", () => {
 
     expect(steps).toEqual([{ tool: "inputText", params: { text: "hello@example.com" } }]);
   });
+
+  test("rejected optional capabilities still start, record inputText, and clean up", async () => {
+    fakeA11y.capabilityError = new Error("capability lookup failed");
+    await recorder.start();
+    expect(fakeGestures.startCount).toBe(1);
+    expect(fakeA11y.subscriptionCount).toBe(1);
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: fakeTimer.now(),
+      text: "hello@example.com",
+      element: { "resource-id": "com.example:id/email" },
+    });
+    const { steps } = await recorder.stop();
+    expect(steps).toEqual([{ tool: "inputText", params: { text: "hello@example.com" } }]);
+    expect(fakeGestures.stopCount).toBe(1);
+    expect(fakeA11y.unsubscribeCount).toBe(1);
+  });
+
+  test.each(["disconnected", "rejected"])(
+    "required connection %s still fails startup",
+    async (mode) => {
+      fakeA11y.connected = false;
+      if (mode === "rejected") {
+        fakeA11y.connectionError = new Error("connection failed");
+      }
+      await expect(recorder.start()).rejects.toThrow(
+        mode === "rejected" ? "connection failed" : "Unable to connect",
+      );
+      expect(fakeGestures.startCount).toBe(0);
+      expect(fakeA11y.subscriptionCount).toBe(0);
+    },
+  );
 
   test("consecutive inputText events on same element are coalesced", async () => {
     await recorder.start();

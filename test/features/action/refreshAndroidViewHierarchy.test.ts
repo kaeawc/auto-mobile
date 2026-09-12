@@ -1,16 +1,18 @@
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { describe, expect, test } from "bun:test";
 import type { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { refreshAndroidViewHierarchy } from "../../../src/features/action/refreshAndroidViewHierarchy";
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 
 /**
  * Issue #6252: `refreshAndroidViewHierarchy`'s incomplete-hierarchy fallback
  * called `viewHierarchy.getUiAutomatorHierarchy` / `viewHierarchy.mergeHierarchies`,
  * neither of which was ever implemented on `ViewHierarchy` — every fallback
- * attempt threw and was silently swallowed. The function no longer attempts
- * the nonexistent fallback; it must return the (possibly incomplete) hierarchy
- * as-is without throwing.
+ * attempt threw and was silently swallowed. Without injected ADB it still returns the capture unchanged. With ADB,
+ * issue #6323 supplements incomplete captures within the original deadline.
  */
 describe("refreshAndroidViewHierarchy", () => {
   const asClient = (fake: FakeCtrlProxy): AndroidCtrlProxyClient =>
@@ -45,7 +47,7 @@ describe("refreshAndroidViewHierarchy", () => {
     expect(result).toEqual(completeResult);
   });
 
-  test("returns an incomplete hierarchy as-is without throwing (no uiautomator fallback exists)", async () => {
+  test("returns an incomplete hierarchy as-is without throwing (no fallback executor supplied)", async () => {
     const fakeCtrlProxy = new FakeCtrlProxy();
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
@@ -93,5 +95,48 @@ describe("refreshAndroidViewHierarchy", () => {
     await refreshAndroidViewHierarchy(asClient(fakeCtrlProxy), 1000);
 
     expect(fakeCtrlProxy.getLastRequestHierarchySyncArgs()?.timeoutMs).toBe(1000);
+  });
+});
+
+describe("refresh fallback budget", () => {
+  test.each([true, false])("supplements only incomplete captures: %s", async (incomplete) => {
+    const timer = new FakeTimer();
+    class SyncClient extends FakeCtrlProxy {
+      override async requestHierarchySync(
+        ...args: Parameters<FakeCtrlProxy["requestHierarchySync"]>
+      ) {
+        timer.advanceTime(200);
+        return super.requestHierarchySync(...args);
+      }
+    }
+    const client = new SyncClient();
+    client.setHierarchyData({ packageName: "com.test", hierarchy: { $: {} } });
+    client.setViewHierarchyResult({
+      hierarchy: { node: { $: {} } },
+      packageName: "com.test",
+      ctrlProxyIncomplete: incomplete,
+    });
+    const adb = new FakeAdbClient();
+    adb.setForegroundApp({ packageName: "com.test", userId: 0 });
+    adb.setCommandResult(
+      "shell cat /data/local/tmp/automobile-hierarchy-test.xml",
+      '<hierarchy><node package="com.test" class="Button" text="Missing" bounds="[0,0][10,10]"/></hierarchy>',
+    );
+    const controller = new AbortController();
+    const result = await refreshAndroidViewHierarchy(
+      client as unknown as AndroidCtrlProxyClient,
+      1000,
+      controller.signal,
+      { adb, timer, idGenerator: new FakeIdGenerator(["test"]) },
+    );
+    expect(result).not.toBeNull();
+    const calls = adb.getCommandCalls();
+    expect(calls.length).toBe(incomplete ? 3 : 0);
+    if (incomplete) {
+      expect(calls[0].timeoutMs).toBe(800);
+      expect(calls[1].timeoutMs).toBe(800);
+      expect(calls[0].signal).toBe(controller.signal);
+      expect(result?.sources).toContain("uiautomator");
+    }
   });
 });

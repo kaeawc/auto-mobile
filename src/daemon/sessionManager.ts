@@ -1,3 +1,4 @@
+import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
@@ -273,6 +274,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
     releaseReason === "device-killed" ||
+    releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("device-disconnected:")
   );
 }
@@ -379,6 +381,8 @@ export class SessionManager {
   private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
+  /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
+  private acceptingSessionCreations = true;
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
   /** Releases received before an assignment has published its session. */
@@ -484,6 +488,16 @@ export class SessionManager {
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
+  /** Release owns the device until both bounded teardown and any overflow work settle. */
+  hasDeviceCleanupInProgress(deviceId: string): boolean {
+    return (
+      this.pendingDeviceCleanups.has(deviceId) ||
+      Array.from(this.activeReleasePromises).some(
+        (release) => release.session.assignedDevice === deviceId,
+      )
+    );
+  }
+
   /**
    * Keep sessions assigned while their work is still running, even if their
    * idle timeout elapses. The daemon supplies the execution tracker; tests can
@@ -515,6 +529,12 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
+    getAbortSignal()?.throwIfAborted();
+    if (!this.acceptingSessionCreations) {
+      throw new ActionableError(
+        `Cannot create device session ${sessionId}: the daemon is shutting down.`,
+      );
+    }
     this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
     let terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
@@ -570,13 +590,27 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Fence new session publication before daemon shutdown snapshots active work.
+   *
+   * A control-socket handler can outlive the bounded quiesce wait while preparing
+   * a device. Its eventual DevicePool binding still reaches createSession(), so
+   * this synchronous fence makes that assignment roll back instead of publishing
+   * a session after the shutdown release snapshot.
+   */
+  stopAcceptingSessionCreations(): void {
+    this.acceptingSessionCreations = false;
+  }
+
   private async persistAndPublishSession(session: Session): Promise<Session> {
     const persistedTerminalRelease = await this.getPersistedTerminalRelease(session.sessionId);
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
+    await this.rejectCreationAfterShutdownFence(session);
     await this.persistSession(session);
+    await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
     if (terminalRelease) {
@@ -590,6 +624,31 @@ export class SessionManager {
     this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
+  }
+
+  private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
+    const cancellation = getAbortSignal();
+    if (this.acceptingSessionCreations && !cancellation?.aborted) {
+      return;
+    }
+    const releasedAtMs = this.timer.now();
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason: cancellation?.aborted ? "session-creation-cancelled" : "daemon-shutdown",
+      releasedAtMs,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+    await this.persistTerminalReleaseIfNeeded(snapshot);
+    this.notifySessionRelease(snapshot);
+    cancellation?.throwIfAborted();
+    throw new TerminalSessionError(session.sessionId, snapshot);
   }
 
   private async getPersistedTerminalRelease(
@@ -1384,9 +1443,15 @@ export class SessionManager {
     );
   }
 
-  /** Wait a bounded amount of time for releases already started by monitors. */
-  async drainReleasePromises(timeoutMs: number): Promise<boolean> {
-    const releases = Array.from(this.activeReleasePromises, (release) => release.promise);
+  /** Wait a bounded amount of time for active and caller-started release work. */
+  async drainReleasePromises(
+    timeoutMs: number,
+    additionalReleases: ReadonlyArray<Promise<unknown>> = [],
+  ): Promise<boolean> {
+    const releases = [
+      ...Array.from(this.activeReleasePromises, (release) => release.promise),
+      ...additionalReleases,
+    ];
     if (releases.length === 0) {
       return true;
     }
@@ -1526,6 +1591,10 @@ export class SessionManager {
     if (reason.value === "device-killed") {
       return;
     }
+    if (candidate === "daemon-shutdown" && !isTerminalReleaseReason(reason.value)) {
+      reason.value = candidate;
+      return;
+    }
     if (!isTerminalReleaseReason(reason.value) && isTerminalReleaseReason(candidate)) {
       reason.value = candidate;
     }
@@ -1574,16 +1643,20 @@ export class SessionManager {
       return snapshot;
     }
     await this.persistSessionRelease(snapshot);
-    if (!isTerminalReleaseReason(reason.value)) {
+    if (reason.value === snapshot.releaseReason) {
       reason.finalizedSnapshot = snapshot;
       return snapshot;
     }
     const upgradedSnapshot = this.withReleaseReason(snapshot, reason.value, session);
     reason.finalizedSnapshot = upgradedSnapshot;
     this.recordFinalizedSessionRelease(session, reason);
-    this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
-    await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
-    reason.terminalPersisted = true;
+    if (upgradedSnapshot.terminal) {
+      this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+      await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
+      reason.terminalPersisted = true;
+    } else {
+      await this.persistSessionRelease(upgradedSnapshot);
+    }
     return upgradedSnapshot;
   }
 

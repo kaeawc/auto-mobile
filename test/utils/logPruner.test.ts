@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pruneLogFiles } from "../../src/utils/logPruner";
@@ -148,19 +148,27 @@ describe("logPruner daemon-launch inherited-fd guard (issue #6194)", () => {
   test("DOES prune daemon-launch-<dead manager pid>.log once no daemon is running", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
+      const liveLaunchLog = "daemon-launch-9999.log";
       await writeFile(path.join(dir, launchLog), "old bootstrap output");
+      await writeFile(path.join(dir, liveLaunchLog), "live manager output");
+      const deadStats = await stat(path.join(dir, launchLog));
+      const liveStats = await stat(path.join(dir, liveLaunchLog));
 
       await pruneLogFiles({
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
-        isProcessAlive: () => false, // manager exited
+        abandonedMaxAgeMs: 1000,
+        // Derive the sweep clock from recorded mtimes so both files are stale
+        // regardless of Windows filesystem and wall-clock precision differences.
+        now: Math.max(deadStats.mtimeMs, liveStats.mtimeMs) + 2000,
+        isProcessAlive: (pid) => pid === 9999, // only manager 4242 exited
         isDaemonRunning: () => false, // no daemon holds the fd anymore
       });
 
       const after = await readdir(dir);
       expect(after).not.toContain(launchLog);
+      expect(after).toContain(liveLaunchLog);
     });
   });
 
@@ -533,6 +541,139 @@ describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
 
       // Lazily computed: never needed because no daemon-launch log was swept.
       expect(enumerateCalls).toBe(0);
+    });
+  });
+});
+
+describe("logPruner transient unlink failures (Windows EBUSY/EPERM)", () => {
+  // On Windows an `unlink` of a just-written file fails transiently with
+  // EBUSY/EPERM while Defender/the indexer still holds a handle. Swallowing
+  // that leaves the file behind for a whole extra prune cycle, which is what
+  // the windows-latest runner observed for `daemon-launch-4242.log`.
+  function errnoError(code: string): NodeJS.ErrnoException {
+    const error = new Error(`${code}: simulated transient lock`) as NodeJS.ErrnoException;
+    error.code = code;
+    return error;
+  }
+
+  const deadNamespace = {
+    ownPrefix: "stdio-111",
+    maxOwnFiles: 10,
+    abandonedMaxAgeMs: -1,
+    isProcessAlive: () => false,
+    daemonPidFiles: () => ({ pidFiles: [], uncertain: false }),
+    readDaemonOwner: () => undefined,
+    isDaemonRunning: () => false,
+  } as const;
+
+  test("retries a transient EBUSY and still removes the launch log and its tombstone", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "just-written daemon output");
+      await writeFile(path.join(dir, `${launchLog}.owner`), "{}");
+
+      const attempts: string[] = [];
+      const slept: number[] = [];
+
+      await pruneLogFiles({
+        ...deadNamespace,
+        dir,
+        unlink: async (filePath) => {
+          attempts.push(filePath);
+          if (attempts.filter((p) => p === filePath).length === 1) {
+            throw errnoError("EBUSY");
+          }
+          await unlink(filePath);
+        },
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      });
+
+      const after = await readdir(dir);
+      expect(after).not.toContain(launchLog);
+      expect(after).not.toContain(`${launchLog}.owner`);
+      // Exactly one retry was needed for the log itself, and it backed off first.
+      expect(attempts.filter((p) => p.endsWith(launchLog)).length).toBe(2);
+      expect(slept.length).toBeGreaterThan(0);
+      expect(slept[0]).toBeGreaterThan(0);
+    });
+  });
+
+  test("gives up on a persistent EBUSY after a bounded number of attempts", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "locked forever");
+
+      let attempts = 0;
+      const slept: number[] = [];
+
+      await pruneLogFiles({
+        ...deadNamespace,
+        dir,
+        unlink: async () => {
+          attempts += 1;
+          throw errnoError("EPERM");
+        },
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      });
+
+      // Bounded: the sweep must not spin forever on a permanently locked file.
+      expect(attempts).toBeGreaterThan(1);
+      expect(attempts).toBeLessThanOrEqual(5);
+      expect(slept.length).toBe(attempts - 1);
+      expect(await readdir(dir)).toContain(launchLog);
+    });
+  });
+
+  test("does not retry a non-transient unlink failure", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "x");
+
+      let attempts = 0;
+
+      await pruneLogFiles({
+        ...deadNamespace,
+        dir,
+        unlink: async () => {
+          attempts += 1;
+          throw errnoError("EISDIR");
+        },
+        sleep: async () => {
+          throw new Error("must not back off for a non-transient error");
+        },
+      });
+
+      expect(attempts).toBe(1);
+    });
+  });
+
+  test("treats ENOENT as success without retrying", async () => {
+    await withTempLogDir(async (dir) => {
+      const launchLog = "daemon-launch-4242.log";
+      await writeFile(path.join(dir, launchLog), "x");
+
+      const attempts: string[] = [];
+
+      await pruneLogFiles({
+        ...deadNamespace,
+        dir,
+        unlink: async (filePath) => {
+          attempts.push(filePath);
+          throw errnoError("ENOENT");
+        },
+        sleep: async () => {
+          throw new Error("must not back off for ENOENT");
+        },
+      });
+
+      // The log itself is attempted once; the tombstone sidecar cleanup still
+      // follows because a concurrently-removed file counts as removed.
+      expect(attempts.filter((p) => p.endsWith(launchLog)).length).toBe(1);
+      expect(attempts).toContain(path.join(dir, `${launchLog}.owner`));
     });
   });
 });

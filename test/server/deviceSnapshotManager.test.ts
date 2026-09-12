@@ -247,6 +247,144 @@ describe("deviceSnapshotManager", () => {
     expect(listed[0]?.snapshotName).toBe("race");
   });
 
+  test("concurrent captures on two devices run one budget eviction, never over-evicting (#6491)", async () => {
+    // Two sessions capture DIFFERENT names on DIFFERENT devices. They take
+    // different per-NAME capture locks, so both reach the archive-budget
+    // eviction phase concurrently. Under the pre-fix code both eviction passes
+    // read the same list and the same running total up front, then delete
+    // least-recently-accessed first: pass A evicts the over-budget tail while
+    // pass B — getting `deleted === false` for every row A already removed —
+    // credits itself nothing and keeps walking, deleting snapshots that were
+    // never over budget (including a snapshot the other session just captured),
+    // emptying the archive. The fix serializes the budget arithmetic on one
+    // constant-keyed lock, so the second pass re-reads a fresh, accurate list.
+    const MB = 1024 * 1024;
+    const maxArchiveSizeMb = 3;
+    const maxSizeBytes = maxArchiveSizeMb * MB;
+
+    const config: DeviceSnapshotConfig = {
+      includeAppData: true,
+      includeSettings: true,
+      useVmSnapshot: false,
+      strictBackupMode: false,
+      vmSnapshotTimeoutMs: 12000,
+      maxArchiveSizeMb,
+    };
+    await configRepository.setConfig(config);
+
+    // Physical-style device ids (not "emulator-...") keep the eviction delete on
+    // the simple unscoped path — no AVD-scoped second delete to reason about.
+    const deviceA: BootedDevice = { deviceId: "device-a", name: "Device A", platform: "android" };
+    const deviceB: BootedDevice = { deviceId: "device-b", name: "Device B", platform: "android" };
+
+    // Three pre-seeded 1 MB snapshots, oldest-accessed first.
+    for (const [name, accessedMs] of [
+      ["s1", 1000],
+      ["s2", 2000],
+      ["s3", 3000],
+    ] as const) {
+      const timestamp = new Date(accessedMs).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: name,
+        timestamp,
+        deviceId: "seed-device",
+        deviceName: "Seed Device",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName: name,
+        deviceId: "seed-device",
+        deviceName: "Seed Device",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 1 * MB,
+        manifest,
+      });
+    }
+
+    // The two new captures are the newest-accessed and 1 MB each. After both
+    // insert, the archive holds 5 MB against a 3 MB budget, so a correct single
+    // pass evicts exactly the two oldest (s1, s2) and stops.
+    fakeTimer.advanceTime(1_000_000);
+    store.setSnapshotSize("cap-a", 1 * MB);
+    store.setSnapshotSize("cap-b", 1 * MB);
+
+    // A deferred gate per capture: both captures block inside the provider until
+    // released, so both are in flight and both reach eviction together.
+    const started: string[] = [];
+    const releases: Array<() => void> = [];
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async (args) => {
+          started.push(args.snapshotName);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          const timestamp = new Date(fakeTimer.now()).toISOString();
+          const manifest: DeviceSnapshotManifest = {
+            snapshotName: args.snapshotName,
+            timestamp,
+            deviceId: TEST_DEVICE.deviceId,
+            deviceName: TEST_DEVICE.name,
+            platform: TEST_DEVICE.platform,
+            snapshotType: "adb",
+            includeAppData: args.includeAppData ?? true,
+            includeSettings: args.includeSettings ?? true,
+          };
+          return { snapshotName: args.snapshotName, timestamp, snapshotType: "adb", manifest };
+        },
+      }),
+    });
+
+    // Deterministic microtask-only polling — no real timers.
+    const waitUntil = async (cond: () => boolean): Promise<void> => {
+      for (let i = 0; i < 1000 && !cond(); i++) {
+        await Promise.resolve();
+      }
+      if (!cond()) {
+        throw new Error(`waitUntil timed out; started=${JSON.stringify(started)}`);
+      }
+    };
+
+    const p1 = captureDeviceSnapshot(deviceA, { snapshotName: "cap-a", includeAppData: true });
+    const p2 = captureDeviceSnapshot(deviceB, { snapshotName: "cap-b", includeAppData: true });
+
+    // Both captures are simultaneously in flight (different names => different locks).
+    await waitUntil(() => started.length >= 2);
+    expect(started.slice().sort()).toEqual(["cap-a", "cap-b"]);
+
+    // Release both; both proceed to insert their record and then evict.
+    releases.forEach((release) => release());
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    const survivors = (await repository.listSnapshots()).map((record) => record.snapshotName);
+    const survivorNames = new Set(survivors);
+    const totalSize = (await repository.listSnapshots()).reduce(
+      (sum, record) => sum + record.sizeBytes,
+      0,
+    );
+    const allInitial = ["s1", "s2", "s3", "cap-a", "cap-b"];
+    const rowsRemoved = allInitial.filter((name) => !survivorNames.has(name)).sort();
+    const evictedUnion = [...r1.evictedSnapshotNames, ...r2.evictedSnapshotNames].sort();
+
+    // Only the over-budget tail (the two oldest) is evicted; nothing beyond it.
+    expect(survivorNames).toEqual(new Set(["s3", "cap-a", "cap-b"]));
+    // Neither session's freshly-captured snapshot was destroyed by the other pass.
+    expect(await repository.getSnapshot("cap-a")).not.toBeNull();
+    expect(await repository.getSnapshot("cap-b")).not.toBeNull();
+    // The archive ends trimmed to (not below) the budget.
+    expect(totalSize).toBe(maxSizeBytes);
+    expect(totalSize).toBeLessThanOrEqual(maxSizeBytes);
+    // Reported evicted names equal the rows actually removed — no phantoms, no omissions.
+    expect(rowsRemoved).toEqual(["s1", "s2"]);
+    expect(evictedUnion).toEqual(["s1", "s2"]);
+  });
+
   test("restoreDeviceSnapshot touches lastAccessedAt and forwards manifest", async () => {
     const createdAt = new Date(0).toISOString();
     const manifest: DeviceSnapshotManifest = {
@@ -672,5 +810,199 @@ describe("deviceSnapshotManager", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  describe("scoped on-disk settings/metadata read-back (#6492)", () => {
+    test("listDeviceSnapshots discovers an AVD-scoped Android metadata.json with no DB row", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-meta-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "baseline";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+
+        const timestamp = new Date(fakeTimer.now()).toISOString();
+        const manifest: DeviceSnapshotManifest = {
+          snapshotName,
+          timestamp,
+          deviceId: "emulator-5554",
+          deviceName: "Pixel_7",
+          platform: "android",
+          snapshotType: "adb",
+          includeAppData: false,
+          includeSettings: true,
+          settings: { global: { foo: "bar" } },
+        };
+        await fs.writeFile(
+          realStore.getMetadataPath(snapshotName, androidOptions),
+          JSON.stringify(manifest, null, 2),
+        );
+
+        // No DB row exists for this snapshot yet — it lives only on disk.
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+
+        const { snapshots, count, totalSizeBytes } = await listDeviceSnapshots();
+
+        expect(count).toBe(1);
+        expect(snapshots[0]?.snapshotName).toBe(snapshotName);
+        expect(totalSizeBytes).toBeGreaterThan(0);
+
+        const record = await repository.getSnapshot(snapshotName);
+        expect(record).not.toBeNull();
+        expect(record?.manifest.settings).toEqual(manifest.settings);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("restoreDeviceSnapshot hydrates an AVD-scoped metadata.json snapshot directly, with no prior listDeviceSnapshots call", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-restore-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "baseline";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+
+        const timestamp = new Date(fakeTimer.now()).toISOString();
+        const manifest: DeviceSnapshotManifest = {
+          snapshotName,
+          timestamp,
+          deviceId: "emulator-5554",
+          deviceName: "Pixel_7",
+          platform: "android",
+          snapshotType: "adb",
+          includeAppData: false,
+          includeSettings: true,
+          settings: { global: { foo: "bar" } },
+        };
+        await fs.writeFile(
+          realStore.getMetadataPath(snapshotName, androidOptions),
+          JSON.stringify(manifest, null, 2),
+        );
+
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+
+        // No listDeviceSnapshots() call first — restore must find it on its own.
+        const { result, manifest: returnedManifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+          snapshotName,
+        });
+
+        expect(result.snapshotType).toBe("adb");
+        expect(returnedManifest.settings).toEqual(manifest.settings);
+        expect(restoreCalls[0]?.manifest.settings).toEqual(manifest.settings);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("restoreDeviceSnapshot round-trips a settings-only Android capture's settings.json when the DB row is absent", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-settings-only-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "settings-baseline";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+
+        // This is exactly what CaptureSnapshot.saveSettings writes: the raw
+        // settings triplet, NOT a full manifest — no metadata.json/manifest.json
+        // exists anywhere for this snapshot (mirrors the real non-VM Android
+        // settings-only capture path).
+        const settings = {
+          global: { some_global_setting: "1" },
+          secure: { some_secure_setting: "on" },
+          system: { some_system_setting: "off" },
+        };
+        await fs.writeFile(
+          realStore.getSettingsPath(snapshotName, androidOptions),
+          JSON.stringify(settings, null, 2),
+        );
+
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+
+        const { result, manifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+          snapshotName,
+        });
+
+        expect(result.snapshotType).toBe("adb");
+        expect(manifest.platform).toBe("android");
+        expect(manifest.includeSettings).toBe(true);
+        expect(manifest.settings).toEqual(settings);
+        expect(restoreCalls[0]?.manifest.settings).toEqual(settings);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("listDeviceSnapshots skips a '.replacing' set-aside directory nested under android/<avd>/", async () => {
+      const tempRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "snapshot-manager-scoped-replacing-"),
+      );
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };
+        const asideDir = realStore.getSnapshotPathWithOptions("ghost.replacing", androidOptions);
+        await fs.mkdir(asideDir, { recursive: true });
+
+        const manifest: DeviceSnapshotManifest = {
+          snapshotName: "ghost",
+          timestamp: new Date(0).toISOString(),
+          deviceId: "emulator-5554",
+          deviceName: "Pixel_5",
+          platform: "android",
+          snapshotType: "adb",
+          includeAppData: false,
+          includeSettings: true,
+        };
+        await fs.writeFile(path.join(asideDir, "metadata.json"), JSON.stringify(manifest));
+
+        const { snapshots } = await listDeviceSnapshots();
+
+        expect(snapshots.some((entry) => entry.snapshotName === "ghost.replacing")).toBe(false);
+        expect(await repository.getSnapshot("ghost.replacing")).toBeNull();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    test("listDeviceSnapshots degrades a malformed scoped metadata.json to a skip, without throwing", async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-bad-"));
+      try {
+        const realStore = new DeviceSnapshotStore(tempRoot);
+        await realStore.ensureSnapshotsDirectory();
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+        const snapshotName = "corrupt";
+        const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };
+        const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+        await fs.mkdir(scopedDir, { recursive: true });
+        await fs.writeFile(
+          realStore.getMetadataPath(snapshotName, androidOptions),
+          "{ not valid json",
+        );
+
+        const { snapshots, count } = await listDeviceSnapshots();
+
+        expect(count).toBe(0);
+        expect(snapshots).toEqual([]);
+        expect(await repository.getSnapshot(snapshotName)).toBeNull();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
   });
 });

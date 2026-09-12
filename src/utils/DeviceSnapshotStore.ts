@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { logger } from "./logger";
+import { assertSafePathSegment } from "./snapshotNameValidation";
 import type { Platform } from "../models";
 
 /**
@@ -51,12 +52,22 @@ export class DeviceSnapshotStore {
 
   getSnapshotPathWithOptions(snapshotName: string, options?: SnapshotPathOptions): string {
     if (options?.platform === "ios" && options.deviceId) {
+      // deviceId is the simulator UDID, sourced from simctl rather than a
+      // validated caller-supplied name. Reject it before it is joined onto
+      // basePath — an unvalidated scope segment containing '..' or a
+      // separator can otherwise resolve the scoped path outside the
+      // snapshots directory entirely (issue #6493).
+      assertSafePathSegment("iOS device id", options.deviceId);
       return path.join(this.basePath, "ios", options.deviceId, snapshotName);
     }
 
     // Android emulators scope by AVD name so the same snapshot name can be
     // reused across AVDs without a filesystem collision (#5707).
     if (options?.platform === "android" && options.avdName) {
+      // avdName comes from `adb emu avd name` output (trimmed to its first
+      // line), not from a validated caller-supplied name. Same containment
+      // rule as above (issue #6493).
+      assertSafePathSegment("Android AVD name", options.avdName);
       return path.join(this.basePath, "android", options.avdName, snapshotName);
     }
 

@@ -10,7 +10,6 @@ import {
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
   MIN_PREFERENCE_MCP_TIMEOUT_MS,
   MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
-  MIN_START_DEVICE_MCP_TIMEOUT_MS,
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
@@ -46,6 +45,7 @@ import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+  MAX_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../../src/utils/deviceTimeouts";
 
@@ -92,6 +92,11 @@ describe("resolveMcpRequestTimeoutMs", () => {
   }
 
   const cases: TimeoutCase[] = [
+    {
+      name: "setDeviceResources floor when timeoutMs omitted",
+      tool: "setDeviceResources",
+      expected: 305_000,
+    },
     // --- Tool floors applied when the client omits timeoutMs (base -> DEFAULT) ---
     {
       name: "tool without a floor -> default",
@@ -104,9 +109,9 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
     },
     {
-      name: "startDevice floor when timeoutMs omitted",
+      name: "startDevice default includes cold boot and runner setup",
       tool: "startDevice",
-      expected: MIN_START_DEVICE_MCP_TIMEOUT_MS,
+      expected: 365_000,
     },
     {
       name: "provisionDevice floor when timeoutMs omitted",
@@ -167,10 +172,10 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
     },
     {
-      name: "raises short startDevice to floor",
+      name: "raises short startDevice transport to default lifecycle budget",
       tool: "startDevice",
       timeoutMs: 60_000,
-      expected: MIN_START_DEVICE_MCP_TIMEOUT_MS,
+      expected: 365_000,
     },
     {
       name: "raises short provisionDevice to floor",
@@ -241,10 +246,10 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: 900_000,
     },
     {
-      name: "preserves startDevice above floor",
+      name: "preserves startDevice above default lifecycle budget",
       tool: "startDevice",
-      timeoutMs: 300_000,
-      expected: 300_000,
+      timeoutMs: 400_000,
+      expected: 400_000,
     },
     {
       name: "preserves provisionDevice outer request timeout above the floor",
@@ -882,7 +887,19 @@ describe("resolveMcpRequestTimeoutMs", () => {
     );
   });
 
-  test("keeps transport alive beyond the provisionDevice tool budget", () => {
+  test("keeps transport alive through an explicit resource-configuration budget", () => {
+    const request: DaemonRequest = {
+      id: "resources",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "setDeviceResources", arguments: { timeoutMs: 300_000 } },
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport alive through provisionDevice rollback", () => {
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
@@ -894,7 +911,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
-      600_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      600_000 + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
   });
 
@@ -910,11 +927,35 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     expect(MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS).toBe(
-      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS +
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
-      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS +
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
+  });
+
+  test("caps provisionDevice lifecycle and rollback budgets below socket idle timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "provisionDevice",
+        arguments: { timeoutMs: Number.MAX_SAFE_INTEGER },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      MAX_PROVISION_DEVICE_TIMEOUT_MS +
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+    expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
 
   test("keeps transport alive beyond the deleteDevice tool budget", () => {

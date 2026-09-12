@@ -187,9 +187,9 @@ export interface AndroidEmulator {
   launchEmulator(request: AndroidEmulatorLaunchRequest): Promise<AndroidEmulatorLaunchHandle>;
 
   /**
-   * Kill a running emulator
+   * Request termination of the expected running emulator.
    * @param device - The device to kill
-   * @returns Promise that resolves when emulator is stopped
+   * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   killDevice(
     device: BootedDevice,
@@ -2194,9 +2194,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
-   * Kill a running emulator
+   * Request termination of the expected running emulator.
    * @param device - The device to kill
-   * @returns Promise that resolves when emulator is stopped
+   * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   async killDevice(
     device: BootedDevice,
@@ -2215,16 +2215,64 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }
 
-    // Use ADB to stop the emulator
-    const adb = this.adbFactory.create(emulator);
-    await adb.execute(["emu", "kill"], {
-      timeoutMs: options.timeoutMs,
-      noRetry: true,
-      signal: options.signal,
-      waitForProcessSettlementAfterAbort: true,
-    });
+    if (
+      emulator.name !== device.name ||
+      emulator.platform !== device.platform ||
+      (device.transportId !== undefined && emulator.transportId !== device.transportId)
+    ) {
+      throw new ActionableError(
+        `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
+      );
+    }
 
-    logger.info(`Killed emulator '${device.name}'`);
+    // A serial can be reused after discovery, so the checked ADB transport is
+    // the identity to trust. `adb emu` cannot be pinned to it: the console
+    // subcommand ignores `-t` and only selects via `-s`/ANDROID_SERIAL, so
+    // `adb -t <id> emu kill` fails with "more than one emulator detected; use
+    // -s" as soon as a second emulator is attached (issue #6845). Re-selecting
+    // the kill by serial only moves that window later: the checked emulator can
+    // exit and a replacement inherit its serial between the check and the kill,
+    // and `emu kill` would then terminate the replacement. `shell` does honour
+    // `-t`, and powering the guest off exits the emulator process, so verify the
+    // transport still resolves to the expected serial and then terminate through
+    // that same transport. adb never reuses a transport id, so a transport whose
+    // emulator has gone fails the command instead of selecting a replacement.
+    // Callers confirm disappearance. Older callers without an expected transport
+    // may still match a cold-boot AVD; a discovery that reports no transport at
+    // all keeps the legacy serial-scoped `emu kill`.
+    if (emulator.transportId) {
+      const transportAdb = this.adbFactory.create(null);
+      const serialResult = await transportAdb.execute(
+        ["-t", emulator.transportId, "get-serialno"],
+        {
+          timeoutMs: options.timeoutMs,
+          noRetry: true,
+          signal: options.signal,
+        },
+      );
+      const observedSerial = serialResult.stdout.trim();
+      if (observedSerial !== emulator.deviceId) {
+        throw new ActionableError(
+          `Emulator '${device.deviceId}' identity changed before termination; transport ${emulator.transportId} now reports '${observedSerial}'. Refusing to kill its replacement.`,
+        );
+      }
+      await transportAdb.execute(["-t", emulator.transportId, "shell", "reboot", "-p"], {
+        timeoutMs: options.timeoutMs,
+        noRetry: true,
+        signal: options.signal,
+        waitForProcessSettlementAfterAbort: true,
+      });
+    } else {
+      const adb = this.adbFactory.create(emulator);
+      await adb.execute(["emu", "kill"], {
+        timeoutMs: options.timeoutMs,
+        noRetry: true,
+        signal: options.signal,
+        waitForProcessSettlementAfterAbort: true,
+      });
+    }
+
+    logger.info(`Requested termination of emulator '${device.name}'`);
     return emulator;
   }
 

@@ -2,26 +2,26 @@ import AppKit
 import AVFoundation
 import CoreGraphics
 import Foundation
-import ScreenCaptureKit
 import ScreenCaptureCore
+import ScreenCaptureKit
 
 // MARK: - Constants
 
-// ScreenCaptureKit cold-starts just beyond two seconds on hosted macOS runners.
-// Keep the permission hint behind the source's first-frame timeout so startup
-// latency is not misreported as a missing Screen Recording entitlement.
+/// ScreenCaptureKit cold-starts just beyond two seconds on hosted macOS runners.
+/// Keep the permission hint behind the source's first-frame timeout so startup
+/// latency is not misreported as a missing Screen Recording entitlement.
 let simulatorPermissionTimeoutSeconds: TimeInterval = 10.0
 
-// Exit status used when a capture stream dies *after* it started delivering
-// frames (a mid-stream `SCStream`/`AVCaptureSession` fatal error). The helper
-// deliberately exits with a non-zero, non-`1` code instead of leaving a dead
-// stream spinning `RunLoop.main`: the parent supervisor (`IosH264Source`) owns
-// bounded reconnect and re-launches a fresh helper on any non-zero exit, so a
-// deterministic process signal is a stronger contract than a live-but-silent
-// process the supervisor can only detect by string-matching an `error:` stderr
-// line. `1` is already used for startup failures; `70` (EX_SOFTWARE) marks the
-// distinct "was running, then the stream failed" case for log triage. See
-// issue #4768.
+/// Exit status used when a capture stream dies *after* it started delivering
+/// frames (a mid-stream `SCStream`/`AVCaptureSession` fatal error). The helper
+/// deliberately exits with a non-zero, non-`1` code instead of leaving a dead
+/// stream spinning `RunLoop.main`: the parent supervisor (`IosH264Source`) owns
+/// bounded reconnect and re-launches a fresh helper on any non-zero exit, so a
+/// deterministic process signal is a stronger contract than a live-but-silent
+/// process the supervisor can only detect by string-matching an `error:` stderr
+/// line. `1` is already used for startup failures; `70` (EX_SOFTWARE) marks the
+/// distinct "was running, then the stream failed" case for log triage. See
+/// issue #4768.
 let midStreamFatalExitCode: Int32 = 70
 
 // A command-line process has no AppKit application by default. ScreenCaptureKit
@@ -81,7 +81,8 @@ private final class FrameMetricsReporter {
 
     private func emitSnapshot() {
         guard let encoded = try? JSONEncoder().encode(writer.metrics()),
-              let json = String(data: encoded, encoding: .utf8) else {
+              let json = String(data: encoded, encoding: .utf8)
+        else {
             return
         }
         output("\(Self.linePrefix)\(json)")
@@ -95,7 +96,7 @@ private final class FrameMetricsReporter {
 NSSetUncaughtExceptionHandler { exception in
     logError(
         "fatal: uncaught Objective-C exception \(exception.name.rawValue): "
-        + (exception.reason ?? "no reason provided")
+            + (exception.reason ?? "no reason provided")
     )
 }
 
@@ -155,6 +156,25 @@ case .help:
     print(CommandLineOptions.helpText)
     exit(0)
 
+case let .highlightSimulator(deviceName, json):
+    guard screenRecordingPermissionAccess.requestIfNeeded() else {
+        logScreenRecordingPermissionRequired()
+        exit(1)
+    }
+    Task { @MainActor in
+        let host = SimulatorHighlightHost(deviceName: deviceName)
+        installShutdownHandlers { host.close(); exit(0) }
+        await host.receive(Data(json.utf8))
+        FileHandle.standardInput.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                exit(0)
+            }
+            Task { @MainActor in host.enqueue(data) }
+        }
+    }
+    NSApplication.shared.run()
+
 case .listDevices:
     CMIOSystem.enableScreenCaptureDevices()
     // Poll briefly for the system to register USB devices instead of an
@@ -170,16 +190,16 @@ case .listSimulators:
         exit(1)
     }
     switch runBlocking({ try await SimulatorWindowDiscovery.discover() }) {
-    case .success(let windows):
+    case let .success(windows):
         writeJSON(SimulatorWindowListResponse(windows: windows))
         exit(0)
-    case .failure(let error):
+    case let .failure(error):
         logError("error: failed to query simulator windows: \(error)")
         logError("hint: grant Screen Recording permission to your terminal/IDE.")
         exit(1)
     }
 
-case .captureSimulator(let windowID, let fps, let audio, let encode):
+case let .captureSimulator(windowID, fps, audio, encode):
     guard screenRecordingPermissionAccess.requestIfNeeded() else {
         logScreenRecordingPermissionRequired()
         exit(1)
@@ -188,12 +208,12 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
 
     if audio {
         switch runBlocking({ try await SimulatorWindowDiscovery.discover() }) {
-        case .success(let windows):
+        case let .success(windows):
             if let error = SimulatorAudioCaptureAvailability.errorMessage(for: windows) {
                 logError("error: \(error)")
                 exit(1)
             }
-        case .failure(let error):
+        case let .failure(error):
             logError("error: failed to query simulator windows: \(error)")
             exit(1)
         }
@@ -205,7 +225,7 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
     logError(CaptureStartupMarker.line(.resolvingWindow(windowID: windowID)))
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
-    case .success(.resolved(let resolved)):
+    case let .success(.resolved(resolved)):
         window = resolved
         logError(CaptureStartupMarker.line(.resolvedWindow(
             windowID: windowID,
@@ -215,16 +235,16 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
     case .success(.notFound):
         logError("error: no window with CGWindowID \(windowID)")
         exit(1)
-    case .success(.notSimulatorWindow(let bundleIdentifier)):
+    case let .success(.notSimulatorWindow(bundleIdentifier)):
         // Fail closed: the window id resolves to a live window that is not owned
         // by the iOS Simulator (a recycled/stale window id). Capturing it would
         // silently leak an unrelated window's contents (#4763).
         logError(
             "error: window with CGWindowID \(windowID) is not an iOS Simulator window"
-            + " (owning bundle: \(bundleIdentifier ?? "unknown")); refusing to capture"
+                + " (owning bundle: \(bundleIdentifier ?? "unknown")); refusing to capture"
         )
         exit(1)
-    case .failure(let error):
+    case let .failure(error):
         logError("error: failed to query simulator windows: \(error)")
         exit(1)
     }
@@ -301,7 +321,7 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
     }
     RunLoop.main.run()
 
-case .capture(let deviceID, let encode):
+case let .capture(deviceID, encode):
     CMIOSystem.enableScreenCaptureDevices()
     // Poll briefly for the requested device to register instead of an
     // unconditional 0.5s sleep; return as soon as it enumerates (issue #4737).
@@ -374,20 +394,25 @@ case .capture(let deviceID, let encode):
 
 // MARK: - Async/sync bridges
 
-// A reference box so the Task closure mutates a captured class instead of a
-// `var`. Swift 5.9 (Xcode 15) rejects `var` capture in `Task { … }` even when
-// the semaphore enforces a happens-before relationship; class capture is fine.
-private final class Box<T> {
+/// A reference box so the Task closure mutates a captured class instead of a
+/// `var`. Swift 5.9 (Xcode 15) rejects `var` capture in `Task { … }` even when
+/// the semaphore enforces a happens-before relationship; class capture is fine.
+/// `@unchecked Sendable`: the `Task` writes `value` before `semaphore.signal()` and
+/// `runBlocking` reads it only after `semaphore.wait()`, so the semaphore is the
+/// happens-before edge that serializes the single write and single read.
+private final class Box<T>: @unchecked Sendable {
     var value: T
-    init(_ value: T) { self.value = value }
+    init(_ value: T) {
+        self.value = value
+    }
 }
 
-func runBlocking<T>(_ body: @escaping () async throws -> T) -> Result<T, Error> {
+func runBlocking<T>(_ body: @escaping @Sendable () async throws -> T) -> Result<T, Error> {
     let semaphore = DispatchSemaphore(value: 0)
     let box = Box<Result<T, Error>>(.failure(CancellationError()))
     Task {
         do {
-            box.value = .success(try await body())
+            box.value = try .success(await body())
         } catch {
             box.value = .failure(error)
         }
@@ -397,7 +422,7 @@ func runBlocking<T>(_ body: @escaping () async throws -> T) -> Result<T, Error> 
     return box.value
 }
 
-func runBlocking<T>(_ body: @escaping () async -> T) -> T {
+func runBlocking<T>(_ body: @escaping @Sendable () async -> T) -> T {
     let semaphore = DispatchSemaphore(value: 0)
     let box = Box<T?>(nil)
     Task {
@@ -406,14 +431,18 @@ func runBlocking<T>(_ body: @escaping () async -> T) -> T {
     }
     semaphore.wait()
     // box.value is set by the async body before semaphore.signal(); wait() blocks until then.
-    return box.value!  // swiftlint:disable:this force_unwrapping
+    return box.value! // swiftlint:disable:this force_unwrapping
 }
 
 // MARK: - Signal handling
 
-// Retain signal sources beyond `installShutdownHandlers` to keep them alive
-// for the duration of the run loop.
-private var retainedSignalSources: [DispatchSourceSignal] = []
+/// Retain signal sources beyond `installShutdownHandlers` to keep them alive
+/// for the duration of the run loop. `nonisolated(unsafe)`: written exactly once by
+/// `installShutdownHandlers` on the main thread before `RunLoop.main.run()`, and
+/// never read afterward (it only holds the sources alive), so there is no cross-thread
+/// access to race — the annotation opts this write-once global out of the top-level
+/// `@MainActor` inference so the nonisolated helper can assign it.
+private nonisolated(unsafe) var retainedSignalSources: [DispatchSourceSignal] = []
 
 func installShutdownHandlers(_ handler: @escaping () -> Void) {
     let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)

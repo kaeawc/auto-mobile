@@ -88,9 +88,16 @@ export class DualTrackRecorder {
       throw new Error("[DualTrackRecorder] Unable to connect to the accessibility service.");
     }
     if (this.recordWithSendKeys) {
-      const supportedCommands = await a11y.getSupportedCommands();
-      this.recordWithSupportedSendKeys =
-        supportedCommands?.includes("request_insert_text") ?? false;
+      this.recordWithSupportedSendKeys = false;
+      try {
+        const supportedCommands = await a11y.getSupportedCommands();
+        this.recordWithSupportedSendKeys =
+          supportedCommands?.includes("request_insert_text") ?? false;
+      } catch (error) {
+        logger.warn(
+          `[DualTrackRecorder] Capability lookup failed; recording text with inputText: ${error}`,
+        );
+      }
     }
 
     // Notify Kotlin service that recording is starting (enables interaction event emission)

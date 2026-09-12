@@ -65,6 +65,33 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.71",
+    apkSha256: "81498270b95f0d78c5621030960883d14017a88135fd2839fc59e8f5aa4a0224",
+    ipaSha256: "85d02e85dcc0309538aa1c094125c199c99e1668c5da2abc0269355c08392e28",
+    runnerSha256: "31bc5bf31ffbf500aa49b55f2d61a380c48d9f2bace2a4b400c9851d3ea0642e",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "e5ce791aed17a1bf391db5737367a8ca2d7792b805f2fa4235e4ec7f8cee062c",
+    screenCaptureHelperSha256: "525bc83a1ec275884fe7b281d231ab7f01003bd93247b05538c0c0d9bdddce4b",
+  },
+  {
+    version: "0.0.70",
+    apkSha256: "a0d8bba12fce1395fd32bfdd5567b7680f9ce220a430766cc1444abc79e9914e",
+    ipaSha256: "f57db6f95333dbb9b932b2d2b8d9f08729946fe87910c35848496155531d87c4",
+    runnerSha256: "3e873bb3bfc4755b8d8116569949d58b59e88b0de6d9c6c949519b953e6f474c",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "e5ce791aed17a1bf391db5737367a8ca2d7792b805f2fa4235e4ec7f8cee062c",
+    screenCaptureHelperSha256: "885e369bde6afc8f8d1a1183654aafe868a1fcaa7c7fa688688b4d42c20ce21c",
+  },
+  {
+    version: "0.0.69",
+    apkSha256: "c413aa51c2fb30fea7539873740c2b08e1a2f703752eb03e8f7ad58da6c473b1",
+    ipaSha256: "28256f7c82b97cd30823e25caa49b00ce82c7047bb1c4e5cd63228aa80f2e37c",
+    runnerSha256: "31d59101419a1a9a63f3965bc4825666208a2221781d122bcbe1d13a985b42aa",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "e5ce791aed17a1bf391db5737367a8ca2d7792b805f2fa4235e4ec7f8cee062c",
+    screenCaptureHelperSha256: "730bba741536173fecfaf2ccbb00768e9b2be3be38adc524132973c76562a882",
+  },
+  {
     version: "0.0.68",
     apkSha256: "95ed259c766d477d788a5bdf1ff851b6fe2198697f8ae2fcaaf690f0cb708fb5",
     ipaSha256: "a302bf4702c97fbf0d7dcecf22de4f470fd99602ee1f66d6beff5731a4a69aeb",
@@ -437,11 +464,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "6c6e3ab0eeb410d73c4f1fc3bb29d384fcb8bd9e297ddf2f7deb047b073dc93b",
-  ipaSha256: "405f16a3744c285904ba1a75883909638a0ae2acf52f606f03bf176e80495c68",
+  apkSha256: "bb70ccb599a38cc10fab6b630b0e295435d071c35d70b3a5c7eec4edc4df22e1",
+  ipaSha256: "4e2aa93b17f0ca4944fd724094bd5dff479ac5c31ef44d369b27cf56bb725707",
   runnerSha256Target: "xctest",
-  videoJarSha256: "e5ce791aed17a1bf391db5737367a8ca2d7792b805f2fa4235e4ec7f8cee062c",
-  runnerSha256: "850fc6b04c85a42248fbf761943d8e47d09d74e8e05e695e0f65b79630a37f2d",
+  videoJarSha256: "345887c28a2e0272d09c9e85ab1f571f1d05b68b24bc2c9f082b3e4518cc777e",
+  runnerSha256: "47e046d4f6376c7083fee0e5bfc98873dba2461e7c3dda70c120f7d54a8884db",
 };
 
 /**
@@ -811,7 +838,7 @@ export const APK_SHA256_CHECKSUM: string = resolveApkChecksum({});
 export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
 export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl({});
 export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum({});
-export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
+export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of AutoMobileTest.app (device build), empty = skip verification
 // SHA256 of the simulator runner executable, empty = skip verification. The
 // per-release target records whether that is the legacy XCTRunner stub or the
 // CtrlProxy xctest executable.

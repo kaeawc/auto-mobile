@@ -3,28 +3,16 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PathMeasure
-import android.graphics.PointF
 import android.graphics.RectF
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightBounds
-import dev.jasonpearson.automobile.ctrlproxy.models.HighlightLineCap
-import dev.jasonpearson.automobile.ctrlproxy.models.HighlightLineJoin
-import dev.jasonpearson.automobile.ctrlproxy.models.HighlightPoint
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
-import dev.jasonpearson.automobile.ctrlproxy.models.HighlightStyle
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
-import dev.jasonpearson.automobile.ctrlproxy.models.SmoothingAlgorithm
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.random.Random
 
 data class HighlightOperationResult(
@@ -35,15 +23,12 @@ data class HighlightOperationResult(
 class OverlayDrawer(
   private var overlayManager: OverlayManager? = null,
   private val screenDimensionsProvider: (() -> ScreenDimensions?)? = null,
-  private val colorParser: (String) -> Int = { Color.parseColor(it) },
+  private val random: Random = Random.Default,
 ) {
 
   companion object {
     private const val TAG = "OverlayDrawer"
-    private const val DEFAULT_STROKE_COLOR = "#FF0000"
     private const val DEFAULT_STROKE_WIDTH = 8f
-    private const val DEFAULT_PATH_STROKE_WIDTH = 8f
-    private const val DEFAULT_PATH_TENSION = 0.5f
     private const val ELLIPSE_SEGMENT_COUNT = 64
     private const val ELLIPSE_JITTER_RATIO = 0.035f
     private const val ELLIPSE_JITTER_FREQ_X = 2.3f
@@ -52,11 +37,6 @@ class OverlayDrawer(
     private const val ELLIPSE_START_ANGLE_JITTER = 8f
     private const val ELLIPSE_MIN_WIDTH_FACTOR = 0.75f
     private const val ELLIPSE_MAX_WIDTH_FACTOR = 2.0f
-    private const val PATH_MIN_SAMPLE_DISTANCE = 3f
-    private const val PATH_MAX_SEGMENTS = 240f
-    private const val PATH_TAPER_FRACTION = 0.12f
-    private const val PATH_MIN_WIDTH_FACTOR = 0.35f
-    private const val PATH_CURVE_TAPER_INTENSITY = 0.35f
   }
 
   private val lock = Any()
@@ -73,7 +53,6 @@ class OverlayDrawer(
   private var invalidatePending = false
 
   private var overlayView: HighlightOverlayView? = null
-  private val pathSmoother = PathSmoother()
   private val animator =
     HighlightAnimator(
       onAlphaUpdate = { id, alpha -> updateHighlightAlpha(id, alpha) },
@@ -184,13 +163,7 @@ class OverlayDrawer(
         invalidatePending = false
         renderSnapshot
       }
-    snapshot.forEach { renderState ->
-      when (renderState.shapeType) {
-        ShapeType.BOX,
-        ShapeType.CIRCLE -> drawEllipse(canvas, renderState)
-        ShapeType.PATH -> drawPath(canvas, renderState)
-      }
-    }
+    snapshot.forEach { renderState -> drawEllipse(canvas, renderState) }
   }
 
   private fun drawEllipse(canvas: Canvas, renderState: HighlightRenderState) {
@@ -234,41 +207,6 @@ class OverlayDrawer(
 
     paint.strokeWidth = originalWidth
     paint.alpha = originalAlpha
-  }
-
-  private fun drawPath(canvas: Canvas, renderState: HighlightRenderState) {
-    val strokePaint = renderState.strokePaint ?: return
-    val segments = renderState.pathSegments
-    if (segments.isNullOrEmpty()) {
-      applyStrokeAlpha(renderState, strokePaint)
-      renderState.path?.let { canvas.drawPath(it, strokePaint) }
-      return
-    }
-
-    val originalWidth = strokePaint.strokeWidth
-    val originalAlpha = strokePaint.alpha
-    val totalSegments = segments.size
-
-    segments.forEachIndexed { index, segment ->
-      strokePaint.strokeWidth = segment.strokeWidth
-      applyStaggeredFadeAlpha(renderState, strokePaint, index, totalSegments)
-      canvas.drawLine(segment.startX, segment.startY, segment.endX, segment.endY, strokePaint)
-    }
-
-    strokePaint.strokeWidth = originalWidth
-    strokePaint.alpha = originalAlpha
-  }
-
-  private fun updateHighlightAlpha(id: String, alpha: Float) {
-    val clamped = alpha.coerceIn(0f, 1f)
-    synchronized(lock) { highlights[id]?.alpha = clamped }
-    scheduleInvalidate()
-  }
-
-  private fun updateHighlightDrawProgress(id: String, progress: Float) {
-    val clamped = progress.coerceIn(0f, 1f)
-    synchronized(lock) { highlights[id]?.drawProgress = clamped }
-    scheduleInvalidate()
   }
 
   private fun applyStrokeAlpha(renderState: HighlightRenderState, paint: Paint) {
@@ -315,6 +253,18 @@ class OverlayDrawer(
     paint.alpha = targetAlpha
   }
 
+  private fun updateHighlightAlpha(id: String, alpha: Float) {
+    val clamped = alpha.coerceIn(0f, 1f)
+    synchronized(lock) { highlights[id]?.alpha = clamped }
+    scheduleInvalidate()
+  }
+
+  private fun updateHighlightDrawProgress(id: String, progress: Float) {
+    val clamped = progress.coerceIn(0f, 1f)
+    synchronized(lock) { highlights[id]?.drawProgress = clamped }
+    scheduleInvalidate()
+  }
+
   private fun ensureOverlayVisible(): String? {
     val manager = overlayManager ?: return "Overlay not initialized"
     if (!manager.show()) {
@@ -328,31 +278,16 @@ class OverlayDrawer(
   }
 
   private fun buildRenderState(shape: HighlightShape): HighlightRenderResult {
-    val shapeType =
-      when (shape.type) {
-        "box" -> ShapeType.BOX
-        "circle" -> ShapeType.CIRCLE
-        "path" -> ShapeType.PATH
-        else -> return HighlightRenderResult(error = "Unsupported highlight shape: ${shape.type}")
+    if (shape.type != "circle")
+      return HighlightRenderResult(error = "Only hand-drawn circle highlights are supported")
+    val paint =
+      Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.RED
+        style = Paint.Style.STROKE
+        strokeWidth = DEFAULT_STROKE_WIDTH
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
       }
-
-    val paintResult = resolvePaints(shape.style, shapeType)
-    if (paintResult.error != null) {
-      return HighlightRenderResult(error = paintResult.error)
-    }
-
-    return when (shapeType) {
-      ShapeType.BOX,
-      ShapeType.CIRCLE -> buildRectRenderState(shape, shapeType, paintResult)
-      ShapeType.PATH -> buildPathRenderState(shape, paintResult)
-    }
-  }
-
-  private fun buildRectRenderState(
-    shape: HighlightShape,
-    shapeType: ShapeType,
-    paintResult: HighlightPaintResult,
-  ): HighlightRenderResult {
     val bounds = shape.bounds ?: return HighlightRenderResult(error = "Missing highlight bounds")
     if (!bounds.hasValidSize()) {
       return HighlightRenderResult(error = "Highlight bounds must have positive width and height")
@@ -364,156 +299,21 @@ class OverlayDrawer(
       return HighlightRenderResult(error = rectResult.error ?: "Invalid highlight bounds")
     }
 
-    val baseStrokeWidth = paintResult.strokePaint?.strokeWidth ?: DEFAULT_STROKE_WIDTH
+    val baseStrokeWidth = DEFAULT_STROKE_WIDTH
     val ellipseSegments = buildEllipseSegments(rect, baseStrokeWidth)
-    val baseAlpha = paintResult.strokePaint?.alpha ?: 255
+    val baseAlpha = 255
     return HighlightRenderResult(
       state =
         HighlightRenderState(
           shape = shape,
           rect = rect,
-          path = null,
-          pathSegments = null,
           ellipseSegments = ellipseSegments,
-          shapeType = shapeType,
-          strokePaint = paintResult.strokePaint,
+          strokePaint = paint,
           baseAlpha = baseAlpha,
           alpha = 1f,
           drawProgress = 0f,
         )
     )
-  }
-
-  private fun buildPathRenderState(
-    shape: HighlightShape,
-    paintResult: HighlightPaintResult,
-  ): HighlightRenderResult {
-    val points =
-      shape.points ?: return HighlightRenderResult(error = "Path highlight requires points")
-    if (points.size < 2) {
-      return HighlightRenderResult(error = "Path highlight requires at least 2 points")
-    }
-
-    val scaleResult = shape.bounds?.let { resolveScale(it) } ?: HighlightScaleResult()
-    if (scaleResult.error != null) {
-      return HighlightRenderResult(error = scaleResult.error)
-    }
-    val scaleX = scaleResult.scaleX ?: 1f
-    val scaleY = scaleResult.scaleY ?: 1f
-    val pathPoints = points.toPointFList(scaleX, scaleY)
-    if (pathPoints.any { !it.x.isFinite() || !it.y.isFinite() }) {
-      return HighlightRenderResult(error = "Path points must be finite numbers")
-    }
-
-    val tension = shape.style?.tension ?: DEFAULT_PATH_TENSION
-    if (tension < 0f || tension > 1f) {
-      return HighlightRenderResult(error = "tension must be between 0.0 and 1.0")
-    }
-
-    val algorithm = shape.style?.smoothing ?: SmoothingAlgorithm.CATMULL_ROM
-    val path = pathSmoother.smoothPath(pathPoints, algorithm, tension)
-    val baseStrokeWidth = paintResult.strokePaint?.strokeWidth ?: DEFAULT_PATH_STROKE_WIDTH
-    val pathSegments = buildPathSegments(path, baseStrokeWidth)
-
-    val baseAlpha = paintResult.strokePaint?.alpha ?: 255
-    return HighlightRenderResult(
-      state =
-        HighlightRenderState(
-          shape = shape,
-          rect = null,
-          path = path,
-          pathSegments = pathSegments,
-          ellipseSegments = null,
-          shapeType = ShapeType.PATH,
-          strokePaint = paintResult.strokePaint,
-          baseAlpha = baseAlpha,
-          alpha = 1f,
-          drawProgress = 0f,
-        )
-    )
-  }
-
-  private fun resolvePaints(
-    style: HighlightStyle?,
-    shapeType: ShapeType,
-  ): HighlightPaintResult {
-    val effectiveStyle = style?.takeUnless { isStyleEmpty(it) }
-    val strokeWidth = effectiveStyle?.strokeWidth ?: defaultStrokeWidth(shapeType)
-    if (strokeWidth <= 0f) {
-      return HighlightPaintResult(error = "strokeWidth must be greater than 0")
-    }
-
-    val strokeColor =
-      if (shapeType == ShapeType.PATH) {
-        effectiveStyle?.strokeColor ?: DEFAULT_STROKE_COLOR
-      } else {
-        DEFAULT_STROKE_COLOR
-      }
-    val parsedStrokeColor =
-      parseColor(strokeColor)
-        ?: return HighlightPaintResult(error = "Invalid strokeColor: $strokeColor")
-
-    val paint =
-      Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = parsedStrokeColor
-        this.style = Paint.Style.STROKE
-        this.strokeWidth = strokeWidth
-        strokeCap = resolveStrokeCap(effectiveStyle, shapeType)
-        strokeJoin = resolveStrokeJoin(effectiveStyle, shapeType)
-      }
-
-    val dashPattern =
-      if (shapeType == ShapeType.PATH) {
-        effectiveStyle?.dashPattern
-      } else {
-        null
-      }
-    if (dashPattern != null) {
-      if (dashPattern.isEmpty() || dashPattern.any { it <= 0f }) {
-        return HighlightPaintResult(error = "dashPattern must contain positive values")
-      }
-      paint.pathEffect = DashPathEffect(dashPattern.toFloatArray(), 0f)
-    }
-
-    return HighlightPaintResult(strokePaint = paint)
-  }
-
-  private fun isStyleEmpty(style: HighlightStyle): Boolean {
-    return style.strokeColor == null &&
-      style.strokeWidth == null &&
-      style.dashPattern == null &&
-      style.smoothing == null &&
-      style.tension == null &&
-      style.capStyle == null &&
-      style.joinStyle == null
-  }
-
-  private fun defaultStrokeWidth(shapeType: ShapeType): Float {
-    return if (shapeType == ShapeType.PATH) {
-      DEFAULT_PATH_STROKE_WIDTH
-    } else {
-      DEFAULT_STROKE_WIDTH
-    }
-  }
-
-  private fun resolveStrokeCap(style: HighlightStyle?, shapeType: ShapeType): Paint.Cap {
-    val fallback = Paint.Cap.ROUND
-    return when (style?.capStyle) {
-      HighlightLineCap.BUTT -> Paint.Cap.BUTT
-      HighlightLineCap.ROUND -> Paint.Cap.ROUND
-      HighlightLineCap.SQUARE -> Paint.Cap.SQUARE
-      null -> fallback
-    }
-  }
-
-  private fun resolveStrokeJoin(style: HighlightStyle?, shapeType: ShapeType): Paint.Join {
-    val fallback = Paint.Join.ROUND
-    return when (style?.joinStyle) {
-      HighlightLineJoin.BEVEL -> Paint.Join.BEVEL
-      HighlightLineJoin.MITER -> Paint.Join.MITER
-      HighlightLineJoin.ROUND -> Paint.Join.ROUND
-      null -> fallback
-    }
   }
 
   private fun buildEllipseSegments(rect: RectF, baseStrokeWidth: Float): List<EllipseSegment> {
@@ -531,7 +331,6 @@ class OverlayDrawer(
     }
 
     val sweep = 360f / segmentCount.toFloat()
-    val random = Random(System.nanoTime())
     val phaseX = random.nextDouble() * Math.PI * 2.0
     val phaseY = random.nextDouble() * Math.PI * 2.0
     val startOffset =
@@ -573,145 +372,14 @@ class OverlayDrawer(
       (ELLIPSE_MAX_WIDTH_FACTOR - ELLIPSE_MIN_WIDTH_FACTOR) * variation
   }
 
-  private fun buildPathSegments(path: Path, baseStrokeWidth: Float): List<PathSegment> {
-    val measure = PathMeasure(path, false)
-    val length = measure.length
-    if (length <= 0f) {
-      return emptyList()
-    }
-
-    val step = max(PATH_MIN_SAMPLE_DISTANCE, length / PATH_MAX_SEGMENTS)
-    val segments = ArrayList<PathSegment>()
-
-    val prevPos = FloatArray(2)
-    val prevTan = FloatArray(2)
-    measure.getPosTan(0f, prevPos, prevTan)
-    var lastX = prevPos[0]
-    var lastY = prevPos[1]
-    var lastTanX = prevTan[0]
-    var lastTanY = prevTan[1]
-    var lastDistance = 0f
-    var distance = step
-
-    while (distance < length) {
-      val pos = FloatArray(2)
-      val tan = FloatArray(2)
-      measure.getPosTan(distance, pos, tan)
-      val midProgress = ((lastDistance + distance) / 2f / length).coerceIn(0f, 1f)
-      val widthFactor = resolveWidthFactor(midProgress, lastTanX, lastTanY, tan[0], tan[1])
-      segments.add(
-        PathSegment(
-          startX = lastX,
-          startY = lastY,
-          endX = pos[0],
-          endY = pos[1],
-          strokeWidth = baseStrokeWidth * widthFactor,
-        )
-      )
-
-      lastX = pos[0]
-      lastY = pos[1]
-      lastTanX = tan[0]
-      lastTanY = tan[1]
-      lastDistance = distance
-      distance += step
-    }
-
-    val endPos = FloatArray(2)
-    val endTan = FloatArray(2)
-    measure.getPosTan(length, endPos, endTan)
-    val endProgress = ((lastDistance + length) / 2f / length).coerceIn(0f, 1f)
-    val endWidthFactor = resolveWidthFactor(endProgress, lastTanX, lastTanY, endTan[0], endTan[1])
-    segments.add(
-      PathSegment(
-        startX = lastX,
-        startY = lastY,
-        endX = endPos[0],
-        endY = endPos[1],
-        strokeWidth = baseStrokeWidth * endWidthFactor,
-      )
-    )
-
-    return segments
-  }
-
-  private fun resolveWidthFactor(
-    progress: Float,
-    previousTanX: Float,
-    previousTanY: Float,
-    tanX: Float,
-    tanY: Float,
-  ): Float {
-    val taperFactor = resolveTaperFactor(progress)
-    val curveFactor = resolveCurveFactor(previousTanX, previousTanY, tanX, tanY)
-    return max(PATH_MIN_WIDTH_FACTOR, taperFactor * curveFactor)
-  }
-
-  private fun resolveTaperFactor(progress: Float): Float {
-    if (PATH_TAPER_FRACTION <= 0f) {
-      return 1f
-    }
-    val start = min(1f, progress / PATH_TAPER_FRACTION)
-    val end = min(1f, (1f - progress) / PATH_TAPER_FRACTION)
-    val taper = min(start, end)
-    return taper * taper * (3f - 2f * taper)
-  }
-
-  private fun resolveCurveFactor(
-    previousTanX: Float,
-    previousTanY: Float,
-    tanX: Float,
-    tanY: Float,
-  ): Float {
-    val previousMagnitude = sqrt(previousTanX * previousTanX + previousTanY * previousTanY)
-    val currentMagnitude = sqrt(tanX * tanX + tanY * tanY)
-    if (previousMagnitude == 0f || currentMagnitude == 0f) {
-      return 1f
-    }
-
-    val normalizedPrevX = previousTanX / previousMagnitude
-    val normalizedPrevY = previousTanY / previousMagnitude
-    val normalizedX = tanX / currentMagnitude
-    val normalizedY = tanY / currentMagnitude
-    val dot = (normalizedPrevX * normalizedX + normalizedPrevY * normalizedY).coerceIn(-1f, 1f)
-    val curvature = (1f - dot) / 2f
-    val adjustment = min(1f, curvature) * PATH_CURVE_TAPER_INTENSITY
-    return 1f - adjustment
-  }
-
-  private fun parseColor(color: String): Int? {
-    return try {
-      colorParser(color)
-    } catch (e: IllegalArgumentException) {
-      Log.w(TAG, "Failed to parse color: $color", e)
-      null
-    }
-  }
-
   private data class HighlightRenderState(
     val shape: HighlightShape,
     val rect: RectF?,
-    val path: Path?,
-    val pathSegments: List<PathSegment>?,
     val ellipseSegments: List<EllipseSegment>?,
-    val shapeType: ShapeType,
     val strokePaint: Paint?,
     val baseAlpha: Int,
     var alpha: Float,
     var drawProgress: Float = 0f,
-  )
-
-  private data class HighlightPaintResult(
-    val strokePaint: Paint? = null,
-    val error: String? = null,
-  )
-
-  private data class PathSegment(
-    val startX: Float,
-    val startY: Float,
-    val endX: Float,
-    val endY: Float,
-    val strokeWidth: Float,
   )
 
   private data class EllipseSegment(
@@ -729,10 +397,6 @@ class OverlayDrawer(
     val scaleX = scale.scaleX ?: 1f
     val scaleY = scale.scaleY ?: 1f
     return HighlightRectResult(rect = bounds.toRectF(scaleX, scaleY))
-  }
-
-  private fun List<HighlightPoint>.toPointFList(scaleX: Float, scaleY: Float): List<PointF> {
-    return map { point -> PointF(point.x * scaleX, point.y * scaleY) }
   }
 
   private fun resolveScale(bounds: HighlightBounds): HighlightScaleResult {
@@ -784,10 +448,4 @@ class OverlayDrawer(
     val state: HighlightRenderState? = null,
     val error: String? = null,
   )
-
-  private enum class ShapeType {
-    BOX,
-    CIRCLE,
-    PATH,
-  }
 }

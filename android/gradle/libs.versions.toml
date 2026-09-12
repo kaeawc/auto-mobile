@@ -11,7 +11,7 @@ build-android-targetSdk = "36"             # Used in playground Android modules
 build-android-agp = "9.4.0"
 
 # Kotlin versions
-build-kotlin = "2.4.10"
+build-kotlin = "2.4.20"
 build-kotlin-language = "2.3"              # Used in all Kotlin modules
 build-kotlin-consumer = "2.2.21"           # Published runner/test-plan consumer floor
 build-kotlin-consumer-api = "2.2"          # API surface supported by older Kotlin consumers
@@ -35,7 +35,7 @@ androidx-lifecycle = "2.11.0"
 androidx-startup = "1.2.0"
 
 # Media library versions
-coil = "3.6.1"
+coil = "3.6.2"
 core-splashscreen = "1.2.0"
 kotlinx-coroutines-test = "1.11.0"
 media3 = "1.11.0"
@@ -73,7 +73,7 @@ mavenpublish = "0.37.0"
 dokka = "2.2.0"
 compose-multiplatform = "1.12.0"
 compose-hot-reload = "1.2.0"
-metro = "1.4.2"
+metro = "1.4.3"
 conveyor = "2.0"
 # Conveyor's in-app update control API (SoftwareUpdateController). Versioned independently of the
 # `conveyor` Gradle plugin above — this is the runtime library the desktop app links against.

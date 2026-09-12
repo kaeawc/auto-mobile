@@ -488,7 +488,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             break;
           }
           throw new ActionableError(
-            "Both Android and iOS devices are connected. Please disconnect devices from one platform or call setActiveDevice to select a platform.",
+            "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
           );
         }
 

@@ -102,16 +102,57 @@ describe("assignStableViewIds (#3228)", () => {
     );
   });
 
-  test("different descendant content yields DIFFERENT ids (distinct rows never share)", () => {
+  test("structurally distinct rows yield DIFFERENT ids (distinct rows never share)", () => {
+    // Distinctness is structural: a differing resource-id / class / test-tag
+    // anywhere in the subtree keeps the ancestors' ids distinct (#6230), even
+    // though the volatile display text no longer participates in the rollup.
     const rowA = node({ "view-id": generatedUuid("a") }, [
-      node({ "view-id": generatedUuid("a1"), text: "Item 1" }),
+      node({
+        "view-id": generatedUuid("a1"),
+        "resource-id": "com.example:id/first",
+        text: "Item 1",
+      }),
     ]);
     const rowB = node({ "view-id": generatedUuid("b") }, [
-      node({ "view-id": generatedUuid("b1"), text: "Item 2" }),
+      node({
+        "view-id": generatedUuid("b1"),
+        "resource-id": "com.example:id/second",
+        text: "Item 2",
+      }),
     ]);
     assignStableViewIds(rowA);
     assignStableViewIds(rowB);
     expect(rowA["view-id"]).not.toEqual(rowB["view-id"]);
+    // The leaf nodes themselves still differ by their own resource-id/text.
+    expect((rowA.node as Record<string, unknown>)["view-id"]).not.toEqual(
+      (rowB.node as Record<string, unknown>)["view-id"],
+    );
+  });
+
+  test("a descendant's text/content-desc churn does NOT change an ancestor's id (#6230)", () => {
+    // A row wrapping a live timer child whose label ticks between the skeleton
+    // capture and the fresh capture a later tapOn resolves against. The row (and
+    // any other ancestor) must keep its id so the emitted selector still matches;
+    // only the timer leaf's own id may change, because its own content changed.
+    const rowWith = (label: string): Record<string, unknown> =>
+      node({ "view-id": generatedUuid("row"), "resource-id": "com.example:id/timerRow" }, [
+        node({ "view-id": generatedUuid("static"), text: "Elapsed" }),
+        node({ "view-id": generatedUuid("timer"), text: label }),
+      ]);
+    const before = rowWith("1 second");
+    const after = rowWith("2 seconds");
+    assignStableViewIds(before);
+    assignStableViewIds(after);
+    // Ancestor row id is stable across the descendant label tick…
+    expect(before["view-id"]).toEqual(after["view-id"]);
+    // …and the static sibling's own id is likewise stable…
+    expect((before.node as Record<string, unknown>[])[0]["view-id"]).toEqual(
+      (after.node as Record<string, unknown>[])[0]["view-id"],
+    );
+    // …while the timer leaf's OWN id changes, because its own text changed.
+    expect((before.node as Record<string, unknown>[])[1]["view-id"]).not.toEqual(
+      (after.node as Record<string, unknown>[])[1]["view-id"],
+    );
   });
 
   test("canonical class and legacy className participate equivalently in identity", () => {
@@ -277,4 +318,22 @@ describe("assignStableViewIds (#3228)", () => {
     assignStableViewIds(typed);
     expect(empty["view-id"]).not.toEqual(typed["view-id"]);
   });
+});
+
+test("named toggles retain ids across state text changes but remain distinct (#6794)", () => {
+  const capture = (text: string, description: string, checkable = true) => {
+    const tile = node({
+      "view-id": generatedUuid("tile"),
+      class: "android.widget.Switch",
+      "content-desc": description,
+      text,
+      checkable,
+    });
+    assignStableViewIds(tile);
+    return tile["view-id"];
+  };
+  expect(capture("Off", "Do Not Disturb.")).toBe(capture("On", "Do Not Disturb."));
+  expect(capture("On", "Bluetooth.")).not.toBe(capture("On", "Do Not Disturb."));
+  expect(capture("Off", "")).not.toBe(capture("On", ""));
+  expect(capture("Off", "Status", false)).not.toBe(capture("On", "Status", false));
 });

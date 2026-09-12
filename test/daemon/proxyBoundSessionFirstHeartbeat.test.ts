@@ -518,23 +518,31 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
-  // AC1: the ownership heartbeat is delivered before the best-effort notification
-  // subscription — subscribeToNotifications() is a daemon RPC that can stall, and
-  // must not delay the time-critical first heartbeat past the reclaim grace.
-  test("delivers the first heartbeat before subscribing to notifications", async () => {
+  // AC1 + #6336: start notification opt-in before the heartbeat so shutdown
+  // release signals cannot land in an unsubscribed window, but do not await the
+  // potentially-stalled subscription before dispatching the time-critical
+  // heartbeat.
+  test("starts notification subscription without delaying the first heartbeat", async () => {
     await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
 
-    let subscribeCallsAtHeartbeat = -1;
-    const clientRef: { current: FakeDaemonClient | null } = { current: null };
+    const releaseSubscription = Promise.withResolvers<void>();
+    let subscriptionStarted = false;
+    let subscriptionStartedAtHeartbeat = false;
+    let heartbeatObserved = false;
     const fakeClient = new FakeDaemonClient({
       onCallDaemonMethod: (method, params) => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-          subscribeCallsAtHeartbeat = clientRef.current!.subscribeToNotificationsCalls;
+          heartbeatObserved = true;
+          subscriptionStartedAtHeartbeat = subscriptionStarted;
           sessionManager.recordHeartbeat(params.sessionId);
         }
       },
     });
-    clientRef.current = fakeClient;
+    fakeClient.subscribeToNotifications = async () => {
+      fakeClient.subscribeToNotificationsCalls += 1;
+      subscriptionStarted = true;
+      await releaseSubscription.promise;
+    };
     const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
       initialSessionUuid: BOUND_SESSION,
@@ -545,12 +553,97 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
 
     try {
-      await proxy.ensureConnected();
-      // The heartbeat ran while the subscription had not yet been requested.
-      expect(subscribeCallsAtHeartbeat).toBe(0);
-      // The subscription still happens (best-effort), just after the heartbeat.
+      let connected = false;
+      const connection = proxy.ensureConnected().then(() => {
+        connected = true;
+      });
+      for (let i = 0; i < 50 && !heartbeatObserved; i++) {
+        await Promise.resolve();
+      }
+
+      expect(subscriptionStartedAtHeartbeat).toBe(true);
+      expect(heartbeatObserved).toBe(true);
+      expect(connected).toBe(false);
       expect(fakeClient.subscribeToNotificationsCalls).toBe(1);
       expect(sessionManager.getSession(BOUND_SESSION)?.hasReceivedHeartbeat).toBe(true);
+
+      releaseSubscription.resolve();
+      await connection;
+      expect(connected).toBe(true);
+    } finally {
+      releaseSubscription.resolve();
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("captures initial-binding shutdown during the first heartbeat and waits for EOF (#6336)", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    let subscriptionStarted = false;
+    const oldDaemonRef: { current: FakeDaemonClient | null } = { current: null };
+    const oldDaemon = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "daemon/heartbeat" && subscriptionStarted) {
+          oldDaemonRef.current!.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            BOUND_SESSION,
+            "daemon-shutdown",
+          );
+        }
+      },
+    });
+    oldDaemonRef.current = oldDaemon;
+    oldDaemon.subscribeToNotifications = async () => {
+      oldDaemon.subscribeToNotificationsCalls += 1;
+      subscriptionStarted = true;
+    };
+    const replacementDaemon = new FakeDaemonClient({
+      toolResultFor: (toolName) =>
+        toolName === "getAndroid"
+          ? {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ sessionUuid: "replacement-session" }),
+                },
+              ],
+            }
+          : undefined,
+    });
+    const clients: DaemonClientLike[] = [oldDaemon, replacementDaemon];
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      const reacquired = proxy.callTool("getAndroid", { avdName: "am-api34-ga-arm64" });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(subscriptionStarted).toBe(true);
+      expect(oldDaemon.callToolCalls).toEqual([]);
+      expect(replacementDaemon.callToolCalls).toEqual([]);
+
+      oldDaemon.emitConnectionClosed();
+
+      await expect(reacquired).resolves.toEqual({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ sessionUuid: "replacement-session" }),
+          },
+        ],
+      });
+      expect(replacementDaemon.callToolCalls).toEqual([
+        { toolName: "getAndroid", params: { avdName: "am-api34-ga-arm64" } },
+      ]);
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

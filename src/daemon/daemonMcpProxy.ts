@@ -1,7 +1,10 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { shellQuote } from "../utils/shellQuote";
 import {
+  DaemonBoundSessionLostError,
   DaemonClient,
+  DaemonHandshakeMismatchError,
+  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
   type DaemonClientFactory,
@@ -18,11 +21,19 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
+  DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
 } from "./constants";
-import { PROGRESS_NOTIFICATION_METHOD, type DaemonNotification, type DaemonOptions } from "./types";
+import {
+  PROGRESS_NOTIFICATION_METHOD,
+  type DaemonNotification,
+  type DaemonOptions,
+  type DaemonStatus,
+} from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
+  DEVICE_SESSION_RECOVERY_PROMPT,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
@@ -58,6 +69,25 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
+
+/** A transport failed before dispatch, rather than a reconciliation policy gate. */
+class DaemonPreflightConnectionError extends DaemonUnavailableError {
+  constructor(readonly cause: DaemonUnavailableError) {
+    super(cause.message);
+    this.name = "DaemonPreflightConnectionError";
+  }
+}
+
+async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof DaemonUnavailableError) {
+      throw new DaemonPreflightConnectionError(error);
+    }
+    throw error;
+  }
+}
 
 function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean {
   return uri === `automobile:device-session/${sessionUuid}/screenshot`;
@@ -129,8 +159,11 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
       : installableVersion.length > 0 && installableVersion !== "unknown"
         ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
         : "the same installed auto-mobile package";
-    const retryGuidance =
-      params.retryAfterMs !== undefined
+    const unresolvedClientVersion =
+      installableVersion.trim() === "" || installableVersion === "unknown";
+    const retryGuidance = unresolvedClientVersion
+      ? " The client package version could not be resolved. Reinstall or repair the AutoMobile client package, then relaunch this MCP client. Restarting the daemon cannot repair missing client version metadata."
+      : params.retryAfterMs !== undefined
         ? ` Retry after ${params.retryAfterMs}ms or restart the daemon from this client's build: ${restartCommand}`
         : ` Restart the daemon from this client's build: ${restartCommand}`;
     const sameRelease =
@@ -241,7 +274,7 @@ export class DaemonConnectionSessionReleasedError extends Error {
   constructor(reason: string) {
     super(
       `This MCP connection has no active device session (the previous session was released: ${reason}). ` +
-        "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+        DEVICE_SESSION_RECOVERY_PROMPT,
     );
     this.name = "DaemonConnectionSessionReleasedError";
     this.reason = reason;
@@ -297,6 +330,8 @@ export interface DaemonMcpProxyConfig {
   connectionTimeoutMs?: number;
   /** Factory for creating daemon clients (for testing) */
   clientFactory?: DaemonClientFactory;
+  /** Socket-owner identity probe; custom client factories inject this separately. */
+  daemonStatusProbe?: () => Promise<DaemonStatus>;
   /** Custom daemon manager (for testing) */
   daemonManager?: DaemonManagerLike;
   /** Options to pass when auto-starting the daemon */
@@ -634,6 +669,8 @@ export class DaemonMcpProxy {
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
+  private readonly daemonStatusProbe?: () => Promise<DaemonStatus>;
+  private reconciliationSnapshot?: Promise<DaemonStatus>;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
   /**
@@ -649,6 +686,13 @@ export class DaemonMcpProxy {
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
   private connectionCloseReject: ((reason?: unknown) => void) | null = null;
+  /**
+   * A `daemon-shutdown` release arrives before the old daemon closes its socket.
+   * Calls admitted for replacement acquisition wait on this peer-close barrier
+   * instead of reconnecting to the still-reachable but quiesced incarnation.
+   */
+  private daemonShutdownDisconnect: Promise<void> | null = null;
+  private resolveDaemonShutdownDisconnect: (() => void) | null = null;
   private connected: boolean = false;
   private closing: boolean = false;
   // The daemon clears socket-local state when its RPC connection drops. Keep this
@@ -711,6 +755,7 @@ export class DaemonMcpProxy {
   private readonly releasedSessionEpochs = new Map<string, number>();
   private readonly releasedSessionReasons = new Map<string, string>();
   private readonly activeReleaseEpochReferences = new Map<string, number>();
+  private readonly activeAcquisitionReleaseEpochs = new Map<number, number>();
   // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
   // or the session binding mid-flight (list_changed nulls a cache; a bound-session
   // release changes the session scope). A `tools/list` / `resources/list` captures
@@ -768,6 +813,7 @@ export class DaemonMcpProxy {
     this.clientFactory =
       config.clientFactory ??
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
+    this.daemonStatusProbe = this.createStatusProbe(config);
     this.timer = config.timer ?? defaultTimer;
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
@@ -803,6 +849,13 @@ export class DaemonMcpProxy {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
+    const daemonShutdownDisconnect = this.daemonShutdownDisconnect;
+    if (daemonShutdownDisconnect) {
+      await daemonShutdownDisconnect;
+      if (this.closing) {
+        throw new DaemonUnavailableError("MCP proxy is closing");
+      }
+    }
     if (this.connected && this.client) {
       return;
     }
@@ -836,6 +889,7 @@ export class DaemonMcpProxy {
 
   private async doConnect(): Promise<void> {
     this.throwIfClosing();
+    this.reconciliationSnapshot = undefined;
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     // This is an observation-only probe (issue #6140: isAvailable never touches
@@ -878,20 +932,24 @@ export class DaemonMcpProxy {
       );
     }
     this.subscribeToClientConnectionClosed(client);
-    await client.connect();
+    await runPreflightTransport(() => client.connect());
     if (this.closing) {
       await client.close();
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
     logger.info("[DaemonMcpProxy] Connected to daemon");
 
-    // Deliver the ownership heartbeat FIRST — before the best-effort notification
-    // subscription (issue #5637). subscribeToNotifications() is a daemon RPC that
-    // can stall up to the connection timeout; awaiting it before the heartbeat
-    // would let the pre-first-heartbeat reclaim reap a bound session near the
-    // grace edge before the heartbeat is even sent. The notification handler is
-    // already registered above (before connect), so a session-released frame is
-    // still handled during the heartbeat even without the opt-in subscription.
+    // Start notification opt-in BEFORE awaiting the ownership heartbeat so a
+    // shutdown that releases the initial binding during that round trip cannot
+    // publish to an unsubscribed socket (#6336). Do not await the subscription
+    // yet: it is a best-effort daemon RPC that can stall up to the connection
+    // timeout, while the time-critical first heartbeat must still be dispatched
+    // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
+    const notificationSubscription = supportsNotifications
+      ? client.subscribeToNotifications!().catch((error) => {
+          logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+        })
+      : Promise.resolve();
     //
     // On the FIRST establishment mark the proxy `connected` only AFTER the
     // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
@@ -915,16 +973,10 @@ export class DaemonMcpProxy {
     this.connected = true;
     this.cancelBackgroundConnectRetry();
 
-    if (supportsNotifications) {
-      try {
-        await client.subscribeToNotifications!();
-      } catch (error) {
-        // Best-effort: without the subscription the proxy degrades to the old
-        // cached behavior instead of failing the connection. Unexpected against
-        // a same-version daemon (the handshake gate pins versions), so warn.
-        logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
-      }
-    }
+    // Connection establishment still waits for the already-running subscription
+    // so callers do not race later requests ahead of notification opt-in. Failure
+    // was converted to a warning above and preserves the prior best-effort policy.
+    await notificationSubscription;
 
     // If a client `tools/list` was served statically before this connection
     // existed (issue #5879), prompt it to re-fetch now that the daemon can
@@ -1054,6 +1106,12 @@ export class DaemonMcpProxy {
       return;
     }
     this.recordSessionReleased(releasedSessionUuid, notification.reason);
+    if (notification.reason === "daemon-shutdown") {
+      // Daemon shutdown is connection-wide. Arm the successor barrier even when
+      // this UUID belongs to an unresolved acquisition result that has not become
+      // the current binding yet.
+      this.waitForDaemonShutdownDisconnect();
+    }
     // A released session is no longer owned: drop it so a later fresh-screenshot
     // read stops owner-routing to it and falls back to the live binding (which the
     // daemon denies), matching the "released session remains denied" guarantee
@@ -1071,12 +1129,146 @@ export class DaemonMcpProxy {
     }
   }
 
-  /**
-   * Ensure the client never attaches to a daemon running a different package version.
-   * Newer clients may restart older daemons, but every mismatch remains a hard gate.
-   */
+  private waitForDaemonShutdownDisconnect(): void {
+    if (this.daemonShutdownDisconnect || !this.client) {
+      return;
+    }
+    const disconnect = Promise.withResolvers<void>();
+    let peerDisconnected = false;
+    const completeDisconnect = (): void => {
+      peerDisconnected = true;
+      disconnect.resolve();
+    };
+    const timeoutHandle = this.timer.setTimeout(disconnect.resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
+    const barrier = disconnect.promise
+      .then(async () => {
+        this.timer.clearTimeout(timeoutHandle);
+        if (!peerDisconnected) {
+          if (this.resolveDaemonShutdownDisconnect === completeDisconnect) {
+            this.resolveDaemonShutdownDisconnect = null;
+          }
+          // A stalled transport must not remain attached after the bounded EOF
+          // wait. resetConnection detaches it synchronously before closing it.
+          void this.resetConnection();
+        }
+        await this.waitForDaemonShutdownRestartWindow();
+      })
+      .catch((error) => {
+        // Readiness is re-checked by doConnect; this barrier only prevents the
+        // deterministic stale-PID/no-startup-lock gap from racing that path.
+        logger.warn(`[DaemonMcpProxy] Failed while awaiting daemon restart transition: ${error}`);
+      });
+    this.daemonShutdownDisconnect = barrier;
+    this.resolveDaemonShutdownDisconnect = completeDisconnect;
+    void barrier.then(() => {
+      if (this.daemonShutdownDisconnect === barrier) {
+        this.daemonShutdownDisconnect = null;
+      }
+    });
+    // Keep the old client attached long enough to observe peer EOF, but prevent
+    // ensureConnected() from treating this quiesced incarnation as reusable.
+    this.connected = false;
+    if (typeof this.client.onConnectionClosed !== "function") {
+      // This client cannot report peer EOF. Begin detaching now; the timeout
+      // still bounds a custom close() implementation that never settles.
+      void this.resetConnection();
+    }
+  }
+
+  private completeDaemonShutdownDisconnect(
+    expectedResolve: (() => void) | null = this.resolveDaemonShutdownDisconnect,
+  ): void {
+    if (this.resolveDaemonShutdownDisconnect !== expectedResolve) {
+      return;
+    }
+    this.resolveDaemonShutdownDisconnect = null;
+    expectedResolve?.();
+  }
+
+  private async waitForDaemonShutdownRestartWindow(): Promise<void> {
+    const socketPath = this.config.socketPath ?? SOCKET_PATH;
+    let deadline =
+      this.timer.now() + Math.max(DAEMON_STARTUP_TIMEOUT_MS, DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
+    let emptyHandoffDeadline: number | undefined;
+    while (!this.closing && this.timer.now() < deadline) {
+      if (await DaemonClient.isAvailable(socketPath)) {
+        return;
+      }
+      const status = await this.daemonManager.status();
+      const startupLockHeld = this.daemonManager.isStartupLockHeldByLiveProcess();
+      if (startupLockHeld && this.config.autoStartDaemon) {
+        // doConnect() may now join the lock holder through DaemonManager.start().
+        return;
+      }
+      if (startupLockHeld || status.running) {
+        // A successor has begun publishing ownership. Clients with auto-start
+        // disabled cannot join its lock, so keep their barrier active until its
+        // socket becomes reachable under the overall startup deadline.
+        emptyHandoffDeadline = undefined;
+      } else {
+        // Explicit restart deliberately leaves no PID and no startup lock while
+        // it pauses between stop and start. Preserve that handoff instead of
+        // racing to start a daemon with this proxy's potentially different
+        // options.
+        emptyHandoffDeadline ??= this.timer.now() + DAEMON_RESTART_HANDOFF_TIMEOUT_MS;
+        // A short startup-timeout override must not truncate the complete
+        // bounded restart preflight after the empty handoff is first observed.
+        deadline = Math.max(deadline, emptyHandoffDeadline);
+        if (this.timer.now() >= emptyHandoffDeadline) {
+          return;
+        }
+      }
+      const waitDeadline = emptyHandoffDeadline ?? deadline;
+      await this.timer.sleep(Math.min(100, waitDeadline - this.timer.now()));
+    }
+  }
+
+  private createStatusProbe(
+    config: DaemonMcpProxyConfig,
+  ): (() => Promise<DaemonStatus>) | undefined {
+    // Custom transports supply their matching probe separately; constructing a
+    // default socket client here would escape an injected transport/test seam.
+    if (config.daemonStatusProbe) {
+      return config.daemonStatusProbe;
+    }
+    if (config.clientFactory) {
+      return undefined;
+    }
+    return () =>
+      new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs).getDaemonStatus();
+  }
+
+  private reconciliationStatus(): Promise<DaemonStatus> {
+    if (!this.daemonStatusProbe) {
+      return this.daemonManager.status();
+    }
+    this.reconciliationSnapshot ??= this.readSocketReconciliationStatus();
+    return this.reconciliationSnapshot;
+  }
+
+  private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
+    const recorded = await this.daemonManager.status();
+    const actual = await runPreflightTransport(() => this.daemonStatusProbe!());
+    // Compatibility allows legacy missing build fields, but missing identity is not
+    // evidence that a PID record belongs to this socket. Only enrich a known matching
+    // process, build and entry script; never manufacture live build/options from a legacy probe.
+    const actualBuild = buildIdentityFromStatus(actual);
+    const matchesRecord =
+      recorded.running &&
+      actual.pid !== undefined &&
+      actual.pid === recorded.pid &&
+      recorded.version === actual.version &&
+      actualBuild.buildId !== "unknown" &&
+      actualBuild.buildId.length > 0 &&
+      actualBuild.entryScript.length > 0 &&
+      recorded.buildId === actualBuild.buildId &&
+      recorded.entryScript === actualBuild.entryScript;
+    return matchesRecord ? { ...recorded, ...actual } : actual;
+  }
+
+  /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
   private async ensureVersionMatches(): Promise<void> {
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1167,6 +1359,7 @@ export class DaemonMcpProxy {
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
     await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
+    this.reconciliationSnapshot = undefined;
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1177,7 +1370,7 @@ export class DaemonMcpProxy {
       );
     }
 
-    const restartedStatus = await this.daemonManager.status();
+    const restartedStatus = await this.reconciliationStatus();
     const restartedVersion = restartedStatus.version?.trim() ?? "";
     if (!restartedStatus.running || restartedVersion !== this.clientVersion) {
       throw this.versionMismatchError(
@@ -1214,7 +1407,7 @@ export class DaemonMcpProxy {
     if (!this.clientAssetVersion) {
       return;
     }
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1237,7 +1430,7 @@ export class DaemonMcpProxy {
    * {@link ensureVersionMatches}.
    */
   private async ensureBuildMatches(): Promise<void> {
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1273,6 +1466,7 @@ export class DaemonMcpProxy {
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
     await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
+    this.reconciliationSnapshot = undefined;
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1283,7 +1477,7 @@ export class DaemonMcpProxy {
       );
     }
 
-    const restartedStatus = await this.daemonManager.status();
+    const restartedStatus = await this.reconciliationStatus();
     const restartedIdentity = buildIdentityFromStatus(restartedStatus);
     if (!restartedStatus.running || !buildIdentitiesMatch(this.buildIdentity, restartedIdentity)) {
       throw this.buildMismatchError(
@@ -1310,7 +1504,7 @@ export class DaemonMcpProxy {
   }
 
   private async ensureStartupOptionsMatch(): Promise<void> {
-    const status = await this.daemonManager.status();
+    const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
     }
@@ -1334,6 +1528,7 @@ export class DaemonMcpProxy {
     // so the restart gains the missing flag without stripping any the daemon
     // already had (issue #3846).
     await this.daemonManager.restart(mergeDaemonOptions(status.options, requested));
+    this.reconciliationSnapshot = undefined;
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
@@ -1341,7 +1536,7 @@ export class DaemonMcpProxy {
       );
     }
 
-    const restartedStatus = await this.daemonManager.status();
+    const restartedStatus = await this.reconciliationStatus();
     const remaining = startupOptionDeficits(requested, restartedStatus.options);
     if (!restartedStatus.running || remaining.length > 0) {
       throw new DaemonUnavailableError(
@@ -1424,23 +1619,46 @@ export class DaemonMcpProxy {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
     this.throwIfBoundSessionFenced(allowReleasedSession);
-    await this.ensureConnected();
-    this.throwIfBoundSessionFenced(allowReleasedSession);
+    let established = false;
 
     try {
+      // Socket identity discovery can race a daemon handoff before any tool
+      // has been dispatched. Give establishment the same single reconnect
+      // attempt as a recoverable transport failure, preserving the fences.
+      await this.ensureConnected();
+      this.throwIfBoundSessionFenced(allowReleasedSession);
+      established = true;
       return await operation();
     } catch (error) {
       if (this.closing) {
         throw error;
       }
       this.throwIfBoundSessionFenced(allowReleasedSession);
-      if (!this.isRecoverableDaemonSessionError(error)) {
+      if (error instanceof DaemonBoundSessionLostError) {
+        if (error.failure.sessionUuid !== this.boundSessionUuid) {
+          throw new DaemonBoundSessionExpiredError(
+            error.failure.sessionUuid,
+            error.failure.reason,
+            error.failure.release,
+          );
+        }
+        this.fenceBoundSessionUuid(
+          error.failure.sessionUuid,
+          error.failure.reason,
+          error.failure.release,
+        );
+        throw this.boundSessionExpiredError();
+      }
+      if (!this.isRecoverableDaemonSessionError(error, established)) {
         throw error;
       }
 
       logger.warn(
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
+      if (error instanceof DaemonShuttingDownError) {
+        this.waitForDaemonShutdownDisconnect();
+      }
       await this.resetConnection();
       this.throwIfBoundSessionFenced(allowReleasedSession);
       await this.ensureConnected();
@@ -1462,7 +1680,24 @@ export class DaemonMcpProxy {
     }
   }
 
-  private isRecoverableDaemonSessionError(error: unknown): boolean {
+  private isRecoverableDaemonSessionError(error: unknown, established = true): boolean {
+    if (!established) {
+      return error instanceof DaemonPreflightConnectionError;
+    }
+    // Compatibility policy failures cannot be healed by another connection
+    // attempt (and repeating a failed reconciliation could restart twice).
+    if (
+      error instanceof DaemonVersionMismatchError ||
+      error instanceof DaemonBuildMismatchError ||
+      error instanceof DaemonAssetVersionMismatchError
+    ) {
+      return false;
+    }
+    // Structured server evidence proves rejection happened before dispatch.
+    // Legacy message-only errors remain non-retryable rather than guessing.
+    if (error instanceof DaemonHandshakeMismatchError) {
+      return true;
+    }
     if (error instanceof DaemonUnavailableError) {
       return true;
     }
@@ -1496,6 +1731,7 @@ export class DaemonMcpProxy {
   }
 
   private async resetConnection(): Promise<void> {
+    const shutdownDisconnectResolve = this.resolveDaemonShutdownDisconnect;
     const staleClient = this.client;
     this.connected = false;
     this.client = null;
@@ -1506,6 +1742,7 @@ export class DaemonMcpProxy {
     this.invalidateCache();
 
     if (!staleClient) {
+      this.completeDaemonShutdownDisconnect(shutdownDisconnectResolve);
       return;
     }
 
@@ -1514,6 +1751,10 @@ export class DaemonMcpProxy {
     } catch (error) {
       logger.warn(`[DaemonMcpProxy] Failed to close stale daemon client: ${error}`);
     }
+    // resetConnection deliberately unregisters the peer-close callback before
+    // closing the stale client. Resolve an armed shutdown barrier explicitly so
+    // the retry cannot wait forever for a callback that can no longer fire.
+    this.completeDaemonShutdownDisconnect(shutdownDisconnectResolve);
   }
 
   private subscribeToClientConnectionClosed(client: DaemonClientLike): void {
@@ -1523,6 +1764,11 @@ export class DaemonMcpProxy {
     this.connectionClosedUnsubscribe?.();
     this.connectionClosedUnsubscribe = client.onConnectionClosed(() => {
       if (this.client === client) {
+        // EOF is the only connection-wide shutdown signal an idle proxy receives,
+        // and a subscribed release notification can be lost while the old socket
+        // drains. Arm the same successor barrier before reset detaches this client.
+        this.waitForDaemonShutdownDisconnect();
+        this.completeDaemonShutdownDisconnect();
         void this.resetConnection();
       }
     });
@@ -1692,7 +1938,13 @@ export class DaemonMcpProxy {
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
   ): Promise<any> {
-    // Device-session acquisition (getAndroid/getApple/startDevice) mints a NEW
+    // These are daemon-internal routing markers. Never accept caller-controlled
+    // values: only this proxy may add them after selecting its active binding.
+    const callerArgs = { ...args };
+    delete callerArgs[DAEMON_BOUND_SESSION_PARAM];
+    delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
+    delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    // Device-session acquisition (including booted provisionDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
     // the client can recover in-band (issue #5689). Forward its raw args and bind
@@ -1703,8 +1955,8 @@ export class DaemonMcpProxy {
     // after a device has been bound.
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
-        ? args
-        : this.withBoundSessionUuid(args);
+        ? callerArgs
+        : this.withBoundSessionUuid(callerArgs);
     const forwardedArgs = this.withToolSelectionProfile(routingArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -1715,6 +1967,7 @@ export class DaemonMcpProxy {
     // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
+    this.retainAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
     if (progressToken !== undefined && onProgress) {
       this.progressListeners.set(progressToken, onProgress);
     }
@@ -1730,12 +1983,18 @@ export class DaemonMcpProxy {
         isSessionAcquisition,
       );
       if (result?.isError) {
+        // Provisioning retains its usable device session when optional resource
+        // configuration fails. Own that result-minted session before returning
+        // the evidence-bearing error, so the caller can inspect or retry it.
+        if (name === "provisionDevice") {
+          await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
+        }
         this.refreshReplayLeaseForBoundSessionResult(forwardedArgs, callReleaseEpoch);
         return result;
       }
-      this.rememberToolSelectionProfile(name, args, result);
+      this.rememberToolSelectionProfile(name, callerArgs, result);
       if (isSessionAcquisition) {
-        await this.bindResultMintedDeviceSession(name, result);
+        await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
         return result;
       }
       // Remember what was actually forwarded, not the caller's raw args. An
@@ -1772,6 +2031,7 @@ export class DaemonMcpProxy {
       throw error;
     } finally {
       this.releaseReleaseEpochReference(forwardedSessionUuid);
+      this.releaseAcquisitionReleaseEpoch(isSessionAcquisition, callReleaseEpoch);
       if (progressToken !== undefined) {
         this.progressListeners.delete(progressToken);
       }
@@ -2118,7 +2378,10 @@ export class DaemonMcpProxy {
       return;
     }
     this.releaseEpoch += 1;
-    if (!this.activeReleaseEpochReferences.has(normalizedSessionUuid)) {
+    if (
+      !this.activeReleaseEpochReferences.has(normalizedSessionUuid) &&
+      this.activeAcquisitionReleaseEpochs.size === 0
+    ) {
       return;
     }
     this.releasedSessionEpochs.set(normalizedSessionUuid, this.releaseEpoch);
@@ -2145,8 +2408,54 @@ export class DaemonMcpProxy {
       return;
     }
     this.activeReleaseEpochReferences.delete(sessionUuid);
-    this.releasedSessionEpochs.delete(sessionUuid);
-    this.releasedSessionReasons.delete(sessionUuid);
+    const releasedAtEpoch = this.releasedSessionEpochs.get(sessionUuid);
+    if (
+      releasedAtEpoch === undefined ||
+      !this.isReleaseNeededByActiveAcquisition(releasedAtEpoch)
+    ) {
+      this.releasedSessionEpochs.delete(sessionUuid);
+      this.releasedSessionReasons.delete(sessionUuid);
+    }
+  }
+
+  private retainAcquisitionReleaseEpoch(isSessionAcquisition: boolean, epoch: number): void {
+    if (!isSessionAcquisition) {
+      return;
+    }
+    this.activeAcquisitionReleaseEpochs.set(
+      epoch,
+      (this.activeAcquisitionReleaseEpochs.get(epoch) ?? 0) + 1,
+    );
+  }
+
+  private releaseAcquisitionReleaseEpoch(isSessionAcquisition: boolean, epoch: number): void {
+    if (!isSessionAcquisition) {
+      return;
+    }
+    const references = (this.activeAcquisitionReleaseEpochs.get(epoch) ?? 0) - 1;
+    if (references > 0) {
+      this.activeAcquisitionReleaseEpochs.set(epoch, references);
+    } else {
+      this.activeAcquisitionReleaseEpochs.delete(epoch);
+    }
+    for (const [sessionUuid, releasedAtEpoch] of this.releasedSessionEpochs) {
+      if (
+        !this.activeReleaseEpochReferences.has(sessionUuid) &&
+        !this.isReleaseNeededByActiveAcquisition(releasedAtEpoch)
+      ) {
+        this.releasedSessionEpochs.delete(sessionUuid);
+        this.releasedSessionReasons.delete(sessionUuid);
+      }
+    }
+  }
+
+  private isReleaseNeededByActiveAcquisition(releasedAtEpoch: number): boolean {
+    for (const acquisitionEpoch of this.activeAcquisitionReleaseEpochs.keys()) {
+      if (releasedAtEpoch > acquisitionEpoch) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private forwardedSessionReleaseReasonSince(
@@ -2154,10 +2463,24 @@ export class DaemonMcpProxy {
     forwardEpoch: number,
   ): string | undefined {
     const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (!forwardedUuid || (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) <= forwardEpoch) {
+    if (!forwardedUuid) {
       return undefined;
     }
-    return this.releasedSessionReasons.get(forwardedUuid) ?? "released";
+    return this.sessionReleaseReasonSince(forwardedUuid, forwardEpoch);
+  }
+
+  private sessionReleaseReasonSince(sessionUuid: string, forwardEpoch: number): string | undefined {
+    if ((this.releasedSessionEpochs.get(sessionUuid) ?? 0) <= forwardEpoch) {
+      return undefined;
+    }
+    return this.releasedSessionReasons.get(sessionUuid) ?? "released";
+  }
+
+  private throwIfSessionReleasedSince(sessionUuid: string, forwardEpoch: number): void {
+    const releaseReason = this.sessionReleaseReasonSince(sessionUuid, forwardEpoch);
+    if (releaseReason) {
+      throw new DaemonBoundSessionExpiredError(sessionUuid, releaseReason);
+    }
   }
 
   private fenceReleasedForwardedSession(
@@ -2189,13 +2512,17 @@ export class DaemonMcpProxy {
     throw new DaemonBoundSessionExpiredError(forwardedUuid, reason);
   }
 
-  // Bind and heartbeat the device session a getAndroid/getApple/startDevice call
+  // Bind and heartbeat the device session an acquisition call
   // minted in its RESULT — the proxy equivalent of the direct-path bind in
   // src/server/index.ts. Without this the daemon never sees an ownership heartbeat
   // for a result-minted session and reaps it under the pre-first-heartbeat grace
   // (issue #5689). Acquisition also clears any terminal fence: the connection is
   // usable again once a fresh session is established (AC2).
-  private async bindResultMintedDeviceSession(name: string, result: unknown): Promise<void> {
+  private async bindResultMintedDeviceSession(
+    name: string,
+    result: unknown,
+    acquisitionReleaseEpoch: number,
+  ): Promise<void> {
     if (!isDeviceSessionAcquisitionTool(name)) {
       return;
     }
@@ -2203,12 +2530,16 @@ export class DaemonMcpProxy {
     if (!mintedSessionUuid || mintedSessionUuid === this.boundSessionUuid) {
       return;
     }
+    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
     // binding.)
     if (this.heartbeatKeeperStarted) {
       await this.stopBoundSessionHeartbeat();
     }
+    // Stopping the previous binding's keeper may yield. Recheck before publishing
+    // the new binding so a release delivered during that await cannot be missed.
+    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     this.terminalBoundSession = undefined;
     this.boundSessionUuid = mintedSessionUuid;
     this.boundSessionUuidAt = this.timer.now();
@@ -2219,6 +2550,10 @@ export class DaemonMcpProxy {
     // daemon records ownership before the pre-first-heartbeat grace fires
     // (mirrors the establishment guarantee in issue #5637).
     await this.establishBoundSessionHeartbeat();
+    // The first heartbeat is an awaited daemon round-trip. A shutdown release
+    // can arrive while it is in flight, fence and clear the binding, and make
+    // this acquisition result stale before it reaches the caller.
+    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
   }
 
   // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit
@@ -2304,6 +2639,8 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
+      error instanceof DaemonBoundSessionExpiredError ||
+      error instanceof DaemonBoundSessionLostError ||
       this.isRecoverableDaemonSessionError(error) ||
       this.isUnadmittedDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
@@ -2496,6 +2833,7 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     await this.stopBoundSessionHeartbeat();

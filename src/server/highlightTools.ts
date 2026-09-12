@@ -43,7 +43,7 @@ const highlightBaseSchema = z
       .optional()
       .describe("Highlight request timeout ms (default: 5000)"),
     description: z.string().optional().describe("Optional description of the highlight"),
-    shape: highlightShapeSchema.optional().describe("Optional highlight shape definition"),
+    shape: highlightShapeSchema.optional().describe("Optional bounds for a red hand-drawn circle"),
     elementId: elementIdTextFieldsSchema.shape.elementId,
     text: elementIdTextFieldsSchema.shape.text,
     container: elementContainerSchema.optional().describe("Scope search to a container"),
@@ -409,7 +409,7 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
 
   ToolRegistry.registerDeviceAware(
     "highlight",
-    "Draw a visual highlight around a UI element.",
+    "Draw a red hand-drawn circle around a UI element.",
     highlightSchema,
     highlightHandler,
     { defaultEnabled: false },

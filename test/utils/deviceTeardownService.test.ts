@@ -4,7 +4,10 @@ import {
   type DeviceTeardownPhase,
 } from "../../src/utils/deviceTeardownService";
 import type { DeviceTeardownOperationStore } from "../../src/db/deviceTeardownOperationRepository";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -106,6 +109,128 @@ describe("DeviceTeardownService", () => {
         workflow,
       ),
     ).resolves.toEqual({ status: "failed", phase: "verification" });
+  });
+
+  test("uses a transferred provision lease without preempting a queued provision", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const provisionLease = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const queuedProvision = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+
+    await expect(
+      service.teardown(
+        {
+          operationId: "failed-provision-cleanup",
+          fingerprint: "fingerprint",
+          identity,
+          deadlineMs: 1_000,
+          lifecycleLease: provisionLease,
+        },
+        workflow,
+      ),
+    ).resolves.toEqual({ status: "destroyed" });
+
+    const nextProvision = await queuedProvision;
+    expect(nextProvision.signal.aborted).toBe(false);
+    nextProvision.release();
+  });
+
+  test("releases a transferred lease when the operation id is already accepted", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+    const request = {
+      operationId: "already-accepted-cleanup",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+    };
+
+    await expect(service.teardown(request, workflow)).resolves.toEqual({ status: "destroyed" });
+    const transferred = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+
+    // The replayed operation never reaches `execute`, so nothing else holds a
+    // handle on the transferred reservation.
+    await expect(
+      service.teardown({ ...request, lifecycleLease: transferred }, workflow),
+    ).resolves.toEqual({ status: "destroyed" });
+
+    const nextProvision = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 2_000 },
+    );
+    timer.advanceTime(2_001);
+    await expect(nextProvision).resolves.toBeDefined();
+    (await nextProvision).release();
+  });
+
+  test("uses a live teardown signal after another teardown preempts provisioning", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const provisionLease = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    const competingTeardown = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    expect(provisionLease.signal.aborted).toBe(true);
+    let resolveLease: VirtualDeviceLifecycleLease | undefined;
+    const workflow = {
+      resolve: async (_signal: AbortSignal, lease: VirtualDeviceLifecycleLease) => {
+        resolveLease = lease;
+        return { target: "target" } as const;
+      },
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+
+    await expect(
+      service.teardown(
+        {
+          operationId: "preempted-provision-cleanup",
+          fingerprint: "fingerprint",
+          identity,
+          deadlineMs: 1_000,
+          lifecycleLease: provisionLease,
+        },
+        workflow,
+      ),
+    ).resolves.toEqual({ status: "destroyed" });
+
+    expect(resolveLease?.signal.aborted).toBe(false);
+    (await competingTeardown).release();
   });
 
   test("caller cancellation stops waiting without cancelling accepted teardown", async () => {

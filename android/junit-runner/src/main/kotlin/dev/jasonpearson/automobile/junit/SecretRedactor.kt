@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.junit
 
 import java.text.Normalizer
+import org.yaml.snakeyaml.LoaderOptions
+import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.constructor.SafeConstructor
 
 /**
  * Redacts sensitive plan-parameter values from any recovery context that leaves the process for a
@@ -13,13 +16,24 @@ import java.text.Normalizer
  * (issue #6029 review — an independent fixpoint could mismatch the executor's single ordered pass,
  * or blow up on a self-referential value). The executor hands over the concrete substituted secret
  * strings; this object expands each into its Unicode NFC/NFD forms and scrubs every occurrence. It
- * also scans the RAW plan for the declared secret key names with a placeholder-tolerant line
- * scanner (a full YAML load chokes on `${...}` in flow collections). `internal` — its only consumer
- * is the executor, and `SecretRedactorTest` unit-tests it. Mirrors the iOS `SecretRedaction` /
+ * also scans the RAW plan for the declared secret key names: `${...}` placeholders are swapped for
+ * YAML-safe sentinels so snakeyaml can spec-decode the key scalars (escapes, folding, CRLF), then
+ * the sentinels are mapped back — falling back to a placeholder-tolerant line scanner when the
+ * substituted plan is not loadable (issue #6141). `internal` — its only consumer is the executor,
+ * and `SecretRedactorTest` unit-tests it. Mirrors the iOS `SecretRedaction` /
  * `PlanMetadataParser.parseSecretParameterKeys`.
  */
 internal object SecretRedactor {
   const val PLACEHOLDER: String = "***REDACTED***"
+
+  /** Matches a `${...}` substitution placeholder (non-greedy, no nested braces). */
+  private val PLACEHOLDER_PATTERN = Regex("""\$\{[^}]*}""")
+
+  // A sentinel that survives YAML as a plain scalar (letters/digits only, no escapes) and is
+  // exceedingly unlikely to collide with a real key. The index keeps each placeholder distinct so
+  // it maps back to its exact original text.
+  private const val SENTINEL_PREFIX = "AMx6141xPLACEHOLDERx"
+  private const val SENTINEL_SUFFIX = "xEND"
 
   /**
    * Expand the executor-supplied concrete secret strings into the exact forms to scrub: each value
@@ -215,13 +229,88 @@ internal object SecretRedactor {
 
   /**
    * Scan a plan's top-level `secretParameters:` declaration for the sensitive key names, tolerating
-   * `${...}` placeholders anywhere (they are literal text to the scanner). MUST run on the RAW,
-   * pre-substitution plan: a substituted value can inject a newline that truncates the declaration,
-   * and a full YAML load throws on unquoted placeholders in flow collections (issue #6029 review).
-   * Non-throwing. Only the `secretParameters:` block is scanned, so unrelated `${...}` lists are
-   * ignored. Mirrors iOS `PlanMetadataParser.parseSecretParameterKeys`.
+   * `${...}` placeholders anywhere (they are literal text). MUST run on the RAW, pre-substitution
+   * plan: a substituted value can inject a newline that truncates the declaration (issue #6029
+   * review).
+   *
+   * Primary path (issue #6141): replace every `${...}` placeholder with a YAML-safe sentinel so a
+   * real YAML load does not choke on unquoted placeholders in flow collections, run the plan
+   * through snakeyaml — which decodes escapes (`\xNN`, `\uNNNN`, `\U........`, `\n`, `\t`, `\0`,
+   * `\/`, …), multi-line folding, and CRLF to the spec-correct key name — then map the sentinels
+   * back to their original `${...}` text. Falls back to the placeholder-tolerant line scanner
+   * ([parsePlanSecretKeysBestEffort]) whenever the substituted plan is not loadable as a mapping
+   * (e.g. a value injected a newline that truncated the document), so the redactor never drops a
+   * declared key. Non-throwing. Mirrors iOS `PlanMetadataParser.parseSecretParameterKeys`.
    */
   fun parsePlanSecretKeys(planContent: String): Set<String> {
+    val sentinels = mutableListOf<Pair<String, String>>()
+    val substituted =
+      PLACEHOLDER_PATTERN.replace(planContent) { match ->
+        val sentinel = "$SENTINEL_PREFIX${sentinels.size}$SENTINEL_SUFFIX"
+        sentinels.add(sentinel to match.value)
+        sentinel
+      }
+
+    val decoded = runCatching {
+      // SafeConstructor: build only maps/lists/scalars, never arbitrary Java types — a redactor
+      // must not become a YAML-deserialization gadget for untrusted plan content. Escapes and
+      // folding are resolved by the reader, so they still decode under SafeConstructor.
+      val root = Yaml(SafeConstructor(LoaderOptions())).load<Any?>(substituted)
+      val declaration = (root as? Map<*, *>)?.get("secretParameters")
+      extractKeyNames(declaration, sentinels)
+    }
+      .getOrNull()
+
+    // A null result means the substituted plan was not a loadable mapping (snakeyaml threw or the
+    // top level was not a map). Fall back to the best-effort scanner so a declared key is never
+    // dropped. A non-null empty set means the plan parsed cleanly with no `secretParameters:`.
+    return decoded ?: parsePlanSecretKeysBestEffort(planContent)
+  }
+
+  /**
+   * Turn a snakeyaml-decoded `secretParameters` value into its set of key names, mapping any
+   * substitution sentinel back to its original `${...}` text. A scalar declaration is treated as a
+   * single key; a sequence contributes each stringified element. Returns null when the declaration
+   * is absent so the caller can distinguish "no secrets" (empty set) from "not a mapping"
+   * (fallback).
+   */
+  private fun extractKeyNames(
+    declaration: Any?,
+    sentinels: List<Pair<String, String>>,
+  ): Set<String> {
+    val keys = LinkedHashSet<String>()
+    when (declaration) {
+      null -> {}
+      is List<*> ->
+        for (element in declaration) {
+          if (element == null) continue
+          val key = restorePlaceholders(parameterStringValue(element), sentinels)
+          if (key.isNotEmpty()) keys.add(key)
+        }
+      else -> {
+        val key = restorePlaceholders(parameterStringValue(declaration), sentinels)
+        if (key.isNotEmpty()) keys.add(key)
+      }
+    }
+    return keys
+  }
+
+  private fun restorePlaceholders(value: String, sentinels: List<Pair<String, String>>): String {
+    var restored = value
+    for ((sentinel, original) in sentinels) {
+      if (restored.contains(sentinel)) restored = restored.replace(sentinel, original)
+    }
+    return restored
+  }
+
+  /**
+   * Best-effort, placeholder-tolerant line scanner for the declared secret key names. Retained as
+   * the fallback for plans that snakeyaml cannot load as a mapping (e.g. a substituted value that
+   * injects a document-truncating newline). Over-captures rather than dropping tokens, so the
+   * redactor stays fail-safe toward over-redaction. Does NOT spec-decode escapes/folding — that is
+   * the snakeyaml primary path's job (issue #6141).
+   */
+  internal fun parsePlanSecretKeysBestEffort(planContent: String): Set<String> {
     val lines = planContent.split('\n')
     val keys = LinkedHashSet<String>()
     var index = 0

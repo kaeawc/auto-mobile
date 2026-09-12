@@ -712,9 +712,7 @@ jobs:
           path: android/desktop-app/build/reports/tests/test/
 
   fast-validation:
-    # Workflow-wiring changes deliberately wait for their forced XCTestRunner
-    # result below. Ordinary PRs retain the usual short fast-validation path.
-    timeout-minutes: 70
+    timeout-minutes: 20
     name: "Fast Validation"
     runs-on: ubuntu-latest
     needs: [detect-changes, format-check]
@@ -807,20 +805,6 @@ jobs:
 
       - wait: install-fast-validation-deps
 
-      # Keep edits to the XCTestRunner job's own wiring from landing without the
-      # job being exercised. This is intentionally an always-run Ubuntu guard,
-      # rather than adding pull_request.yml to native_integration: the latter
-      # would spend roughly 20-25 macOS minutes on every unrelated workflow edit.
-      # A relevant change must carry run-ios (or run-native), which starts a new
-      # run and lets the existing force-label logic execute the macOS job.
-      - name: "Require an iOS run for XCTestRunner workflow wiring changes"
-        id: validate-ios-workflow-change
-        shell: bash
-        env:
-          IOS_INTEGRATION_WORKFLOW_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          IOS_INTEGRATION_WORKFLOW_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-        run: bun scripts/ci/validate-ios-integration-workflow-changes.ts
-
       - wait: [setup-python-lock, setup-uv-lock]
 
       - name: "Run fast validation checks"
@@ -850,35 +834,6 @@ jobs:
         run: bash scripts/versioning/generate-ios-version.sh --check
 
       - wait: hadolint
-
-      # Run every local validation while the macOS job may still be queued.
-      # Only a labeled workflow-wiring change waits here, after the independent
-      # work is complete, so the required check still cannot pass before the
-      # exact XCTestRunner job succeeds.
-      - name: "Wait for forced XCTestRunner workflow validation"
-        if: steps.validate-ios-workflow-change.outputs.requires_xctest_result == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const deadline = Date.now() + 45 * 60 * 1000;
-            while (Date.now() < deadline) {
-              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: context.runId,
-                filter: 'latest',
-                per_page: 100,
-              });
-              const xctest = jobs.find(job => job.name === 'XCTestRunner Simulator Tests');
-              if (xctest?.status === 'completed') {
-                if (xctest.conclusion !== 'success') {
-                  core.setFailed(`Forced XCTestRunner job concluded ${xctest.conclusion}.`);
-                }
-                return;
-              }
-              await new Promise(resolve => setTimeout(resolve, 15_000));
-            }
-            core.setFailed('Timed out waiting for the forced XCTestRunner job.');
 
       - name: "Upload Fast Validation Logs"
         if: failure()
@@ -966,7 +921,9 @@ jobs:
         # BATS pass used to run inline inside the required Fast Validation job and
         # dominated its wall-clock. It now runs as a parallel matrix leg, matching
         # merge.yml, and is gated by the required "Shell Tests" roll-up.
-        os: [ubuntu-latest, macos-latest]
+        # Keep the portable PR lane on Linux. The equivalent macOS lane runs in
+        # nightly.yml so slow hosted macOS capacity is off the merge path.
+        os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1039,7 +996,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1082,10 +1039,20 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    # The macOS installer path remains per-PR coverage. For kaeawc-authored PRs,
+    # send just that matrix leg to the idle Apple Silicon runner to avoid the
+    # GitHub-hosted macOS queue; Ubuntu and every other author stay hosted. This
+    # is a required check, so automobile-mac must remain online and awake: GitHub
+    # cannot fall back to a hosted runner after a self-hosted job has queued. The
+    # author guard is a default, not a security boundary; all_external_contributors
+    # fork-PR approval policy is the gate for untrusted workflow changes.
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc') && fromJSON('["self-hosted", "automobile-mac"]') || matrix.os }}
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
+      # Minimal setup must not restart a daemon owned by the persistent runner
+      # account. The product default remains to migrate stale daemons for users.
+      AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION: "true"
       # ffmpeg is a large, slow install (it has timed out this job) and video
       # recording is not exercised here — skip it.
       AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
@@ -1104,6 +1071,20 @@ jobs:
         with:
           lfs: false
 
+      - name: "Confirm clean installer fixture"
+        if: env.RUN_INSTALLER == 'true'
+        shell: bash
+        run: |
+          # Refuse pre-existing files or symlinked parents before allowing cleanup
+          # of any project target supported by the minimal installer.
+          for directory in .codex .cursor .vscode; do
+            test ! -L "$directory"
+          done
+          for config in .mcp.json .codex/config.toml .cursor/mcp.json .vscode/mcp.json; do
+            test ! -e "$config"
+            test ! -L "$config"
+          done
+
       - name: "Run Installer (minimal)"
         if: env.RUN_INSTALLER == 'true'
         shell: bash
@@ -1118,17 +1099,29 @@ jobs:
           echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
           exit 0
 
-      - name: "Run Uninstaller"
+      - name: "Remove generated project MCP configuration"
         if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
           set -uo pipefail
           set +e
-          bash ./scripts/uninstall.sh --all --force 2>&1 | tee ci-logs/uninstaller.log
-          uninstall_status=${PIPESTATUS[0]}
+          # No client installed is a valid installer outcome. Each target was
+          # absent before this run, so remove only files this run could create.
+          cleanup_status=0
+          for directory in .codex .cursor .vscode; do
+            if [[ -L "$directory" ]]; then
+              echo "Refusing cleanup through symlink: $directory" >&2
+              cleanup_status=1
+            fi
+          done
+          if [[ "$cleanup_status" -eq 0 ]]; then
+            for config in .mcp.json .codex/config.toml .cursor/mcp.json .vscode/mcp.json; do
+              rm -f -- "$config" || cleanup_status=1
+            done
+          fi
           set -e
-          echo "UNINSTALL_EXIT_CODE=${uninstall_status}" >> "$GITHUB_ENV"
+          echo "UNINSTALL_EXIT_CODE=${cleanup_status}" >> "$GITHUB_ENV"
           exit 0
 
       - name: "Upload Logs"
@@ -1232,7 +1225,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1278,7 +1271,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1320,9 +1313,9 @@ jobs:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    # The full isolated Bun suite can approach fifteen minutes on a contended
-    # hosted macOS runner. Keep the cross-platform lane intact while allowing
-    # enough headroom to finish after setup, lint, and build (issue #5328).
+    # macOS coverage runs after merge, where a scarce hosted macOS runner cannot
+    # block PRs. Keep this required PR lane on Windows alongside the separate
+    # Ubuntu coverage job below.
     timeout-minutes: 25
     env:
       RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
@@ -1330,7 +1323,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macos-latest
           - windows-latest
     steps:
       - name: "Skip Node TypeScript build and test"
@@ -1426,7 +1418,7 @@ jobs:
           turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-${{ matrix.os }}.log"
 
       - name: "Run Bun image runtime smoke"
-        if: env.RUN_MCP_BUILD_TEST == 'true' && (matrix.os == 'macos-latest' || matrix.os == 'windows-latest')
+        if: env.RUN_MCP_BUILD_TEST == 'true' && matrix.os == 'windows-latest'
         run: bun run test:image:bun
 
       - name: "Upload Build/Test Logs"
@@ -1687,6 +1679,10 @@ jobs:
     name: "Swift Code Coverage"
     # See swiftlint: pull-request YAML must not schedule work on a self-hosted
     # runner. Trusted post-merge work retains the automobile-mac route.
+    # macos-26 + Xcode 26.5 (Swift 6.3): the sole coverage package, control-proxy,
+    # declares swift-tools-version 6.3 (its strict-concurrency floor, matching the
+    # repo-wide iOS 6.3 migration), which the Swift 5.10 toolchain on macos-14 /
+    # Xcode 15.4 cannot even parse. Mirrors the other Swift-6.3 jobs' toolchain.
     runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -1695,6 +1691,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+
+      - name: "Select Xcode 26.5"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
 
       - name: "Generate Swift Coverage Badge"
         run: bash scripts/coverage/generate-swift-coverage.sh
@@ -2027,12 +2028,13 @@ jobs:
             exit 1
           fi
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          # Exercise the rewrite hierarchy, privacy mapping, and rotation contracts on iOS.
           xcodebuild test-without-building \
             -xctestrun "${XCTESTRUN}" \
             -destination "id=${SIMULATOR_UDID}" \
             -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
-            -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp \
-            -only-testing:CtrlProxyUITests/CtrlProxyUITests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
+            -only-testing:CtrlProxyUITests/RotationOrientationTests \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
 
       # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
       # BEFORE any simulator workflow that opens an in-process session — including

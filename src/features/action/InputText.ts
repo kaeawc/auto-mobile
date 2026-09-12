@@ -19,7 +19,12 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import { resolveAutoInputMode } from "./resolveAutoInputMode";
 import { serverConfig } from "../../utils/ServerConfig";
-import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
+import {
+  clearTextWithKeyEvents,
+  DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS,
+  getFocusedTextLength,
+  hasFocusedTextInput,
+} from "./ClearText";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
@@ -73,8 +78,6 @@ const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => (
     };
   },
 });
-
-const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 
 export type AppendKeyEventValidator = (
   timeoutMs?: number,
@@ -905,7 +908,7 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy), signal);
+    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy) ?? 0, signal);
     for (const keyEventPlan of keyEventPlans) {
       await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
     }

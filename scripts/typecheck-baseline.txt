@@ -22,8 +22,6 @@ src/db/logEventRepository.ts: error TS2322: Type '{ deviceId: null | string; tim
 src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 src/db/migrations/2026_01_27_000_failures.ts: error TS2769: No overload matches this call.
-src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
-src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'DataTypeExpression'.
 src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
@@ -89,8 +87,6 @@ src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'stri
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 src/features/observe/android/CtrlProxyHierarchy.ts: error TS2554: Expected 0 arguments, but got 1.
-src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
-src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: NormalizedHighlightBounds | undefined; } | { type: "circle"; style?: HighlightStyle | ... 1 more ... | undefined; bounds: NormalizedHighlightBounds | undefined; }' is not assignable to type 'HighlightShape'.
 src/features/observe/audits/AccessibilityAuditor.ts: error TS2741: Property '$' is missing in type 'Hierarchy' but required in type 'ViewHierarchyNode'.
 src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/observe/ios/CtrlProxyGestures.ts: error TS2345: Argument of type '{ idPrefix: string; responseType: string; messageType: string; params: { x1: number; y1: number; x2: number; y2: number; fingerCount: number; duration: number; offset: number | undefined; }; timeoutMs: number; perf: PerformanceTracker | undefined; notConnectedMessage: string; errorLabel: string; }' is not assignable to parameter of type 'SendCommandOptions<GestureTimingResult>'.
@@ -207,7 +203,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 46 :: src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 46 :: src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
 # swap-fp: 47 :: src/features/observe/HierarchyPlatformValidator.ts: error TS2339: Property 'startsWith' does not exist on type '{}'.
-# swap-fp: 5 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: NormalizedHighlightBounds | undefined; } | { type: "circle"; style?: HighlightStyle | ... 1 more ... | undefined; bounds: NormalizedHighlightBounds | undefined; }' is not assignable to type 'HighlightShape'.
 # swap-fp: 5 :: src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 # swap-fp: 5,7,7 :: src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 # swap-fp: 51 :: src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
@@ -237,12 +232,10 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
 # swap-fp: 7,13,55,56,63 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 # swap-fp: 7,7,7,7,9,9,9,9 :: src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-# swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
 # swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
-# swap-fp: 9 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
 # swap-fp: 9 :: src/server/networkGraph.ts: error TS2322: Type 'null | string | undefined' is not assignable to type 'null | string'.
 # swap-fp: 9,9,11,11 :: src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 # swap-fp: 9,9,9 :: src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.

@@ -74,9 +74,14 @@ describe("proxy server session ownership errors", () => {
                 code: "session_ownership_lost",
                 message:
                   "Session ownership lost for session-123: heartbeat-timeout. " +
-                  "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+                  "Call getAndroid or getApple to acquire a new device session.",
                 sessionUuid: "session-123",
                 reason: "heartbeat-timeout",
+                retryable: true,
+                recovery: {
+                  action: "acquire_replacement_session",
+                  tools: ["getAndroid", "getApple"],
+                },
                 release: {
                   sessionId: "session-123",
                   deviceId: "emulator-5554",
@@ -143,6 +148,108 @@ describe("proxy server session ownership errors", () => {
         expect(client.readResource({ uri: "automobile:devices/booted" })).rejects.toThrow(
           ownershipLoss,
         ),
+      ]);
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
+  test("returns iOS daemon-shutdown loss and requires an in-band replacement session (#6724)", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const originalClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      toolResultFor: (toolName) =>
+        toolName === "getApple"
+          ? {
+              content: [{ type: "text", text: JSON.stringify({ sessionId: "shutdown-session" }) }],
+            }
+          : undefined,
+    });
+    const replacementClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      toolResultFor: (toolName) =>
+        toolName === "getApple"
+          ? {
+              content: [
+                { type: "text", text: JSON.stringify({ sessionId: "replacement-session" }) },
+              ],
+            }
+          : undefined,
+    });
+    let clientFactoryCalls = 0;
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      version: DAEMON_VERSION,
+    };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => {
+          clientFactoryCalls += 1;
+          return clientFactoryCalls === 1 ? originalClient : replacementClient;
+        },
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "shutdown-recovery-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.listTools();
+      await client.callTool({ name: "getApple", arguments: {} });
+      originalClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "shutdown-session",
+        "daemon-shutdown",
+      );
+
+      const loss = await client.callTool({
+        name: "observe",
+        arguments: { deviceId: "ios-simulator-1" },
+      });
+      expect(loss).toMatchObject({
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "no_active_device_session",
+                message:
+                  "This MCP connection has no active device session " +
+                  "(the previous session was released: daemon-shutdown). " +
+                  "Call getAndroid or getApple to acquire a new device session.",
+                reason: "daemon-shutdown",
+                retryable: true,
+                recovery: {
+                  action: "acquire_replacement_session",
+                  tools: ["getAndroid", "getApple"],
+                },
+              },
+            }),
+          },
+        ],
+      });
+
+      originalClient.emitConnectionClosed();
+      await client.callTool({ name: "getApple", arguments: {} });
+      await client.callTool({
+        name: "observe",
+        arguments: { deviceId: "ios-simulator-1" },
+      });
+
+      expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(replacementClient.callToolCalls).toEqual([
+        { toolName: "getApple", params: {} },
+        {
+          toolName: "observe",
+          params: { deviceId: "ios-simulator-1", sessionUuid: "replacement-session" },
+        },
       ]);
     } finally {
       await client.close();

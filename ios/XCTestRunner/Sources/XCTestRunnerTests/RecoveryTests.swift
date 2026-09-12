@@ -584,9 +584,10 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
     }
 
     func testSecretValueRedactedWhenKeyUsesHexEscapeViaFailSafe() throws {
-        // The key `"API\x54OKEN"` is not spec-decoded by the scanner, so it can't be matched to the
-        // parameter `APITOKEN` by name; the strengthened value-layer fail-safe over-redacts so the
-        // secret still cannot leak (#6097 — the important security assertion).
+        // The key `"API\x54OKEN"` is now spec-decoded to `APITOKEN` (issue #6141), so it matches the
+        // parameter `APITOKEN` by name and its value is redacted directly. Even if decoding had
+        // failed, the value-layer fail-safe would over-redact, so the secret still cannot leak
+        // (#6097 — the important security assertion, which holds either way).
         let secret = "SECRET-hex-7b3"
         let plan =
             "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe\n  - tool: inputText\n    text: \"field\""
@@ -613,9 +614,10 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
     }
 
     func testSecretValueRedactedDespiteDecoyParameterMatchingUnDecodedHexKey() throws {
-        // Parameters contain BOTH the real `APITOKEN` (what YAML decodes `"API\x54OKEN"` to) and a
-        // decoy `APIx54OKEN` matching the scanner's un-decoded spelling. The fail-safe must not trust
-        // the decoy exact-match; it over-redacts so the REAL secret cannot leak (#6097 — decoy).
+        // Parameters contain BOTH the real `APITOKEN` (what the scanner now decodes `"API\x54OKEN"`
+        // to — issue #6141) and a decoy `APIx54OKEN` matching the OLD un-decoded spelling. Decoding
+        // resolves the key to `APITOKEN`, so the real secret is redacted by exact match and the decoy
+        // is never trusted; the secret cannot leak (#6097 — decoy).
         let real = "REAL-hex-secret-1a2"
         let plan =
             "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe\n  - tool: inputText\n    text: \"field\""
@@ -998,7 +1000,11 @@ private final class ScriptedCapturingModelResponder: ModelResponding, @unchecked
 }
 
 /// Direct tests of `PlanMetadataParser`'s `secretParameters:` parsing (#6029). Parity note: these
-/// forms must all parse the same set of keys snakeyaml gives the Android runner.
+/// forms parse the same keys snakeyaml gives the Android runner for the common and escaped forms
+/// (issue #6141 added full double-quoted escape decoding here). The one deliberate divergence is a
+/// PLAIN scalar spanning lines (`[API⏎TOKEN]`): iOS's scanner over-captures token-per-line
+/// (`["API","TOKEN"]`) while snakeyaml folds it to `"API TOKEN"` — both fail safe toward
+/// over-redaction, neither leaks.
 /// Tests of `PlanMetadataParser.parseSecretParameterKeys` — the RAW, placeholder-tolerant scanner
 /// that replaces the previous substituted-content / YAML-load parsing (#6029 convergence).
 final class PlanMetadataSecretParametersParsingTests: XCTestCase {
@@ -1189,6 +1195,44 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         // key and must be kept so its parameter value is redacted (#6097 Codex — quoted whitespace).
         let yaml = "name: P\nsecretParameters: [\" \"]\nsteps:\n  - tool: observe"
         XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), [" "])
+    }
+
+    func testDoubleQuotedHexEscapeIsDecodedToSpecCorrectKey() {
+        // Issue #6141: `\x54` decodes to `T`, so `"API\x54OKEN"` yields the key `APITOKEN` — matching
+        // what snakeyaml gives the Android runner.
+        let yaml = "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
+    }
+
+    func testDoubleQuotedUnicodeEscapesAreDecoded() {
+        // `A` -> A, `\U00000042` -> B (issue #6141).
+        let yaml = "name: P\nsecretParameters: [\"\\u0041\\U00000042\"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["AB"])
+    }
+
+    func testDoubleQuotedControlEscapesAreDecoded() {
+        // `\t` -> TAB, `\n` -> LF (issue #6141).
+        let yaml = "name: P\nsecretParameters: [\"A\\tB\\nC\"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["A\tB\nC"])
+    }
+
+    func testBlockSequenceDoubleQuotedHexEscapeIsDecoded() {
+        // The block-sequence form decodes escapes the same way as the flow form (issue #6141).
+        let yaml = "name: P\nsecretParameters:\n  - \"API\\x54OKEN\"\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
+    }
+
+    func testMalformedHexEscapeIsKeptLiteralFailSafe() {
+        // A `\x` with too few hex digits cannot decode; keep it literal (fail-safe over-capture) so
+        // the token is still treated as a secret key rather than dropped (issue #6141).
+        let yaml = "name: P\nsecretParameters: [\"API\\xZZ\"]\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APIxZZ"])
+    }
+
+    func testSingleQuotedBlockScalarUnescapesDoubledQuote() {
+        // A single-quoted scalar is literal except `''` -> `'` (issue #6141).
+        let yaml = "name: P\nsecretParameters:\n  - 'API''TOKEN'\nsteps:\n  - tool: observe"
+        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API'TOKEN"])
     }
 
     func testFlushBlockStopsAtNextTopLevelKey() {

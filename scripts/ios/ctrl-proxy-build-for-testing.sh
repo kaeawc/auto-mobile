@@ -114,7 +114,7 @@ BUILD_START=$(date +%s)
 run_xcodebuild() {
     xcodebuild build-for-testing \
         -project "${XCODEPROJ}" \
-        -scheme "CtrlProxyApp" \
+        -scheme "AutoMobileTest" \
         -destination 'generic/platform=iOS Simulator' \
         -derivedDataPath "${DERIVED_DATA}" \
         -configuration Debug \
@@ -161,9 +161,8 @@ if [ -z "${XCTESTRUN_FILE}" ]; then
 fi
 
 REQUIRED_ARTIFACTS=(
-    "${SIM_DIR}/CtrlProxyApp.app"
+    "${SIM_DIR}/AutoMobileTest.app"
     "${SIM_DIR}/CtrlProxyUITests-Runner.app"
-    "${SIM_DIR}/CtrlProxyTests.xctest"
 )
 
 ALL_FOUND=true

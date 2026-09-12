@@ -14,11 +14,13 @@ import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
+  BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
   DaemonResponse,
   PROGRESS_NOTIFICATION_METHOD,
   SessionContext,
+  type BoundSessionLoss,
 } from "./types";
 import {
   SOCKET_PATH,
@@ -35,6 +37,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
@@ -85,7 +88,6 @@ import {
   setAndroidKeyValueDirect,
   withAndroidSharedPreferencesInspectionFallback,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
-import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   resolveApkChecksum,
@@ -132,6 +134,18 @@ import {
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
+/** Keep shutdown bounded if a client cannot flush a release notification. */
+const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
+
+class ReleasedBoundSessionError extends Error {
+  constructor(readonly failure: BoundSessionLoss) {
+    super(
+      `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). ` +
+        "Acquire a new device session before continuing.",
+    );
+    this.name = "ReleasedBoundSessionError";
+  }
+}
 
 /**
  * Bound on the observation-only liveness probe a LOCK-LESS bind runs against an
@@ -458,7 +472,9 @@ class McpClientReconnectDeadlineError extends Error {
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
+  private serverClosePromise: Promise<void> | null = null;
   private closing = false;
+  private acceptingRequests = false;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private readonly adbClientFactory: AdbClientFactory;
@@ -469,6 +485,8 @@ export class UnixSocketServer {
   private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
+  /** Session-release frames written but not yet flushed to their client sockets. */
+  private pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
   private listChangedUnsubscribe: (() => void) | null = null;
   private sessionReleaseUnsubscribe: (() => void) | null = null;
   private socketPath: string;
@@ -500,6 +518,7 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
+  private readonly identityStartedAt: number;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
@@ -596,6 +615,7 @@ export class UnixSocketServer {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     };
+    this.identityStartedAt = this.timer.now();
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -607,6 +627,8 @@ export class UnixSocketServer {
    */
   async start(): Promise<void> {
     this.closing = false;
+    this.acceptingRequests = true;
+    this.serverClosePromise = null;
     this.lifecycleGeneration += 1;
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
@@ -713,6 +735,12 @@ export class UnixSocketServer {
    * Handle a new client connection
    */
   private handleConnection(socket: Socket): void {
+    if (!this.acceptingRequests) {
+      // An accept callback can already be queued when quiesce closes the
+      // listener. End that late connection before it can bind or issue work.
+      socket.end();
+      return;
+    }
     const sessionId = this.idGenerator.next();
     const session: SessionContext = {
       sessionId,
@@ -844,7 +872,12 @@ export class UnixSocketServer {
       if (!socket) {
         continue;
       }
-      this.writeFrame(socket, sessionId, notification);
+      const pending = Promise.withResolvers<void>();
+      this.pendingSessionReleaseWrites.add(pending.promise);
+      this.writeFrame(socket, sessionId, notification, () => {
+        this.pendingSessionReleaseWrites.delete(pending.promise);
+        pending.resolve();
+      });
     }
   }
 
@@ -896,18 +929,21 @@ export class UnixSocketServer {
     socket: Socket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
+    onFlushed?: () => void,
   ): void {
     if (socket.destroyed) {
+      onFlushed?.();
       return;
     }
     try {
-      const ok = socket.write(JSON.stringify(frame) + "\n");
+      const ok = socket.write(JSON.stringify(frame) + "\n", onFlushed);
       if (!ok) {
         logger.debug(
           `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`,
         );
       }
     } catch (error) {
+      onFlushed?.();
       logger.warn(`Daemon RPC write failed for ${sessionId}: ${error}`);
       if (!socket.destroyed) {
         socket.destroy();
@@ -930,6 +966,15 @@ export class UnixSocketServer {
         type: "mcp_response",
         success: false,
         error: "Session not found",
+      };
+    }
+
+    if (!this.acceptingRequests) {
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: false,
+        error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
       };
     }
 
@@ -1072,6 +1117,9 @@ export class UnixSocketServer {
           ...(error instanceof DeviceControlTransportError
             ? { transportFailure: error.failure }
             : {}),
+          ...(error instanceof ReleasedBoundSessionError
+            ? { boundSessionLoss: error.failure }
+            : {}),
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
@@ -1127,6 +1175,14 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: evaluation.message,
+      handshakeFailure: {
+        code: "daemon_identity_mismatch",
+        phase: "daemon-preflight",
+        executionStarted: false,
+        reason: evaluation.reason,
+        daemon: this.daemonIdentity,
+        client: extractClientHandshake(request),
+      },
     };
   }
 
@@ -1676,6 +1732,9 @@ export class UnixSocketServer {
         context.totalTimeoutMs,
       );
     } catch (error) {
+      if (error instanceof ReleasedBoundSessionError) {
+        throw error;
+      }
       const message = errorMessage(error);
       if (message.includes("Session not found")) {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
@@ -2458,7 +2517,17 @@ export class UnixSocketServer {
     if (!this.isReleasedBoundSession(args)) {
       return;
     }
-    throw new Error(`Session not found: ${this.getSessionUuid(args)}`);
+    const sessionUuid = this.getSessionUuid(args);
+    if (!sessionUuid) {
+      throw new Error("Released bound session is missing its session UUID.");
+    }
+    const release = this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid);
+    throw new ReleasedBoundSessionError({
+      code: BOUND_SESSION_LOSS_CODE,
+      sessionUuid,
+      reason: release?.releaseReason ?? "session-not-found",
+      ...(release ? { release } : {}),
+    });
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -2681,7 +2750,11 @@ export class UnixSocketServer {
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).
-          version: getMcpServerVersion(),
+          version: this.daemonIdentity.version,
+          pid: process.pid,
+          buildId: this.daemonIdentity.build.buildId,
+          entryScript: this.daemonIdentity.build.entryScript,
+          startedAt: this.identityStartedAt,
           releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
           android: {
             ctrlProxy: {
@@ -4788,11 +4861,64 @@ export class UnixSocketServer {
   }
 
   /**
+   * Stop admitting control-socket work while preserving connected notification
+   * subscribers. Daemon shutdown uses this barrier before releasing device
+   * sessions, so no new request can mint or refresh a session after the shutdown
+   * snapshot while each bound proxy can still receive its exact release reason.
+   */
+  async quiesce(): Promise<void> {
+    this.acceptingRequests = false;
+    // Stop new connections immediately while keeping established notification
+    // subscribers alive long enough to receive session-release frames. Any
+    // connection that has not opted in cannot receive the shutdown reason, so
+    // close it now and let its proxy reconnect to the successor daemon.
+    void this.closeListeningServer(this.isOwnedSocketFile());
+    for (const [sessionId, socket] of this.clientSockets) {
+      if (!this.notificationSubscribers.has(sessionId) && !socket.destroyed) {
+        socket.end();
+      }
+    }
+    await this.drainActiveRequestHandlers();
+  }
+
+  /** Wait for release frames to flush to client sockets, bounded for shutdown. */
+  async drainSessionReleaseNotifications(): Promise<void> {
+    const pendingWrites = Array.from(this.pendingSessionReleaseWrites);
+    if (pendingWrites.length === 0) {
+      return;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<boolean>((resolve) => {
+      timeoutHandle = this.timer.setTimeout(
+        () => resolve(false),
+        DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS,
+      );
+    });
+    try {
+      const drained = await Promise.race([
+        Promise.allSettled(pendingWrites).then(() => true),
+        timeout,
+      ]);
+      if (!drained) {
+        logger.warn(
+          `Timed out waiting for ${pendingWrites.length} session-release notification(s) to flush during shutdown`,
+        );
+      }
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  /**
    * Stop the Unix socket server
    */
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
     this.closing = true;
+    this.acceptingRequests = false;
     this.lifecycleGeneration += 1;
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
@@ -4849,6 +4975,9 @@ export class UnixSocketServer {
   }
 
   private closeListeningServer(ownsSocketPath: boolean): Promise<void> {
+    if (this.serverClosePromise) {
+      return this.serverClosePromise;
+    }
     if (!this.server) {
       return Promise.resolve();
     }
@@ -4859,18 +4988,28 @@ export class UnixSocketServer {
       this.server.unref();
       return Promise.resolve();
     }
-    return new Promise((resolve) => {
+    this.serverClosePromise = new Promise((resolve) => {
       this.server!.close(() => {
         logger.info("Unix socket server closed");
         resolve();
       });
     });
+    return this.serverClosePromise;
   }
 
   private destroyClientSockets(clientSockets: Socket[]): void {
     for (const socket of clientSockets) {
       if (!socket.destroyed) {
-        socket.destroy();
+        // `destroy()` may discard a just-flushed session-release frame and reset
+        // the peer before it can read the exact daemon-shutdown reason. End the
+        // writable side and destroy only after its buffer drains, with a bounded
+        // fallback for a non-reading peer.
+        const forceClose = this.timer.setTimeout(
+          () => socket.destroy(),
+          DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS,
+        );
+        socket.once("close", () => this.timer.clearTimeout(forceClose));
+        socket.end();
       }
     }
   }

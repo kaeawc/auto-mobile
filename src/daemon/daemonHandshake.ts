@@ -1,4 +1,5 @@
 import { releaseVersion } from "../utils/mcpVersion";
+import { z } from "zod";
 import { type BuildIdentity, buildIdentitiesMatch, describeBuildIdentity } from "./buildIdentity";
 
 /**
@@ -21,6 +22,35 @@ import { type BuildIdentity, buildIdentitiesMatch, describeBuildIdentity } from 
  */
 
 export type HandshakeMismatchReason = "version" | "build";
+
+export interface DaemonHandshakeFailure {
+  code: "daemon_identity_mismatch";
+  phase: "daemon-preflight";
+  executionStarted: false;
+  reason: HandshakeMismatchReason;
+  daemon: DaemonSelfIdentity;
+  client: ClientHandshake;
+}
+
+const handshakeFailureSchema = z.object({
+  code: z.literal("daemon_identity_mismatch"),
+  phase: z.literal("daemon-preflight"),
+  executionStarted: z.literal(false),
+  reason: z.enum(["version", "build"]),
+  daemon: z.object({
+    version: z.string(),
+    build: z.object({ buildId: z.string(), entryScript: z.string() }),
+  }),
+  client: z.object({
+    clientVersion: z.string().optional(),
+    clientBuildId: z.string().optional(),
+    clientEntryScript: z.string().optional(),
+  }),
+});
+
+export function isDaemonHandshakeFailure(value: unknown): value is DaemonHandshakeFailure {
+  return handshakeFailureSchema.safeParse(value).success;
+}
 
 /**
  * The identity fields a client declares on connect. All optional so a legacy

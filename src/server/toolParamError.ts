@@ -75,7 +75,22 @@ function coverageKey(unionId: number, path: ReadonlyArray<PropertyKey>): string 
   return `${unionId}#${path.map(String).join(".")}`;
 }
 
-function formatSelectorIssue(issue: ZodIssue, toolName: string, path: string): string | undefined {
+function formatSelectorIssue(
+  issue: ZodIssue,
+  toolName: string,
+  path: string,
+  rawInput: unknown,
+): string | undefined {
+  if (
+    toolName === "tapOn" &&
+    path === "selector" &&
+    issue.code === "invalid_type" &&
+    issue.expected === "object" &&
+    rawInput !== undefined &&
+    !isProvidedInput(rawInput, issue.path)
+  ) {
+    return "selector is required: selector: { elementId | testTag | text | accessibilityLink | textAny }";
+  }
   if (issue.code !== "unrecognized_keys" || toolName !== "tapOn" || path !== "selector") {
     return undefined;
   }
@@ -98,7 +113,8 @@ function formatMissingPlatformIssue(
 function formatIssue(issue: ZodIssue, toolName: string, rawInput: unknown): string {
   const path = issue.path.length ? issue.path.join(".") : "parameters";
   const actionableIssue =
-    formatSelectorIssue(issue, toolName, path) ?? formatMissingPlatformIssue(issue, path, rawInput);
+    formatSelectorIssue(issue, toolName, path, rawInput) ??
+    formatMissingPlatformIssue(issue, path, rawInput);
   if (actionableIssue) {
     return actionableIssue;
   }

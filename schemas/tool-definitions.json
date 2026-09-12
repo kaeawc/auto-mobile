@@ -1600,16 +1600,16 @@
       "type": "object",
       "properties": {
         "bootTimeoutMs": {
-          "description": "Maximum time to find, recover, or boot the device operating system",
+          "description": "Maximum time in ms to find, recover, or boot the device operating system (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields.",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
         },
         "automationReadyTimeoutMs": {
-          "description": "Maximum time to install, update, start, and verify the automation runner",
+          "description": "Maximum time in ms to install, update, start, and verify the automation runner (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields; when bootTimeoutMs is omitted, this must be <= 710000.",
           "type": "integer",
           "minimum": 1000,
-          "maximum": 120000
+          "maximum": 890000
         },
         "avdName": {
           "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
@@ -1633,16 +1633,16 @@
       "type": "object",
       "properties": {
         "bootTimeoutMs": {
-          "description": "Maximum time to find, recover, or boot the device operating system",
+          "description": "Maximum time in ms to find, recover, or boot the device operating system (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields.",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
         },
         "automationReadyTimeoutMs": {
-          "description": "Maximum time to install, update, start, and verify the automation runner",
+          "description": "Maximum time in ms to install, update, start, and verify the automation runner (default 180000). bootTimeoutMs + automationReadyTimeoutMs must be <= 890000, including defaults for omitted fields; when bootTimeoutMs is omitted, this must be <= 710000.",
           "type": "integer",
           "minimum": 1000,
-          "maximum": 120000
+          "maximum": 890000
         },
         "udid": {
           "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",
@@ -1971,7 +1971,7 @@
   },
   {
     "name": "highlight",
-    "description": "Draw a visual highlight around a UI element.",
+    "description": "Draw a red hand-drawn circle around a UI element.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1994,312 +1994,54 @@
           "type": "string"
         },
         "shape": {
-          "description": "Optional highlight shape definition",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "box"
-                },
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "y": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "width": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "height": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "sourceWidth": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "sourceHeight": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": ["x", "y", "width", "height"],
-                  "additionalProperties": false
-                },
-                "style": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "strokeColor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "strokeWidth": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "exclusiveMinimum": 0
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dashPattern": {
-                          "anyOf": [
-                            {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                              }
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "smoothing": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "tension": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "capStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["butt", "round", "square"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "joinStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["miter", "round", "bevel"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["type", "bounds"],
-              "additionalProperties": false
+          "description": "Optional bounds for a red hand-drawn circle",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "circle"
             },
-            {
+            "bounds": {
               "type": "object",
               "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "circle"
+                "x": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 },
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "y": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "width": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "height": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "sourceWidth": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "sourceHeight": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": ["x", "y", "width", "height"],
-                  "additionalProperties": false
+                "y": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 },
-                "style": {
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sourceWidth": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "strokeColor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "strokeWidth": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "exclusiveMinimum": 0
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dashPattern": {
-                          "anyOf": [
-                            {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                              }
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "smoothing": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "tension": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "capStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["butt", "round", "square"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "joinStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["miter", "round", "bevel"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceHeight": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     },
                     {
                       "type": "null"
@@ -2307,191 +2049,12 @@
                   ]
                 }
               },
-              "required": ["type", "bounds"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "path"
-                },
-                "points": {
-                  "minItems": 2,
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "x": {
-                        "type": "number"
-                      },
-                      "y": {
-                        "type": "number"
-                      }
-                    },
-                    "required": ["x", "y"],
-                    "additionalProperties": false
-                  }
-                },
-                "bounds": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "x": {
-                          "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
-                        },
-                        "y": {
-                          "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
-                        },
-                        "width": {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "height": {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "sourceWidth": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "sourceHeight": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": ["x", "y", "width", "height"],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "style": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "strokeColor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "strokeWidth": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "exclusiveMinimum": 0
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dashPattern": {
-                          "anyOf": [
-                            {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                              }
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "smoothing": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "tension": {
-                          "anyOf": [
-                            {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 1
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "capStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["butt", "round", "square"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "joinStyle": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": ["miter", "round", "bevel"]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["type", "points"],
+              "required": ["x", "y", "width", "height"],
               "additionalProperties": false
             }
-          ]
+          },
+          "required": ["type", "bounds"],
+          "additionalProperties": false
         },
         "elementId": {
           "description": "Resource ID, e.g. com.app:id/btn_login",
@@ -3697,6 +3260,20 @@
       },
       "type": "object",
       "properties": {
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "visible": {
+              "type": "boolean",
+              "const": true
+            },
+            "package": {
+              "type": "string"
+            }
+          },
+          "required": ["visible", "package"],
+          "additionalProperties": false
+        },
         "screenSize": {
           "type": "object",
           "properties": {
@@ -7572,6 +7149,209 @@
           "type": "string",
           "minLength": 1
         },
+        "resources": {
+          "description": "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+          "type": "object",
+          "properties": {
+            "wallpaperRendering": {
+              "description": "Home and Lock Screen wallpaper rendering; excludes widgets and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "widgets": {
+              "description": "Widget refresh, including app widgets; excludes wallpaper and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "liveActivities": {
+              "description": "Live Activities and Dynamic Island updates; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthServices": {
+              "description": "HealthKit data and Health app background work. Health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "homeServices": {
+              "description": "HomeKit accessories and automations. Home integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "fitnessServices": {
+              "description": "Apple Fitness, coaching, activity awards, and activity sharing.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "familyServices": {
+              "description": "Family Sharing, family approvals, and parental controls. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screenTime": {
+              "description": "Screen Time limits and usage tracking. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "newsServices": {
+              "description": "Apple News background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "weatherServices": {
+              "description": "Apple Weather background forecasts.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tipsServices": {
+              "description": "Apple Tips background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "gameServices": {
+              "description": "Game Center and saved-game synchronization; excludes controller input.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsSync": {
+              "description": "Maps favorites, history, background updates, and suggested destinations; excludes MapKit rendering and location services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "advertising": {
+              "description": "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "diagnosticReporting": {
+              "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photoAnalysis": {
+              "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantSuggestions": {
+              "description": "Siri inference, knowledge, and proactive suggestions; preserves speech, system voices, and shared language/model infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleIntelligence": {
+              "description": "Apple Intelligence orchestration and generative experiences; system writing tools and intelligence integrations may become unavailable. Preserves shared model and speech services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "searchIndexing": {
+              "description": "Spotlight and Settings search, including app-provided system indexes; excludes an app's own search service.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appStoreServices": {
+              "description": "App Store installation/update services; excludes push and StoreKit payment services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleMediaSync": {
+              "description": "Apple Music and subscribed/purchased media background services; excludes generic audio/video playback and StoreKit payments.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailServices": {
+              "description": "Apple Mail background services. Mail-based sign-in email workflows may be unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarServices": {
+              "description": "Local Calendar database access; excludes server-side calendar integrations in apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "reminderServices": {
+              "description": "Apple Reminders database and background work; excludes reminders maintained by other apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "personalDataSync": {
+              "description": "Exchange, CalDAV, and CardDAV synchronization; preserves local Contacts database access.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "safariSync": {
+              "description": "Safari bookmark/history synchronization; preserves associated domains, shared credentials, browsing protections, and WebKit.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSettingsSync": {
+              "description": "iCloud system-settings synchronization and storage-plan recommendations; preserves accounts, credentials, CloudKit data, Drive, and Photos transfers.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagingMaintenance": {
+              "description": "Apple Messages history cleanup, attachment transfer, and FaceTime message storage; preserves identity, message database XPC helpers, and system calling services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "watchConnectivity": {
+              "description": "Paired Watch and companion-device communication.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "carPlay": {
+              "description": "CarPlay vehicle connectivity.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tvRemote": {
+              "description": "Apple TV discovery and remote control.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "findMy": {
+              "description": "Find My device-location services; excludes general location APIs.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "continuity": {
+              "description": "Nearby-device Continuity discovery; cross-device workflows may stop working. Preserves system share sheets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "walletServices": {
+              "description": "Wallet, Apple Pay, digital identity, and merchant services. Payment sheets, including dependent StoreKit workflows, may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "businessServices": {
+              "description": "Apple business messaging services; excludes ordinary app messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backgroundSync": {
+              "description": "General OS background app scheduling. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "animations": {
+              "description": "System UI animations. Control is currently unsupported.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googlePlayServices": {
+              "description": "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSync": {
+              "description": "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
         "device": {
           "oneOf": [
             {
@@ -7675,14 +7455,24 @@
           "enum": ["automation", "none"]
         },
         "timeoutMs": {
-          "description": "Total provision, boot, and readiness timeout in ms",
+          "description": "Total provision, boot, resource configuration, and readiness timeout in ms",
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 890000
+          "maximum": 830000
         }
       },
       "required": ["operationId", "device"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["resources"]
+      },
+      "then": {
+        "properties": {
+          "boot": {
+            "const": true
+          }
+        }
+      }
     }
   },
   {
@@ -8018,6 +7808,10 @@
           "type": "string",
           "enum": ["portrait", "landscape"]
         },
+        "lockOrientation": {
+          "description": "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -8261,7 +8055,7 @@
           "type": "string"
         }
       },
-      "required": ["commands", "platform"],
+      "required": ["commands"],
       "additionalProperties": false
     }
   },
@@ -8409,6 +8203,241 @@
           }
         }
       }
+    }
+  },
+  {
+    "name": "setDeviceResources",
+    "description": "Set selected device resources and verify installed services. Wallpaper, widgets, and Live Activities are independent. All settings are opt-in; omitted resources stay unchanged. iOS Simulator controls are runtime-dependent; Android controls report unsupported.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "resources": {
+          "type": "object",
+          "properties": {
+            "wallpaperRendering": {
+              "description": "Home and Lock Screen wallpaper rendering; excludes widgets and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "widgets": {
+              "description": "Widget refresh, including app widgets; excludes wallpaper and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "liveActivities": {
+              "description": "Live Activities and Dynamic Island updates; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthServices": {
+              "description": "HealthKit data and Health app background work. Health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "homeServices": {
+              "description": "HomeKit accessories and automations. Home integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "fitnessServices": {
+              "description": "Apple Fitness, coaching, activity awards, and activity sharing.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "familyServices": {
+              "description": "Family Sharing, family approvals, and parental controls. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screenTime": {
+              "description": "Screen Time limits and usage tracking. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "newsServices": {
+              "description": "Apple News background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "weatherServices": {
+              "description": "Apple Weather background forecasts.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tipsServices": {
+              "description": "Apple Tips background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "gameServices": {
+              "description": "Game Center and saved-game synchronization; excludes controller input.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsSync": {
+              "description": "Maps favorites, history, background updates, and suggested destinations; excludes MapKit rendering and location services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "advertising": {
+              "description": "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "diagnosticReporting": {
+              "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photoAnalysis": {
+              "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantSuggestions": {
+              "description": "Siri inference, knowledge, and proactive suggestions; preserves speech, system voices, and shared language/model infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleIntelligence": {
+              "description": "Apple Intelligence orchestration and generative experiences; system writing tools and intelligence integrations may become unavailable. Preserves shared model and speech services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "searchIndexing": {
+              "description": "Spotlight and Settings search, including app-provided system indexes; excludes an app's own search service.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appStoreServices": {
+              "description": "App Store installation/update services; excludes push and StoreKit payment services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleMediaSync": {
+              "description": "Apple Music and subscribed/purchased media background services; excludes generic audio/video playback and StoreKit payments.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailServices": {
+              "description": "Apple Mail background services. Mail-based sign-in email workflows may be unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarServices": {
+              "description": "Local Calendar database access; excludes server-side calendar integrations in apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "reminderServices": {
+              "description": "Apple Reminders database and background work; excludes reminders maintained by other apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "personalDataSync": {
+              "description": "Exchange, CalDAV, and CardDAV synchronization; preserves local Contacts database access.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "safariSync": {
+              "description": "Safari bookmark/history synchronization; preserves associated domains, shared credentials, browsing protections, and WebKit.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSettingsSync": {
+              "description": "iCloud system-settings synchronization and storage-plan recommendations; preserves accounts, credentials, CloudKit data, Drive, and Photos transfers.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagingMaintenance": {
+              "description": "Apple Messages history cleanup, attachment transfer, and FaceTime message storage; preserves identity, message database XPC helpers, and system calling services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "watchConnectivity": {
+              "description": "Paired Watch and companion-device communication.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "carPlay": {
+              "description": "CarPlay vehicle connectivity.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tvRemote": {
+              "description": "Apple TV discovery and remote control.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "findMy": {
+              "description": "Find My device-location services; excludes general location APIs.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "continuity": {
+              "description": "Nearby-device Continuity discovery; cross-device workflows may stop working. Preserves system share sheets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "walletServices": {
+              "description": "Wallet, Apple Pay, digital identity, and merchant services. Payment sheets, including dependent StoreKit workflows, may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "businessServices": {
+              "description": "Apple business messaging services; excludes ordinary app messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backgroundSync": {
+              "description": "General OS background app scheduling. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "animations": {
+              "description": "System UI animations. Control is currently unsupported.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googlePlayServices": {
+              "description": "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSync": {
+              "description": "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "timeoutMs": {
+          "description": "Total configuration budget in milliseconds. Defaults to 300000.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["resources"],
+      "additionalProperties": false
     }
   },
   {
@@ -8795,9 +8824,92 @@
       "type": "object",
       "properties": {
         "toolName": {
-          "description": "Exact case-sensitive AutoMobile tool name to enable or disable.",
+          "description": "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "enum": [
+            "accessibility",
+            "accessibilityFocus",
+            "biometricAuth",
+            "changeLocalization",
+            "clearKeyValueFile",
+            "clearMockNetwork",
+            "clearText",
+            "clipboard",
+            "crashApp",
+            "debugSearch",
+            "deleteDevice",
+            "deviceSnapshot",
+            "displayConfig",
+            "dragAndDrop",
+            "executePlan",
+            "explore",
+            "exportPlan",
+            "getAndroid",
+            "getAppPermissions",
+            "getApple",
+            "getDataStore",
+            "getDeepLinks",
+            "getDeviceState",
+            "getIosSimulatorCapabilities",
+            "getNavigationGraph",
+            "getNetworkGraph",
+            "getNotificationPolicy",
+            "getPreference",
+            "highlight",
+            "homeScreen",
+            "identifyInteractions",
+            "imeAction",
+            "inputText",
+            "installApp",
+            "keyboard",
+            "killDevice",
+            "launchApp",
+            "listApps",
+            "listDataStores",
+            "listDeviceImages",
+            "listDevices",
+            "mockNetwork",
+            "navigateTo",
+            "network",
+            "observe",
+            "openLink",
+            "phoneCall",
+            "pinchOn",
+            "postNotification",
+            "pressButton",
+            "provisionDevice",
+            "putAppFile",
+            "recentApps",
+            "recordSteps",
+            "removeKeyValue",
+            "resetKeychain",
+            "rotate",
+            "selectAllText",
+            "sendKeys",
+            "sendSms",
+            "setActiveDevice",
+            "setAppPermissions",
+            "setDeviceResources",
+            "setDeviceState",
+            "setKeyValue",
+            "setNotificationPolicy",
+            "setPreference",
+            "setUIState",
+            "shake",
+            "sqlQuery",
+            "stageSharedStorage",
+            "stageSharedStorageFixtures",
+            "startTestRecording",
+            "swipeOn",
+            "systemTray",
+            "tapAny",
+            "tapOn",
+            "terminateApp",
+            "uninstallApp",
+            "videoRecording",
+            "wakeAndUnlock"
+          ]
         },
         "enabled": {
           "description": "Whether to enable the tool (default: true).",
@@ -10010,6 +10122,20 @@
             {
               "type": "object",
               "properties": {
+                "keyboard": {
+                  "type": "object",
+                  "properties": {
+                    "visible": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "package": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["visible", "package"],
+                  "additionalProperties": false
+                },
                 "isDiff": {
                   "type": "boolean",
                   "const": true
@@ -11982,312 +12108,54 @@
                 "type": "string"
               },
               "shape": {
-                "description": "Highlight shape",
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "box"
-                      },
-                      "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "x": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "y": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "width": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "height": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "sourceWidth": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "sourceHeight": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["x", "y", "width", "height"],
-                        "additionalProperties": false
-                      },
-                      "style": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "strokeColor": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "strokeWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "exclusiveMinimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "dashPattern": {
-                                "anyOf": [
-                                  {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "number",
-                                      "exclusiveMinimum": 0
-                                    }
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "smoothing": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "tension": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "capStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["butt", "round", "square"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "joinStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "required": ["type", "bounds"],
-                    "additionalProperties": false
+                "description": "Red hand-drawn circle bounds",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "circle"
                   },
-                  {
+                  "bounds": {
                     "type": "object",
                     "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "circle"
+                      "x": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
-                      "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "x": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "y": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "width": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "height": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "sourceWidth": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "sourceHeight": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["x", "y", "width", "height"],
-                        "additionalProperties": false
+                      "y": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
-                      "style": {
+                      "width": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "height": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "sourceWidth": {
                         "anyOf": [
                           {
-                            "type": "object",
-                            "properties": {
-                              "strokeColor": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "strokeWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "exclusiveMinimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "dashPattern": {
-                                "anyOf": [
-                                  {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "number",
-                                      "exclusiveMinimum": 0
-                                    }
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "smoothing": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "tension": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "capStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["butt", "round", "square"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "joinStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "sourceHeight": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
                           },
                           {
                             "type": "null"
@@ -12295,191 +12163,12 @@
                         ]
                       }
                     },
-                    "required": ["type", "bounds"],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "path"
-                      },
-                      "points": {
-                        "minItems": 2,
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "x": {
-                              "type": "number"
-                            },
-                            "y": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["x", "y"],
-                          "additionalProperties": false
-                        }
-                      },
-                      "bounds": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "x": {
-                                "type": "integer",
-                                "minimum": -9007199254740991,
-                                "maximum": 9007199254740991
-                              },
-                              "y": {
-                                "type": "integer",
-                                "minimum": -9007199254740991,
-                                "maximum": 9007199254740991
-                              },
-                              "width": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              "height": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              "sourceWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "sourceHeight": {
-                                "anyOf": [
-                                  {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["x", "y", "width", "height"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "style": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "strokeColor": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "strokeWidth": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "exclusiveMinimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "dashPattern": {
-                                "anyOf": [
-                                  {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "number",
-                                      "exclusiveMinimum": 0
-                                    }
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "smoothing": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "tension": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "capStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["butt", "round", "square"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "joinStyle": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "required": ["type", "points"],
+                    "required": ["x", "y", "width", "height"],
                     "additionalProperties": false
                   }
-                ]
+                },
+                "required": ["type", "bounds"],
+                "additionalProperties": false
               },
               "timing": {
                 "description": "Highlight timing",

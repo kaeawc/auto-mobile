@@ -16,6 +16,13 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+// Recovery must observe disappearance after shutdown, not merely a command ack.
+class StoppedDeviceManager extends FakeDeviceManager {
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.bootedDevices = this.bootedDevices.filter((booted) => booted.deviceId !== device.deviceId);
+  }
+}
+
 describe("ADB server reset session recovery", () => {
   test("rebinds a live session only after restarting its recorded AVD", async () => {
     class ReplacementSerialDeviceManager extends FakeDeviceManager {
@@ -321,7 +328,7 @@ describe("ADB server reset session recovery", () => {
   test("retains captured session identity between cohort detachment and recovery", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -375,7 +382,7 @@ describe("ADB server reset session recovery", () => {
   test("refuses to rebind when the original AVD identity was never recorded", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -406,7 +413,7 @@ describe("ADB server reset session recovery", () => {
   test("detaches every reset-cohort serial while retaining bound session mappings", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -468,7 +475,7 @@ describe("ADB server reset session recovery", () => {
   test("defers the entire reset cohort while named startup holds a matching lease", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -523,7 +530,7 @@ describe("ADB server reset session recovery", () => {
   test("does not partially detach a cohort when an idle tracked process cannot stop", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -600,7 +607,7 @@ describe("ADB server reset session recovery", () => {
   test("cancels cohort session executions before detaching reusable serials", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const cancellations: Array<{
       sessionId: string;
       reason: string;
@@ -688,7 +695,7 @@ describe("ADB server reset session recovery", () => {
   test("keeps recovery fenced until it observes the captured session release", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const device: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -750,7 +757,7 @@ describe("ADB server reset session recovery", () => {
   test("settles an incident when heartbeat release wins during reset preparation", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const backingStore = new InMemoryEmulatorLossIncidentStore(timer);
     const openStarted = Promise.withResolvers<void>();
     const releaseOpen = Promise.withResolvers<void>();
@@ -829,7 +836,7 @@ describe("ADB server reset session recovery", () => {
   });
 
   test("recovers both captured AVDs when the first reuses the second serial", async () => {
-    class SwappedSerialDeviceManager extends FakeDeviceManager {
+    class SwappedSerialDeviceManager extends StoppedDeviceManager {
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
         this.startedDevices.push(device);
         const deviceId = device.name === "Pixel_8_API_35" ? "emulator-5556" : "emulator-5558";
@@ -925,7 +932,7 @@ describe("ADB server reset session recovery", () => {
   test("rebinds the preserved session before accepting a same-AVD replacement", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -978,7 +985,7 @@ describe("ADB server reset session recovery", () => {
   test("does not overwrite a same-AVD replacement owned by another session", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -1035,7 +1042,7 @@ describe("ADB server reset session recovery", () => {
   test("cancels a detached reset member and releases its preserved session", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const releasedSessionIds: string[] = [];
     const pool = new DevicePool(
       sessionManager,
@@ -1087,7 +1094,7 @@ describe("ADB server reset session recovery", () => {
   test("stops the process retained from a detached reset cohort member", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -1146,7 +1153,7 @@ describe("ADB server reset session recovery", () => {
   test("terminates a tracked idle reset-cohort emulator before detaching it", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -1201,7 +1208,7 @@ describe("ADB server reset session recovery", () => {
   test("keeps active sessions quarantined when idle cohort process stop fails", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const incidents = new InMemoryEmulatorLossIncidentStore(timer);
     const pool = new DevicePool(
       sessionManager,
@@ -1304,7 +1311,7 @@ describe("ADB server reset session recovery", () => {
   test("does not recreate an absent preserved session for a recovery replacement", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -1349,7 +1356,7 @@ describe("ADB server reset session recovery", () => {
   });
 
   test("cancels the reserved AVD when an earlier recovery reuses its serial", async () => {
-    class SwappedSerialDeviceManager extends FakeDeviceManager {
+    class SwappedSerialDeviceManager extends StoppedDeviceManager {
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
         this.startedDevices.push(device);
         const deviceId = device.name === "Pixel_8_API_35" ? "emulator-5556" : "emulator-5558";
@@ -1425,7 +1432,7 @@ describe("ADB server reset session recovery", () => {
   test("cancels reset reservation waits when the caller aborts", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -1462,7 +1469,7 @@ describe("ADB server reset session recovery", () => {
   test("releases the preserved session when reboot rejects after detaching the old serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const releasedSessionIds: string[] = [];
     const incidentStore = new InMemoryEmulatorLossIncidentStore(timer);
     const reboot: AndroidDeviceReboot = {
@@ -1549,7 +1556,7 @@ describe("ADB server reset session recovery", () => {
     timer.enableAutoAdvance();
     const persistence = new FakeDeviceSessionPersistence();
     const sessionManager = new SessionManager(timer, persistence);
-    const manager = new FakeDeviceManager();
+    const manager = new StoppedDeviceManager();
     const incidentStore = new TransientCompletionFailureStore(timer);
     let releaseAttempts = 0;
     const reboot: AndroidDeviceReboot = {

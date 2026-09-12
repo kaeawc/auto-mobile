@@ -160,3 +160,56 @@ test("does not activate or fall back after cancellation during runner capability
   expect(actions).toHaveLength(0);
   expect(adb.getAllCommands()).toHaveLength(0);
 });
+
+test.each(["capability", "action"])(
+  "propagates abort during pending %s without input fallback",
+  async (stage) => {
+    const { tap, adb, gestures } = createTap();
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    if (stage === "capability") {
+      (tap as any).accessibilityService.supportsNodeActionSelectors = async (
+        _perf: unknown,
+        signal: AbortSignal,
+      ) => {
+        received = signal;
+        signal.addEventListener("abort", finish, { once: true });
+        await pending;
+        return true;
+      };
+    } else {
+      (tap as any).accessibilityService.requestNodeAction = async (
+        _action: string,
+        _selector: unknown,
+        _timeout: unknown,
+        _perf: unknown,
+        signal: AbortSignal,
+      ) => {
+        received = signal;
+        signal.addEventListener("abort", finish, { once: true });
+        await pending;
+        return { success: true };
+      };
+    }
+    const result = (tap as any).executeAndroidTapWithCoordinates(
+      "tap",
+      540,
+      380,
+      0,
+      row,
+      controller.signal,
+    );
+    for (let i = 0; i < 12; i++) {
+      await Promise.resolve();
+    }
+    expect(received).toBe(controller.signal);
+    controller.abort();
+    await expect(result).rejects.toThrow("Operation cancelled");
+    expect(adb.getAllCommands()).toHaveLength(0);
+    expect(gestures).toHaveLength(0);
+  },
+);

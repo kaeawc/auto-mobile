@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AutoMobileSDK",
     platforms: [
-        .iOS(.v15),
+        .iOS(.v17),
         .macOS(.v13),
     ],
     products: [
@@ -14,11 +14,13 @@ let package = Package(
         ),
     ],
     dependencies: [
+        .package(path: "../highlight-core"),
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
     ],
     targets: [
         .target(
             name: "AutoMobileSDK",
+            dependencies: [.product(name: "AutoMobileHighlightCore", package: "highlight-core")],
             path: "Sources/AutoMobileSDK",
             resources: [.process("PrivacyInfo.xcprivacy")]
         ),

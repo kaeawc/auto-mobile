@@ -31,7 +31,7 @@ the exact arguments supported by your connection.
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                        |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                     |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.        |
-| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility.                        |
+| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility; disabled by default.   |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                        |
 | 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                     |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                               |
@@ -66,9 +66,11 @@ standalone `{ "action": "clear" }` command clears the focused field. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
 
-`sendKeys` becomes default-enabled when the bundled CtrlProxy artifacts reach
-0.0.68. Until then, `inputText` remains the default compatibility path; a local
-fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
+`sendKeys` is the default text-input path on any AutoMobile release whose
+CtrlProxy artifacts are 0.0.68 or newer, which is the case for current releases.
+On older pinned releases `inputText` and `clearText` are default-enabled instead
+and `sendKeys` is off; enable `sendKeys` there explicitly with `setToolEnabled`
+or `--enable-tool sendKeys`.
 
 ??? note "Pinch rotation semantics"
 
@@ -149,7 +151,8 @@ fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
 | 📋 <code>listDevices</code>                                                    | Lists booted devices; a note points to MCP resources for images and detail.                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 🖼️ <code>listDeviceImages</code>                                               | Lists available device images.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 🤖 <code>getAndroid</code> / 🍎 <code>getApple</code>                          | Finds or recovers an Android AVD or iOS Simulator for automation.                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 🧱 <code>provisionDevice</code>                                                | Provisions an exact virtual-device identity.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 🧱 <code>provisionDevice</code>                                                | Provisions an exact virtual-device identity, with optional resource configuration before automation readiness.                                                                                                                                                                                                                                                                                                                                                                         |
+| ⚙️ <code>setDeviceResources</code>                                             | Configures selected device resources and returns verified, unsupported, or unknown state; omitted settings stay unchanged. Disabled by default: enable it with `setToolEnabled` (case-sensitive `setDeviceResources`) or `--enable-tool setDeviceResources` before use.                                                                                                                                                                                                                |
 | 🔧 <code>setActiveDevice</code>                                                | Sets the active device.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ❌ <code>killDevice</code> / 🧹 <code>deleteDevice</code>                      | Stops a device, or stops and permanently deletes it.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 📸 <code>deviceSnapshot</code>                                                 | Captures or restores a device snapshot.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -167,6 +170,26 @@ fresh CtrlProxy can use `sendKeys` after explicitly enabling it.
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+### Keeping an Android orientation locked
+
+`rotate` preserves its existing behavior when `lockOrientation` is omitted: it
+temporarily disables auto-rotate when necessary, then restores the prior
+setting. To keep portrait or landscape orientation in effect for subsequent
+actions, pass `lockOrientation: true`:
+
+```json
+{ "orientation": "landscape", "lockOrientation": true }
+```
+
+The result reports `orientationLockState` as `locked`, `unlocked`, or `unknown`.
+A persistent request succeeds only after live rotation and the lock are
+confirmed. If lock verification fails, `currentOrientation` reports the latest
+confirmed live orientation, or `unknown` when it cannot be read.
+
+To restore automatic rotation, pass `lockOrientation: false`, for example
+`{ "orientation": "landscape", "lockOrientation": false }`. These lock options
+are supported only on Android.
 
 ### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
 
@@ -217,6 +240,14 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state. |
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description. |
 | 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
+
+On Android, compact observations fold captured soft-keyboard keys into a single
+`keyboard: { visible: true, package: "…" }` summary. Use `sendKeys` for text input
+and semantic keys, or `keyboard` to open or close it. `observe` with
+`project: "full"` or `raw: true` retains the individual keys. Folding requires
+a control-proxy build that supplies IME window identity; older builds retain
+their existing key output. An absent summary means no IME identity was captured,
+not a confirmed hidden keyboard.
 
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public

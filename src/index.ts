@@ -22,6 +22,7 @@ import type { DaemonOptions } from "./daemon/types";
 import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
+import { hasGlobalHelpFlag } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
@@ -81,6 +82,11 @@ async function main() {
   startupBenchmark.startPhase("moduleImports");
 
   const rawArgs = process.argv.slice(2);
+  if (hasGlobalHelpFlag(rawArgs)) {
+    const { runCliCommand } = await import("./cli");
+    await runCliCommand(["help"]);
+    process.exit(0);
+  }
   const bootDeviceIndex = rawArgs.indexOf("--boot-device");
   if (bootDeviceIndex >= 0) {
     // The daemon-free boot entrypoint must remain before every normal server

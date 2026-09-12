@@ -1,8 +1,16 @@
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
-import { hasAccessibilityAction } from "../../../utils/elementProperties";
+import {
+  getToggleContentDescription,
+  hasAccessibilityAction,
+} from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
-import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./elementProvenance";
+import {
+  ElementProvenance,
+  getElementProvenance,
+  getCapturedKeyboard,
+  isStrictAncestor,
+} from "./elementProvenance";
 
 /**
  * Interactable Skeleton Projection (issue #4388).
@@ -58,9 +66,16 @@ function deriveId(el: Element): string | undefined {
   return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
 }
 
-/** `label = text ?? content-desc`. */
+/** Named toggles use their accessibility identity; other nodes prefer visible text. */
 function deriveLabel(el: Element): string | undefined {
-  return nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"]);
+  return (
+    getToggleContentDescription(el) ?? nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"])
+  );
+}
+
+/** Preserve a named toggle's own state alongside its identifying label. */
+function deriveSublabel(el: Element, label: string | undefined): string | undefined {
+  return getToggleContentDescription(el) && el.text !== label ? nonEmptyString(el.text) : undefined;
 }
 
 /**
@@ -179,7 +194,10 @@ function strictlyContains(
  */
 function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] {
   const byIdentity = new Map<string, SkeletonAccumulator>();
-  for (const el of [...elements.clickable, ...elements.scrollable, ...elements.text]) {
+  const appElements = [...elements.clickable, ...elements.scrollable, ...elements.text].filter(
+    (element) => !getElementProvenance(element)?.keyboardPackage,
+  );
+  for (const el of appElements) {
     const bounds = boundsTuple(el);
     if (!bounds) {
       continue;
@@ -191,7 +209,13 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
 
     let acc = byIdentity.get(key);
     if (!acc) {
-      acc = { elementId, label, bounds, affordances: new Set<Affordance>() };
+      acc = {
+        elementId,
+        label,
+        sublabel: deriveSublabel(el, label),
+        bounds,
+        affordances: new Set<Affordance>(),
+      };
       byIdentity.set(key, acc);
     }
     if (acc.provenance === undefined) {
@@ -374,7 +398,7 @@ function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): vo
       container.sublabel = parts.slice(1).join(", ");
     }
   } else {
-    container.sublabel = parts.join(", ");
+    container.sublabel = [...new Set([container.sublabel, ...parts].filter(Boolean))].join(", ");
   }
 }
 
@@ -592,6 +616,7 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
 
 /** The `skeleton` (actionable) and `context` (non-actionable) halves of a projection. */
 export interface SkeletonProjectionResult {
+  keyboard?: ObserveResult["keyboard"];
   /** Actionable-only rows (`affordances.length >= 1`); the surface a client should act on. */
   skeleton: SkeletonElement[];
   /**
@@ -629,9 +654,21 @@ export function projectSkeleton(elements: ObserveElements): SkeletonProjectionRe
   assignDuplicateIndexes(actionable);
 
   return {
+    keyboard: getCapturedKeyboard(elements) ?? keyboardSummary(elements),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
   };
+}
+
+/** Report only observed IME identity; missing capture evidence does not mean hidden. */
+function keyboardSummary(elements: ObserveElements): ObserveResult["keyboard"] {
+  for (const element of [...elements.clickable, ...elements.scrollable, ...elements.text]) {
+    const packageName = getElementProvenance(element)?.keyboardPackage;
+    if (packageName) {
+      return { visible: true, package: packageName };
+    }
+  }
+  return undefined;
 }
 
 /**

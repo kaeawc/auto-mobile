@@ -908,6 +908,49 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
   });
 
+  test("bounds killSimulator's boot-lease wait when no signal ever aborts it", async () => {
+    // Simulate a wedged boot: readiness never resolves, so the boot lease is
+    // held indefinitely. killSimulator (via deviceBootRecovery / handle.kill())
+    // is called with no ambient abort signal (no getAbortSignal() in scope).
+    let releaseBoot!: () => void;
+    const harness = createConcurrentStartHarness(
+      () =>
+        new Promise((resolve) => {
+          releaseBoot = () => resolve(createExecResult("", ""));
+        }),
+    );
+    // A huge readiness timeout keeps the boot's own internal bootstatus exec
+    // timeout from firing within this test's assertion window, isolating the
+    // boot-lease wait's own deadline as the only thing that can settle `kill`.
+    const readiness = harness.createClient().waitForSimulatorReady(UDID, 10_000_000);
+    await drainMicrotasks();
+
+    const kill = harness
+      .createClient()
+      .killSimulator({ name: "iPhone 17", platform: "ios", deviceId: UDID })
+      .catch((error: unknown) => error);
+
+    harness.timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+    await drainMicrotasks();
+
+    const killResult = await kill;
+    expect(killResult).toBeInstanceOf(Error);
+    expect((killResult as Error).message).toBe(
+      `Timed out waiting to shut down iOS simulator ${UDID}`,
+    );
+    expect(harness.shutdownInvocations()).toBe(0);
+
+    releaseBoot();
+    await readiness;
+    await drainMicrotasks();
+    expect(harness.shutdownInvocations()).toBe(0);
+    await harness
+      .createClient()
+      .killSimulator({ name: "iPhone 17", platform: "ios", deviceId: UDID });
+    expect(harness.shutdownInvocations()).toBe(1);
+    expect(harness.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("preserves successful boot state when coordinated shutdown fails", async () => {
     let completeOwnerBootstatus: (() => void) | undefined;
     const shutdownError = new Error("shutdown failed");

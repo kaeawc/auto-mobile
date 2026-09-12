@@ -442,7 +442,11 @@ export class NavigationRetention {
         }
         const result = await trx
           .deleteFrom("navigation_node_observations")
-          .where("id", "in", rows.map((row) => row.id))
+          .where(
+            "id",
+            "in",
+            rows.map((row) => row.id),
+          )
           .executeTakeFirst();
         return Number(result.numDeletedRows ?? 0);
       });
@@ -472,7 +476,11 @@ export class NavigationRetention {
         }
         const result = await trx
           .deleteFrom("navigation_edge_observations")
-          .where("id", "in", rows.map((row) => row.id))
+          .where(
+            "id",
+            "in",
+            rows.map((row) => row.id),
+          )
           .executeTakeFirst();
         return Number(result.numDeletedRows ?? 0);
       });
@@ -645,7 +653,10 @@ export class NavigationRetention {
 // Free helpers (kept small so the class methods stay under the complexity gate).
 // ---------------------------------------------------------------------------
 
-async function loadBuildKeys(db: Kysely<Database>, appIds?: readonly string[]): Promise<BuildKeyRow[]> {
+async function loadBuildKeys(
+  db: Kysely<Database>,
+  appIds?: readonly string[],
+): Promise<BuildKeyRow[]> {
   let query = db.selectFrom("navigation_build_keys").select(["id", "app_id"]);
   if (appIds && appIds.length > 0) {
     query = query.where("app_id", "in", appIds);
@@ -716,21 +727,23 @@ async function loadMaxSeenByBuildKey(
   let nodeQuery = db
     .selectFrom("navigation_node_observations as observation")
     .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
-    .select((eb) => ["observation.build_key_id", eb.fn.max("observation.last_seen_at").as("max_seen")]);
+    .select((eb) => [
+      "observation.build_key_id",
+      eb.fn.max("observation.last_seen_at").as("max_seen"),
+    ]);
   let edgeQuery = db
     .selectFrom("navigation_edge_observations as observation")
     .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
-    .select((eb) => ["observation.build_key_id", eb.fn.max("observation.last_seen_at").as("max_seen")]);
+    .select((eb) => [
+      "observation.build_key_id",
+      eb.fn.max("observation.last_seen_at").as("max_seen"),
+    ]);
   if (appIds && appIds.length > 0) {
     nodeQuery = nodeQuery.where("buildKey.app_id", "in", appIds);
     edgeQuery = edgeQuery.where("buildKey.app_id", "in", appIds);
   }
-  const nodeMax = await nodeQuery
-    .groupBy("observation.build_key_id")
-    .execute();
-  const edgeMax = await edgeQuery
-    .groupBy("observation.build_key_id")
-    .execute();
+  const nodeMax = await nodeQuery.groupBy("observation.build_key_id").execute();
+  const edgeMax = await edgeQuery.groupBy("observation.build_key_id").execute();
 
   const maxSeen = new Map<number, number>();
   for (const row of [...nodeMax, ...edgeMax]) {

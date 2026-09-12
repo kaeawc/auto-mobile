@@ -359,14 +359,11 @@ describe("NavigationRetention prune", () => {
 
     let yields = 0;
     let readAfterFirstYield: Promise<unknown> | undefined;
-    const summary = await retention(
-      { ...CONFIG, evictionChunkSize: 2 },
-      async () => {
-        yields += 1;
-        readAfterFirstYield ??= db.selectFrom("navigation_build_keys").selectAll().execute();
-        await readAfterFirstYield;
-      },
-    ).prune(50_000);
+    const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
+      yields += 1;
+      readAfterFirstYield ??= db.selectFrom("navigation_build_keys").selectAll().execute();
+      await readAfterFirstYield;
+    }).prune(50_000);
 
     expect(summary.nodeObservationsDeleted).toBe(5);
     expect(yields).toBeGreaterThan(0);

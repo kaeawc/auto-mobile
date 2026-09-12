@@ -65,7 +65,10 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         #if DEBUG
         server?.stop()
         #endif
-        observers.forEach(NotificationCenter.default.removeObserver)
+        let center = NotificationCenter.default
+        for observer in observers {
+            center.removeObserver(observer)
+        }
     }
 
     // MARK: - On-Demand Access
@@ -117,9 +120,17 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
     }
 
     private func observeApplicationLifecycle() {
-        guard lifecycleObservers.isEmpty else { return }
+        // `refreshApplicationActiveState` takes `lock`, so seed the state before
+        // acquiring it (NSLock is not recursive).
         refreshApplicationActiveState()
         let center = NotificationCenter.default
+        lock.lock()
+        guard lifecycleObservers.isEmpty else {
+            // Already observing: a second `initialize()` must not double-register,
+            // and `reset()` must not be able to interleave with the publish below.
+            lock.unlock()
+            return
+        }
         lifecycleObservers = [
             center.addObserver(
                 forName: UIApplication.didBecomeActiveNotification,
@@ -137,6 +148,7 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
                 queue: .main
             ) { [weak self] _ in self?.setApplicationActive(false) },
         ]
+        lock.unlock()
     }
 
     private func refreshApplicationActiveState() {

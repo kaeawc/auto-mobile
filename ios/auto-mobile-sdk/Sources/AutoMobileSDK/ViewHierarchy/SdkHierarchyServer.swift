@@ -138,14 +138,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
                     return
                 }
 
-                guard self.tracker?.isApplicationActive == true else {
-                    self.sendResponse(
-                        connection,
-                        statusCode: 409,
-                        body: Data("{\"error\":\"app_not_active\"}".utf8)
-                    )
-                    return
-                }
+                guard self.requireApplicationActive(connection) else { return }
 
                 if request.contains("GET /hierarchy/fresh") {
                     self.handleFreshHierarchy(connection)
@@ -227,71 +220,95 @@ final class SdkHierarchyServer: @unchecked Sendable {
         sendResponse(connection, statusCode: 200, body: data)
     }
 
-    private func handleNetworkMock(_ connection: NWConnection, initialData: Data) {
+    /// The foreground gate, asserted at a single point so every caller answers a
+    /// non-foreground request identically.
+    ///
+    /// Returns `false` (having already answered the connection) when the app is
+    /// not active, so callers can `guard ... else { return }`.
+    private func requireApplicationActive(_ connection: NWConnection) -> Bool {
+        guard tracker?.isApplicationActive == true else {
+            sendResponse(
+                connection,
+                statusCode: 409,
+                body: Data("{\"error\":\"app_not_active\"}".utf8)
+            )
+            return false
+        }
+        return true
+    }
+
+    /// Read a body-bearing route's body, then run `execute`.
+    ///
+    /// The foreground check at header-parse time is NOT sufficient for these
+    /// routes: the body can arrive in later TCP segments, so an app that was
+    /// active when the headers landed may have resigned active by the time the
+    /// body completes. The gate is therefore re-asserted here, at execution
+    /// time, and a request that loses the foreground mid-read gets exactly the
+    /// same `409 app_not_active` answer as one that never had it.
+    private func withRequestBody(
+        _ connection: NWConnection,
+        initialData: Data,
+        execute: @escaping (SdkHierarchyServer, Data?) -> Void
+    ) {
         readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
             guard let self = self else {
                 connection.cancel()
                 return
             }
+            guard self.requireApplicationActive(connection) else { return }
+            execute(self, body)
+        }
+    }
+
+    private func handleNetworkMock(_ connection: NWConnection, initialData: Data) {
+        withRequestBody(connection, initialData: initialData) { server, body in
             guard let body = body,
                   let payload = try? JSONDecoder().decode(SetMockRulesBody.self, from: body) else {
-                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                 return
             }
             NetworkMockRuleStore.shared.setRules(payload.rules)
-            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+            server.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
     }
 
     private func handleNetworkErrorSimulation(_ connection: NWConnection, initialData: Data) {
-        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
-            guard let self = self else {
-                connection.cancel()
-                return
-            }
+        withRequestBody(connection, initialData: initialData) { server, body in
             guard let body = body,
                   let payload = try? JSONDecoder().decode(NetworkErrorSimulationDTO.self, from: body) else {
-                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                 return
             }
             NetworkMockRuleStore.shared.setErrorSimulation(payload)
-            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+            server.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
     }
 
     private func handleNetworkFaultRules(_ connection: NWConnection, initialData: Data) {
-        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
-            guard let self else {
-                connection.cancel()
-                return
-            }
+        withRequestBody(connection, initialData: initialData) { server, body in
             guard let body,
                   let payload = try? JSONDecoder().decode(SetNetworkFaultRulesBody.self, from: body) else {
-                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                 return
             }
             NetworkMockRuleStore.shared.setFaultRules(payload.rules)
-            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+            server.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
     }
 
     private func handleHighlight(_ connection: NWConnection, initialData: Data) {
 #if canImport(UIKit)
-        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
-            guard let self = self else {
-                connection.cancel()
-                return
-            }
+        withRequestBody(connection, initialData: initialData) { server, body in
             guard let body = body,
                   let payload = try? JSONDecoder().decode(SdkAddHighlightBody.self, from: body) else {
-                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                 return
             }
             guard SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape) else {
-                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"highlight_failed\"}".utf8))
+                server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"highlight_failed\"}".utf8))
                 return
             }
-            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+            server.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
 #else
         sendResponse(connection, statusCode: 503, body: Data("{\"error\":\"highlight_unavailable\"}".utf8))
@@ -303,12 +320,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
         initialData: Data,
         route: @escaping (Data) -> SdkRouteResponse
     ) {
-        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
-            guard let self = self else {
-                connection.cancel()
-                return
-            }
-            self.sendRouteResponse(connection, route(body ?? Data()))
+        withRequestBody(connection, initialData: initialData) { server, body in
+            server.sendRouteResponse(connection, route(body ?? Data()))
         }
     }
 
@@ -459,6 +472,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
         case 204: statusText = "No Content"
         case 400: statusText = "Bad Request"
         case 404: statusText = "Not Found"
+        case 409: statusText = "Conflict"
         case 500: statusText = "Internal Server Error"
         case 503: statusText = "Service Unavailable"
         default: statusText = "Unknown"

@@ -781,12 +781,13 @@ export interface DeviceToolsDependencies {
   /**
    * Re-resolve an emulator's AVD name from the RUNTIME rather than from any
    * host-side cache (`emu avd name`). Resolves to undefined when the emulator
-   * console cannot answer inside `timeoutMs`. See
-   * {@link verifyPooledAndroidAvdName}.
+   * console cannot answer inside `timeoutMs`, which is the caller's REMAINING
+   * deadline, not an independent budget. See {@link verifyPooledAndroidAvdName}.
    */
   resolveRunningAndroidAvdName: (
     device: BootedDevice,
     timeoutMs: number,
+    signal?: AbortSignal,
   ) => Promise<string | undefined>;
 }
 
@@ -842,21 +843,24 @@ function releaseProvisionDeviceWaiter(
 }
 
 /**
- * How long the runtime gets to name itself before a destructive action gives up
- * on verification. Short on purpose: the caller is holding a lifecycle lease and
- * a wedged console must not turn a kill into a hang — an unanswered probe is a
- * logged warning, not a failure (see {@link verifyPooledAndroidAvdName}).
+ * The CEILING on how long the runtime gets to name itself before a destructive
+ * action gives up on verification. Short on purpose: the caller is holding a
+ * lifecycle lease and a wedged console must not turn a kill into a hang. It is a
+ * ceiling and never a floor — the probe is bounded by whichever is smaller, this
+ * or the caller's remaining teardown/kill deadline, and an unanswered probe
+ * REFUSES the action (see {@link verifyPooledAndroidAvdName}).
  */
 const POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS = 3_000;
 
 async function defaultResolveRunningAndroidAvdName(
   device: BootedDevice,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
     const { AndroidEmulatorClient } =
       await import("../utils/android-cmdline-tools/AndroidEmulatorClient");
-    return await new AndroidEmulatorClient().resolveRunningAvdName(device, timeoutMs);
+    return await new AndroidEmulatorClient().resolveRunningAvdName(device, timeoutMs, signal);
   } catch (error) {
     // An unreachable console is one of the three expected outcomes of this
     // probe; the caller treats "could not resolve" as its documented blind spot.
@@ -2393,7 +2397,8 @@ function resolveKillDeviceStableTarget(
  * can belong to the previous occupant of the serial. Every DESTRUCTIVE caller
  * (killDevice, deleteDevice) must therefore run {@link
  * verifyPooledAndroidAvdName} first, which re-resolves the name from the
- * runtime and fails closed on a mismatch.
+ * runtime and fails closed on a mismatch -- and on a probe that does not
+ * answer.
  */
 function getValidatedPooledAndroidAvdName(
   device: BootedDevice,
@@ -2411,9 +2416,18 @@ function getValidatedPooledAndroidAvdName(
   return pooled?.avdName;
 }
 
-interface PooledAvdNameConflict {
-  pooledAvdName: string;
-  runtimeAvdName: string;
+type PooledAvdNameRefusal =
+  | { reason: "conflict"; pooledAvdName: string; runtimeAvdName: string }
+  | { reason: "unresolved"; pooledAvdName: string };
+
+/**
+ * The caller's own deadline for the destructive action, which the verification
+ * probe borrows rather than starting a timer of its own.
+ */
+interface PooledAvdNameProbeBudget {
+  timer: Timer;
+  deadlineMs: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -2424,12 +2438,22 @@ interface PooledAvdNameConflict {
  * previous one disappear, leaving the pool holding the OLD label — and a kill or
  * delete issued against that label would stop the NEW emulator (#6863 review).
  * So ask the runtime itself:
- *  - it names a DIFFERENT AVD -> return the conflict; the caller refuses;
  *  - it names the SAME AVD -> identity verified, proceed;
- *  - it cannot answer inside the bounded timeout -> proceed on the pooled name
- *    and warn. That is the whole of the remaining blind spot, narrowed from
- *    "any restart faster than one discovery interval" to "the emulator console
- *    is unavailable at the moment of the destructive action".
+ *  - it names a DIFFERENT AVD -> `conflict`; the caller refuses;
+ *  - it cannot answer inside the bounded budget -> `unresolved`; the caller
+ *    refuses too.
+ *
+ * There is no fail-open branch. `Unknown (<serial>)` means "no information", and
+ * a probe that does not answer leaves it that way — acting anyway would be
+ * acting on a label this daemon cannot tie to the runtime. The cost is that an
+ * emulator whose console has wedged is not killable through the tool; the
+ * message names `adb -s <serial> emu kill` as the manual escape, and a
+ * tool-level `force` option is tracked as a separate follow-up.
+ *
+ * The probe is bounded by whichever is smaller, the verification ceiling or the
+ * caller's REMAINING deadline: it runs inside a lifecycle lease that is already
+ * on the clock, so it must never start an independent timer that can outlast it.
+ * A budget that is already spent refuses immediately without probing at all.
  *
  * Physical handsets never reach the probe: {@link
  * getValidatedPooledAndroidAvdName} returns nothing for a non-emulator serial,
@@ -2439,34 +2463,51 @@ async function verifyPooledAndroidAvdName(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
   resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
-): Promise<PooledAvdNameConflict | undefined> {
+  budget: PooledAvdNameProbeBudget,
+): Promise<PooledAvdNameRefusal | undefined> {
   const pooledAvdName = getValidatedPooledAndroidAvdName(device, devicePool);
   if (!pooledAvdName) {
     return undefined;
   }
+  const remainingMs = budget.deadlineMs - budget.timer.now();
+  if (remainingMs <= 0) {
+    return { reason: "unresolved", pooledAvdName };
+  }
   const runtimeAvdName = await resolveRunningAvdName(
     device,
-    POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
+    Math.min(POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS, remainingMs),
+    budget.signal,
   );
   if (runtimeAvdName === undefined) {
     logger.warn(
       `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
-        "the emulator console did not report a name. Proceeding on the pooled name.",
+        "the emulator console did not report a name.",
     );
-    return undefined;
+    return { reason: "unresolved", pooledAvdName };
   }
-  return runtimeAvdName === pooledAvdName ? undefined : { pooledAvdName, runtimeAvdName };
+  return runtimeAvdName === pooledAvdName
+    ? undefined
+    : { reason: "conflict", pooledAvdName, runtimeAvdName };
 }
 
-function pooledAvdNameConflictMessage(
+function pooledAvdNameRefusalMessage(
   device: BootedDevice,
-  conflict: PooledAvdNameConflict,
+  refusal: PooledAvdNameRefusal,
 ): string {
+  if (refusal.reason === "conflict") {
+    return (
+      `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +
+      `AVD '${refusal.pooledAvdName}', but the emulator now running on that serial reports ` +
+      `AVD '${refusal.runtimeAvdName}'. The serial was reused by a different AVD; re-resolve ` +
+      "the target and retry."
+    );
+  }
   return (
     `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +
-    `AVD '${conflict.pooledAvdName}', but the emulator now running on that serial reports ` +
-    `AVD '${conflict.runtimeAvdName}'. The serial was reused by a different AVD; re-resolve the ` +
-    "target and retry."
+    `AVD '${refusal.pooledAvdName}', but the emulator console on that serial did not answer, so ` +
+    "the AVD actually running there could not be confirmed. Acting on the recorded name could " +
+    "stop a different emulator that took the serial. Resolve the target and retry, or stop it " +
+    `by hand with \`adb -s ${device.deviceId} emu kill\`.`
   );
 }
 
@@ -2966,18 +3007,23 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
   // runtime name is unknown; make the runtime confirm that name before the stop
   // and the delete act on it (#6863 review).
   for (const candidate of findMatchingBootedTeardownDevices(booted, context.args, devicePool)) {
-    const conflict = await verifyPooledAndroidAvdName(
+    const refusal = await verifyPooledAndroidAvdName(
       candidate,
       devicePool,
       getDeviceToolsDependencies().resolveRunningAndroidAvdName,
+      {
+        timer: context.dependencies.timer,
+        deadlineMs: context.deadlineMs,
+        signal: context.requestAbortSignal,
+      },
     );
-    if (conflict) {
+    if (refusal) {
       return {
         response: createTeardownFailureResponse(
           context.args,
           "precondition",
           "target_identity_unresolved",
-          pooledAvdNameConflictMessage(candidate, conflict),
+          pooledAvdNameRefusalMessage(candidate, refusal),
         ),
       };
     }
@@ -7054,13 +7100,14 @@ export function registerDeviceTools() {
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
     // Before anything destructive: if this target's AVD name comes from the pool
     // rather than from the runtime, make the runtime confirm it (#6863 review).
-    const avdNameConflict = await verifyPooledAndroidAvdName(
+    const avdNameRefusal = await verifyPooledAndroidAvdName(
       args.device,
       devicePool,
       deps.resolveRunningAndroidAvdName,
+      { timer: deps.timer, deadlineMs, signal: requestAbortSignal },
     );
-    if (avdNameConflict) {
-      throw new ActionableError(pooledAvdNameConflictMessage(args.device, avdNameConflict));
+    if (avdNameRefusal) {
+      throw new ActionableError(pooledAvdNameRefusalMessage(args.device, avdNameRefusal));
     }
     const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
     const lifecycleLease = stableTarget

@@ -66,6 +66,28 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
   }
 }
 
+/**
+ * A clock that jumps a full shutdown budget forward the next time it is read,
+ * so a test can model "the caller's deadline was already consumed by the work
+ * that ran before this point" without sleeping.
+ */
+class DeadlineSpendingFakeTimer extends FakeTimer {
+  private spendOnNextRead = false;
+
+  spendDeadlineOnNextRead(): void {
+    this.spendOnNextRead = true;
+  }
+
+  override now(): number {
+    const value = super.now();
+    if (this.spendOnNextRead) {
+      this.spendOnNextRead = false;
+      super.advanceTime(60_000);
+    }
+    return value;
+  }
+}
+
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(device: BootedDevice): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
@@ -591,20 +613,40 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
-    // The documented blind spot, now narrowed to "the console is unavailable at
-    // the moment of the kill": proceed on the pooled name rather than leaving an
-    // emulator un-killable because its console stopped answering. The kill
-    // REACHING the device manager is the point of the choice, so assert it
-    // explicitly -- whichever way the open fail-open/fail-closed question is
-    // decided, this test is where the answer is written down.
-    test("proceeds on the pooled name when the runtime cannot answer", async () => {
+    // `Unknown (<serial>)` means "no information", and a probe that does not
+    // answer leaves it that way. A kill issued on nothing but the pooled label
+    // could stop a different AVD that took the serial, so the tool refuses and
+    // says how to do it by hand. Nothing destructive may reach the device
+    // manager (#6863 review).
+    test("refuses the kill when the runtime cannot answer", async () => {
       manager = new SuccessfulKillDeviceManager();
       setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
       await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
 
-      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /emulator-5554[\s\S]*Pixel_8_Old[\s\S]*adb -s emulator-5554 emu kill/,
+      );
       expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
-      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // The probe borrows the kill's deadline. When that deadline is already spent
+    // by the time verification runs, there is no budget to probe with and no way
+    // to identify the target, so the refusal is immediate and the console is
+    // never contacted (#6863 review).
+    test("refuses without probing when the kill deadline is already spent", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const timer = new DeadlineSpendingFakeTimer();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+      timer.spendDeadlineOnNextRead();
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /did not answer/,
+      );
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual([]);
     });
 
     // A handset's name is `ro.product.model`, not an AVD, and two handsets of the

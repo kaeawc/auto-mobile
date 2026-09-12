@@ -1395,6 +1395,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return name === "" ? undefined : name;
   }
 
+  /**
+   * `infoTimeoutMs` is the TOTAL budget for naming this runtime, not a per-command
+   * allowance. The console probe and the `getprop` fallback run sequentially, so
+   * giving each its own full budget would let two stalled commands take twice the
+   * timeout the caller asked for -- and this resolver runs inside a destructive
+   * action that is already holding a lifecycle lease against a deadline (#6863
+   * review). They share one deadline; the fallback gets only what is left of it,
+   * and is skipped when nothing is.
+   */
   private async getRunningAVDName(
     device: BootedDevice,
     infoTimeoutMs: number,
@@ -1402,6 +1411,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   ): Promise<{ name: string; diagnostic?: ReadinessDiagnostic }> {
     const deviceId = device.deviceId;
     const adbWithDevice = this.adbFactory.create(device);
+    const deadlineMs = this.timer.now() + infoTimeoutMs;
     let diagnostic: ReadinessDiagnostic | undefined;
     try {
       const result = await adbWithDevice.executeCommand(
@@ -1424,10 +1434,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
     }
 
+    const remainingMs = deadlineMs - this.timer.now();
+    if (remainingMs <= 0) {
+      logger.debug(
+        `AVD name resolution for ${deviceId} spent its ${infoTimeoutMs}ms budget on the console probe; skipping the property fallback`,
+      );
+      return { name: "", diagnostic };
+    }
+
     try {
       const result = await adbWithDevice.executeCommand(
         "shell getprop ro.boot.qemu.avd_name",
-        infoTimeoutMs,
+        remainingMs,
         undefined,
         true,
         signal,

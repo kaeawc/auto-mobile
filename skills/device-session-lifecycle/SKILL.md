@@ -33,11 +33,35 @@ distinguishing "same serial, new boot" from "same device", and since #6863 it
 is the ONLY epoch token in the model — the ADB transport id is gone from
 `BootedDevice`/`PooledDevice`, and discovery carries nothing else. Anything
 identity-sensitive must be keyed on the incarnation; runtime identity is
-validated by serial + platform + name (with `Unknown (<serial>)` tolerated as
-"the console could not answer", never as "a different device"), and a boundary
-is observed as **disappearance then reappearance** — the pool evicts an entry
-the moment discovery stops listing the serial and re-adds it under a fresh
-incarnation.
+validated by serial + platform + name, and a boundary is observed as
+**disappearance then reappearance** — the pool evicts an entry the moment
+discovery stops listing the serial and re-adds it under a fresh incarnation.
+
+**`Unknown (<serial>)` means "no information", uniformly.** It is the
+placeholder Android discovery emits when the emulator console did not answer
+`avd name`, and it is guarded by `isAndroidEmulatorSerial` (a handset's name is
+`ro.product.model`, so handsets keep serial-only identity). The same rule
+applies in all three places the name is read:
+
+1. **Comparing observations** (`deviceTools.isSameBootedDeviceIdentity` /
+   `isConfirmedDeviceReplacement`): never evidence of a replacement AND never
+   evidence of continuity — the two predicates are deliberately not each
+   other's negation. During shutdown, a still-listed serial whose name probe
+   stopped answering is the same device still present, so the wait runs on to
+   real absence; only a RESOLVED, different name declares a replacement.
+2. **Destructive actions** (`killDevice`, `deleteDevice`): the pooled AVD label
+   must be confirmed by the runtime (`AndroidEmulatorClient.resolveRunningAvdName`,
+   bounded by the CALLER's remaining teardown/kill deadline — never an
+   independent timer). A different name refuses; an unanswered probe also
+   refuses (`target_identity_unresolved`), naming `adb -s <serial> emu kill` as
+   the manual escape. There is no fail-open branch. A tool-level `force` option
+   for an emulator whose console is wedged is tracked as a separate follow-up.
+3. **Publishing identity** (`DevicePool.describesPooledRuntime`, the booted-devices
+   resource): the placeholder is not agreement, so the resource withholds BOTH
+   the pooled epoch (`connectionId` falls back to the bare serial) and the
+   pooled AVD label (`stableId` falls back to discovery's own name). The pool's
+   internal `matchesRuntimeIdentity` still TOLERATES the placeholder so an
+   unreadable console never evicts a live entry — tolerance is not agreement.
 
 **Documented blind spot**: a same-serial restart faster than one discovery
 interval never reaches the pool, so it reads as continuity. Every host-side
@@ -45,7 +69,8 @@ cache keyed on the epoch must therefore SELF-HEAL on failure (evict and rebuild
 once before surfacing the error — see the append-helper cache in
 `src/daemon/socketServer.ts`), and any destructive action that would act on a
 pool-cached AVD name must re-resolve it from the runtime first
-(`AndroidEmulatorClient.resolveRunningAvdName`, used by killDevice/deleteDevice).
+(`AndroidEmulatorClient.resolveRunningAvdName`, used by killDevice/deleteDevice)
+and refuse when that re-resolution does not answer.
 Historical entries in `references/history.md` that reason about `transportId`
 (e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
 

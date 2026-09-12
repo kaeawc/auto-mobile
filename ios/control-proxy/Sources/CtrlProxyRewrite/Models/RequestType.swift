@@ -64,6 +64,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case setNetworkMockRules = "set_network_mock_rules"
     case setNetworkFaultRules = "set_network_fault_rules"
     case setNetworkErrorSimulation = "set_network_error_simulation"
+    case getSdkCapabilities = "get_sdk_capabilities"
 
     // Database inspection
     case executeSql = "execute_sql"
@@ -122,6 +123,7 @@ extension RequestType {
         case .setNetworkMockRules: return .setNetworkMockRulesResult
         case .setNetworkFaultRules: return .setNetworkFaultRulesResult
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulationResult
+        case .getSdkCapabilities: return .sdkCapabilitiesResult
         case .executeSql: return .executeSqlResult
         case .listDatabases: return .listDatabasesResult
         case .storageCapabilities: return .storageCapabilitiesResult

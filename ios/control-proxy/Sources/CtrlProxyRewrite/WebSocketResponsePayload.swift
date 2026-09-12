@@ -40,6 +40,7 @@ extension StorageEntryResponse: WebSocketResponsePayload {}
 extension SetNetworkMockRulesResponse: WebSocketResponsePayload {}
 extension SetNetworkErrorSimulationResponse: WebSocketResponsePayload {}
 extension SetNetworkFaultRulesResponse: WebSocketResponsePayload {}
+extension SdkCapabilitiesResponse: WebSocketResponsePayload {}
 extension ExecuteSqlResponse: WebSocketResponsePayload {}
 extension ListDatabasesResponse: WebSocketResponsePayload {}
 extension StorageCapabilitiesResponse: WebSocketResponsePayload {}

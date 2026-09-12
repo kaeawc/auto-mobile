@@ -27,6 +27,7 @@ describe("network tool schema", () => {
   let iosMessages: string[];
   let androidMessages: string[];
   let iosErrorSimulations: unknown[];
+  let iosMockRuleSyncCalls: number;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
   let androidGetInstanceSpy: ReturnType<typeof spyOn>;
   let originalIosBundlePath: string | undefined;
@@ -58,6 +59,7 @@ describe("network tool schema", () => {
     serverConfig.setNetworkMockableEnabled(true);
     iosMessages = [];
     iosErrorSimulations = [];
+    iosMockRuleSyncCalls = 0;
     androidMessages = [];
     iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       sendMessage: (message: string) => {
@@ -67,6 +69,9 @@ describe("network tool schema", () => {
       setNetworkErrorSimulation: async (config: unknown) => {
         iosErrorSimulations.push(config);
         return { success: true, totalTimeMs: 0 };
+      },
+      syncNetworkMockRulesIfAvailable: async () => {
+        iosMockRuleSyncCalls++;
       },
     } as IOSCtrlProxyClient);
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
@@ -494,24 +499,7 @@ describe("network tool schema", () => {
     });
     expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
     expect(androidGetInstanceSpy).not.toHaveBeenCalled();
-    expect(iosMessages).toHaveLength(1);
-    expect(JSON.parse(iosMessages[0])).toEqual({
-      type: "set_network_mock_rules",
-      rules: [
-        {
-          mockId: "mock-1",
-          host: "api\\.example\\.com",
-          path: "^/v1/items",
-          method: "GET",
-          limit: 2,
-          remaining: 2,
-          statusCode: 500,
-          responseHeaders: { "x-test": "yes" },
-          responseBody: '{"error":"mocked"}',
-          contentType: "application/json",
-        },
-      ],
-    });
+    expect(iosMockRuleSyncCalls).toBe(1);
   });
 
   test("mockNetwork keeps the network-mockable gate for iOS", async () => {
@@ -587,9 +575,6 @@ describe("network tool schema", () => {
         "POST api\\.example\\.com/two": -1,
       },
     });
-    expect(iosMessages).toHaveLength(1);
-    expect(JSON.parse(iosMessages[0]).rules.map((rule: { mockId: string }) => rule.mockId)).toEqual(
-      ["mock-2"],
-    );
+    expect(iosMockRuleSyncCalls).toBe(3);
   });
 });

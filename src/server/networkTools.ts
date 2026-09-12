@@ -180,15 +180,16 @@ function assertIosNetworkErrorSimulationAvailable(): void {
   );
 }
 
-function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void {
+async function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): Promise<void> {
   if (device.platform !== "android" && device.platform !== "ios") {
     return;
   }
   try {
-    const client =
-      device.platform === "android"
-        ? AndroidCtrlProxyClient.getInstance(device)
-        : IOSCtrlProxyClient.getInstance(device);
+    if (device.platform === "ios") {
+      await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+      return;
+    }
+    const client = AndroidCtrlProxyClient.getInstance(device);
     // Use limit (not remaining) since the server never tracks consumption —
     // the device-side NetworkMockRuleStore manages its own remaining count
     const rules = buildNetworkMockRules(state);
@@ -374,7 +375,7 @@ export function registerNetworkTools(): void {
         contentType: args.contentType ?? "application/json",
       });
 
-      syncMockRulesToDevice(device, state);
+      await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         mockId: mock.mockId,
@@ -409,7 +410,7 @@ export function registerNetworkTools(): void {
         cleared = state.clearAllMocks();
       }
 
-      syncMockRulesToDevice(device, state);
+      await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         cleared,

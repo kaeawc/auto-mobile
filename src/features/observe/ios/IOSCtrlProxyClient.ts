@@ -91,6 +91,25 @@ const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
  */
 export type BootedDeviceLister = () => Promise<BootedDevice[]>;
 
+type IosSdkCapability =
+  | "hierarchy"
+  | "network_mocking"
+  | "network_fault_rules"
+  | "network_error_simulation"
+  | "database"
+  | "highlight";
+
+interface IosSdkCapabilities {
+  bundleId: string;
+  capabilities: Set<IosSdkCapability>;
+}
+
+interface IosSdkCapabilitiesResult extends BaseResult {
+  available: boolean;
+  bundleId?: string;
+  capabilities?: string[];
+}
+
 /** Default production lister that queries the real device manager. */
 const defaultBootedDeviceLister: BootedDeviceLister = () =>
   PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
@@ -538,6 +557,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private onPushUpdateCallbacks: Set<(hierarchy: XCTestHierarchy) => void> = new Set();
   private supportedCommands: Set<string> | null = null;
   private supportedFeatures: Set<string> | null = null;
+  private sdkCapabilities: IosSdkCapabilities | null = null;
+  private sdkCapabilitiesKnown = false;
+  private sdkCapabilitiesKnownAt = 0;
+  private sdkCapabilityGeneration = 0;
+  private sdkCapabilityRefreshInFlight: {
+    generation: number;
+    promise: Promise<IosSdkCapabilities | null>;
+  } | null = null;
 
   // Track last foreground bundle for performance monitoring
   private lastForegroundBundleId: string | null = null;
@@ -617,6 +644,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private sdkEventPollConsecutiveEmpty = 0;
   private static readonly SDK_IDENTITY_REFRESH_TIMEOUT_MS = 100;
   private static readonly SDK_IDENTITY_REFRESH_RETRY_MS = 10;
+  private static readonly SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS = 5000;
 
   private constructor(
     device: BootedDevice,
@@ -692,6 +720,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   /** Remove SDK navigation state after an app process is replaced. */
   public clearSdkScreenIdentity(applicationId?: string): void {
+    this.invalidateSdkCapabilities();
     if (applicationId) {
       this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
       this.invalidateSdkScreenIdentity(applicationId);
@@ -1193,8 +1222,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.isRequestingServiceRestart = false;
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
-    this.syncNetworkMockRulesToDevice();
-    this.syncNetworkErrorSimulationToDevice();
     this.syncHierarchyCadenceToDevice();
 
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
@@ -1207,6 +1234,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private syncNetworkMockRulesToDevice(): void {
+    if (
+      !this.hasSdkCapability("network_mocking") &&
+      !this.isLegacySdkCommandSupported("network_mocking")
+    ) {
+      return;
+    }
     if (!serverConfig.isNetworkMockableEnabled()) {
       return;
     }
@@ -1222,6 +1255,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private syncNetworkErrorSimulationToDevice(): void {
+    if (
+      !this.hasSdkCapability("network_error_simulation") &&
+      !this.isLegacySdkCommandSupported("network_error_simulation")
+    ) {
+      return;
+    }
     if (!this.isCommandSupported("set_network_error_simulation")) {
       logger.info(
         "[IOSCtrlProxyClient] Skipping network error simulation sync; runner does not advertise set_network_error_simulation",
@@ -1252,6 +1291,178 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       logger.warn(
         `[IOSCtrlProxyClient] Failed to sync network error simulation on reconnect: ${e}`,
       );
+    }
+  }
+
+  private invalidateSdkCapabilities(): void {
+    this.sdkCapabilityGeneration++;
+    this.sdkCapabilities = null;
+    this.sdkCapabilitiesKnown = false;
+    this.sdkCapabilitiesKnownAt = 0;
+    this.sdkCapabilityRefreshInFlight = null;
+  }
+
+  private hasSdkCapability(capability: IosSdkCapability, bundleId?: string): boolean {
+    const normalizedBundleId = bundleId?.trim();
+    return (
+      this.sdkCapabilities !== null &&
+      (normalizedBundleId === undefined || this.sdkCapabilities.bundleId === normalizedBundleId) &&
+      this.sdkCapabilities.capabilities.has(capability)
+    );
+  }
+
+  private async refreshSdkCapabilities(): Promise<IosSdkCapabilities | null> {
+    if (!this.isCommandSupported("get_sdk_capabilities")) {
+      this.sdkCapabilities = null;
+      this.sdkCapabilitiesKnown = true;
+      return null;
+    }
+
+    const generation = this.sdkCapabilityGeneration;
+    if (this.sdkCapabilityRefreshInFlight?.generation === generation) {
+      return this.sdkCapabilityRefreshInFlight.promise;
+    }
+
+    const promise = this.requestSdkCapabilities(generation);
+    const inFlight = { generation, promise };
+    this.sdkCapabilityRefreshInFlight = inFlight;
+    void promise
+      .finally(() => {
+        if (this.sdkCapabilityRefreshInFlight === inFlight) {
+          this.sdkCapabilityRefreshInFlight = null;
+        }
+      })
+      .catch(() => {
+        // The caller handles the rejection; this branch prevents an unhandled promise rejection.
+      });
+    return promise;
+  }
+
+  private async requestSdkCapabilities(generation: number): Promise<IosSdkCapabilities | null> {
+    const result = await sendCommand<IosSdkCapabilitiesResult>(this.createDelegateContext(), {
+      idPrefix: "sdkCapabilities",
+      responseType: "sdk_capabilities",
+      messageType: "get_sdk_capabilities",
+      timeoutMs: 1000,
+      cancelScreenshotBackoff: false,
+      errorLabel: "SDK capability query",
+      notConnectedError: () => ({
+        success: false,
+        available: false,
+        capabilities: [],
+        totalTimeMs: 0,
+      }),
+      timeoutError: (timeoutMs) => ({
+        success: false,
+        available: false,
+        capabilities: [],
+        totalTimeMs: timeoutMs,
+      }),
+      unsupportedCommandError: () => ({
+        success: false,
+        available: false,
+        capabilities: [],
+        totalTimeMs: 0,
+      }),
+    });
+
+    let capabilities: IosSdkCapabilities | null = null;
+    if (!result.success) {
+      return null;
+    }
+
+    if (result.success && result.available && result.bundleId) {
+      capabilities = {
+        bundleId: result.bundleId,
+        capabilities: new Set(
+          (result.capabilities ?? []).filter(
+            (capability): capability is IosSdkCapability =>
+              capability === "hierarchy" ||
+              capability === "network_mocking" ||
+              capability === "network_fault_rules" ||
+              capability === "network_error_simulation" ||
+              capability === "database" ||
+              capability === "highlight",
+          ),
+        ),
+      };
+    }
+
+    if (generation === this.sdkCapabilityGeneration) {
+      this.sdkCapabilities = capabilities;
+      this.sdkCapabilitiesKnown = true;
+      this.sdkCapabilitiesKnownAt = this.timer.now();
+    }
+    return generation === this.sdkCapabilityGeneration ? capabilities : null;
+  }
+
+  private async refreshSdkCapabilitiesAndSync(): Promise<void> {
+    const capabilities = await this.refreshSdkCapabilities();
+    if (capabilities === null) {
+      if (this.supportedCommands !== null && !this.supportedCommands.has("get_sdk_capabilities")) {
+        this.syncNetworkMockRulesToDevice();
+        this.syncNetworkErrorSimulationToDevice();
+      }
+      return;
+    }
+    this.syncNetworkMockRulesToDevice();
+    this.syncNetworkErrorSimulationToDevice();
+  }
+
+  private sdkUnavailableResult(capability: IosSdkCapability): BaseResult {
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error: `The foreground iOS app does not expose the AutoMobile SDK capability ${capability}.`,
+    };
+  }
+
+  private async ensureSdkCapability(
+    capability: IosSdkCapability,
+    bundleId?: string,
+  ): Promise<boolean> {
+    if (this.supportedCommands === null || !this.supportedCommands.has("get_sdk_capabilities")) {
+      return this.isLegacySdkCommandSupported(capability);
+    }
+    if (this.sdkCapabilitiesKnown) {
+      if (
+        this.sdkCapabilities === null &&
+        this.timer.now() - this.sdkCapabilitiesKnownAt >=
+          IOSCtrlProxyClient.SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS
+      ) {
+        this.sdkCapabilitiesKnown = false;
+      } else {
+        return this.hasSdkCapability(capability, bundleId);
+      }
+    }
+    await this.refreshSdkCapabilities();
+    return this.hasSdkCapability(capability, bundleId);
+  }
+
+  private isLegacySdkCommandSupported(capability: IosSdkCapability): boolean {
+    const commandByCapability: Record<IosSdkCapability, string> = {
+      hierarchy: "request_hierarchy",
+      network_mocking: "set_network_mock_rules",
+      network_fault_rules: "set_network_fault_rules",
+      network_error_simulation: "set_network_error_simulation",
+      database: "execute_sql",
+      highlight: "add_highlight",
+    };
+    return this.isCommandSupported(commandByCapability[capability]);
+  }
+
+  private async requireSdkCapability(
+    capability: IosSdkCapability,
+    bundleId?: string,
+  ): Promise<void> {
+    if (!(await this.ensureSdkCapability(capability, bundleId))) {
+      throw new Error(this.sdkUnavailableResult(capability).error);
+    }
+  }
+
+  public async syncNetworkMockRulesIfAvailable(): Promise<void> {
+    if (await this.ensureSdkCapability("network_mocking")) {
+      this.syncNetworkMockRulesToDevice();
     }
   }
 
@@ -1833,8 +2044,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.supportedFeatures = Array.isArray(message.supportedFeatures)
         ? new Set(message.supportedFeatures)
         : null;
+      this.invalidateSdkCapabilities();
+      void this.refreshSdkCapabilitiesAndSync().catch((error) => {
+        // SDK absence/version skew is expected; this trace is diagnostic only.
+        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh failed: ${error}`);
+      });
       logger.info(`[IOSCtrlProxyClient] Received connected message`);
       return;
+    }
+
+    if (this.isSdkCapabilityFailure(message)) {
+      this.invalidateSdkCapabilities();
     }
 
     if (type === "hierarchy_update" && message.data) {
@@ -1937,6 +2157,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private isCommandSupported(messageType: string): boolean {
     return this.supportedCommands === null || this.supportedCommands.has(messageType);
+  }
+
+  private isSdkCapabilityFailure(message: WebSocketMessage): boolean {
+    if (message.success !== false && message.ok !== false) {
+      return false;
+    }
+    return (
+      message.type === "set_network_mock_rules_result" ||
+      message.type === "set_network_fault_rules_result" ||
+      message.type === "set_network_error_simulation_result" ||
+      message.type === "highlight_response" ||
+      message.type === "execute_sql_result" ||
+      message.type === "list_databases_result" ||
+      message.type === "storage_capabilities_result" ||
+      message.type === "list_tables_result" ||
+      message.type === "table_data_result" ||
+      message.type === "table_structure_result"
+    );
   }
 
   /**
@@ -2141,6 +2379,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyHighlightResult> {
+    if (!(await this.ensureSdkCapability("highlight"))) {
+      return this.sdkUnavailableResult("highlight");
+    }
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
 
@@ -2149,6 +2390,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
   ): Promise<BaseResult> {
+    if (!(await this.ensureSdkCapability("network_error_simulation"))) {
+      return this.sdkUnavailableResult("network_error_simulation");
+    }
     return sendCommand<BaseResult>(this.createDelegateContext(), {
       idPrefix: "networkErrorSimulation",
       responseType: "set_network_error_simulation_result",
@@ -2317,6 +2561,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
   ): Promise<CtrlProxyPressHomeResult> {
+    this.invalidateSdkCapabilities();
     return this.navigation.requestPressHome(timeoutMs, perf, frameContext);
   }
 
@@ -2338,6 +2583,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
   ): Promise<CtrlProxyPressButtonResult> {
+    if (button.toLowerCase() === "home" || button.toLowerCase() === "recent") {
+      this.invalidateSdkCapabilities();
+    }
     return this.navigation.requestPressButton(button, timeoutMs, perf, frameContext);
   }
 
@@ -2346,6 +2594,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
   ): Promise<CtrlProxyRecentAppsResult> {
+    this.invalidateSdkCapabilities();
     return this.navigation.requestRecentApps(timeoutMs, perf, frameContext);
   }
 
@@ -2363,7 +2612,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     coldBoot?: boolean,
   ): Promise<CtrlProxyLaunchAppResult> {
-    return this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
+    this.invalidateSdkCapabilities();
+    const result = await this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
+    if (result.success) {
+      await this.refreshSdkCapabilitiesAndSync().catch((error) => {
+        // A launched app without AutoMobileSDK is normal; the launch itself succeeded.
+        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh after launch failed: ${error}`);
+      });
+    }
+    return result;
   }
 
   // ===========================================================================
@@ -2555,6 +2812,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     query: string,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
+    await this.requireSdkCapability("database", appId);
     return this.database.executeSQL(
       appId,
       databasePath,
@@ -2568,6 +2826,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
+    await this.requireSdkCapability("database", appId);
     return this.database.listDatabases(appId, timeoutMs);
   }
 
@@ -2575,6 +2834,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     timeoutMs?: number,
   ): Promise<import("./CtrlProxyDatabase").StorageCapabilities> {
+    await this.requireSdkCapability("database", appId);
     return this.database.storageCapabilities(appId, timeoutMs);
   }
 
@@ -2583,6 +2843,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     databasePath: string,
     timeoutMs?: number,
   ): Promise<string[]> {
+    await this.requireSdkCapability("database", appId);
     return this.database.listTables(appId, databasePath, timeoutMs);
   }
 
@@ -2594,6 +2855,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     offset?: number,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
+    await this.requireSdkCapability("database", appId);
     return this.database.getTableData(appId, databasePath, table, limit, offset, timeoutMs);
   }
 
@@ -2603,6 +2865,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     table: string,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableStructureResult> {
+    await this.requireSdkCapability("database", appId);
     return this.database.getTableStructure(appId, databasePath, table, timeoutMs);
   }
 
@@ -3039,6 +3302,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     );
     if (bundleId && bundleId !== this.lastForegroundBundleId) {
       this.lastForegroundBundleId = bundleId;
+      this.invalidateSdkCapabilities();
+      void this.refreshSdkCapabilitiesAndSync().catch((error) => {
+        // Foreground apps without AutoMobileSDK are normal.
+        logger.debug(
+          `[IOSCtrlProxyClient] SDK capability refresh after app change failed: ${error}`,
+        );
+      });
       // Start performance monitoring for this device/bundle
       const monitor = getPerformanceMonitor();
       monitor.startMonitoring(this.device.deviceId, bundleId, "ios");

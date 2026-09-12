@@ -60,8 +60,15 @@ function setup(pages: ObserveResult[], markScrollBoundary = true) {
   }
   const adb = new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
-  let index = 0;
-  observer.setObserveResult(() => pages[Math.min(index++, pages.length - 1)]);
+  // A real tray only changes when a scroll gesture moves it, so page turns are
+  // driven by executed swipes rather than by observation count. That keeps
+  // settle polling (which re-observes without swiping) reading one page.
+  observer.setObserveResult(() => {
+    const swipes = adb
+      .getExecutedCommands()
+      .filter((command) => command.startsWith("shell input swipe")).length;
+    return pages[Math.min(swipes, pages.length - 1)];
+  });
   setSystemTrayDependencies({
     adbFactory: () => adb,
     observeScreenFactory: () => observer,
@@ -493,6 +500,46 @@ describe("systemTray list", () => {
       "shell cmd statusbar collapse",
       "shell cmd statusbar expand-notifications",
     ]);
+  });
+  test("keeps hierarchy text candidates that differ from the rendered text", async () => {
+    const notification = row("Photo");
+    notification.node.push({
+      $: {
+        "resource-id": "android:id/big_picture",
+        text: "1 new photo",
+        "content-desc": "Sunset over the bay",
+        package: "com.android.systemui",
+        bounds: "[0,200][1000,1600]",
+      },
+      node: [],
+    });
+    setup([page(notification)]);
+    expect((await list()).notifications[0].texts).toEqual(
+      expect.arrayContaining(["1 new photo", "Sunset over the bay"]),
+    );
+  });
+  test("reconciles a scrolled page only after the tray stops moving", async () => {
+    const adb = new FakeAdbExecutor();
+    const observer = new FakeObserveScreen();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const initial = page(positionedRow("A", 500), positionedRow("B", 700));
+    Object.assign(initial.viewHierarchy!.hierarchy!.node.$, { scrollable: true });
+    // Mid-fling rows have not translated by a single consistent offset yet, so
+    // reconciling against them appends the same notifications a second time.
+    const midFling = page(positionedRow("A", 440), positionedRow("B", 630));
+    Object.assign(midFling.viewHierarchy!.hierarchy!.node.$, { scrollable: true });
+    const settled = page(positionedRow("A", 400), positionedRow("B", 600));
+    Object.assign(settled.viewHierarchy!.hierarchy!.node.$, { scrollable: false });
+    observer.setObserveSequence([initial, midFling, settled, settled, settled]);
+    setSystemTrayDependencies({
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+      timer,
+    });
+    const result = await list();
+    expect(result.notifications.map((notification) => notification.title)).toEqual(["A", "B"]);
+    expect(result.swipes).toBe(1);
   });
   test("rejects unsupported platforms before interaction", async () => {
     const { adb } = setup([page()]);

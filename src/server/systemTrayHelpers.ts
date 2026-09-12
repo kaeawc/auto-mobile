@@ -10,6 +10,7 @@ import {
 } from "../features/observe/output/ObserveResultOutput";
 import { isStabilityDiffEmpty } from "../features/observe/SettleObserve";
 import type { Timer } from "../utils/SystemTimer";
+import { waitForScrollIdle } from "../utils/scrollIdle";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
   ActionableError,
@@ -181,6 +182,12 @@ const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 // connection push) re-fires a heads-up that can collapse the shade or race the initial
 // expand; without re-expanding, the poll loop would sit on a closed shade until timeout.
 const SYSTEM_TRAY_REEXPAND_INTERVAL_MS = 1000;
+// A tray scroll keeps animating after `input swipe` returns. Poll until two
+// consecutive observations match instead of trusting the first frame, bounded
+// so a tray whose content never quiets (progress text, chronometers) still
+// makes progress.
+const SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS = 1500;
+const SYSTEM_TRAY_SCROLL_IDLE_POLL_MS = 150;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 // Re-export shared constant so existing callers (interactionTools.ts) keep working.
 export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS =
@@ -1457,8 +1464,7 @@ const readTrayNotificationFields = (root: any) => {
     actions: [] as string[],
     texts: [] as string[],
   };
-  const appendText = (id: string, text: string): void => {
-    fields.texts.push(text);
+  const assignSemanticField = (id: string, text: string): void => {
     if (["app_name_text", "app_name"].includes(id)) {
       fields.appLabel = text;
     }
@@ -1496,9 +1502,13 @@ const readTrayNotificationFields = (root: any) => {
       messages = [];
       messageLayouts.push(messages);
     }
-    const text = extractNodeTextCandidates(node)[0];
+    // `content-desc` (and the iOS accessibility label) routinely carry text the
+    // rendered `text` omits, so keep every candidate rather than the first.
+    const candidates = extractNodeTextCandidates(node);
+    fields.texts.push(...candidates);
+    const text = candidates[0];
     if (text) {
-      appendText(id, text);
+      assignSemanticField(id, text);
       if (id === "message_text") {
         messages.push(text);
       }
@@ -1657,7 +1667,7 @@ export const listSystemTrayNotifications = async (
   }
   signal?.throwIfAborted();
   const detector = createNotificationUIDetector(device, getSystemTrayDependencies, signal);
-  const { adbFactory, observeScreenFactory } = getSystemTrayDependencies();
+  const { adbFactory, observeScreenFactory, timer } = getSystemTrayDependencies();
   // Collapsing resets SystemUI's scroll position; every bounded scan starts at
   // the top even when a previous list left the shade open at its tail.
   await detector.collapseTray();
@@ -1697,10 +1707,28 @@ export const listSystemTrayNotifications = async (
       signal,
     );
     swipes++;
-    observation = await observeSystemTray(
-      observeScreenFactory(device),
-      await detector.getObservationTimestamp(),
-      signal,
+    // Reconcile pages against a settled viewport: a mid-fling frame has not
+    // translated its rows by a single consistent offset yet, so overlap
+    // detection against it duplicates or drops notifications.
+    observation = await waitForScrollIdle(
+      await observeSystemTray(
+        observeScreenFactory(device),
+        await detector.getObservationTimestamp(),
+        signal,
+      ),
+      {
+        observe: async () =>
+          observeSystemTray(
+            observeScreenFactory(device),
+            await detector.getObservationTimestamp(),
+            signal,
+          ),
+        timer,
+        maxWaitMs: SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS,
+        pollIntervalMs: SYSTEM_TRAY_SCROLL_IDLE_POLL_MS,
+        logPrefix: "[systemTray]",
+        signal,
+      },
     );
   }
   // Keep every app's rows available to align pages, then expose only rows

@@ -163,9 +163,7 @@ describe("TrackedScreenGeometry.update (property-based)", () => {
         validDim,
         coordinateSpace,
         captureSequence,
-        fc
-          .tuple(nativeScale, nativeScale)
-          .filter(([a, b]) => a !== b),
+        fc.tuple(nativeScale, nativeScale).filter(([a, b]) => a !== b),
         (width, height, cs, seq, [nsA, nsB]) => {
           const tracker = new TrackedScreenGeometry();
           tracker.update(width, height, cs, nsA);
@@ -205,7 +203,11 @@ describe("TrackedScreenGeometry.markForwarded / bind (property-based)", () => {
         tracker.markForwarded(seq);
         const binding = tracker.bind();
         expect(binding).not.toBeNull();
-        const expected: ScreenGeometryBinding = { captureSequence: seq, width: g.width, height: g.height };
+        const expected: ScreenGeometryBinding = {
+          captureSequence: seq,
+          width: g.width,
+          height: g.height,
+        };
         // coordinateSpace rides the binding only when truthy (legacy point-space omits it).
         if (g.coordinateSpace) {
           expected.coordinateSpace = g.coordinateSpace;

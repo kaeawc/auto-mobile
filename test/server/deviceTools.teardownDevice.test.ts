@@ -169,9 +169,16 @@ function request(
 describe("deleteDevice handler", () => {
   let manager: TeardownDeviceManager;
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
+  // What `emu avd name` answers for a serial whose discovered runtime name is
+  // `Unknown (<serial>)`. undefined == the console did not answer, which is the
+  // documented blind spot: teardown proceeds on the pooled name.
+  let runtimeAvdNames: Map<string, string | undefined>;
+  let runtimeAvdNameProbes: string[];
 
   beforeEach(async () => {
     DaemonState.getInstance().reset();
+    runtimeAvdNames = new Map();
+    runtimeAvdNameProbes = [];
     manager = new TeardownDeviceManager();
     teardownOperationStore = new FakeDeviceTeardownOperationStore();
     await setVideoRecordingManagerDependencies({
@@ -191,6 +198,10 @@ describe("deleteDevice handler", () => {
       clearInstalledAppsForDevice: async () => {},
       teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       timer: new FakeTimer(),
+      resolveRunningAndroidAvdName: async (device) => {
+        runtimeAvdNameProbes.push(device.deviceId);
+        return runtimeAvdNames.get(device.deviceId);
+      },
     });
     registerDeviceTools();
   });
@@ -998,6 +1009,88 @@ describe("deleteDevice handler", () => {
         }),
       }),
     ]);
+  });
+
+  // A different AVD can take over a reused serial before discovery observes the
+  // previous one disappear, leaving the pool holding the OLD label. Acting on
+  // that label would stop the emulator that is running NOW, so teardown asks the
+  // runtime first and refuses when the answers disagree (#6863 review).
+  test("refuses teardown when the runtime names a different AVD than the pool", async () => {
+    const timer = new FakeTimer();
+    const staleAvdName = "Pixel_8_API_35";
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: staleAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(booted, image);
+    manager.setBootedDevices("android", [booted]);
+    manager.setDeviceImages("android", [image]);
+    runtimeAvdNames.set("emulator-5556", "Pixel_9_API_36");
+
+    const body = responseBody(
+      await teardownTool().handler(request("android", staleAvdName, staleAvdName)),
+    );
+
+    expect(body.state).toBe("failed");
+    expect((body.failure as Record<string, unknown>).code).toBe("target_identity_unresolved");
+    expect(String((body.failure as Record<string, unknown>).message)).toContain(staleAvdName);
+    expect(String((body.failure as Record<string, unknown>).message)).toContain("Pixel_9_API_36");
+    // Nothing destructive ran against the emulator that is actually booted.
+    expect(manager.killedDevices).toEqual([]);
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
+  test("proceeds when the runtime confirms the pooled AVD name", async () => {
+    const timer = new FakeTimer();
+    const stableAvdName = "Pixel_8_API_35";
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: stableAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(booted, image);
+    manager.setBootedDevices("android", [booted]);
+    manager.setDeviceImages("android", [image]);
+    runtimeAvdNames.set("emulator-5556", stableAvdName);
+
+    const body = responseBody(
+      await teardownTool().handler(request("android", stableAvdName, stableAvdName)),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(runtimeAvdNameProbes).toContain("emulator-5556");
+    expect(manager.wasMethodCalled("killDevice")).toBe(true);
   });
 
   test("does not stop a freshly discovered AVD that replaced stale same-serial pool state", async () => {

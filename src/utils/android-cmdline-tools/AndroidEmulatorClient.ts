@@ -1376,6 +1376,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
+  /**
+   * Ask the RUNTIME on this serial which AVD it is (`emu avd name`, with the
+   * `ro.boot.qemu.avd_name` property as fallback).
+   *
+   * Public because identity now has no ADB transport id: a caller about to do
+   * something destructive to an emulator whose discovered name is
+   * `Unknown (<serial>)` must be able to re-resolve that name from the device
+   * itself rather than trust a host-side cache (#6863). Returns undefined when
+   * the runtime cannot answer inside `timeoutMs`.
+   */
+  async resolveRunningAvdName(
+    device: BootedDevice,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const { name } = await this.getRunningAVDName(device, timeoutMs, signal);
+    return name === "" ? undefined : name;
+  }
+
   private async getRunningAVDName(
     device: BootedDevice,
     infoTimeoutMs: number,

@@ -461,8 +461,14 @@ describe("killDevice handler", () => {
   const originalAlias = process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
   let sessionManager: SessionManager;
   let manager: FailingKillDeviceManager;
+  // What `emu avd name` answers for a serial whose discovered runtime name is
+  // `Unknown (<serial>)`. undefined == the console did not answer.
+  let runtimeAvdNames: Map<string, string | undefined>;
+  let runtimeAvdNameProbes: string[];
 
   beforeEach(async () => {
+    runtimeAvdNames = new Map();
+    runtimeAvdNameProbes = [];
     process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
     delete process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
     manager = new FailingKillDeviceManager();
@@ -481,6 +487,10 @@ describe("killDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
+      resolveRunningAndroidAvdName: async (device) => {
+        runtimeAvdNameProbes.push(device.deviceId);
+        return runtimeAvdNames.get(device.deviceId);
+      },
     });
     registerDeviceTools();
   });
@@ -501,6 +511,103 @@ describe("killDevice handler", () => {
     } else {
       process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH = originalAlias;
     }
+  });
+
+  /**
+   * The pooled AVD name is a host-side label, not proof of identity: a different
+   * AVD can take over a reused serial before discovery observes the previous one
+   * disappear. Killing on that stale label would stop the emulator running NOW,
+   * so the runtime is asked to confirm the name first (#6863 review).
+   */
+  describe("pooled AVD name verification before a kill", () => {
+    async function poolWithUnknownRuntime(
+      booted: BootedDevice,
+      pooledAvdName: string,
+    ): Promise<void> {
+      const timer = new FakeTimer();
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        manager,
+        new DefaultRetryExecutor(timer),
+        new FakeDeviceSessionRepository(),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.addDevice(booted, {
+        platform: "android",
+        name: pooledAvdName,
+        isRunning: true,
+      });
+      manager.setBootedDevices("android", [booted]);
+    }
+
+    function killTool() {
+      const tool = ToolRegistry.getTool("killDevice");
+      if (!tool) {
+        throw new Error("killDevice not registered");
+      }
+      return tool;
+    }
+
+    const unknownEmulator: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5554)",
+      deviceId: "emulator-5554",
+    };
+
+    test("refuses when the runtime names a different AVD than the pool", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_9_New");
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /Pixel_8_Old[\s\S]*Pixel_9_New/,
+      );
+      expect(manager.wasMethodCalled("killDevice")).toBe(false);
+    });
+
+    test("proceeds when the runtime confirms the pooled AVD name", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+    });
+
+    // The documented blind spot, now narrowed to "the console is unavailable at
+    // the moment of the kill": proceed on the pooled name rather than leaving an
+    // emulator un-killable because its console stopped answering.
+    test("proceeds on the pooled name when the runtime cannot answer", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+    });
+
+    // A handset's name is `ro.product.model`, not an AVD, and two handsets of the
+    // same model share it — there is no AVD name to verify and nothing an
+    // emulator console could answer.
+    test("never probes a physical handset", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      const handset: BootedDevice = {
+        platform: "android",
+        name: "Unknown (R5CT10ABCDE)",
+        deviceId: "R5CT10ABCDE",
+      };
+      await poolWithUnknownRuntime(handset, "Pixel 8");
+
+      await expect(killTool().handler({ device: handset })).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+    });
   });
 
   test("a failed explicit shutdown remains eligible for later crash recovery", async () => {

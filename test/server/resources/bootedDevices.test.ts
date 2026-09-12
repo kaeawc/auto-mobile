@@ -708,6 +708,61 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    // The resource joins discovery to pool state by SERIAL. A different AVD can
+    // take over a reused serial before the next pool refresh, and publishing the
+    // old entry's epoch as the new runtime's `connectionId` would tell consumers
+    // to KEEP state exactly when they must flush it (#6863 review).
+    test("omits the pool epoch when the discovered runtime disagrees with the pooled entry", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      await devicePool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+      // emulator-5554 is now a DIFFERENT AVD; the pool has not refreshed yet.
+      const replacement: BootedDevice = { ...mockAndroidDevice1, name: "Pixel_9_API_36" };
+      fakeDeviceUtils.setBootedDevices("android", [replacement, mockAndroidDevice2]);
+
+      const { client } = fixture.getContext();
+      const readResourceResponseSchema = z.object({
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
+      });
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/booted" } },
+        readResourceResponseSchema,
+      );
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+
+      const reusedSerial = data.devices.find((device) => device.deviceId === "emulator-5554");
+      expect(reusedSerial?.identity?.connectionId).toBe("emulator-5554");
+
+      // The entry whose identity still agrees keeps its epoch.
+      const agreeing = data.devices.find(
+        (device) => device.deviceId === mockAndroidDevice2.deviceId,
+      );
+      expect(agreeing?.identity?.connectionId).toBe(
+        `${mockAndroidDevice2.deviceId}#${devicePool.getDeviceIncarnation(mockAndroidDevice2.deviceId)}`,
+      );
+
+      sessionManager.stopCleanupTimer();
+    });
+
     test("exposes the registry epoch UUID for each live device", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 

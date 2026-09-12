@@ -74,8 +74,11 @@ interface DeviceIdentity {
    * Key for THIS connection epoch of the device. An adb serial is reused across
    * boots, so the serial alone cannot tell a consumer "same device, stream
    * continues" from "device rebooted, flush your state". When the pool knows the
-   * device's `incarnation` this is `<deviceId>#<incarnation>`; otherwise the
-   * serial alone, which callers must read as "no epoch information".
+   * device's `incarnation` AND that pooled entry describes the runtime this
+   * discovery just reported on the serial, this is `<deviceId>#<incarnation>`;
+   * otherwise the serial alone, which callers must read as "no epoch
+   * information". The identity check matters because the pool join is by serial:
+   * an unchecked join could publish a retired entry's epoch for a new runtime.
    */
   connectionId: string;
 }
@@ -369,13 +372,13 @@ function isVirtualDevice(device: BootedDevice): boolean {
 
 function getPoolDeviceInfo(
   devicePool: DevicePool | null,
-  deviceId: string,
+  device: BootedDevice,
 ): PoolDeviceInfo | undefined {
   if (!devicePool) {
     return undefined;
   }
 
-  const pooledDevice = devicePool.getDevice(deviceId);
+  const pooledDevice = devicePool.getDevice(device.deviceId);
   if (!pooledDevice) {
     return undefined;
   }
@@ -386,9 +389,14 @@ function getPoolDeviceInfo(
   return {
     poolStatus,
     assignedSession: pooledDevice.sessionId || undefined,
-    recoveryEligibility: devicePool.getRecoveryEligibility(deviceId),
+    recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
     avdName: pooledDevice.avdName,
-    incarnation: pooledDevice.incarnation,
+    // The epoch is published ONLY when this entry describes the runtime
+    // discovery just reported on the serial. The join is by serial alone, and a
+    // different device can hold that serial before the pool refreshes; naming
+    // the retired entry's epoch would tell consumers to keep state exactly when
+    // the new epoch is supposed to make them flush it.
+    incarnation: devicePool.describesPooledRuntime(device) ? pooledDevice.incarnation : undefined,
   };
 }
 
@@ -511,7 +519,7 @@ async function discoverBootedDevicesForPlatform(
       devices: discovery.devices.map((device) =>
         toBootedDeviceInfo(
           device,
-          getPoolDeviceInfo(devicePool, device.deviceId),
+          getPoolDeviceInfo(devicePool, device),
           sessionInfoByDeviceId?.get(device.deviceId),
           resolveDeviceSessionUuid(device.deviceId),
         ),

@@ -5671,6 +5671,20 @@ export class DevicePool {
    * (see `daemon/deviceSessionRegistry.ts`). Name handling is delegated to
    * {@link namesAgreeOnIdentity}.
    */
+  /**
+   * Whether this pool's entry for a serial describes the runtime a discovery
+   * listing just reported on it — false when there is no entry at all.
+   *
+   * Public because consumers JOIN discovery to pool state by serial alone, and a
+   * serial can be reused by a different runtime before the next refresh. A join
+   * that has not been checked this way must not publish pool-derived epoch
+   * information about the discovered runtime (#6863 review).
+   */
+  describesPooledRuntime(expected: Pick<BootedDevice, "deviceId" | "name" | "platform">): boolean {
+    const pooled = this.devices.get(expected.deviceId);
+    return pooled !== undefined && this.matchesRuntimeIdentity(pooled, expected);
+  }
+
   private matchesRuntimeIdentity(
     pooled: PooledDevice,
     expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,

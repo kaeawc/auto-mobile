@@ -854,9 +854,8 @@ async function defaultResolveRunningAndroidAvdName(
   timeoutMs: number,
 ): Promise<string | undefined> {
   try {
-    const { AndroidEmulatorClient } = await import(
-      "../utils/android-cmdline-tools/AndroidEmulatorClient"
-    );
+    const { AndroidEmulatorClient } =
+      await import("../utils/android-cmdline-tools/AndroidEmulatorClient");
     return await new AndroidEmulatorClient().resolveRunningAvdName(device, timeoutMs);
   } catch (error) {
     // An unreachable console is one of the three expected outcomes of this

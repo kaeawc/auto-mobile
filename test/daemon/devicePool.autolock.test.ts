@@ -352,6 +352,111 @@ describe("DevicePool autolock", () => {
       ).toBeUndefined();
     });
 
+    it("keeps a recovering owned session in the ambiguity candidate set", async () => {
+      // Two Android devices autolocked by the same MCP connection. When one is
+      // detached by a process-wide ADB reset, its session is still owned by the
+      // connection - it is merely recovering. An implicit `platform: "android"`
+      // selector must report ambiguity rather than silently routing every call
+      // to the one device that happens to still be attached.
+      const first = {
+        name: "Pixel_8_API_35",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+      };
+      const second = {
+        name: "Pixel_9_API_36",
+        platform: "android" as const,
+        deviceId: "emulator-5556",
+      };
+      const firstImage = {
+        name: first.name,
+        platform: "android" as const,
+        isRunning: true,
+        source: "local" as const,
+      };
+      const secondImage = { ...firstImage, name: second.name };
+      fakeDeviceUtils.setBootedDevices("android", [first, second]);
+      await pool.addDevice(first, firstImage);
+      await pool.addDevice(second, secondImage);
+      const firstSession = await pool.autolockDevice(
+        first.deviceId,
+        "android",
+        "mcp-session-1",
+        firstImage,
+      );
+      const secondSession = await pool.autolockDevice(
+        second.deviceId,
+        "android",
+        "mcp-session-1",
+        secondImage,
+      );
+
+      const detached = await pool.detachAdbServerResetCohort([pool.getDevice(first.deviceId)!]);
+      try {
+        expect(pool.isSessionRecoveryInFlight(firstSession!)).toBe(true);
+        expect(() => pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toThrow(
+          new RegExp(`Candidate sessions:.*${firstSession}.*${secondSession}`, "s"),
+        );
+      } finally {
+        await pool.releaseAdbServerResetCohortReservations(detached.devices);
+      }
+    });
+
+    it("does not let a queued restoration overwrite a default set after its snapshot", async () => {
+      // `setActiveDevice` can land between the moment restoration reads "this
+      // connection has no default" and the moment it actually attaches. The
+      // conditional default must therefore be evaluated at attach time, under
+      // the assignment mutex, not from the stale pre-loop snapshot.
+      const first = {
+        name: "Pixel_8_API_35",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+      };
+      const second = {
+        name: "Pixel_9_API_36",
+        platform: "android" as const,
+        deviceId: "emulator-5556",
+      };
+      const gate = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      let gatedSessionId: string | undefined;
+      const repository = {
+        markAutolockSession: async (sessionId: string): Promise<void> => {
+          if (gatedSessionId === sessionId) {
+            gatedSessionId = undefined;
+            entered.resolve();
+            await gate.promise;
+          }
+        },
+      };
+      const gatedPool = new DevicePool(
+        sessionManager,
+        "daemon-session-1",
+        timer,
+        undefined,
+        fakeDeviceUtils,
+        undefined,
+        repository,
+      );
+      fakeDeviceUtils.setBootedDevices("android", [first, second]);
+      await gatedPool.initializeWithDevices([first, second]);
+      const firstSession = await gatedPool.autolockDevice(first.deviceId, "android");
+      const secondSession = await gatedPool.autolockDevice(second.deviceId, "android");
+
+      gatedSessionId = firstSession;
+      const explicit = gatedPool.attachAutolockSessionToMcpSession(firstSession!, "mcp-session-1");
+      await entered.promise;
+      const restore = gatedPool.restoreAutolockSessionsForMcpSession(
+        [secondSession!],
+        "mcp-session-1",
+      );
+      gate.resolve();
+      await explicit;
+      await restore;
+
+      expect(gatedPool.resolveAutolockSessionForMcpSession("mcp-session-1")).toBe(firstSession);
+    });
+
     it("records achieved readiness before publishing the MCP session route (#6227 round 9)", async () => {
       await initializeLiveAndroidDevice();
 

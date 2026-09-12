@@ -95,61 +95,72 @@ describe("MCP session autolock routing", () => {
   test.each([{}, { platform: "android" }, { deviceId: "emulator-5554" }])(
     "binds an implicit execution with %j to its resolved autolock before an MCP remap",
     async (selectors) => {
-      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-      process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60";
-      const timer = new FakeTimer();
-      const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-      const fakeDeviceUtils = new FakeDeviceUtils();
-      const devices = [
-        {
-          name: "Pixel 7",
-          platform: "android" as const,
-          deviceId: "emulator-5554",
-        },
-        {
-          name: "Pixel 8",
-          platform: "android" as const,
-          deviceId: "emulator-5556",
-        },
-      ];
-      fakeDeviceUtils.setBootedDevices("android", devices);
-      const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
-      await pool.initializeWithDevices(devices);
-      DaemonState.getInstance().initialize(sessionManager, pool);
-      const originalSessionId = await pool.autolockDevice(
-        "emulator-5554",
-        "android",
-        "mcp-session",
-      );
-      const handlerStarted = Promise.withResolvers<void>();
-      const releaseHandler = Promise.withResolvers<void>();
-
-      // #6227: `pool.autolockDevice` creates its session directly (bypassing the
-      // `deviceTools.ts` acquisition recorder), so routing the `tools/call`
-      // request below through `captureAutolockOwnership` drives real per-session
-      // accessibility-service setup against a fake device. The shared test
-      // preload (test/setup/testPreload.ts) installs a no-op readiness driver so
-      // that setup cannot block on real `adb`/network.
-      ToolRegistry.clearTools();
-      ToolRegistry.registerDeviceAware(
-        "captureAutolockOwnership",
-        "captureAutolockOwnership",
-        captureSchema.extend({
-          platform: z.string().optional(),
-          deviceId: z.string().optional(),
-        }),
-        async () => {
-          handlerStarted.resolve();
-          await releaseHandler.promise;
-          return { content: [{ type: "text", text: "ok" }] };
-        },
-      );
-      fixture = new McpTestFixture({
-        sessionContext: { sessionId: "mcp-session" },
-      });
-      await fixture.setup();
-
+      // Everything that allocates a cleanup timer, a pool, or an MCP fixture is
+      // constructed inside the try, so the finally below still tears it down if
+      // any setup step throws part-way through.
+      let sessionManager: SessionManager | undefined;
       try {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60";
+        const timer = new FakeTimer();
+        sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+        const fakeDeviceUtils = new FakeDeviceUtils();
+        const devices = [
+          {
+            name: "Pixel 7",
+            platform: "android" as const,
+            deviceId: "emulator-5554",
+          },
+          {
+            name: "Pixel 8",
+            platform: "android" as const,
+            deviceId: "emulator-5556",
+          },
+        ];
+        fakeDeviceUtils.setBootedDevices("android", devices);
+        const pool = new DevicePool(
+          sessionManager,
+          "daemon-test",
+          timer,
+          undefined,
+          fakeDeviceUtils,
+        );
+        await pool.initializeWithDevices(devices);
+        DaemonState.getInstance().initialize(sessionManager, pool);
+        const originalSessionId = await pool.autolockDevice(
+          "emulator-5554",
+          "android",
+          "mcp-session",
+        );
+        const handlerStarted = Promise.withResolvers<void>();
+        const releaseHandler = Promise.withResolvers<void>();
+
+        // [#6227](https://github.com/kaeawc/auto-mobile/issues/6227):
+        // `pool.autolockDevice` creates its session directly (bypassing the
+        // `deviceTools.ts` acquisition recorder), so routing the `tools/call`
+        // request below through `captureAutolockOwnership` drives real per-session
+        // accessibility-service setup against a fake device. The shared test
+        // preload (test/setup/testPreload.ts) installs a no-op readiness driver so
+        // that setup cannot block on real `adb`/network.
+        ToolRegistry.clearTools();
+        ToolRegistry.registerDeviceAware(
+          "captureAutolockOwnership",
+          "captureAutolockOwnership",
+          captureSchema.extend({
+            platform: z.string().optional(),
+            deviceId: z.string().optional(),
+          }),
+          async () => {
+            handlerStarted.resolve();
+            await releaseHandler.promise;
+            return { content: [{ type: "text", text: "ok" }] };
+          },
+        );
+        fixture = new McpTestFixture({
+          sessionContext: { sessionId: "mcp-session" },
+        });
+        await fixture.setup();
+
         const { client } = fixture.getContext();
         const request = client.request(
           {
@@ -182,7 +193,7 @@ describe("MCP session autolock routing", () => {
         releaseHandler.resolve();
         await request;
       } finally {
-        sessionManager.stopCleanupTimer();
+        sessionManager?.stopCleanupTimer();
         DaemonState.getInstance().reset();
         delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
         delete process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT;

@@ -6144,9 +6144,28 @@ export class DevicePool {
     const candidates = [...(this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? [])].flatMap(
       (id) => {
         const session = this.sessionManager.getSessionForNewExecution(id, execution);
-        const device = session ? this.devices.get(session.assignedDevice) : undefined;
-        return session && device && device.autolockSessionId === id && device.sessionId === id
-          ? [{ sessionId: id, deviceId: device.id, platform: device.platform }]
+        if (!session) {
+          return [];
+        }
+        const device = this.devices.get(session.assignedDevice);
+        if (device && device.autolockSessionId === id && device.sessionId === id) {
+          return [
+            { sessionId: id, deviceId: device.id, platform: device.platform, recovering: false },
+          ];
+        }
+        // A session detached by a process-wide ADB reset is still owned by this
+        // MCP connection; its device is simply absent from the pool while the
+        // reset is recovered. Dropping it here would let an implicit selector
+        // silently route to the connection's *other* device (#6807).
+        return this.adbServerResetQuarantinedSessions.has(id)
+          ? [
+              {
+                sessionId: id,
+                deviceId: session.assignedDevice,
+                platform: session.platform,
+                recovering: true,
+              },
+            ]
           : [];
       },
     );
@@ -6156,13 +6175,17 @@ export class DevicePool {
         (!deviceId || candidate.deviceId === deviceId),
     );
     if (matches.length === 1) {
+      // A lone recovering match is not ambiguous: returning it lets the caller
+      // surface the recovery error for the device the client actually owns.
       return matches[0].sessionId;
     }
     if (candidates.length > 0 && !deviceId) {
       throw new ActionableError(
         `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
           .map(
-            (candidate) => `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform})`,
+            (candidate) =>
+              `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform}` +
+              `${candidate.recovering ? ", recovering" : ""})`,
           )
           .join(", ")}. Pass an explicit sessionUuid/deviceId.`,
       );
@@ -6175,11 +6198,12 @@ export class DevicePool {
     sessionIds: readonly string[],
     mcpSessionId: string,
   ): Promise<void> {
-    const hadDefault = this.resolveAutolockSessionForMcpSession(mcpSessionId) !== undefined;
     for (const id of sessionIds) {
-      if (!hadDefault || !this.mcpSessionAcquiredAutolocks.get(mcpSessionId)?.has(id)) {
-        await this.attachAutolockSessionToMcpSession(id, mcpSessionId, !hadDefault);
-      }
+      // "if-absent" defers the default decision to attach time, under the
+      // assignment mutex. A pre-loop snapshot would be stale by the time the
+      // second attachment runs, letting restoration clobber a `setActiveDevice`
+      // that landed in between (#6807).
+      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
     }
   }
 
@@ -6189,7 +6213,7 @@ export class DevicePool {
   async attachAutolockSessionToMcpSession(
     sessionId: string,
     mcpSessionId: string | undefined,
-    makeDefault = true,
+    makeDefault: boolean | "if-absent" = true,
   ): Promise<void> {
     if (!mcpSessionId) {
       return;
@@ -6212,7 +6236,11 @@ export class DevicePool {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      if (makeDefault) {
+      if (
+        makeDefault === true ||
+        (makeDefault === "if-absent" &&
+          this.resolveAutolockSessionForMcpSession(mcpSessionId) === undefined)
+      ) {
         this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
       }
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();

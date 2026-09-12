@@ -36,6 +36,14 @@ import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtu
 
 class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly childProcess = new EventEmitter() as ChildProcess;
+  /**
+   * Serials this manager was actually asked to kill. `FakeDeviceUtils` records
+   * operations in its own `killDevice`, which every subclass here overrides, so
+   * `wasMethodCalled("killDevice")` would answer `false` even for a kill that
+   * DID reach the device manager -- making a "the kill was refused" assertion
+   * vacuously true. Assert against this instead.
+   */
+  readonly killedDeviceIds: string[] = [];
 
   constructor() {
     super();
@@ -52,13 +60,15 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
     return this.childProcess;
   }
 
-  override async killDevice(): Promise<void> {
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.killedDeviceIds.push(device.deviceId);
     throw new Error("adb emu kill failed");
   }
 }
 
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(device: BootedDevice): Promise<void> {
+    this.killedDeviceIds.push(device.deviceId);
     this.setBootedDevices(device.platform, []);
   }
 }
@@ -567,7 +577,7 @@ describe("killDevice handler", () => {
       await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
         /Pixel_8_Old[\s\S]*Pixel_9_New/,
       );
-      expect(manager.wasMethodCalled("killDevice")).toBe(false);
+      expect(manager.killedDeviceIds).toEqual([]);
     });
 
     test("proceeds when the runtime confirms the pooled AVD name", async () => {
@@ -578,11 +588,15 @@ describe("killDevice handler", () => {
 
       await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
       expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
     // The documented blind spot, now narrowed to "the console is unavailable at
     // the moment of the kill": proceed on the pooled name rather than leaving an
-    // emulator un-killable because its console stopped answering.
+    // emulator un-killable because its console stopped answering. The kill
+    // REACHING the device manager is the point of the choice, so assert it
+    // explicitly -- whichever way the open fail-open/fail-closed question is
+    // decided, this test is where the answer is written down.
     test("proceeds on the pooled name when the runtime cannot answer", async () => {
       manager = new SuccessfulKillDeviceManager();
       setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
@@ -590,6 +604,7 @@ describe("killDevice handler", () => {
 
       await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
       expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
     // A handset's name is `ro.product.model`, not an AVD, and two handsets of the

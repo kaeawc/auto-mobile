@@ -13,6 +13,8 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { getDefaultPreFirstHeartbeatGraceMs } from "../../src/daemon/sessionManager";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
@@ -918,6 +920,95 @@ describe("post-handler cancellation guard scope", () => {
       status: "busy",
       sessionId: mintedSessionUuid,
     });
+  });
+
+  // The cleanup contract after the eager cancelled-acquisition release was
+  // dropped: cancellation releases NOTHING (the pool publishes a minted session
+  // to the MCP connection before enrichment runs, so an eager release could
+  // strand a sibling that already picked the handle up). The session a client
+  // never heartbeats is collected by the `missing-first-heartbeat` reap in
+  // SessionHeartbeatMonitor instead.
+  test("a cancelled acquisition leaves its session to the missing-first-heartbeat reap", async () => {
+    const sessionId = "cancel-guard-reap-session";
+    const mintedSessionUuid = "reap-minted-session";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-test",
+      timer,
+      undefined,
+      new FakeDeviceUtils(),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const device = { name: "Pixel 8", platform: "android" as const, deviceId: "reap-android-1" };
+    await pool.initializeWithDevices([device]);
+    pool.notifyDeviceReady(device.deviceId);
+
+    const releases: Array<{ sessionUuid: string; reason: string }> = [];
+    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+    sessionManager.releaseSession = async (uuid, reason, allowExpired) => {
+      releases.push({ sessionUuid: uuid, reason });
+      return await releaseSession(uuid, reason, allowExpired);
+    };
+
+    fixture = new McpTestFixture({ sessionContext: { sessionId } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => {
+        await pool.assignDeviceToSession(mintedSessionUuid, "android");
+        await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify({ sessionUuid: mintedSessionUuid }) },
+          ],
+        };
+      },
+      { defaultEnabled: true },
+    );
+
+    await expect(
+      fixture.client.request(
+        { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+        z.any(),
+      ),
+    ).rejects.toThrow(/cancelled during acquisition/);
+
+    // (a) Nothing is released synchronously: the device stays assigned.
+    expect(releases).toEqual([]);
+    expect(sessionManager.getSession(mintedSessionUuid)).not.toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({
+      status: "busy",
+      sessionId: mintedSessionUuid,
+    });
+
+    // (b) The reap collects it. Mirror the daemon's reap callback
+    // (`Daemon.cancelAndReleaseSession`): release the session, then return its
+    // device to the pool.
+    const monitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      () => false,
+      async (reapedSessionUuid, reason) => {
+        const deviceId = await sessionManager.releaseSession(reapedSessionUuid, reason, true);
+        if (deviceId) {
+          await pool.releaseDevice(deviceId, reapedSessionUuid);
+        }
+      },
+      timer,
+    );
+    timer.advanceTime(getDefaultPreFirstHeartbeatGraceMs() + 1);
+    await monitor.tick();
+
+    expect(releases).toEqual([
+      { sessionUuid: mintedSessionUuid, reason: "missing-first-heartbeat" },
+    ]);
+    expect(sessionManager.getSession(mintedSessionUuid)).toBeNull();
+    expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "idle", sessionId: null });
   });
 
   test("a cancelled acquisition drops its direct-session mapping in direct mode", async () => {

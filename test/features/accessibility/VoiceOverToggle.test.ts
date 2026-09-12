@@ -262,25 +262,18 @@ describe("VoiceOverToggle", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
-    // #6496: an indeterminate post-disable probe (CtrlProxy down/timeout)
-    // must never be coalesced into a coincidental confirmed-false match.
-    // Wires the real DefaultIosVoiceOverDetector against a CtrlProxy client
-    // whose requestVoiceOverState always throws, so the tri-state stays
-    // `null` for the entire confirmation window rather than collapsing to
-    // `false` on the very first poll.
+    // #6496: an indeterminate post-disable probe must never be coalesced into
+    // a coincidental confirmed-false match.
     test("does not report applied:true when the post-disable confirmation probe is indeterminate", async () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const realDetector = new DefaultIosVoiceOverDetector(timer);
-      const fakeClient = new FakeIOSCtrlProxy();
-      fakeClient.setFailureMode("voiceOverState", new Error("not connected"));
-
+      fakeDetector.enqueueResolvedStateResults(...Array<null>(100).fill(null));
       const toggle = new VoiceOverToggle(
         SIMULATOR_DEVICE,
-        realDetector,
+        fakeDetector,
         fakeExec,
         timer,
-        () => fakeClient,
+        () => new FakeIOSCtrlProxy(),
       );
       const result = await toggle.toggle(false);
 

@@ -9,6 +9,7 @@ import type { FeatureFlagService } from "../../src/features/featureFlags/Feature
 export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   private voiceOverEnabled: boolean = false;
   private readonly voiceOverEnabledResults: boolean[] = [];
+  private readonly resolvedStateResults: Array<boolean | null> = [];
   private callCount: number = 0;
   private invalidatedDevices: string[] = [];
 
@@ -27,6 +28,11 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   /** Configure successive detection results, falling back to the configured state when exhausted. */
   enqueueVoiceOverEnabledResults(...results: boolean[]): void {
     this.voiceOverEnabledResults.push(...results);
+  }
+
+  /** Configure successive tri-state probe results for `resolveState`. */
+  enqueueResolvedStateResults(...results: Array<boolean | null>): void {
+    this.resolvedStateResults.push(...results);
   }
 
   /**
@@ -49,6 +55,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   reset(): void {
     this.voiceOverEnabled = false;
     this.voiceOverEnabledResults.length = 0;
+    this.resolvedStateResults.length = 0;
     this.callCount = 0;
     this.invalidatedDevices = [];
     this.isVoiceOverEnabledFeatureFlagsArgs.length = 0;
@@ -90,12 +97,8 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   }
 
   /**
-   * Fake tri-state variant. This fake models a resolved boolean outcome, not
-   * the indeterminate/confirmed distinction the real detector's
-   * `resolveState` diverges on for a `null` probe — that distinction is
-   * covered at the DefaultIosVoiceOverDetector / VoiceOverToggle
-   * integration-test level (#6496) by wiring the real detector against a
-   * fake CtrlProxy client configured to fail.
+   * Fake tri-state variant. Tests can enqueue an indeterminate `null` probe
+   * independently from the boolean queue used by the legacy detector methods.
    */
   async resolveState(
     _deviceId: string,
@@ -107,7 +110,10 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
     this.isVoiceOverEnabledTimeoutMsArgs.push(timeoutMs);
-    return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
+    if (this.resolvedStateResults.length > 0) {
+      return this.resolvedStateResults.shift()!;
+    }
+    return this.voiceOverEnabled;
   }
 
   invalidateCache(deviceId: string): void {

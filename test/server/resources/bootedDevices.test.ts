@@ -763,6 +763,52 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    // `Unknown (<serial>)` is the placeholder Android discovery emits when the
+    // emulator console could not answer `avd name`. It asserts nothing, so it
+    // is not agreement with the pooled entry: publishing that entry's epoch
+    // would tell consumers to keep state across a possible serial reuse, and
+    // publishing its AVD label as `stableId` would name a device that may no
+    // longer be the one running (#6863 review).
+    test("withholds the pool epoch and the pooled AVD name for an unresolved runtime name", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      // `addDevice` records the AVD this pool started, which is what would be
+      // published as `stableId` for an emulator whose runtime name is unknown.
+      await devicePool.addDevice(mockAndroidDevice1, {
+        name: mockAndroidDevice1.name,
+        platform: "android",
+        isRunning: true,
+        source: "local",
+      });
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+      const unresolved: BootedDevice = {
+        ...mockAndroidDevice1,
+        name: `Unknown (${mockAndroidDevice1.deviceId})`,
+      };
+      fakeDeviceUtils.setBootedDevices("android", [unresolved]);
+
+      const { client } = fixture.getContext();
+      const result = await client.readResource({ uri: "automobile:devices/booted" });
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      const device = data.devices.find((entry) => entry.deviceId === unresolved.deviceId);
+
+      expect(device?.identity?.connectionId).toBe(unresolved.deviceId);
+      expect(device?.identity?.stableId).toBe(unresolved.name);
+
+      sessionManager.stopCleanupTimer();
+    });
+
     test("exposes the registry epoch UUID for each live device", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 

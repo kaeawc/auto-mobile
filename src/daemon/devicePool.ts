@@ -5669,10 +5669,37 @@ export class DevicePool {
    * serial can be reused by a different runtime before the next refresh. A join
    * that has not been checked this way must not publish pool-derived epoch
    * information about the discovered runtime (#6863 review).
+   *
+   * `Unknown (<serial>)` answers this question with NO. The placeholder means
+   * the emulator console did not answer `avd name`, so it is not information:
+   * {@link matchesRuntimeIdentity} tolerates it in the direction that matters
+   * there (it must never evict a live entry), but tolerance is not agreement,
+   * and this predicate exists precisely to gate what gets PUBLISHED about the
+   * discovered runtime. Same rule, both directions: a placeholder is never
+   * evidence of a replacement and never evidence of continuity.
    */
   describesPooledRuntime(expected: Pick<BootedDevice, "deviceId" | "name" | "platform">): boolean {
     const pooled = this.devices.get(expected.deviceId);
-    return pooled !== undefined && this.matchesRuntimeIdentity(pooled, expected);
+    if (pooled === undefined || !this.matchesRuntimeIdentity(pooled, expected)) {
+      return false;
+    }
+    return !this.hasUnresolvedEmulatorName(expected);
+  }
+
+  /**
+   * Whether a discovered name is the `Unknown (<serial>)` placeholder rather
+   * than a name read from the runtime. Guarded by {@link isAndroidEmulatorSerial}
+   * because a handset's name is `ro.product.model` and its identity rides on its
+   * globally-unique serial, not on its name.
+   */
+  private hasUnresolvedEmulatorName(
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+  ): boolean {
+    return (
+      expected.platform === "android" &&
+      isAndroidEmulatorSerial(expected.deviceId) &&
+      expected.name === unknownAndroidRuntimeName(expected.deviceId)
+    );
   }
 
   /**

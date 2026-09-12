@@ -173,6 +173,11 @@ interface PoolDeviceInfo {
   poolStatus: PoolDeviceStatus;
   assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility;
+  /**
+   * The AVD this pool started on the serial, and the epoch of that allocation.
+   * Both are present ONLY when the pooled entry describes the runtime discovery
+   * just reported on the serial; see {@link getPoolDeviceInfo}.
+   */
   avdName?: string;
   incarnation?: number;
 }
@@ -345,6 +350,17 @@ function toBootedDeviceInfo(
   return info;
 }
 
+/**
+ * The two identities a consumer needs: WHICH device (`stableId`, the AVD name
+ * for an emulator because a serial is reused across boots) and WHICH RUN of it
+ * (`connectionId`, the pool's per-allocation incarnation).
+ *
+ * Both fall back to discovery's own answer when the pool has nothing to say
+ * about this runtime -- including when discovery reports `Unknown (<serial>)`,
+ * where the pooled AVD label could belong to the previous occupant of the
+ * serial. A caller that needs the real AVD name in that case must re-resolve it
+ * from the runtime rather than read it here (#6863 review).
+ */
 function toDeviceIdentity(
   device: BootedDevice,
   poolInfo: PoolDeviceInfo | undefined,
@@ -386,17 +402,23 @@ function getPoolDeviceInfo(
   const poolStatus: PoolDeviceStatus =
     pooledDevice.status === "busy" ? "assigned" : pooledDevice.status;
 
+  // Everything this entry claims about WHICH runtime is on the serial is
+  // published only when the entry describes the runtime discovery just reported
+  // there. The join is by serial alone, and a different device can hold that
+  // serial before the pool refreshes -- or the emulator console can have gone
+  // quiet, leaving discovery with the `Unknown (<serial>)` placeholder, which
+  // asserts nothing either way. Naming the retired entry's epoch would tell
+  // consumers to keep state exactly when the new epoch is supposed to make them
+  // flush it, and naming its AVD would publish the previous occupant's label as
+  // this runtime's `stableId` (#6863 review).
+  const describesRuntime = devicePool.describesPooledRuntime(device);
+
   return {
     poolStatus,
     assignedSession: pooledDevice.sessionId || undefined,
     recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
-    avdName: pooledDevice.avdName,
-    // The epoch is published ONLY when this entry describes the runtime
-    // discovery just reported on the serial. The join is by serial alone, and a
-    // different device can hold that serial before the pool refreshes; naming
-    // the retired entry's epoch would tell consumers to keep state exactly when
-    // the new epoch is supposed to make them flush it.
-    incarnation: devicePool.describesPooledRuntime(device) ? pooledDevice.incarnation : undefined,
+    avdName: describesRuntime ? pooledDevice.avdName : undefined,
+    incarnation: describesRuntime ? pooledDevice.incarnation : undefined,
   };
 }
 

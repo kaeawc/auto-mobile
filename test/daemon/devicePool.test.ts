@@ -1712,6 +1712,32 @@ describe("DevicePool", () => {
       });
     });
 
+    // `Unknown (<serial>)` asserts nothing, so it is neither evidence that a
+    // different AVD took the serial (the entry survives) nor evidence that the
+    // pooled entry describes what is running now (#6863 review). Consumers that
+    // publish pool-derived epoch information must therefore not treat it as a
+    // match.
+    test("does not claim a pooled entry describes a placeholder-named runtime", async () => {
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await devicePool.addDevice(firstConnection, sourceImage);
+
+      expect(devicePool.describesPooledRuntime(firstConnection)).toBe(true);
+      expect(
+        devicePool.describesPooledRuntime({
+          ...firstConnection,
+          name: "Unknown (emulator-5554)",
+        }),
+      ).toBe(false);
+      // The entry itself is untouched: the placeholder is not a replacement.
+      expect(devicePool.getDevice(firstConnection.deviceId)).toMatchObject({ name: "Pixel 8" });
+    });
+
     test("does not transfer ownership from an unknown-name emulator to a different known AVD", async () => {
       const sourceImage: DeviceInfo = {
         name: "Pixel 8",

@@ -852,7 +852,12 @@ function releaseProvisionDeviceWaiter(
  */
 const POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS = 3_000;
 
-async function defaultResolveRunningAndroidAvdName(
+/**
+ * Exported for tests only: the DEFAULT {@link
+ * DeviceToolsDependencies.resolveRunningAndroidAvdName}. Production callers
+ * reach it through `getDeviceToolsDependencies()`.
+ */
+export async function defaultResolveRunningAndroidAvdName(
   device: BootedDevice,
   timeoutMs: number,
   signal?: AbortSignal,
@@ -862,6 +867,13 @@ async function defaultResolveRunningAndroidAvdName(
       await import("../utils/android-cmdline-tools/AndroidEmulatorClient");
     return await new AndroidEmulatorClient().resolveRunningAvdName(device, timeoutMs, signal);
   } catch (error) {
+    if (signal?.aborted) {
+      // Cancellation is not evidence about the runtime's identity, and reporting
+      // it as "unresolved" would make killDevice raise an identity refusal --
+      // and deleteDevice answer `target_identity_unresolved` -- for an action the
+      // CALLER stopped. Propagate the cancellation instead (#6863 review).
+      throw signal.reason ?? error;
+    }
     // An unreachable console is one of the three expected outcomes of this
     // probe; "could not resolve" makes the caller REFUSE the destructive action,
     // so this is a warn-and-report-unresolved, never a swallow that proceeds.

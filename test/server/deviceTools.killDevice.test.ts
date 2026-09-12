@@ -6,10 +6,12 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
+  defaultResolveRunningAndroidAvdName,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { ActionableError } from "../../src/models/ActionableError";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
@@ -695,6 +697,43 @@ describe("killDevice handler", () => {
       await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
         /emulator-5554[\s\S]*Pixel_8_Old/,
       );
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // Cancellation is not evidence about the runtime's identity. Swallowing an
+    // abort into "unresolved" would make a caller who stopped waiting see an
+    // identity refusal naming a manual `emu kill` escape
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("the default AVD resolver rethrows caller cancellation instead of reporting unresolved", async () => {
+      const controller = new AbortController();
+      const reason = new ActionableError("Operation cancelled by the caller");
+      controller.abort(reason);
+
+      await expect(
+        defaultResolveRunningAndroidAvdName(unknownEmulator, 1_000, controller.signal),
+      ).rejects.toBe(reason);
+    });
+
+    test("killDevice surfaces a cancelled AVD probe instead of an identity refusal", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const reason = new ActionableError("Operation cancelled by the caller");
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        resolveRunningAndroidAvdName: async () => {
+          throw reason;
+        },
+      });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      const rejection = await killTool()
+        .handler({ device: unknownEmulator })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(String(rejection)).toContain("cancelled");
+      expect(String(rejection)).not.toContain("did not answer");
       expect(manager.killedDeviceIds).toEqual([]);
     });
 

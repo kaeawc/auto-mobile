@@ -1251,6 +1251,59 @@ describe("deleteDevice handler", () => {
     ]);
   });
 
+  // A caller who stops waiting must not be told the TARGET could not be
+  // identified: cancellation says nothing about which AVD is on the serial, and
+  // `target_identity_unresolved` points the user at a manual `emu kill` for an
+  // action they themselves cancelled
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("reports a cancelled AVD probe as cancellation, not unresolved identity", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = { platform: "android", name: pooledAvdName, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(booted, image);
+    manager.setBootedDevices("android", [booted]);
+    manager.setDeviceImages("android", [image]);
+
+    const controller = new AbortController();
+    // Exactly what the default resolver does once the caller aborts: rethrow the
+    // abort reason rather than answering "no name".
+    setDeviceToolsDependencies({
+      resolveRunningAndroidAvdName: async (_device, _timeoutMs, signal) => {
+        controller.abort(new Error("deleteDevice caller stopped waiting"));
+        throw signal?.reason ?? new Error("deleteDevice caller stopped waiting");
+      },
+    });
+
+    const body = responseBody(
+      await teardownTool().handler(
+        request("android", pooledAvdName, pooledAvdName),
+        undefined,
+        controller.signal,
+      ),
+    );
+
+    expect(body.state).toBe("failed");
+    const failure = body.failure as Record<string, unknown>;
+    expect(failure.code).toBe("operation_cancelled");
+    expect(manager.killedDevices).toEqual([]);
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   test("rejects a stopped-image teardown when a running Android AVD name is unresolved", async () => {
     const booted: BootedDevice = {
       platform: "android",

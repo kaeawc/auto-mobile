@@ -908,6 +908,49 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
   });
 
+  test("bounds killSimulator's boot-lease wait when no signal ever aborts it", async () => {
+    // Simulate a wedged boot: readiness never resolves, so the boot lease is
+    // held indefinitely. killSimulator (via deviceBootRecovery / handle.kill())
+    // is called with no ambient abort signal (no getAbortSignal() in scope).
+    let releaseBoot!: () => void;
+    const harness = createConcurrentStartHarness(
+      () =>
+        new Promise((resolve) => {
+          releaseBoot = () => resolve(createExecResult("", ""));
+        }),
+    );
+    // A huge readiness timeout keeps the boot's own internal bootstatus exec
+    // timeout from firing within this test's assertion window, isolating the
+    // boot-lease wait's own deadline as the only thing that can settle `kill`.
+    const readiness = harness.createClient().waitForSimulatorReady(UDID, 10_000_000);
+    await drainMicrotasks();
+
+    const kill = harness
+      .createClient()
+      .killSimulator({ name: "iPhone 17", platform: "ios", deviceId: UDID })
+      .catch((error: unknown) => error);
+
+    harness.timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+    await drainMicrotasks();
+
+    const killResult = await kill;
+    expect(killResult).toBeInstanceOf(Error);
+    expect((killResult as Error).message).toBe(
+      `Timed out waiting to shut down iOS simulator ${UDID}`,
+    );
+    expect(harness.shutdownInvocations()).toBe(0);
+
+    releaseBoot();
+    await readiness;
+    await drainMicrotasks();
+    expect(harness.shutdownInvocations()).toBe(0);
+    await harness
+      .createClient()
+      .killSimulator({ name: "iPhone 17", platform: "ios", deviceId: UDID });
+    expect(harness.shutdownInvocations()).toBe(1);
+    expect(harness.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("preserves successful boot state when coordinated shutdown fails", async () => {
     let completeOwnerBootstatus: (() => void) | undefined;
     const shutdownError = new Error("shutdown failed");
@@ -1198,5 +1241,97 @@ describe("SimCtlClient boot self-verification", () => {
 
     await expect(readiness).rejects.toBeInstanceOf(ActionableError);
     await expect(readiness).rejects.toThrow(new RegExp(UDID));
+  });
+
+  // #6412: bootSimulator (-> resolveRegisteredBootSimulator ->
+  // getBootedSimulatorsChecked) and waitForSimulatorReady (->
+  // resolveReadySimulator -> listSimulatorImages) resolve a finished boot
+  // through two independent listings. Both must agree on whether a `Booted`
+  // record with missing/false `isAvailable` counts as booted.
+  function bootedDeviceListResult(isAvailable: boolean | undefined, availabilityError?: string) {
+    const device: Record<string, unknown> = {
+      udid: UDID,
+      name: "iPhone 17",
+      state: "Booted",
+    };
+    if (isAvailable !== undefined) {
+      device.isAvailable = isAvailable;
+    }
+    if (availabilityError !== undefined) {
+      device.availabilityError = availabilityError;
+    }
+    return createExecResult(
+      JSON.stringify({
+        devices: {
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [device],
+        },
+      }),
+      "",
+    );
+  }
+
+  test("bootSimulator and waitForSimulatorReady agree when isAvailable is absent", async () => {
+    const bootHarness = createConcurrentStartHarness(
+      () => createExecResult("", ""),
+      () => bootedDeviceListResult(undefined),
+    );
+    const readyHarness = createConcurrentStartHarness(
+      () => createExecResult("", ""),
+      () => bootedDeviceListResult(undefined),
+    );
+
+    const bootDevice = await bootHarness
+      .createClient()
+      .bootSimulator(UDID)
+      .then(
+        (device) => ({ ok: true as const, device }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+    const readyDevice = await readyHarness
+      .createClient()
+      .waitForSimulatorReady(UDID, 5_000)
+      .then(
+        (device) => ({ ok: true as const, device }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+    expect(bootDevice.ok).toBe(true);
+    expect(readyDevice.ok).toBe(true);
+    if (bootDevice.ok && readyDevice.ok) {
+      expect(bootDevice.device.deviceId).toBe(UDID);
+      expect(readyDevice.device.deviceId).toBe(UDID);
+    }
+  });
+
+  test("bootSimulator and waitForSimulatorReady agree when isAvailable is false", async () => {
+    const availabilityError = "the requested device runtime is unavailable";
+    const bootHarness = createConcurrentStartHarness(
+      () => createExecResult("", ""),
+      () => bootedDeviceListResult(false, availabilityError),
+    );
+    const readyHarness = createConcurrentStartHarness(
+      () => createExecResult("", ""),
+      () => bootedDeviceListResult(false, availabilityError),
+    );
+
+    const bootError = await bootHarness
+      .createClient()
+      .bootSimulator(UDID)
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    const readyError = await readyHarness
+      .createClient()
+      .waitForSimulatorReady(UDID, 5_000)
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(bootError).toBeInstanceOf(ActionableError);
+    expect(readyError).toBeInstanceOf(ActionableError);
+    expect((bootError as Error).message).toContain(availabilityError);
+    expect((readyError as Error).message).toContain(availabilityError);
   });
 });

@@ -266,7 +266,12 @@ export class DeviceBootService {
           `Available images: ${images.map((device) => device.name).join(", ") || "none"}.`,
       );
     }
-    return this.bootImage(image, context, progress, false);
+    // `deviceId` also accepts an AVD/image name (see getAndroidSchema), so the
+    // serial lookup above cannot see an already-running image named this way.
+    // Route through the same reuse-before-cold-boot path as the name matcher so
+    // both spellings of the same target resolve identically (#3334): booting a
+    // live image is rejected by the platform, or spawns a doomed second child.
+    return this.bootMatchedImage(image, context, progress);
   }
 
   private async bootMatchingDevice(
@@ -346,9 +351,14 @@ export class DeviceBootService {
     const booted = await this.runPhase(context, "resolving the running device image", () =>
       this.dependencies.deviceManager.getBootedDevices(image.platform),
     );
-    const running = booted.find(
-      (device) => device.deviceId === image.deviceId || device.name === image.name,
-    );
+    // Exact lifecycle identity first: simulators can share a display name, so a
+    // same-name sibling listed ahead of the requested UDID would be handed back
+    // here and then rejected by the caller's identity check -- failing an
+    // acquisition whose target is up. The name fallback still covers an
+    // AVD/image name spelling of `deviceId`, which carries no serial.
+    const running =
+      booted.find((device) => device.deviceId === image.deviceId) ??
+      booted.find((device) => device.name === image.name);
     if (!running) {
       return this.bootImage(image, context, progress, false);
     }

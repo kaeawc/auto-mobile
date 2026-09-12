@@ -68,6 +68,52 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "../daemon/constants";
 
+/**
+ * Internal params a plan step inherits from its enclosing request. Listed once
+ * so the "parent wins even when absent" strip in
+ * `createInternalToolInvocationContext` cannot drift from the set it writes.
+ */
+const INHERITED_PLAN_REQUEST_PARAMS = [
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+] as const;
+
+/**
+ * Overlay the enclosing request's metadata onto a plan step's args.
+ *
+ * Parent metadata wins even when absent: a passthrough step schema must not let
+ * plan content choose another request's live deadline. An absent parent value
+ * therefore DELETES the plan-supplied key rather than writing `undefined` over
+ * it — an own property whose value is `undefined` is still an unrecognized key
+ * to a `.strict()` tool schema (getAndroid/getApple/provisionDevice), which
+ * would reject the step before it runs.
+ */
+function applyInheritedPlanRequestParams(
+  args: Record<string, unknown>,
+  request: {
+    deadlineMs?: unknown;
+    timeoutMs?: unknown;
+    startTime?: unknown;
+    liveDeadlineKey?: unknown;
+  },
+): Record<string, unknown> {
+  const inherited: Record<string, unknown> = {
+    ...args,
+    [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: request.deadlineMs,
+    [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: request.timeoutMs,
+    [INTERNAL_EXECUTION_START_TIME_PARAM]: request.startTime,
+    [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: request.liveDeadlineKey,
+  };
+  for (const key of INHERITED_PLAN_REQUEST_PARAMS) {
+    if (inherited[key] === undefined) {
+      delete inherited[key];
+    }
+  }
+  return inherited;
+}
+
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
@@ -1231,7 +1277,7 @@ export class ToolRegistryClass {
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
-        return await runWithToolSelectionContext(
+        const response = await runWithToolSelectionContext(
           // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.
           {
@@ -1303,6 +1349,7 @@ export class ToolRegistryClass {
             }
           },
         );
+        return response;
       } finally {
         await this.toolCallRepository.recordToolCall({
           toolName: name,
@@ -1423,15 +1470,7 @@ export class ToolRegistryClass {
     const context = getToolSelectionContext();
     const request = context?.planRequest;
     if (request) {
-      // Parent metadata wins even when absent: a passthrough step schema must
-      // not let plan content choose another request's live deadline.
-      args = {
-        ...args,
-        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: request.deadlineMs,
-        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: request.timeoutMs,
-        [INTERNAL_EXECUTION_START_TIME_PARAM]: request.startTime,
-        [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: request.liveDeadlineKey,
-      };
+      args = applyInheritedPlanRequestParams(args, request);
     }
     // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
     // so a plan step or navigation replay routes to the same derived/label

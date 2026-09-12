@@ -59,7 +59,7 @@ export class IOSCtrlProxyProcessClient {
       if (!process || !process.command.includes("CtrlProxy")) {
         continue;
       }
-      if (this.isDaemonManagedSimulatorXcodebuildProcess(process)) {
+      if (await this.isDaemonManagedSimulatorXcodebuildProcess(process)) {
         continue;
       }
       if (!this.hasDeviceIdentity(`${process.command} ${process.environment ?? ""}`, deviceId)) {
@@ -281,20 +281,62 @@ export class IOSCtrlProxyProcessClient {
     return command.includes("CtrlProxyUITests-Runner");
   }
 
-  isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): boolean {
+  /**
+   * The single source of truth for identifying a daemon-managed
+   * `xcodebuild test-without-building` runner, as opposed to an externally
+   * (e.g. hot-reload) launched xcodebuild process. A process matches when its
+   * command has the daemon shape AND either:
+   *  - it is already reparented to PID 1 (the common orphaned-root case), or
+   *  - its immediate parent is an orphaned shell wrapping the same shape
+   *    (the daemon launches the runner through `sh -c`, so the shell -
+   *    not the runner itself - is what gets reparented to PID 1), or
+   *  - its own environment carries none of the external-xcodebuild identity
+   *    markers.
+   */
+  async isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): Promise<boolean> {
     const command = process.command;
-    const shape =
+    if (!IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
+      return false;
+    }
+    if (process.ppid === 1) {
+      return true;
+    }
+    if (await this.hasOrphanedDaemonManagedShellParent(process.ppid)) {
+      return true;
+    }
+    return !this.hasExternalXcodebuildIdentity(process.environment ?? "");
+  }
+
+  private async hasOrphanedDaemonManagedShellParent(
+    parentPid: number | undefined,
+  ): Promise<boolean> {
+    if (parentPid === undefined || parentPid <= 1) {
+      return false;
+    }
+    const parentInfo = await this.getProcessInfo(parentPid);
+    if (!parentInfo || parentInfo.ppid !== 1) {
+      return false;
+    }
+    return (
+      IOSCtrlProxyProcessClient.isShellCommand(parentInfo.command) &&
+      IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
+    );
+  }
+
+  static isDaemonManagedSimulatorXcodebuildCommandShape(command: string): boolean {
+    return (
       command.includes("xcodebuild") &&
       command.includes("test-without-building") &&
       command.includes("-xctestrun") &&
       command.includes("platform=iOS Simulator") &&
       command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
       !command.includes("CTRL_PROXY_IOS_PORT=") &&
-      !command.includes("AUTOMOBILE_DEVICE_ID=");
-    return (
-      shape &&
-      (process.ppid === 1 || !this.hasExternalXcodebuildIdentity(process.environment ?? ""))
+      !command.includes("AUTOMOBILE_DEVICE_ID=")
     );
+  }
+
+  static isShellCommand(command: string): boolean {
+    return /(?:^|\/)(?:ba|z|c|t?c|k)?sh(?:\s|$)/.test(command);
   }
 
   private async findPids(pattern: string, exact: boolean, deadline?: number): Promise<number[]> {
@@ -336,7 +378,7 @@ export class IOSCtrlProxyProcessClient {
     return match ? Number.parseInt(match[1], 10) : null;
   }
 
-  private hasExternalXcodebuildIdentity(environment: string): boolean {
+  hasExternalXcodebuildIdentity(environment: string): boolean {
     return (
       environment.includes("CTRL_PROXY_IOS_PORT=") ||
       environment.includes("AUTOMOBILE_DEVICE_ID=") ||

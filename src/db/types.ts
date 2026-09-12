@@ -543,6 +543,8 @@ export interface EmulatorLossIncidentsTable {
 export interface ProvisionDeviceOperationsTable {
   operation_id: string;
   request_fingerprint: string;
+  /** Fence identifying the attempt that currently owns this row. */
+  attempt_id: Generated<string>;
   status: string;
   result_json: string | null;
   error_code: string | null;

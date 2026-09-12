@@ -13,6 +13,10 @@ import {
 import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
+import {
+  DEVICE_SESSION_ACQUISITION_TOOLS,
+  isDeviceSessionAcquisitionTool,
+} from "../server/deviceSessionResult";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -654,10 +658,17 @@ export async function runCliCommand(
     // Parse tool name, session UUID, and parameters
     const { toolName, sessionUuid, params } = parseCliArgs(args);
 
-    // Add session UUID to params if provided
+    // Add session UUID to params if provided. Acquisition tools MINT a session
+    // rather than joining one, and their schemas are `.strict()`, so folding the
+    // flag in made every `--session-uuid ... getAndroid` call fail with
+    // `Unrecognized key: "sessionUuid"` before any device work started.
     if (sessionUuid) {
-      params.sessionUuid = sessionUuid;
-      logger.debug(`Using session UUID: ${sessionUuid}`);
+      if (isDeviceSessionAcquisitionTool(toolName)) {
+        logger.debug(`Ignoring session UUID for acquisition tool ${toolName}: it mints its own`);
+      } else {
+        params.sessionUuid = sessionUuid;
+        logger.debug(`Using session UUID: ${sessionUuid}`);
+      }
     }
 
     // Special handling for doctor command - try daemon first, fallback to direct
@@ -710,7 +721,10 @@ Examples:
 
 Options:
   help [tool-name]              Show help for a specific tool
-  --session-uuid <uuid>         Associate tool execution with a session (optional)
+  --session-uuid <uuid>         Associate tool execution with a session (optional).
+                                Ignored for the device-acquisition tools
+                                (${DEVICE_SESSION_ACQUISITION_TOOLS.join(", ")}),
+                                which mint their own session.
 
 Parameters:
   Parameters are passed as --key value pairs

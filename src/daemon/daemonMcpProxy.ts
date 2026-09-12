@@ -33,6 +33,7 @@ import {
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
+  DEVICE_SESSION_RECOVERY_PROMPT,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
@@ -273,7 +274,7 @@ export class DaemonConnectionSessionReleasedError extends Error {
   constructor(reason: string) {
     super(
       `This MCP connection has no active device session (the previous session was released: ${reason}). ` +
-        "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+        DEVICE_SESSION_RECOVERY_PROMPT,
     );
     this.name = "DaemonConnectionSessionReleasedError";
     this.reason = reason;

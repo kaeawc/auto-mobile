@@ -125,6 +125,21 @@ const defaultRecordingFileProbe: RecordingFileProbe = {
   },
 };
 
+/**
+ * Minimal filesystem surface for deleting a raw capture file. Narrowed to the one
+ * operation the iOS start-retry needs (rather than reusing the repo-wide
+ * `FileSystem`) so the retry path can be unit-tested with a fake.
+ */
+export interface RecordingFileRemover {
+  remove(filePath: string): Promise<void>;
+}
+
+const defaultRecordingFileRemover: RecordingFileRemover = {
+  async remove(filePath: string): Promise<void> {
+    await fsPromises.rm(filePath, { force: true });
+  },
+};
+
 export interface WaitForRecordingFileOptions {
   probe?: RecordingFileProbe;
   timeoutMs?: number;
@@ -415,6 +430,9 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // producing real recordings (#4965).
     private readonly codecProbe: RecordingCodecProbe = defaultRecordingCodecProbe,
     private readonly timer: Timer = defaultTimer,
+    // Injectable so the stale-capture cleanup between iOS start attempts can be
+    // asserted without touching the real filesystem.
+    private readonly captureFileRemover: RecordingFileRemover = defaultRecordingFileRemover,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -698,6 +716,18 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       if (remainingBeforeSpawn <= 0) {
         break;
       }
+      if (attempt > 1) {
+        // `simctl io ... recordVideo` creates the capture file *before* it emits the
+        // "Recording started" handshake, so an attempt we killed for missing that
+        // handshake leaves a partial .mov behind — and simctl refuses to record over
+        // an existing file (exit 17, "cannot save recorded video output into a file
+        // that already exists"), which would make the #4076 retry fail in exactly the
+        // case it exists for. The partial can never hold a usable recording (the
+        // handshake never completed), so drop it. Safe to unlink here: the previous
+        // attempt's capture process was already reaped by cleanupFailedIosStart
+        // below, so simctl cannot recreate the file after the unlink.
+        await this.removeStaleCapture(capturePath);
+      }
       const captureProcess = await simctl.startCommandArgs(args, {
         stdio: ["ignore", "ignore", "pipe"],
       });
@@ -797,6 +827,20 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       `Failed to start iOS recording within ${this.iosRecordingStartTimeoutMs}ms` +
         (attemptFailures.length > 0 ? `: ${attemptFailures.join(" | ")}` : "."),
     );
+  }
+
+  private async removeStaleCapture(capturePath: string): Promise<void> {
+    try {
+      await this.captureFileRemover.remove(capturePath);
+    } catch (error) {
+      // Best-effort: the remover already treats a missing file as success, so a
+      // failure here is unexpected but must not mask the retry — if the stale file
+      // really does block it, simctl surfaces its own error on the next spawn.
+      logger.warn(
+        `[FfmpegVideo] Failed to remove stale iOS capture ${capturePath}: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private async describeFailedIosStartAttempt(input: {

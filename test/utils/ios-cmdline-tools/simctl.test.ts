@@ -1207,7 +1207,7 @@ describe("Simctl", function () {
       expect(launchctlCalls()).toHaveLength(2);
     });
 
-    test("a slower older probe cannot overwrite a newer headless-session result (PR #6830)", async function () {
+    test("a slower older same-tick probe cannot overwrite a newer headless-session result (PR #6830)", async function () {
       const fakeTimer = new FakeTimer();
       const pending: Array<(managerName: string) => void> = [];
       const controlledExec: typeof mockExecAsync = async (
@@ -1226,10 +1226,8 @@ describe("Simctl", function () {
       };
       simctl = new Simctl(null, controlledExec, fakeTimer, "darwin");
 
-      // Probe A starts at t=0 (cache is empty).
+      // Both probes begin at t=0, as concurrent device starts can do.
       const callA = simctl.openSimulatorApp();
-      // Advance past the TTL so the next start launches an independent probe B.
-      fakeTimer.advanceTime(40_000);
       const callB = simctl.openSimulatorApp();
       expect(launchctlCalls()).toHaveLength(2);
 

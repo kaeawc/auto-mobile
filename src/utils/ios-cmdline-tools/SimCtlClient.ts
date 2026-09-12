@@ -537,6 +537,7 @@ export class SimCtlClient implements SimCtl {
   // stale answer cached for the process lifetime (issue #6372).
   private headlessSessionCache: boolean | null = null;
   private headlessSessionCacheTimestamp = 0;
+  private headlessSessionProbeSequence = 0;
   private static readonly HEADLESS_SESSION_CACHE_TTL = 30_000; // 30 seconds
 
   // Static cache for device list
@@ -2097,20 +2098,23 @@ export class SimCtlClient implements SimCtl {
     }
 
     const cacheAge = this.timer.now() - this.headlessSessionCacheTimestamp;
-    if (this.headlessSessionCache !== null && cacheAge < SimCtlClient.HEADLESS_SESSION_CACHE_TTL) {
+    if (
+      this.headlessSessionCache !== null &&
+      cacheAge >= 0 &&
+      cacheAge < SimCtlClient.HEADLESS_SESSION_CACHE_TTL
+    ) {
       return this.headlessSessionCache;
     }
 
     // Two device starts can race past the expired TTL and each launch an
-    // independent probe. Stamp every probe with the time it started and only
-    // commit its result if no later-started probe has already written the
-    // cache, so a slower, older completion cannot overwrite (and refresh the
-    // timestamp of) a newer result. Each caller keeps its own probe + signal.
-    const probeStartedAt = this.timer.now();
+    // independent probe. A sequence distinguishes probes that begin in the
+    // same timer tick; only the newest one may update the cache. Each caller
+    // keeps its own probe and cancellation signal.
+    const probeSequence = ++this.headlessSessionProbeSequence;
     const headless = await this.detectHeadlessSession(signal);
-    if (probeStartedAt >= this.headlessSessionCacheTimestamp) {
+    if (probeSequence === this.headlessSessionProbeSequence) {
       this.headlessSessionCache = headless;
-      this.headlessSessionCacheTimestamp = probeStartedAt;
+      this.headlessSessionCacheTimestamp = this.timer.now();
     }
     return headless;
   }

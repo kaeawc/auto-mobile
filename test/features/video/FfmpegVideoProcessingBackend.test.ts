@@ -272,9 +272,70 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const handle = await backend.start(mockConfig);
 
     const capturePath = path.join(mockConfig.outputDirectory, "test-recording-raw.mov");
-    expect(attempts).toEqual([capturePath, capturePath]);
+    const retryCapturePath = path.join(
+      mockConfig.outputDirectory,
+      "test-recording-raw-attempt2.mov",
+    );
+    // Each attempt targets its own file, so the retry can never collide with the
+    // first attempt's partial; the first attempt's partial is still removed for
+    // disk hygiene (issue #6851 hardened the earlier #6833 fix).
+    expect(attempts).toEqual([capturePath, retryCapturePath]);
     expect(removed).toEqual([capturePath]);
     expect(handle.recordingId).toBe("test-recording");
+  });
+
+  test("uses a distinct capture path per attempt so a surviving partial cannot exit-17 the retry (#6851)", async function () {
+    // Reproduce the race in #6851: the first attempt's partial capture survives
+    // cleanup (the killed simctl recreated it after the unlink, or the remove lost
+    // the race). If the retry reused the same path it would hit simctl exit 17
+    // ("cannot save ... file already exists") and the whole start would fail. A
+    // distinct path per attempt is immune regardless of cleanup timing.
+    const existingCaptures = new Set<string>();
+    const attempts: string[] = [];
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async (args: string[]) => {
+        const capturePath = args[3];
+        attempts.push(capturePath);
+        if (existingCaptures.has(capturePath)) {
+          return makeExistingFileChild(timer);
+        }
+        existingCaptures.add(capturePath);
+        // First attempt spawns but never emits the handshake (cold-simulator miss),
+        // so it is treated as a failed start and retried.
+        return makeCaptureChild(attempts.length >= 2, timer);
+      },
+      executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)"),
+    } as unknown as SimCtl;
+    // A remover that never actually deletes the partial — models the cleanup race
+    // in which correctness must not depend on the removal succeeding.
+    const remover = {
+      remove: async () => {},
+    };
+
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+      remover,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 25;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-unique-path-udid" };
+
+    const handle = await backend.start(mockConfig);
+
+    expect(handle.recordingId).toBe("test-recording");
+    expect(attempts.length).toBe(2);
+    // The two attempts must target different files; otherwise the surviving partial
+    // from attempt 1 makes attempt 2 exit 17.
+    expect(attempts[0]).not.toBe(attempts[1]);
+    expect(new Set(attempts).size).toBe(2);
   });
 
   test("kills an iOS recorder that is still waiting for its start handshake when shutdown aborts", async function () {

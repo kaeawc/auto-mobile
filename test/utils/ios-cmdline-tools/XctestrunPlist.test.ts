@@ -52,6 +52,44 @@ const SAMPLE_XCTESTRUN = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>`;
 
+/**
+ * A minimal format-version-2 xctestrun: the layout `xcodebuild` emits when
+ * the scheme resolves a test plan. The UI-test target lives nested under
+ * `TestConfigurations[].TestTargets[]` instead of at the top level.
+ */
+const SAMPLE_XCTESTRUN_V2 = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>TestConfigurations</key>
+\t<array>
+\t\t<dict>
+\t\t\t<key>Name</key>
+\t\t\t<string>Configuration 1</string>
+\t\t\t<key>TestTargets</key>
+\t\t\t<array>
+\t\t\t\t<dict>
+\t\t\t\t\t<key>BlueprintName</key>
+\t\t\t\t\t<string>CtrlProxyUITests</string>
+\t\t\t\t\t<key>IsUITestBundle</key>
+\t\t\t\t\t<true/>
+\t\t\t\t\t<key>EnvironmentVariables</key>
+\t\t\t\t\t<dict>
+\t\t\t\t\t\t<key>TERM</key>
+\t\t\t\t\t\t<string>dumb</string>
+\t\t\t\t\t</dict>
+\t\t\t\t</dict>
+\t\t\t</array>
+\t\t</dict>
+\t</array>
+\t<key>__xctestrun_metadata__</key>
+\t<dict>
+\t\t<key>FormatVersion</key>
+\t\t<integer>2</integer>
+\t</dict>
+</dict>
+</plist>`;
+
 function expectDict(value: unknown): Map<string, unknown> {
   expect(value).toBeInstanceOf(Map);
   return value as Map<string, unknown>;
@@ -155,6 +193,68 @@ describe("XctestrunPlist", function () {
       const root = new Map<string, unknown>([
         ["UnitTarget", new Map<string, unknown>([["IsUITestBundle", false]])],
       ]);
+      expect(injectUITestEnvironment(root, { X: "1" })).toBe(0);
+    });
+
+    test("injects into a FormatVersion 2 (TestConfigurations[].TestTargets[]) UI-test target", async function () {
+      const root = expectDict(await parsePlist(SAMPLE_XCTESTRUN_V2));
+      const count = injectUITestEnvironment(root, {
+        CTRL_PROXY_IOS_PORT: "8767",
+        AUTOMOBILE_DEVICE_ID: "SIM-UUID",
+      });
+
+      expect(count).toBe(1);
+
+      const configurations = root.get("TestConfigurations") as unknown[];
+      const configuration = expectDict(configurations[0]);
+      const testTargets = configuration.get("TestTargets") as unknown[];
+      const uiTarget = expectDict(testTargets[0]);
+      const uiEnv = expectDict(uiTarget.get("EnvironmentVariables"));
+
+      // Existing entry preserved.
+      expect(uiEnv.get("TERM")).toBe("dumb");
+      // New entries injected.
+      expect(uiEnv.get("CTRL_PROXY_IOS_PORT")).toBe("8767");
+      expect(uiEnv.get("AUTOMOBILE_DEVICE_ID")).toBe("SIM-UUID");
+    });
+
+    test("injected environment survives a buildPlist -> parsePlist round-trip at the nested v2 location", async function () {
+      const root = expectDict(await parsePlist(SAMPLE_XCTESTRUN_V2));
+      injectUITestEnvironment(root, { CTRL_PROXY_IOS_PORT: "8767" });
+      const rebuilt = buildPlist(root);
+
+      const reparsed = expectDict(await parsePlist(rebuilt));
+      const configurations = reparsed.get("TestConfigurations") as unknown[];
+      const configuration = expectDict(configurations[0]);
+      const testTargets = configuration.get("TestTargets") as unknown[];
+      const uiTarget = expectDict(testTargets[0]);
+      const uiEnv = expectDict(uiTarget.get("EnvironmentVariables"));
+
+      expect(uiEnv.get("CTRL_PROXY_IOS_PORT")).toBe("8767");
+      expect(uiEnv.get("TERM")).toBe("dumb");
+    });
+
+    test("returns 0 for a v2-shaped file with no UI-test target in either layout", async function () {
+      const root = expectDict(
+        await parsePlist(
+          [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<plist version="1.0">',
+            "<dict>",
+            "\t<key>TestConfigurations</key>",
+            "\t<array>",
+            "\t\t<dict>",
+            "\t\t\t<key>TestTargets</key>",
+            "\t\t\t<array>",
+            "\t\t\t\t<dict><key>IsUITestBundle</key><false/></dict>",
+            "\t\t\t</array>",
+            "\t\t</dict>",
+            "\t</array>",
+            "</dict>",
+            "</plist>",
+          ].join("\n"),
+        ),
+      );
       expect(injectUITestEnvironment(root, { X: "1" })).toBe(0);
     });
   });

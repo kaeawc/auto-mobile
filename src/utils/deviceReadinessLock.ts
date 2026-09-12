@@ -227,9 +227,21 @@ export async function trackDeviceAcquisitionReadiness<T>(
 /** Move an in-flight acquisition marker to a replacement device identity. */
 export function moveDeviceAcquisitionReadiness(fromKey: string, toKey: string): void {
   const marker = deviceAcquisitionReadiness.get(fromKey);
-  if (marker && fromKey !== toKey) {
-    deviceAcquisitionReadiness.set(toKey, marker);
+  if (!marker || fromKey === toKey) {
+    return;
   }
+  // Do not clobber a distinct in-flight acquisition already tracking readiness
+  // for the replacement identity. Overwriting it would hand every awaiter on
+  // `toKey` this marker instead, so the awaiter could stop waiting the instant
+  // this acquisition settles while the other's CtrlProxy setup is still
+  // mid-flight — the double-setup race the marker exists to prevent. That
+  // acquisition already covers `toKey`'s awaiters, so leaving it in place is
+  // strictly safer than replacing it.
+  const existing = deviceAcquisitionReadiness.get(toKey);
+  if (existing && existing !== marker) {
+    return;
+  }
+  deviceAcquisitionReadiness.set(toKey, marker);
 }
 
 /**

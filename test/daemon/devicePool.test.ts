@@ -3619,57 +3619,6 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
     });
 
-    // A rebind moves a LIVE session to a replacement device and then releases
-    // its previous one. That release must not erase the session's recorded
-    // admissions: the cancelled-minter fence in `releaseCancelledAcquisition`
-    // reads them to decide whether another execution is already driving the
-    // handle, and a reset count lets a cancelled minter retire a session that
-    // was handed to someone else.
-    test("keeps recorded session admissions across a live-session rebind", async () => {
-      await initializeLiveDevices([
-        createBootedDevice("emulator-old"),
-        createBootedDevice("emulator-new"),
-      ]);
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
-      // A later acquisition was handed the same live session.
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
-      expect(devicePool.getSessionAdmissionCount("session-1")).toBe(1);
-
-      await devicePool.bindOrReuseDeviceSession(
-        "session-1",
-        "emulator-new",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
-
-      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
-      expect(devicePool.getSessionAdmissionCount("session-1")).toBe(1);
-
-      // Only the session's own terminal release drops the counter.
-      await sessionManager.releaseSession("session-1", "test-release");
-      await devicePool.releaseDevice("emulator-new", "session-1");
-      expect(devicePool.getSessionAdmissionCount("session-1")).toBe(0);
-    });
-
-    // The lazy-expiry release path never calls `releaseDevice` (it goes through
-    // `releaseExpiredSessionDevice`), so the counter must be dropped by the
-    // shared session-release callback or it leaks for the daemon's lifetime.
-    test("drops recorded session admissions when the session expires", async () => {
-      await initializeLiveDevices([createBootedDevice("emulator-expiring")]);
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-expiring", "android");
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-expiring", "android");
-      expect(devicePool.getSessionAdmissionCount("session-1")).toBe(1);
-
-      fakeTimer.advanceTime(31 * 60 * 1000);
-      expect(sessionManager.getSession("session-1")).toBeNull();
-      await sessionManager.waitForSessionRelease("session-1");
-
-      expect(devicePool.getSessionAdmissionCount("session-1")).toBe(0);
-    });
-
     test("binds a same-serial transport reconnect without requiring a retry", async () => {
       const firstConnection = {
         ...createBootedDevice("emulator-5554", "android", "Pixel 8"),

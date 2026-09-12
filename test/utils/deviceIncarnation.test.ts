@@ -28,6 +28,51 @@ describe("deviceIncarnationToken", () => {
     expect(deviceIncarnationToken("emulator-5556")).toBeUndefined();
   });
 
+  // The resolver is a module global closed over ONE pool. A daemon-state reset
+  // (shutdown, or a test moving on) retires that pool, and leaving the closure
+  // installed would keep the retired pool alive and keep answering direct-mode
+  // callers with its epochs (#6863 review).
+  test("stops answering after the daemon state that installed it is reset", async () => {
+    const timer = new FakeTimer();
+    const deviceManager = new FakeDeviceManager();
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceManager,
+      new DefaultRetryExecutor(timer),
+    );
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    deviceManager.bootedDevices = [device];
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.initializeWithDevices([device]);
+    expect(deviceIncarnationToken(device.deviceId)).toBeDefined();
+
+    DaemonState.getInstance().reset();
+
+    expect(deviceIncarnationToken(device.deviceId)).toBeUndefined();
+
+    // A fresh initialize installs a resolver for the NEW pool.
+    const replacementPool = new DevicePool(
+      sessionManager,
+      "daemon-session-2",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceManager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, replacementPool);
+    await replacementPool.initializeWithDevices([device]);
+    expect(deviceIncarnationToken(device.deviceId)).toBeDefined();
+    DaemonState.getInstance().reset();
+  });
+
   test("follows the pool's incarnation once the daemon publishes its pool", async () => {
     const timer = new FakeTimer();
     const deviceManager = new FakeDeviceManager();

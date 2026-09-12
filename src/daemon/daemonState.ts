@@ -106,5 +106,11 @@ export class DaemonState implements DaemonStateLike {
     this.sessionManager = null;
     this.devicePool = null;
     this.deviceSessionRegistry = null;
+    // The resolver {@link initialize} installed closes over the pool being
+    // retired here. Leaving it registered would keep that pool alive and keep
+    // answering direct-mode feature code with its epochs, so a per-device cache
+    // could hold state across the reset. Clearing it restores the no-daemon
+    // answer ("no epoch information") until the next initialize.
+    setDeviceIncarnationResolver(undefined);
   }
 }

@@ -28,6 +28,10 @@ export interface DaemonStateAccess {
     releaseSession(sessionId: string): Promise<string | null>;
   };
   getDevicePool(): {
+    restoreAutolockSessionsForMcpSession?(
+      sessionIds: readonly string[],
+      mcpSessionId: string,
+    ): Promise<void>;
     refreshDevices(): Promise<number>;
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;

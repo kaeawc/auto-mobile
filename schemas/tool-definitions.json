@@ -9442,18 +9442,18 @@
   },
   {
     "name": "systemTray",
-    "description": "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
+    "description": "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "open/close/find/tap/dismiss/clearAll notification",
+          "description": "open/close/list/find/tap/dismiss/clearAll notification",
           "type": "string",
-          "enum": ["open", "close", "find", "tap", "dismiss", "clearAll"]
+          "enum": ["open", "close", "list", "find", "tap", "dismiss", "clearAll"]
         },
         "notification": {
-          "description": "Notification criteria to match",
+          "description": "Notification criteria to match; list requires appId and scans up to three swipes on Android",
           "type": "object",
           "properties": {
             "title": {
@@ -9470,6 +9470,60 @@
             },
             "tapActionLabel": {
               "description": "Action button label to tap (for 'tap' action)",
+              "type": "string"
+            },
+            "packageId": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "packageName": {
+              "type": "string"
+            },
+            "appPackage": {
+              "type": "string"
+            },
+            "appPackageId": {
+              "type": "string"
+            },
+            "bundle": {
+              "type": "string"
+            },
+            "bundleId": {
+              "type": "string"
+            },
+            "bundleID": {
+              "type": "string"
+            },
+            "bundleIdentifier": {
+              "type": "string"
+            },
+            "application": {
+              "type": "string"
+            },
+            "applicationId": {
+              "type": "string"
+            },
+            "applicationIdentifier": {
+              "type": "string"
+            },
+            "app": {
+              "type": "string"
+            },
+            "appIdentifier": {
+              "type": "string"
+            },
+            "package_id": {
+              "type": "string"
+            },
+            "package_name": {
+              "type": "string"
+            },
+            "bundle_id": {
+              "type": "string"
+            },
+            "application_id": {
               "type": "string"
             }
           },
@@ -9505,7 +9559,195 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "const": "list"
+          }
+        }
+      },
+      "then": {
+        "required": ["notification"],
+        "properties": {
+          "notification": {
+            "anyOf": [
+              {
+                "required": ["appId"],
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["packageId"],
+                "properties": {
+                  "packageId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["package"],
+                "properties": {
+                  "package": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["packageName"],
+                "properties": {
+                  "packageName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["appPackage"],
+                "properties": {
+                  "appPackage": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["appPackageId"],
+                "properties": {
+                  "appPackageId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundle"],
+                "properties": {
+                  "bundle": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundleId"],
+                "properties": {
+                  "bundleId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundleID"],
+                "properties": {
+                  "bundleID": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundleIdentifier"],
+                "properties": {
+                  "bundleIdentifier": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["application"],
+                "properties": {
+                  "application": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["applicationId"],
+                "properties": {
+                  "applicationId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["applicationIdentifier"],
+                "properties": {
+                  "applicationIdentifier": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["app"],
+                "properties": {
+                  "app": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["appIdentifier"],
+                "properties": {
+                  "appIdentifier": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["package_id"],
+                "properties": {
+                  "package_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["package_name"],
+                "properties": {
+                  "package_name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundle_id"],
+                "properties": {
+                  "bundle_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["application_id"],
+                "properties": {
+                  "application_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
     }
   },
   {

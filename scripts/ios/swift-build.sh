@@ -56,6 +56,7 @@ echo ""
 # macOS packages (can be built and tested on macOS)
 MACOS_PACKAGES=(
     "screen-capture"
+    "network-filter"
 )
 
 # iOS + macOS packages (have both platform support)

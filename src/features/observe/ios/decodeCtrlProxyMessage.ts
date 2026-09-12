@@ -301,6 +301,20 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       };
       break;
 
+    case "sdk_capabilities_result":
+      // Foreground-app-scoped SDK availability (#6832). `available: false` is a
+      // legitimate success reply — the foreground app simply embeds no SDK — so
+      // availability is defaulted independently of `success`.
+      result = {
+        success: message.success ?? false,
+        available: message.available ?? false,
+        bundleId: message.bundleId,
+        capabilities: message.capabilities ?? [],
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      };
+      break;
+
     default:
       // Unrecognized message type carrying an error → reject the request with the
       // rewritten error. Otherwise (unknown type, no error) resolve verbatim with the

@@ -445,6 +445,44 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded?.errorMessage).toBeUndefined();
     expect(decoded?.result).toBe(message);
   });
+
+  test("sdk_capabilities_result reshapes availability, bundleId and capabilities", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "sdk_capabilities_result",
+        success: true,
+        available: true,
+        bundleId: "com.example.app",
+        capabilities: ["database", "hierarchy"],
+        totalTimeMs: 12,
+      }),
+    );
+    expect(decoded).toEqual({
+      requestId: REQ,
+      result: {
+        success: true,
+        available: true,
+        bundleId: "com.example.app",
+        capabilities: ["database", "hierarchy"],
+        totalTimeMs: 12,
+        error: undefined,
+      },
+    });
+  });
+
+  test("sdk_capabilities_result with no SDK in the foreground app reports unavailable", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "sdk_capabilities_result", success: true, available: false, totalTimeMs: 3 }),
+    );
+    expect(decoded?.result).toEqual({
+      success: true,
+      available: false,
+      bundleId: undefined,
+      capabilities: [],
+      totalTimeMs: 3,
+      error: undefined,
+    });
+  });
 });
 
 /**
@@ -521,8 +559,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 47 rawValues", () => {
-    expect(rawValues.length).toBe(47);
+  test("Swift ResponseType declares exactly 48 rawValues", () => {
+    expect(rawValues.length).toBe(48);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -535,8 +573,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 40 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(40);
+  test("the decoder explicitly reshapes exactly 41 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(41);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -559,7 +597,7 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 40 rows = the 40 explicitly-decoded ResponseTypes.
+  // message omits it. 41 rows = the 41 explicitly-decoded ResponseTypes.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "screenshot", expected: true },
@@ -601,10 +639,11 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "list_tables_result", expected: false },
     { type: "table_data_result", expected: false },
     { type: "table_structure_result", expected: false },
+    { type: "sdk_capabilities_result", expected: false },
   ];
 
-  test("the default table covers all 40 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(40);
+  test("the default table covers all 41 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(41);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -642,8 +681,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 39 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(39);
+  test("the passthrough set is the 40 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(40);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

@@ -35,6 +35,7 @@ final class RewriteFakeElementLocator: ElementLocating {
     func switchForegroundApp(bundleId: String) { foregroundBundleId = bundleId }
     func getAppState(bundleId _: String) -> ObservedAppState { .notRunning }
     func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool { true }
+    func refreshForegroundBundleId() -> String? { foregroundBundleId }
 }
 
 @MainActor

@@ -350,6 +350,50 @@ describe("platform device preparation tools", () => {
 
     expect(failure).toBeInstanceOf(ActionableError);
     expect((failure as ActionableError).message).toContain("identifier_conflict");
+    // The conflict is decided from a discovery sweep, so no device is booted
+    // (and then killed) only to report it.
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("getAndroid rejects a stopped AVD paired with a foreign running serial before booting", async () => {
+    // avdName names a stopped AVD; the requested serial is running a different
+    // AVD. The pair is contradictory without booting anything, so the old
+    // post-boot recheck (which cold-booted Pixel_A and killed it) is wrong here.
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_A", isRunning: false, source: "local" },
+    ]);
+    deviceUtils.setBootedDevices("android", [
+      { platform: "android", name: "Pixel_B", deviceId: "emulator-5556" },
+    ]);
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Pixel_A",
+      deviceId: "emulator-5556",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("Pixel_B");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("getAndroid rejects an avdName paired with a serial that is not running before booting", async () => {
+    // Neither identifier maps to a running device: the serial is absent from
+    // discovery. That is still a contradiction the caller must resolve, decided
+    // before any boot.
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_C", isRunning: false, source: "local" },
+    ]);
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Pixel_C",
+      deviceId: "emulator-5599",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("not running");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
   test("getApple rejects contradictory udid and deviceId instead of silently preferring one", () => {

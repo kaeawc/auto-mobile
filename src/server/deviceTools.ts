@@ -2264,8 +2264,12 @@ type TeardownResolvedTarget =
       bootedDevice: BootedDevice;
     };
 
+function isAndroidEmulatorSerial(deviceId: string): boolean {
+  return deviceId.startsWith("emulator-");
+}
+
 function isVirtualAndroidDevice(device: BootedDevice): boolean {
-  return device.platform === "android" && device.deviceId.startsWith("emulator-");
+  return device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);
 }
 
 function resolveKillDeviceStableTarget(
@@ -3479,6 +3483,59 @@ function validateBootIdentity(
  * Anything else is a genuine `identifier_conflict`, reportable only here,
  * because the mapping from AVD name to serial is not known until discovery.
  */
+/**
+ * Reject a contradictory `avdName` + serial-shaped `deviceId` pair BEFORE any
+ * boot. `validateRequestedAndroidSerial` is the post-boot authority, but by the
+ * time it runs a stopped AVD has already been cold-booted and then killed just
+ * to report the conflict (Codex thread on #6833). When the `deviceId` is a
+ * running-emulator serial, the device it names is knowable from one discovery
+ * sweep without booting anything, so the mismatch can be reported up front.
+ *
+ * This fires only for the serial-shaped case: a non-serial `deviceId` is an AVD
+ * image name, whose mapping is not known until discovery, so it stays the
+ * post-boot recheck's job. Anything ambiguous — discovery unavailable this
+ * sweep, or a running device whose runtime name is still `Unknown (<serial>)` —
+ * likewise defers, so this check only ever rejects a pair it can positively
+ * contradict.
+ */
+async function validateRequestedAndroidSerialBeforeBoot(
+  pair: { avdName: string; deviceId: string } | undefined,
+  deviceUtils: PlatformDeviceManager,
+): Promise<void> {
+  if (!pair) {
+    return;
+  }
+  const { avdName, deviceId } = pair;
+  if (!avdName || !isAndroidEmulatorSerial(deviceId) || avdName === deviceId) {
+    return;
+  }
+  const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+    bypassAndroidDeviceListCache: true,
+  });
+  if (!discovery.succeededPlatforms.has("android")) {
+    // Discovery was unavailable this sweep; a pair we cannot yet contradict is
+    // deferred to the post-boot recheck rather than rejected on missing data.
+    return;
+  }
+  const running = discovery.devices.find(
+    (device) => device.platform === "android" && device.deviceId === deviceId,
+  );
+  if (running && isUnknownAndroidRuntimeName(running)) {
+    // The serial is running but its AVD name is not resolvable yet; the
+    // post-boot recheck decides with pool/incarnation context.
+    return;
+  }
+  if (running && running.name === avdName) {
+    return;
+  }
+  throw new ActionableError(
+    `identifier_conflict: avdName '${avdName}' and deviceId '${deviceId}' name ` +
+      `different devices — '${deviceId}' ` +
+      (running ? `is running AVD '${running.name}'` : "is not running") +
+      `. Pass only the identifier you mean.`,
+  );
+}
+
 export function validateRequestedAndroidSerial(
   pair: { avdName: string; deviceId: string } | undefined,
   device: BootedDevice,
@@ -6462,6 +6519,12 @@ export function registerDeviceTools() {
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
     try {
+      // Reject a contradictory getAndroid avdName + serial pair before booting,
+      // so a stopped AVD is not cold-booted and killed just to report it.
+      await validateRequestedAndroidSerialBeforeBoot(
+        budgets.requestedAndroidIdentifierPair,
+        deviceUtils,
+      );
       lifecycleReservations = await reserveStartDeviceLifecycleReservations(
         args,
         budgets,

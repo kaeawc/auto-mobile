@@ -386,6 +386,7 @@ export class DevicePool {
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
+  private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
@@ -5591,8 +5592,13 @@ export class DevicePool {
     }
 
     return async () => {
+      const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
       const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
       await this.releaseDevice(previousDeviceId, sessionId);
+      const replacement = this.devices.get(deviceId);
+      if (wasAutolocked && replacement?.sessionId === sessionId) {
+        replacement.autolockSessionId = sessionId;
+      }
       return session;
     };
   }
@@ -5937,6 +5943,9 @@ export class DevicePool {
     this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+      acquired.add(sessionId);
+      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
@@ -6127,11 +6136,32 @@ export class DevicePool {
     mcpSessionId: string | undefined,
     platform?: Platform,
     execution?: SessionExecutionMetadata,
+    deviceId?: string,
   ): string | undefined {
     if (!mcpSessionId) {
       return undefined;
     }
 
+    if (platform || deviceId) {
+      const selected = this.resolveAutolockDeviceSelector(
+        mcpSessionId,
+        platform,
+        execution,
+        deviceId,
+      );
+      if (selected || deviceId) {
+        return selected;
+      }
+    }
+
+    return this.resolveLatestAutolockSession(mcpSessionId, platform, execution);
+  }
+
+  private resolveLatestAutolockSession(
+    mcpSessionId: string,
+    platform: Platform | undefined,
+    execution: SessionExecutionMetadata | undefined,
+  ): string | undefined {
     const sessionId = this.mcpSessionAutolockMap.get(mcpSessionId);
     if (!sessionId) {
       return undefined;
@@ -6159,12 +6189,94 @@ export class DevicePool {
     return sessionId;
   }
 
+  private resolveAutolockDeviceSelector(
+    mcpSessionId: string,
+    platform: Platform | undefined,
+    execution: SessionExecutionMetadata | undefined,
+    deviceId: string | undefined,
+  ): string | undefined {
+    const candidates = [...(this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? [])].flatMap(
+      (id) => {
+        const session = this.sessionManager.getSessionForNewExecution(id, execution);
+        if (!session) {
+          return [];
+        }
+        const device = this.devices.get(session.assignedDevice);
+        if (device && device.autolockSessionId === id && device.sessionId === id) {
+          return [
+            { sessionId: id, deviceId: device.id, platform: device.platform, recovering: false },
+          ];
+        }
+        // A session detached by a process-wide ADB reset is still owned by this
+        // MCP connection; its device is simply absent from the pool while the
+        // reset is recovered. Dropping it here would let an implicit selector
+        // silently route to the connection's *other* device (#6807).
+        return this.adbServerResetQuarantinedSessions.has(id)
+          ? [
+              {
+                sessionId: id,
+                deviceId: session.assignedDevice,
+                platform: session.platform,
+                recovering: true,
+              },
+            ]
+          : [];
+      },
+    );
+    const matches = candidates.filter(
+      (candidate) =>
+        (!platform || candidate.platform === platform) &&
+        (!deviceId || candidate.deviceId === deviceId),
+    );
+    if (matches.length === 1) {
+      // A lone recovering match is not ambiguous: returning it lets the caller
+      // surface the recovery error for the device the client actually owns.
+      return matches[0].sessionId;
+    }
+    if (candidates.length > 0 && !deviceId) {
+      throw new ActionableError(
+        `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
+          .map(
+            (candidate) =>
+              `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform}` +
+              `${candidate.recovering ? ", recovering" : ""})`,
+          )
+          .join(", ")}. Pass an explicit sessionUuid/deviceId.`,
+      );
+    }
+    return undefined;
+  }
+
+  /** Restore retained capabilities without letting an older queued request reset the default. */
+  async restoreAutolockSessionsForMcpSession(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+  ): Promise<void> {
+    for (const id of sessionIds) {
+      // Nothing left to restore for a session this connection already holds
+      // while it also already has a default. Re-checked each iteration rather
+      // than snapshotted, so an attachment cannot act on a stale reading.
+      if (
+        this.mcpSessionAcquiredAutolocks.get(mcpSessionId)?.has(id) &&
+        this.resolveAutolockSessionForMcpSession(mcpSessionId) !== undefined
+      ) {
+        continue;
+      }
+      // "if-absent" defers the default decision to attach time, under the
+      // assignment mutex. A pre-loop snapshot would be stale by the time the
+      // second attachment runs, letting restoration clobber a `setActiveDevice`
+      // that landed in between (#6807).
+      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
+    }
+  }
+
   /**
    * Associate a live autolock session with a reconnected MCP client session.
    */
   async attachAutolockSessionToMcpSession(
     sessionId: string,
     mcpSessionId: string | undefined,
+    makeDefault: boolean | "if-absent" = true,
   ): Promise<void> {
     if (!mcpSessionId) {
       return;
@@ -6187,7 +6299,16 @@ export class DevicePool {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      if (
+        makeDefault === true ||
+        (makeDefault === "if-absent" &&
+          this.resolveAutolockSessionForMcpSession(mcpSessionId) === undefined)
+      ) {
+        this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      }
+      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+      acquired.add(sessionId);
+      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     });
   }
 
@@ -6257,6 +6378,12 @@ export class DevicePool {
   }
 
   private clearMcpAutolockMappings(sessionId: string): void {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      acquired.delete(sessionId);
+      if (acquired.size === 0) {
+        this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
+      }
+    }
     for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
       if (mappedSessionId === sessionId) {
         this.mcpSessionAutolockMap.delete(mcpSessionId);

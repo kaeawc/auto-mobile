@@ -3,7 +3,7 @@
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
 > **Current state:** `systemTray` is implemented with
-> open/close/find/tap/dismiss/clearAll actions. Collapsed notification groups
+> open/close/list/find/tap/dismiss/clearAll actions. Collapsed notification groups
 > are automatically expanded before tapping.
 
 ## Goal
@@ -15,7 +15,7 @@ notification by text.
 
 ```typescript
 systemTray({
-  action: "open" | "close" | "find" | "tap" | "dismiss" | "clearAll",
+  action: "open" | "close" | "list" | "find" | "tap" | "dismiss" | "clearAll",
   notification?: {
     title?: string,
     body?: string,
@@ -25,6 +25,15 @@ systemTray({
   awaitTimeout?: number
 })
 ```
+
+## List notifications for an app
+
+On Android, use `systemTray({ action: "list", notification: { appId: "com.google.android.apps.messaging" } })`.
+The command collapses and reopens the shade to reset its scroll position, reads its initial contents, then swipes upward at most three times to collect more rows. It stops early when the rows no longer change and closes the shade before returning, so follow-up actions reopen at the top. Cancellation stops further package batches, swipes, and observations.
+
+The response contains `notifications`, `swipes`, and `order: "encounter"`. Each notification includes `id` (when Android exposes a unique row ID), `appId`, `appLabel`, `title`, `body`, `actions`, `texts` (including custom-layout text), and `inGroup`. Missing title/body fields are `null`; only text exposed by the hierarchy is available. Child notifications can inherit their group's app header. Overlapping rows on consecutive pages are reconciled by their unique row IDs when available, otherwise by ordered row positions. Stable IDs or unchanged neighboring rows anchor the scroll displacement, so a row can update its title/body without becoming a duplicate. Without usable IDs or a continuity anchor, rows are retained separately. This positional fallback is best effort: replacement or reordered rows without native IDs cannot always be distinguished. Explicit end-of-scroll metadata stops the scan before unnecessary repeat observations.
+
+App filtering uses the notification's app header, not mentions in message text. Before scanning, the command verifies that this label is unique across a fresh installed-package inventory. Duplicate labels, incomplete inventories, or unavailable label metadata return an error instead of attributing ambiguous notifications. Encounter order is the shade's order, not a guarantee of posting time. This bounded scan may omit notifications beyond three swipes. `list` requires `notification.appId`; existing `find`, `tap`, and `dismiss` criteria requirements are unchanged.
 
 ## Tap observation result
 
@@ -37,6 +46,15 @@ If the effect cannot be confirmed within that budget, the response keeps
 dispatch-level `success: true`, sets `settled: false`, and omits the
 observation. Re-observe before continuing; do not interpret an unsettled
 result as proof that the tap failed or retry the tap automatically.
+
+## List notifications for an app
+
+On Android, use `systemTray({ action: "list", notification: { appId: "com.google.android.apps.messaging" } })`.
+The command collapses and reopens the shade to reset its scroll position, reads its initial contents, then swipes upward at most three times to collect more rows. It stops early when the rows no longer change and closes the shade before returning, so follow-up actions reopen at the top. Cancellation stops further package batches, swipes, and observations.
+
+The response contains `notifications`, `swipes`, and `order: "encounter"`. Each notification includes `id` (when Android exposes a unique row ID), `appId`, `appLabel`, `title`, `body`, `actions`, `texts` (including custom-layout text), and `inGroup`. Missing title/body fields are `null`; only text exposed by the hierarchy is available. Child notifications can inherit their group's app header. Overlapping rows on consecutive pages are reconciled by their unique row IDs when available, otherwise by ordered row positions. Stable IDs or unchanged neighboring rows anchor the scroll displacement, so a row can update its title/body without becoming a duplicate. Without usable IDs or a continuity anchor, rows are retained separately. This positional fallback is best effort: replacement or reordered rows without native IDs cannot always be distinguished. Explicit end-of-scroll metadata stops the scan before unnecessary repeat observations.
+
+App filtering uses the notification's app header, not mentions in message text. Before scanning, the command verifies that this label is unique across a fresh installed-package inventory. Duplicate labels, incomplete inventories, or unavailable label metadata return an error instead of attributing ambiguous notifications. Encounter order is the shade's order, not a guarantee of posting time. This bounded scan may omit notifications beyond three swipes. `list` requires `notification.appId`; existing `find`, `tap`, and `dismiss` criteria requirements are unchanged.
 
 ## Android implementation
 

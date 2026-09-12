@@ -59,19 +59,22 @@ for (const replacement of [
   });
 }
 
-test("verifies the checked transport resolves to the serial, then terminates through it", async () => {
+test("verifies the checked transport resolves to the serial, then terminates through the console kill", async () => {
   const { client, adb, factory } = fixture(original);
   await expect(client.killDevice(original)).resolves.toMatchObject(original);
 
   const argv = adb.getExecutedArgv();
   const serialCheckIndex = argv.findIndex((args) => args.join(" ") === "-t 1 get-serialno");
-  const killIndex = argv.findIndex((args) => args.join(" ") === "-t 1 shell reboot -p");
+  const killIndex = argv.findIndex((args) => args.join(" ") === "emu kill");
   expect(serialCheckIndex).toBeGreaterThanOrEqual(0);
+  // The serial-scoped console kill runs only after the transport check confirms
+  // identity, with no awaited work between, so the verified serial cannot be
+  // freed and re-inherited in the gap.
   expect(killIndex).toBeGreaterThan(serialCheckIndex);
   expectNoTransportScopedEmuCommand(argv);
-  // Nothing reselects the emulator by its reusable serial.
-  expect(argv.some((args) => args.join(" ").endsWith("emu kill"))).toBe(false);
-  expect(factory.getCalls().at(-1)?.device).toBeNull();
+  // The kill is dispatched serial-scoped (`-s <serial>`), never `-t`, so two
+  // attached emulators never collapse the console selection (#6845).
+  expect(factory.getCalls().at(-1)?.device?.deviceId).toBe(original.deviceId);
 });
 
 test("refuses the kill when the checked transport now resolves to a different serial", async () => {
@@ -85,9 +88,19 @@ test("unknown expected transport permits a matching cold-boot AVD and binds to i
   const { client, adb } = fixture(original);
   await client.killDevice({ ...original, transportId: undefined });
   expect(adb.getExecutedArgv()).toContainEqual(["-t", "1", "get-serialno"]);
-  expect(adb.getExecutedArgv()).toContainEqual(["-t", "1", "shell", "reboot", "-p"]);
   expectNoTransportScopedEmuCommand(adb.getExecutedArgv());
-  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("terminates through the graceful console kill so the quick-boot snapshot is saved (#6849)", async () => {
+  // A guest `shell reboot -p` powers the OS off without letting the emulator
+  // write its quick-boot snapshot, so the next quick-boot of the AVD resumes
+  // into a halted guest that never comes adb-online. killDevice must use the
+  // emulator console `emu kill`, which saves the snapshot on exit.
+  const { client, adb } = fixture(original);
+  await expect(client.killDevice(original)).resolves.toMatchObject(original);
+  expect(adb.getExecutedCommands().some((command) => command.includes("reboot -p"))).toBe(false);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
 });
 
 test("matching legacy discovery without transport still allows ordinary termination", async () => {
@@ -102,7 +115,7 @@ test("matching legacy discovery without transport still allows ordinary terminat
 });
 
 for (const replacedBeforeDispatch of [false, true]) {
-  test(`real ADB builder terminates through the checked transport; replacement=${replacedBeforeDispatch}`, async () => {
+  test(`real ADB builder terminates through the serial-scoped console kill; replacement=${replacedBeforeDispatch}`, async () => {
     const commands: string[][] = [];
     let transportSerial = "emulator-5554";
     let replacementKilled = false;
@@ -125,10 +138,7 @@ for (const replacedBeforeDispatch of [false, true]) {
               }
             } else if (args.at(-1) === "get-serialno") {
               stdout = `${transportSerial}\n`;
-            } else if (
-              args.slice(-2).join(" ") === "emu kill" ||
-              args.slice(-3).join(" ") === "shell reboot -p"
-            ) {
+            } else if (args.slice(-2).join(" ") === "emu kill") {
               replacementKilled = transportSerial !== "emulator-5554";
             }
             return {
@@ -150,21 +160,24 @@ for (const replacedBeforeDispatch of [false, true]) {
     } else {
       await expect(client.killDevice(original)).resolves.toMatchObject(original);
     }
-    expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([]);
-    expect(commands.filter((args) => args.slice(-3).join(" ") === "shell reboot -p")).toEqual(
-      replacedBeforeDispatch ? [] : [["-t", "1", "shell", "reboot", "-p"]],
+    // The console kill is the snapshot-saving primitive (#6849); it runs only
+    // on the success path, serial-scoped, and never over a transport (#6845).
+    expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual(
+      replacedBeforeDispatch ? [] : [["-s", "emulator-5554", "emu", "kill"]],
     );
+    expect(commands.filter((args) => args.slice(-3).join(" ") === "shell reboot -p")).toEqual([]);
     expectNoTransportScopedEmuCommand(commands);
     expect(replacementKilled).toBe(false);
   });
 }
 
-test("does not terminate a replacement that inherits the serial after the transport check", async () => {
+test("refuses the kill when the checked transport has gone before the serial-scoped console kill", async () => {
   const commands: string[][] = [];
-  // adb never reuses a transport id, so a replacement that inherits the serial
-  // arrives on a new transport and transport 1 stops resolving.
-  let transportOneSerial: string | null = "emulator-5554";
-  let serialOwner: "original" | "replacement" = "original";
+  // The checked emulator exits after the device-list snapshot but before the
+  // transport check. adb never reuses a transport id, so a replacement that
+  // inherits serial emulator-5554 arrives on a fresh transport and transport 1
+  // stops resolving — the get-serialno check on transport 1 fails and the kill
+  // is refused, so the serial-scoped `emu kill` never selects the replacement.
   let replacementTerminated = false;
   const timer = new FakeTimer();
   const factory: AdbClientFactory = {
@@ -176,21 +189,14 @@ test("does not terminate a replacement that inherits the serial after the transp
           let stdout = "";
           if (args.join(" ") === "devices -l") {
             stdout = "List of devices attached\nemulator-5554 device transport_id:1\n";
-          } else if (args[0] === "-t" && transportOneSerial === null) {
-            throw new Error(`error: transport id ${args[1]} not found`);
+          } else if (args[0] === "-t" && args[1] === "1" && args.at(-1) === "get-serialno") {
+            throw new Error("error: transport id 1 not found");
           } else if (args.slice(-3).join(" ") === "emu avd name") {
             stdout = "Pixel_8\nOK\n";
-          } else if (args.at(-1) === "get-serialno") {
-            stdout = `${transportOneSerial}\n`;
-            // The checked emulator exits right after the check and a different
-            // emulator inherits serial emulator-5554 on a fresh transport.
-            transportOneSerial = null;
-            serialOwner = "replacement";
-          } else if (
-            args.slice(-2).join(" ") === "emu kill" ||
-            args.slice(-3).join(" ") === "shell reboot -p"
-          ) {
-            replacementTerminated = serialOwner === "replacement";
+          } else if (args.slice(-2).join(" ") === "emu kill") {
+            // serial emulator-5554 now belongs to the replacement; reaching here
+            // would terminate it.
+            replacementTerminated = true;
           }
           return {
             stdout,

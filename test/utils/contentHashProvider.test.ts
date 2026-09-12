@@ -269,9 +269,9 @@ describe("CachingContentHashProvider", () => {
     expect(await stale).toBe("sha256:STALE");
 
     // The old promise's finally must not clear the newer cache/in-flight state.
-    expect(
-      await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5),
-    ).toBe("sha256:FRESH");
+    expect(await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5)).toBe(
+      "sha256:FRESH",
+    );
     expect(computeCalls).toBe(2);
   });
 });

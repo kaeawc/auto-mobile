@@ -390,6 +390,7 @@ describe("MultiPlatformDeviceManager", () => {
       } as unknown as SimCtlClient;
       const fakeEmulator = {
         listAvds: async () => [androidImage],
+        getBootedDevices: async () => [],
       } as unknown as AndroidEmulatorClient;
 
       const manager = new MultiPlatformDeviceManager(
@@ -420,6 +421,7 @@ describe("MultiPlatformDeviceManager", () => {
       } as unknown as SimCtlClient;
       const fakeEmulator = {
         listAvds: async () => [androidImage],
+        getBootedDevices: async () => [],
       } as unknown as AndroidEmulatorClient;
 
       const manager = new MultiPlatformDeviceManager(
@@ -432,6 +434,52 @@ describe("MultiPlatformDeviceManager", () => {
 
       expect(devices).toEqual([androidImage]);
     });
+  });
+
+  test("listDeviceImages(android) reports isRunning for the booted emulator, like iOS", async () => {
+    // Issue #6850: the Android image listing hardcoded isRunning:false even for
+    // the emulator being driven, while iOS reports its booted state correctly.
+    const runningImage: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const idleImage: DeviceInfo = { name: "Pixel_Tablet", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [runningImage, idleImage],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    const devices = await manager.listDeviceImages("android");
+
+    expect(devices).toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: true },
+      { name: "Pixel_Tablet", platform: "android", isRunning: false },
+    ]);
+  });
+
+  test("listDeviceImages(android) degrades to isRunning:false when booted discovery fails", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      // getBootedDevices already swallows discovery failures to an empty list;
+      // the listing must still succeed rather than fail on a missing boot scan.
+      getBootedDevices: async (): Promise<BootedDevice[]> => [],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: false },
+    ]);
   });
 
   test("listDeviceImages(ios) surfaces iOS image discovery failures", async () => {

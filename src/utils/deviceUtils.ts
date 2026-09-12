@@ -423,16 +423,33 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]> {
     switch (platform) {
       case "android":
-        return this.emulator.listAvds();
+        return this.listAndroidDeviceImages();
       case "ios":
         return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
-        const emulators = await this.emulator.listAvds();
+        const emulators = await this.listAndroidDeviceImages();
         const simulators = await this.listIosDeviceImagesIfAvailable({
           swallowDiscoveryErrors: true,
         });
         return [...emulators, ...simulators];
     }
+  }
+
+  /**
+   * List Android AVD images with live isRunning state. `listAvds` reports every
+   * AVD as isRunning:false; the iOS listing already reports its booted state
+   * from simctl, so this overlays the booted-emulator scan to keep the two
+   * platforms' image listings symmetric (issue #6850). `getBootedDevices`
+   * swallows discovery failures to an empty list, so a scan failure degrades to
+   * isRunning:false rather than failing the listing.
+   */
+  private async listAndroidDeviceImages(): Promise<DeviceInfo[]> {
+    const [images, bootedDevices] = await Promise.all([
+      this.emulator.listAvds(),
+      this.emulator.getBootedDevices(),
+    ]);
+    const runningAvdNames = new Set(bootedDevices.map((device) => device.name));
+    return images.map((image) => ({ ...image, isRunning: runningAvdNames.has(image.name) }));
   }
 
   /**

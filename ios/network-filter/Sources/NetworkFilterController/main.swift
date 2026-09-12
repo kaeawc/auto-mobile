@@ -11,11 +11,13 @@ private struct ControllerResult: Encodable {
 }
 
 private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
-    private static let readbackRetryDelay: TimeInterval = 0.2
     private var connection: NSXPCConnection?
     private var request: OSSystemExtensionRequest?
     private let outputLock = NSLock()
     private var finished = false
+    private let retries = ProbeStartupRetryCoordinator(scheduler: DispatchProbeRetryScheduler())
+    private let stateLock = NSLock()
+    private var connectionGeneration: UInt64 = 0
 
     func run() {
         DispatchQueue.global().asyncAfter(deadline: .now() + 8) { [self] in
@@ -105,8 +107,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         }
     }
 
-    private func readSnapshot(retryDeadline: Date? = nil) {
-        let deadline = retryDeadline ?? Date().addingTimeInterval(7)
+    private func readSnapshot() {
         guard let requirement = ProbeSigning.peerRequirement(identifier: ProbeSigning.providerIdentifier),
               let serviceName = Bundle.main.object(forInfoDictionaryKey: "ProbeMachServiceName") as? String
         else {
@@ -117,31 +118,37 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             )
             return
         }
+        let generation = beginAttempt()
         let connection = NSXPCConnection(machServiceName: serviceName, options: [])
         self.connection = connection
         connection.setCodeSigningRequirement(requirement)
         connection.remoteObjectInterface = NSXPCInterface(with: ProbeBridge.self)
         connection.resume()
         let proxy = connection.remoteObjectProxyWithErrorHandler { [self] error in
-            finish("unavailable", error.localizedDescription, code: 1)
+            // The provider is launched lazily, so this fires whenever the
+            // read-back beats macOS to resuming the provider's XPC listener.
+            guard claimOutcome(generation) else { return }
+            retryOrFinish(
+                .connection(error as NSError), connection: connection, detail: error.localizedDescription
+            )
         }
         guard let service = proxy as? ProbeBridge else {
+            guard claimOutcome(generation) else { return }
+            connection.invalidate()
             finish("unavailable", "Provider bridge is unavailable", code: 1)
             return
         }
         service.snapshot(version: IdentityProbe.version) { [self] data, error in
+            guard claimOutcome(generation) else { return }
             guard error == nil, let data,
                   let snapshot = try? JSONDecoder().decode(ProbeSnapshot.self, from: data),
                   snapshot.version == IdentityProbe.version, snapshot.mode == "allow_only"
             else {
-                if ProbeReadbackStartupState.isTransient(error), Date() < deadline {
-                    connection.invalidate()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.readbackRetryDelay) { [self] in
-                        readSnapshot(retryDeadline: deadline)
-                    }
-                    return
-                }
-                finish("unavailable", error ?? "Provider returned an incompatible snapshot", code: 1)
+                retryOrFinish(
+                    .readback(error),
+                    connection: connection,
+                    detail: error ?? "Provider returned an incompatible snapshot"
+                )
                 return
             }
             finish(
@@ -150,6 +157,32 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                 snapshot: snapshot
             )
         }
+    }
+
+    private func retryOrFinish(_ failure: ProbeStartupFailure, connection: NSXPCConnection, detail: String) {
+        connection.invalidate()
+        guard retries.scheduleRetry(after: failure, { [self] in readSnapshot() }) else {
+            finish("unavailable", detail, code: 1)
+            return
+        }
+    }
+
+    private func beginAttempt() -> UInt64 {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        connectionGeneration &+= 1
+        return connectionGeneration
+    }
+
+    /// One connection yields at most one outcome. Both the error handler and the
+    /// reply can fire for the same attempt — notably after a retry invalidates
+    /// it — and a superseded callback must not spend another retry.
+    private func claimOutcome(_ generation: UInt64) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard generation == connectionGeneration else { return false }
+        connectionGeneration &+= 1
+        return true
     }
 
     private func finish(_ state: String, _ detail: String, code: Int32 = 0, snapshot: ProbeSnapshot? = nil) {

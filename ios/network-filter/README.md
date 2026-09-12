@@ -80,7 +80,12 @@ After placing the signed app in `/Applications`, invoke its executable:
 
 Initial extension and filter approval require macOS interaction. A timeout is an
 uncertain installation result: inspect `status` and System Settings before
-retrying. Filter configuration acknowledgement alone never reports readiness.
+retrying. Filter configuration acknowledgement alone never reports readiness:
+the controller only reports `ready` after an authenticated read-back. Because
+macOS launches the provider lazily, that read-back retries startup races — an
+XPC connection to a listener that has not resumed, or a reply from a provider
+that has not finished starting — over a bounded ~2.2s backoff before reporting
+`unavailable`. Signing and protocol rejections are never retried.
 To stop collecting diagnostics, disable this probe in System Settings' Network
 Extensions panel. Leave unrelated filters unchanged.
 

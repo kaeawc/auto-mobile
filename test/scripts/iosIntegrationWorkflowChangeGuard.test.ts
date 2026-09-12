@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { load } from "js-yaml";
 import { loadJobSteps, loadWorkflow } from "../helpers/workflowSteps";
 
 const WORKFLOW = ".github/workflows/pull_request.yml";
@@ -21,5 +22,18 @@ describe("Fast Validation independence from XCTestRunner", () => {
     expect(job).toBeDefined();
     expect(job?.if).toContain("ios_integration_should_run");
     expect(loadJobSteps(WORKFLOW, "ios-xctest-runner-simulator-tests").length).toBeGreaterThan(0);
+  });
+
+  test("runs XCTestRunner when its recording session heartbeat helper changes", () => {
+    const filterStep = loadJobSteps(WORKFLOW, "detect-changes").find(
+      (step) => step.id === "filter-native-integration",
+    );
+    const filters = filterStep?.with?.filters;
+    expect(typeof filters).toBe("string");
+
+    const nativeIntegration = load(filters as string) as { native_integration?: string[] };
+    expect(nativeIntegration.native_integration).toContain(
+      "test/helpers/sessionOwnershipHeartbeat.ts",
+    );
   });
 });

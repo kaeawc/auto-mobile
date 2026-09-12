@@ -5,6 +5,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import {
+  startSessionOwnershipHeartbeat,
+  type SessionOwnershipHeartbeat,
+} from "../helpers/sessionOwnershipHeartbeat";
 
 const execFileAsync = promisify(execFile);
 const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
@@ -14,6 +18,10 @@ const LOCAL_CLI_ENTRYPOINT = fileURLToPath(new URL("../../dist/src/index.js", im
 // screenshot readiness check, rather than stopping immediately after startup.
 const DEFAULT_WAIT_MS = 10000;
 const DEFAULT_TEST_TIMEOUT_MS = 420000;
+// The daemon's default ownership timeout is 10s. Renew well within that window
+// while one-shot CLI calls are doing iOS setup or leaving a recording active.
+const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
+const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;
@@ -79,7 +87,11 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-async function runLocalCli(args: string[]): Promise<ToolTextResponse> {
+async function runLocalCliOutput(
+  args: string[],
+  signal?: AbortSignal,
+  timeout?: number,
+): Promise<string> {
   // The workflow warms CtrlProxy in the daemon process before this test runs.
   // Calling the local CLI keeps start and stop in that same process; importing
   // the tool handler here would create a second cold DeviceSessionManager and
@@ -89,9 +101,30 @@ async function runLocalCli(args: string[]): Promise<ToolTextResponse> {
     [LOCAL_CLI_ENTRYPOINT, "--cli", ...args],
     {
       maxBuffer: 10 * 1024 * 1024,
+      signal,
+      timeout,
     },
   );
-  return JSON.parse(stdout) as ToolTextResponse;
+  return stdout;
+}
+
+async function runLocalCli(args: string[], signal?: AbortSignal): Promise<ToolTextResponse> {
+  return JSON.parse(await runLocalCliOutput(args, signal)) as ToolTextResponse;
+}
+
+async function startVideoRecordingSessionHeartbeat(
+  sessionUuid: string,
+): Promise<SessionOwnershipHeartbeat> {
+  return startSessionOwnershipHeartbeat({
+    intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
+    renew: async (signal) => {
+      await runLocalCliOutput(
+        ["--daemon", "heartbeat", sessionUuid],
+        signal,
+        SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS,
+      );
+    },
+  });
 }
 
 async function runVideoRecordingCli(
@@ -190,6 +223,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       let stopPayload: RecordingToolResult | undefined;
       let outputPath: string | undefined;
       let sessionUuid: string | undefined;
+      let sessionHeartbeat: SessionOwnershipHeartbeat | undefined;
       let stopped = false;
 
       try {
@@ -198,7 +232,9 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
           throw new Error("AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID is required");
         }
         sessionUuid = await acquireVideoRecordingSession(deviceId);
+        sessionHeartbeat = await startVideoRecordingSessionHeartbeat(sessionUuid);
         await bindVideoRecordingSession(sessionUuid, deviceId);
+        sessionHeartbeat.assertHealthy();
 
         startPayload = await runVideoRecordingCli(sessionUuid, [
           "--action",
@@ -227,6 +263,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         outputPath = started.outputPath;
         expect(recordingId).toBeString();
         expect(outputPath).toBeString();
+        sessionHeartbeat.assertHealthy();
 
         const waitMs = getWaitMs();
         const firstWaitMs = Math.floor(waitMs / 2);
@@ -240,6 +277,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
           await execFileAsync("xcrun", ["simctl", "ui", deviceId, "appearance", "light"]);
         }
         await defaultTimer.sleep(waitMs - firstWaitMs);
+        sessionHeartbeat.assertHealthy();
 
         stopPayload = await runVideoRecordingCli(sessionUuid, [
           "--action",
@@ -303,6 +341,13 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
             .filter((line): line is string => Boolean(line))
             .join("\n"),
         );
+      } finally {
+        const heartbeatCleanupError = await sessionHeartbeat?.stop();
+        if (heartbeatCleanupError) {
+          console.warn(
+            `iOS recording session heartbeat cleanup failed: ${heartbeatCleanupError.message}`,
+          );
+        }
       }
     },
     getTestTimeoutMs(),

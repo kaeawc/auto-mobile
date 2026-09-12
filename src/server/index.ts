@@ -42,6 +42,31 @@ import {
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
 
+/**
+ * Fail a `getAndroid`/`getApple` call whose request was cancelled while its
+ * post-acquisition enrichment ran. The client discards this response, so the
+ * handler still fails the call — but it deliberately releases NOTHING in daemon
+ * mode. The pool publishes a minted autolock session to the MCP connection
+ * BEFORE enrichment runs (`DevicePool.autolockDevice` sets
+ * `mcpSessionAutolockMap` ahead of the return), so by the time this fires the
+ * session may already be resolved by a sibling acquisition or by any ordinary
+ * device tool on the same connection; an eager release here would strand that
+ * caller and idle the device underneath it. A session nobody actually picks up
+ * is collected by the `missing-first-heartbeat` reap in
+ * `src/daemon/sessionManager.ts` (grace before the first heartbeat, then
+ * `cleanupExpiredSessions`), which is the backstop this path relies on.
+ */
+function failCancelledAcquisition(acquiredSessionUuid: string): never {
+  if (!DaemonState.getInstance().isInitialized()) {
+    // Direct (non-daemon) mode has no SessionManager and no reap, and it has no
+    // reuse path either: `bindBootedDeviceSession` always mints a fresh UUID and
+    // registers a process-local mapping, so dropping that mapping needs no
+    // ownership information and can strand nobody.
+    unregisterDirectSession(acquiredSessionUuid);
+  }
+  throw new ActionableError("MCP request was cancelled during acquisition.");
+}
+
 async function awaitWithCancellation<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
@@ -963,27 +988,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // never performed. A non-acquisition tool keeps its result here; a
         // genuine cancellation is still classified by the outer catch.
         if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
-          // The client discards this response, so the handler still fails the
-          // call — but it deliberately releases NOTHING in daemon mode. The
-          // pool publishes a minted autolock session to the MCP connection
-          // BEFORE this enrichment runs (`DevicePool.autolockDevice` sets
-          // `mcpSessionAutolockMap` ahead of the return), so by the time this
-          // guard fires the session may already be resolved by a sibling
-          // acquisition or by any ordinary device tool on the same connection;
-          // an eager release here would strand that caller and idle the device
-          // underneath it. A session nobody actually picks up is collected by
-          // the `missing-first-heartbeat` reap in `src/daemon/sessionManager.ts`
-          // (grace before the first heartbeat, then `cleanupExpiredSessions`),
-          // which is the backstop this path relies on.
-          if (!DaemonState.getInstance().isInitialized()) {
-            // Direct (non-daemon) mode has no SessionManager and no reap, and
-            // it has no reuse path either: `bindBootedDeviceSession` always
-            // mints a fresh UUID and registers a process-local mapping, so
-            // dropping that mapping needs no ownership information and can
-            // strand nobody.
-            unregisterDirectSession(acquiredSessionUuid);
-          }
-          throw new ActionableError("MCP request was cancelled during acquisition.");
+          failCancelledAcquisition(acquiredSessionUuid);
         }
       }
       const isRecordingIdCleanup =

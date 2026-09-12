@@ -6340,6 +6340,16 @@ export class DevicePool {
   }
 
   /**
+   * Connection epoch of the pooled device on `deviceId`, or undefined when the
+   * serial is not pooled. The canonical answer for every per-device cache that
+   * must not survive a same-serial reincarnation; see
+   * `utils/deviceIncarnation.ts`.
+   */
+  getDeviceIncarnation(deviceId: string): number | undefined {
+    return this.devices.get(deviceId)?.incarnation;
+  }
+
+  /**
    * Get device assigned to session
    */
   getDeviceForSession(sessionId: string): PooledDevice | null {

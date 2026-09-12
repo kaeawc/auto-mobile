@@ -6,11 +6,12 @@ import type { Platform } from "../models";
 /**
  * Identity of a single device *connection epoch*.
  *
- * The adb serial / simulator UDID (`deviceId`) is reused across boots and its
- * ADB `transportId` changes on reconnect, so a consumer cannot tell "same
- * device, stream continues" from "device rebooted, flush your caches" by serial
- * alone. `deviceSessionUuid` is minted once per epoch and retired when the
- * device disconnects, giving every stream a stable routing key that a reused
+ * The adb serial / simulator UDID (`deviceId`) is reused across boots, and a
+ * discovery listing carries no per-connection token at all, so a consumer cannot
+ * tell "same device, stream continues" from "device rebooted, flush your caches"
+ * by serial alone. `deviceSessionUuid` is minted once per epoch -- keyed on the
+ * pool's `incarnation`, the only epoch boundary in the model -- and retired when
+ * the device disconnects, giving every stream a stable routing key that a reused
  * serial cannot alias.
  */
 export interface DeviceSessionRecord {

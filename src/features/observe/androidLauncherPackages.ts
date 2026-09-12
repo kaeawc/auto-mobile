@@ -81,9 +81,10 @@ interface ResolvedHomePackageCacheEntry {
   packageName: string;
   resolvedAtMs: number;
   /**
-   * The device CONNECTION EPOCH this entry was resolved under, e.g.
-   * `BootedDevice.transportId` -- undefined when the caller has no
-   * incarnation info to offer. Android serials are reused across connection
+   * The device CONNECTION EPOCH this entry was resolved under -- the device
+   * pool's `incarnation` counter, read through
+   * `utils/deviceIncarnation.ts`; undefined when no pool can answer (direct
+   * mode, or a caller with no incarnation info to offer). Android serials are reused across connection
    * epochs (see `daemon/deviceSessionRegistry.ts`; e.g. a fresh AVD taking
    * over `emulator-5554` within the TTL below), so keying this cache on
    * `deviceId` alone lets a same-serial reincarnation serve the PREVIOUS
@@ -150,12 +151,15 @@ function freshCachedPackageName(
  * must fall back to {@link isFallbackLauncherPackage} in that case.
  *
  * @param incarnationToken - A discriminator for the device's current
- *   connection epoch, e.g. `BootedDevice.transportId`. A cached entry
- *   resolved under a DIFFERENT token (same `deviceId`, new incarnation -- a
- *   reused Android serial such as `emulator-5554` picked up by a fresh AVD
- *   within the TTL) is treated as a cache miss and re-resolved, instead of
- *   serving the previous incarnation's launcher. Omit to keep the previous
- *   serial-only keying (e.g. callers with no incarnation info available).
+ *   connection epoch: the device pool's `incarnation` counter, stringified by
+ *   `deviceIncarnationToken`. A cached entry resolved under a DIFFERENT token
+ *   (same `deviceId`, new incarnation -- a reused Android serial such as
+ *   `emulator-5554` picked up by a fresh AVD within the TTL) is treated as a
+ *   cache miss and re-resolved, instead of serving the previous incarnation's
+ *   launcher. Omit to keep the previous serial-only keying (e.g. callers with
+ *   no incarnation info available). A restart faster than one discovery
+ *   interval leaves the incarnation unchanged, so this narrows the window --
+ *   it does not close it.
  * @param timeoutMs - Optional remaining budget for the resolve command. When
  *   provided the ADB query is bounded to `min(RESOLVE_HOME_TIMEOUT_MS,
  *   timeoutMs)` so a caller spending a shrinking request deadline (e.g. home
@@ -247,9 +251,9 @@ export function isFallbackLauncherPackage(appId: string | null | undefined): boo
  * fallback launcher package otherwise.
  *
  * @param incarnationToken - Forwarded to {@link resolveConfiguredHomePackage}
- *   -- see its doc for why a device's connection-epoch discriminator (e.g.
- *   `BootedDevice.transportId`) must be supplied to avoid serving a reused
- *   serial's stale cached launcher.
+ *   -- see its doc for why a device's connection-epoch discriminator (the pool
+ *   incarnation, via `deviceIncarnationToken`) must be supplied to avoid
+ *   serving a reused serial's stale cached launcher.
  * @param timeoutMs - Optional remaining budget forwarded to
  *   {@link resolveConfiguredHomePackage} so the launcher lookup shares the
  *   caller's deadline instead of always taking the full resolve default.

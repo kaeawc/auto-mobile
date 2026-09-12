@@ -69,6 +69,7 @@ import { InputText, type AppendKeyEventValidator } from "../features/action/Inpu
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
+import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -349,7 +350,14 @@ export interface AppendTextInput {
 
 interface CachedAppendTextInput {
   input: AppendTextInput;
-  transportId?: string;
+  /**
+   * Pool connection epoch this helper was built for (see
+   * `utils/deviceIncarnation.ts`). `undefined` means no pool could answer, in
+   * which case the entry is still reused -- {@link
+   * UnixSocketServer.evictDeviceInputCache} and the append self-heal are the
+   * safeguards, not a rebuild on every keystroke.
+   */
+  incarnationToken: string | undefined;
 }
 
 interface BoundMcpClient {
@@ -3853,10 +3861,27 @@ export class UnixSocketServer {
       frameContext === undefined
         ? undefined
         : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs);
-    const input = this.getAppendTextInput(targetDevice);
-    return signal
-      ? await input.appendText(text, appendTimeoutMs, beforeKeyEvent, signal)
-      : await input.appendText(text, appendTimeoutMs, beforeKeyEvent);
+    const cached = this.getAppendTextInput(targetDevice);
+    const run = async (input: AppendTextInput, timeoutMs: number) =>
+      signal
+        ? await input.appendText(text, timeoutMs, beforeKeyEvent, signal)
+        : await input.appendText(text, timeoutMs, beforeKeyEvent);
+    const result = await run(cached.input, appendTimeoutMs);
+    if (result.success || !cached.fromCache || signal?.aborted) {
+      return result;
+    }
+    // Self-heal: without an ADB transport id there is nothing that proves a
+    // cached helper still belongs to the device now on this serial, and a
+    // restart faster than one discovery interval leaves the pool incarnation
+    // unchanged. A failure is the first evidence either way, so drop the helper
+    // and give a freshly built one exactly one attempt before surfacing the
+    // error.
+    this.evictDeviceInputCache(targetDevice.deviceId);
+    const retryTimeoutMs = deadline - this.timer.now();
+    if (retryTimeoutMs <= 0) {
+      return result;
+    }
+    return await run(this.getAppendTextInput(targetDevice).input, retryTimeoutMs);
   }
 
   private async validateAppendFrameContext(
@@ -4793,21 +4818,31 @@ export class UnixSocketServer {
     }
   }
 
-  /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
-  private getAppendTextInput(device: BootedDevice): AppendTextInput {
+  /**
+   * Cached-per-device accessor for the append helper; see
+   * {@link appendTextInputs}. Keyed on the pool's connection epoch so a
+   * same-serial reincarnation cannot inherit the previous device's probed API
+   * level. `fromCache` tells the caller whether a failure is worth retrying
+   * against a freshly built helper.
+   */
+  private getAppendTextInput(device: BootedDevice): {
+    input: AppendTextInput;
+    fromCache: boolean;
+  } {
+    const incarnationToken = deviceIncarnationToken(device.deviceId);
     const existing = this.appendTextInputs.get(device.deviceId);
-    if (existing?.transportId !== undefined && device.transportId === existing.transportId) {
-      return existing.input;
+    if (existing && existing.incarnationToken === incarnationToken) {
+      return { input: existing.input, fromCache: true };
     }
     if (existing) {
       logger.debug(
         `[UnixSocketServer] Rebuilding cached append helper for ${device.deviceId}: ` +
-          `ADB transport changed from ${existing.transportId} to ${device.transportId}`,
+          `pool incarnation changed from ${existing.incarnationToken} to ${incarnationToken}`,
       );
     }
     const created = this.appendTextFactory(device);
-    this.appendTextInputs.set(device.deviceId, { input: created, transportId: device.transportId });
-    return created;
+    this.appendTextInputs.set(device.deviceId, { input: created, incarnationToken });
+    return { input: created, fromCache: false };
   }
 
   /**

@@ -30,6 +30,7 @@ import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { shouldSkipActionObservationScreenshot } from "../observe/automaticScreenshotPolicy";
 import { serverConfig } from "../../utils/ServerConfig";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -642,7 +643,7 @@ export class BaseVisualChange {
           this.adb,
           this.device.deviceId,
           this.timer,
-          this.device.transportId,
+          deviceIncarnationToken(this.device.deviceId),
           signal,
           remainingMs(),
         );

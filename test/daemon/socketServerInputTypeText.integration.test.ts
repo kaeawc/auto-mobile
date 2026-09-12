@@ -16,6 +16,10 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import {
+  deviceIncarnationToken,
+  setDeviceIncarnationResolver,
+} from "../../src/utils/deviceIncarnation";
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -184,6 +188,7 @@ describe("UnixSocketServer input/typeText", () => {
     PlatformDeviceManagerFactory.reset();
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
+    setDeviceIncarnationResolver(undefined);
   });
 
   test("routes Android text input through existing platform input infrastructure", async () => {
@@ -678,9 +683,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(
-      createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]),
-    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -730,9 +733,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(
-      createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]),
-    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -765,9 +766,7 @@ describe("UnixSocketServer input/typeText", () => {
   });
 
   test("evicts the cached append helper after a session MCP forward succeeds it in the device queue", async () => {
-    PlatformDeviceManagerFactory.setInstance(
-      createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]),
-    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessions = new Map([
       ["session-a", createFakeSession("session-a", androidDevice.deviceId, "android")],
     ]);
@@ -897,17 +896,16 @@ describe("UnixSocketServer input/typeText", () => {
     expect(adb.probeCalls.length).toBe(2);
   });
 
-  test("re-probes append input when direct discovery reports a new connection incarnation", async () => {
+  test("re-probes append input when the pool reports a new connection incarnation", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    let discoveredDevice = {
-      ...androidDevice,
-      transportId: "1",
-    } as BootedDevice;
+    const discoveredDevice = androidDevice;
+    let incarnation = 1;
+    setDeviceIncarnationResolver(() => incarnation);
     let bypassedAndroidDeviceListCache = false;
     PlatformDeviceManagerFactory.setInstance({
       getBootedDevicesDetailed: async (
@@ -949,10 +947,7 @@ describe("UnixSocketServer input/typeText", () => {
       );
 
     expect((await append()).success).toBe(true);
-    discoveredDevice = {
-      ...androidDevice,
-      transportId: "2",
-    } as BootedDevice;
+    incarnation = 2;
     expect((await append()).success).toBe(true);
 
     expect(factoryCalls).toBe(2);
@@ -960,14 +955,16 @@ describe("UnixSocketServer input/typeText", () => {
     expect(bypassedAndroidDeviceListCache).toBe(true);
   });
 
-  test("revalidates append transport identity after waiting behind same-device input", async () => {
+  test("revalidates append device identity after waiting behind same-device input", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    let discoveredDevice = { ...androidDevice, transportId: "1" } as BootedDevice;
+    const discoveredDevice = androidDevice;
+    let incarnation = 1;
+    setDeviceIncarnationResolver(() => incarnation);
     let discoveryCalls = 0;
     PlatformDeviceManagerFactory.setInstance({
       getBootedDevicesDetailed: async () => {
@@ -992,12 +989,12 @@ describe("UnixSocketServer input/typeText", () => {
     const firstAppendStarted = new Promise<void>((resolve) => {
       signalFirstAppendStarted = resolve;
     });
-    const createdForTransportIds: Array<string | undefined> = [];
+    const createdForIncarnations: Array<string | undefined> = [];
     server.appendTextFactory = (device) => {
-      createdForTransportIds.push(device.transportId);
+      createdForIncarnations.push(deviceIncarnationToken(device.deviceId));
       return {
         appendText: async () => {
-          if (createdForTransportIds.length === 1) {
+          if (createdForIncarnations.length === 1) {
             signalFirstAppendStarted?.();
             await firstAppendReleased;
           }
@@ -1027,17 +1024,17 @@ describe("UnixSocketServer input/typeText", () => {
     expect(discoveryCalls).toBe(3);
 
     // The second request was resolved before the replacement, then waited in
-    // the same-device queue. Its queued revalidation must see the new transport.
-    discoveredDevice = { ...androidDevice, transportId: "2" } as BootedDevice;
+    // the same-device queue. Its queued revalidation must see the new epoch.
+    incarnation = 2;
     releaseFirstAppend?.();
 
     expect((await first).success).toBe(true);
     expect((await second).success).toBe(true);
-    expect(createdForTransportIds).toEqual(["1", "2"]);
+    expect(createdForIncarnations).toEqual(["1", "2"]);
     expect(discoveryCalls).toBe(4);
   });
 
-  test("does not reuse append input when direct discovery omits transport identity", async () => {
+  test("documented blind spot: with no pool incarnation the cached append helper is reused", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
@@ -1072,11 +1069,67 @@ describe("UnixSocketServer input/typeText", () => {
         1234,
       );
 
+    // Nothing in a discovery listing distinguishes one occupant of a reused
+    // serial from the next, so with no pool to name the epoch the helper is
+    // reused rather than rebuilt on every keystroke (#1099). The safeguards are
+    // `evictDeviceInputCache` on the pool's own lifecycle events and the
+    // append self-heal below, not this comparison.
     expect((await append()).success).toBe(true);
     expect((await append()).success).toBe(true);
 
+    expect(factoryCalls).toBe(1);
+    expect(adb.probeCalls.length).toBe(1);
+  });
+
+  test("rebuilds a cached append helper once when its first use fails", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      const call = factoryCalls;
+      return {
+        appendText: async () =>
+          call === 1 ? { success: false, error: "stale helper" } : { success: true, charsSent: 1 },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = () =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        {
+          platform: "android",
+          deviceId: "emulator-5554",
+          text: "A",
+          mode: "append",
+        },
+        1234,
+      );
+
+    // First call builds the helper and caches it; it is not "from cache", so
+    // its failure is surfaced as-is.
+    expect((await append()).success).toBe(false);
+    expect(factoryCalls).toBe(1);
+
+    // The second call takes the cached helper. There is no epoch change to
+    // detect a same-serial reincarnation, so the failure itself is the signal:
+    // evict, rebuild once, and the retry succeeds.
+    expect((await append()).success).toBe(true);
     expect(factoryCalls).toBe(2);
-    expect(adb.probeCalls.length).toBe(2);
   });
 
   // The client forwards every printable ASCII character, but uppercase and shifted

@@ -3089,20 +3089,86 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * Establish the connection a screenshot request needs, gated on the caller's
+   * cancellation on both sides of the (potentially multi-second) reconnect.
+   *
+   * @returns the result to return instead of capturing - a connection failure or
+   *   the caller's cancellation - or undefined when dispatch should proceed.
+   */
+  private async connectForScreenshot(
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult | undefined> {
+    if (signal?.aborted) {
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+
+    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+    if (!connected) {
+      logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for screenshot");
+      return { success: false, error: "Failed to connect to accessibility service" };
+    }
+
+    if (signal?.aborted) {
+      // Connecting (and reconnecting) can take seconds, so the caller may well
+      // have given up by the time we get here. Dispatching anyway would consume
+      // the shared a11y screenshot rate limit and push a late frame onto the
+      // observation stream for a capture nobody is waiting on (#6605).
+      logger.debug("[CTRL_PROXY] Screenshot cancelled before dispatch");
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Put a registered screenshot request on the wire, unless the caller cancelled
+   * while the connection was being established (#6605). A cancelled request is
+   * settled locally instead: it must not consume the shared accessibility
+   * screenshot rate limit, nor publish a late observation-stream frame.
+   */
+  private async dispatchScreenshotRequest(
+    sentRequestId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) {
+      // Settle the registration we just made so it neither waits out its
+      // timeout nor accepts a late response.
+      this.requestManager.resolveError(sentRequestId, OPERATION_CANCELLED_MESSAGE);
+      return;
+    }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not connected");
+    }
+    const message = serializeCtrlProxyRequest(
+      ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }),
+    );
+    // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
+    // junit-runner) and the observation-stream scheduler both hit the same rate-limited
+    // accessibility takeScreenshot(). Advancing the shared clock here (non-blocking) makes the
+    // stream scheduler coalesce around a one-shot instead of the two engines rate-limiting each
+    // other while a live viewer is attached. requestScreenshot always issues a real a11y capture
+    // (it has no ADB path), so the stamp is unconditionally correct.
+    this.getScreenshotBackoffScheduler().noteCaptureStarted();
+    this.ws.send(message);
+    logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${sentRequestId})`);
+  }
+
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     suppressObservationStreamPush: boolean = false,
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
     let requestId: string | undefined;
 
     try {
-      const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for screenshot");
-        return { success: false, error: "Failed to connect to accessibility service" };
+      const blocked = await this.connectForScreenshot(perf, signal);
+      if (blocked) {
+        return blocked;
       }
 
       requestId = this.requestManager.generateId("screenshot");
@@ -3128,23 +3194,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }),
       );
 
-      await perf.track("sendRequest", async () => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }),
-        );
-        // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
-        // junit-runner) and the observation-stream scheduler both hit the same rate-limited
-        // accessibility takeScreenshot(). Advancing the shared clock here (non-blocking) makes the
-        // stream scheduler coalesce around a one-shot instead of the two engines rate-limiting each
-        // other while a live viewer is attached. requestScreenshot always issues a real a11y capture
-        // (it has no ADB path), so the stamp is unconditionally correct.
-        this.getScreenshotBackoffScheduler().noteCaptureStarted();
-        this.ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${sentRequestId})`);
-      });
+      await perf.track("sendRequest", () => this.dispatchScreenshotRequest(sentRequestId, signal));
 
       const result = await perf.track("waitForScreenshot", () => screenshotPromise);
       const duration = this.timer.now() - startTime;

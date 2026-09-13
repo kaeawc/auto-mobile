@@ -24,7 +24,15 @@ data class DeviceSnapshotMetadata(
   val includeSettings: Boolean = false,
   val createdAt: String = "",
   val lastAccessedAt: String = "",
-  val sizeBytes: Long = 0,
+  /**
+   * On-disk cost of the snapshot, or null when the daemon could not measure it.
+   *
+   * An Android `vm` snapshot's payload lives inside the AVD, so a capture whose AVD directory
+   * cannot be resolved is serialized as `"sizeBytes": null`. Declaring this non-null made kotlinx
+   * serialization reject the ENTIRE archive response, so one unsized row stopped the dashboard from
+   * listing any snapshot at all (#6891 review).
+   */
+  val sizeBytes: Long? = null,
 )
 
 /** The archive resource payload. */

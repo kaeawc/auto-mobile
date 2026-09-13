@@ -500,6 +500,59 @@ describe("ListInstalledApps", function () {
       expect(stored.some((row) => row.package_name === "com.stale.app")).toBe(false);
     });
 
+    test("rebuilds when only one row was refreshed by a package event", async function () {
+      // Regression for issue #6639: a single CtrlProxy package-added broadcast
+      // upserts one row with a fresh timestamp while the rest of the device's
+      // rows stay hours old. Device-wide freshness must reflect the oldest row,
+      // otherwise that one write extends the TTL for the whole stale row set.
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      const staleTime = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.stale.app",
+          is_system: 0,
+          installed_at: staleTime,
+          last_verified_at: staleTime,
+        },
+      ]);
+
+      timer.advanceTime(5 * 60 * 1000 + 1);
+
+      // The broadcast writer patches exactly one row, bypassing the coordinator.
+      await repo.upsertInstalledApp(
+        mockDevice.deviceId,
+        0,
+        "com.broadcast.app",
+        false,
+        timer.now(),
+      );
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.fresh\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
+        stdout: "",
+        stderr: "",
+      });
+
+      const cachedList = new ListInstalledApps(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer },
+      );
+      const result = await cachedList.executeDetailed();
+
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(result.profiles[0].some((app) => app.packageName === "com.example.fresh")).toBe(true);
+      expect(result.profiles[0].some((app) => app.packageName === "com.stale.app")).toBe(false);
+    });
+
     test("should rebuild immediately when a package mutation marks the cache stale", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();

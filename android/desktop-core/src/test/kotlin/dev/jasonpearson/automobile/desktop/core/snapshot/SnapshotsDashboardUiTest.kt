@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotMetadata
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeDeviceSnapshotConfigClient
+import kotlin.test.assertEquals
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
@@ -24,6 +25,14 @@ class SnapshotsDashboardUiTest {
       sizeBytes = 2_500_000,
       createdAt = "2026-07-19T00:00:00Z",
     )
+
+  @Test
+  fun `an unmeasured size renders as unknown rather than as zero bytes`() {
+    // The daemon reports a vm snapshot it could not measure as a null size
+    // (#6891 review); rendering that as "0 B" would be a number nothing backs.
+    assertEquals("unknown size", formatSize(null))
+    assertEquals("2 MB", formatSize(2_500_000))
+  }
 
   @Test
   fun `lists captured snapshots`() = runComposeUiTest {

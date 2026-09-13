@@ -58,4 +58,67 @@ describe("actionable interaction schema errors", () => {
       expect(message).not.toContain("selector is required");
     },
   );
+
+  // #6867: a selector with two or more unknown keys concatenated every union
+  // branch's unrecognized-key list, so a key ACCEPTED by one branch was named as
+  // unrecognized by the others — in the same sentence that listed it as accepted.
+  describe("selector unrecognized keys (#6867)", () => {
+    const parseSelector = (selector: unknown) => {
+      const input = { selector };
+      const result = tapOnSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      if (result.success) {
+        throw new Error("expected invalid selector");
+      }
+      return formatToolParamError("tapOn", result.error, input, tapOnSchema);
+    };
+
+    test("a single unknown key is unchanged", () => {
+      const message = parseSelector({ foo: "bar" });
+      expect(message).toContain('selector Unrecognized key: "foo"');
+      expect(message).toContain("Accepted: elementId, testTag, text, accessibilityLink, textAny");
+      expect(message.split("Unrecognized")).toHaveLength(2);
+    });
+
+    test("a valid key beside a bad key names only the bad key", () => {
+      const message = parseSelector({ text: "Clock", bogus: 1 });
+      expect(message).toContain('selector Unrecognized key: "bogus"');
+      expect(message).not.toContain('"text",');
+      expect(message.split("Unrecognized")).toHaveLength(2);
+    });
+
+    test("a top-level parameter inside the selector names it and points one level up", () => {
+      const message = parseSelector({
+        elementId: "com.google.android.deskclock:id/onoff",
+        index: 0,
+      });
+      expect(message).toContain('selector Unrecognized key: "index"');
+      expect(message).not.toContain('"elementId",');
+      expect(message).toContain('did you mean the top-level "index" parameter?');
+      expect(message.split("Unrecognized")).toHaveLength(2);
+    });
+
+    test("keys from two different branches are reported as mutually exclusive", () => {
+      const message = parseSelector({ text: "a", elementId: "b" });
+      expect(message).not.toContain("Unrecognized");
+      expect(message).toContain("provide exactly one");
+      expect(message).toContain("Accepted: elementId, testTag, text, accessibilityLink, textAny");
+    });
+
+    test("the top-level hint is derived from the tool schema, not a fixed list", () => {
+      const message = parseSelector({ elementId: "id", preTapStability: true });
+      expect(message).toContain('did you mean the top-level "preTapStability" parameter?');
+    });
+
+    test("without the schema no top-level hint is invented", () => {
+      const input = { selector: { elementId: "id", index: 0 } };
+      const result = tapOnSchema.safeParse(input);
+      if (result.success) {
+        throw new Error("expected invalid selector");
+      }
+      const message = formatToolParamError("tapOn", result.error, input);
+      expect(message).toContain('selector Unrecognized key: "index"');
+      expect(message).not.toContain("did you mean");
+    });
+  });
 });

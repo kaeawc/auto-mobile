@@ -4693,6 +4693,7 @@ export function registerDeviceTools() {
         "provisionDevice",
         error,
         input,
+        provisionDeviceSchema,
       )}`;
       logger.warn(`[DeviceTools] ${message}`, error);
       return createToolErrorResponse("invalid_arguments", message);

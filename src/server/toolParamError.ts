@@ -75,6 +75,146 @@ function coverageKey(unionId: number, path: ReadonlyArray<PropertyKey>): string 
   return `${unionId}#${path.map(String).join(".")}`;
 }
 
+// ---------------------------------------------------------------------------
+// Unrecognized keys across union branches (#6867)
+// ---------------------------------------------------------------------------
+
+// zod reports `unrecognized_keys` once PER BRANCH of a union, and each branch
+// names every key IT does not accept. Concatenating those lists tells the caller
+// that a key one branch accepts is unrecognized — in the same sentence that lists
+// it as accepted. Only the INTERSECTION across all branches is genuinely unknown:
+// a key accepted by any branch is never unrecognized. A branch that reported no
+// unrecognized key at all accepts every supplied key, so it contributes the empty
+// set and collapses the intersection (#6867).
+interface UnrecognizedGroup {
+  // Rejected by every branch — the keys that are actually unknown.
+  intersection: string[];
+  // Rejected by at least one branch, first-seen order. When `intersection` is
+  // empty these are valid keys that belong to mutually exclusive branches.
+  reported: string[];
+}
+
+type UnrecognizedKeysIssue = Extract<ZodIssue, { code: "unrecognized_keys" }>;
+
+function isUnrecognizedKeys(issue: ZodIssue): issue is UnrecognizedKeysIssue {
+  return issue.code === "unrecognized_keys";
+}
+
+// Re-issue the branch's own issue with the merged key set and sentence. Keeping
+// the `unrecognized_keys` code means tool-specific formatting (the "Accepted: …"
+// list) still applies; only the key list and wording change.
+function withMergedKeys(
+  issue: UnrecognizedKeysIssue,
+  keys: string[],
+  message: string,
+): UnrecognizedKeysIssue {
+  return { ...issue, keys, message };
+}
+
+function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, UnrecognizedGroup> {
+  const byGroup = new Map<string, { branchCount: number; byBranch: Map<number, Set<string>> }>();
+  for (const entry of flattenedIssues) {
+    if (!entry.union || !isUnrecognizedKeys(entry.issue)) {
+      continue;
+    }
+    const key = coverageKey(entry.union.unionId, entry.issue.path);
+    const group = byGroup.get(key) ?? {
+      branchCount: entry.union.branchCount,
+      byBranch: new Map<number, Set<string>>(),
+    };
+    const branch = group.byBranch.get(entry.union.branchIndex) ?? new Set<string>();
+    group.byBranch.set(
+      entry.union.branchIndex,
+      new Set([...branch, ...entry.issue.keys.map(String)]),
+    );
+    byGroup.set(key, group);
+  }
+
+  const merged = new Map<string, UnrecognizedGroup>();
+  for (const [key, group] of byGroup) {
+    const branches = [...group.byBranch.values()];
+    const reported = [...new Set(branches.flatMap((branch) => [...branch]))];
+    const complete = group.byBranch.size === group.branchCount;
+    const intersection = complete
+      ? reported.filter((name) => branches.every((branch) => branch.has(name)))
+      : [];
+    merged.set(key, { intersection, reported });
+  }
+  return merged;
+}
+
+function quoteKeys(keys: ReadonlyArray<string>): string {
+  return keys.map((name) => `"${name}"`).join(", ");
+}
+
+// Mirrors zod's own phrasing so a single-key message is byte-identical to what
+// an un-merged branch would have produced.
+function unrecognizedKeysMessage(keys: ReadonlyArray<string>): string {
+  return keys.length === 1
+    ? `Unrecognized key: ${quoteKeys(keys)}`
+    : `Unrecognized keys: ${quoteKeys(keys)}`;
+}
+
+function mutuallyExclusiveMessage(keys: ReadonlyArray<string>): string {
+  return `Mutually exclusive keys: ${quoteKeys(keys)} — provide exactly one.`;
+}
+
+// A nested object key that is ALSO a parameter of the tool itself: the caller put
+// `index` inside `selector` when `index` is a sibling of `selector`. Naming the
+// key as unknown without saying where it does belong leaves no next step (#6867).
+function topLevelHint(
+  path: ReadonlyArray<PropertyKey>,
+  keys: ReadonlyArray<string>,
+  siblingKeys: ReadonlySet<string>,
+): string {
+  if (path.length === 0 || siblingKeys.size === 0) {
+    return "";
+  }
+  const owner = String(path[0]);
+  const promoted = keys.filter((name) => name !== owner && siblingKeys.has(name));
+  if (promoted.length === 0) {
+    return "";
+  }
+  const plural = promoted.length === 1 ? "parameter" : "parameters";
+  return ` — did you mean the top-level ${quoteKeys(promoted)} ${plural}?`;
+}
+
+interface ZodDefLike {
+  type?: string;
+  in?: unknown;
+  innerType?: unknown;
+  options?: readonly unknown[];
+}
+
+interface ZodSchemaLike {
+  def?: ZodDefLike;
+  shape?: Record<string, unknown>;
+}
+
+function asZodSchemaLike(value: unknown): ZodSchemaLike | undefined {
+  return typeof value === "object" && value !== null ? (value as ZodSchemaLike) : undefined;
+}
+
+// The tool's own top-level parameter names, read off the schema the caller parsed
+// with rather than a hardcoded list, so the hint stays correct for every tool and
+// cannot drift as parameters are added. Wrappers (`.pipe`, `.optional`, effects)
+// are unwrapped; a union of objects contributes every arm's keys.
+function topLevelSchemaKeys(schema: unknown, depth = 0): ReadonlySet<string> {
+  const node = depth > 8 ? undefined : asZodSchemaLike(schema);
+  const def = node?.def;
+  if (!node || !def) {
+    return new Set<string>();
+  }
+  if (node.shape) {
+    return new Set(Object.keys(node.shape));
+  }
+  if (Array.isArray(def.options)) {
+    return new Set(def.options.flatMap((option) => [...topLevelSchemaKeys(option, depth + 1)]));
+  }
+  const inner = def.in ?? def.innerType;
+  return inner === undefined ? new Set<string>() : topLevelSchemaKeys(inner, depth + 1);
+}
+
 function formatSelectorIssue(
   issue: ZodIssue,
   toolName: string,
@@ -260,26 +400,56 @@ function selectGenuineIssues(
 // no access to it — the message is then computed from branch coverage alone,
 // identical to pre-#5862 behavior). Threading it lets a provided-value error on a
 // nested field survive even when an inapplicable union arm rejects its parent as
-// `never` (#5862).
-export function formatToolParamError(toolName: string, error: unknown, rawInput?: unknown): string {
+// `never` (#5862). `schema` is the tool's own input schema; when supplied, a
+// rejected nested key that is a top-level parameter of the tool is named as such
+// instead of only being called unknown (#6867).
+export function formatToolParamError(
+  toolName: string,
+  error: unknown,
+  rawInput?: unknown,
+  schema?: unknown,
+): string {
   if (!(error instanceof ZodError)) {
     return String(error);
   }
 
   const { issues: flattenedIssues, sawUnion } = flattenZodIssues(error.issues);
   const selectedIssues = selectGenuineIssues(flattenedIssues, sawUnion, rawInput);
+  const unrecognizedGroups = groupUnrecognizedKeys(flattenedIssues);
+  const siblingKeys = topLevelSchemaKeys(schema);
+
+  const renderer = (issue: ZodIssue, hintKeys?: ReadonlyArray<string>): string =>
+    formatIssue(issue, toolName, rawInput) +
+    (hintKeys ? topLevelHint(issue.path, hintKeys, siblingKeys) : "");
+
+  // Union branches whose unrecognized-key sets did not intersect: every key is
+  // accepted by some branch, so none is unknown. Held back and only emitted when
+  // nothing else explains the failure (#6867).
+  const conflicts: Array<{ issue: UnrecognizedKeysIssue; keys: string[] }> = [];
+  const render = (entry: FlattenedIssue): string | undefined => {
+    const { issue } = entry;
+    if (!entry.union || !isUnrecognizedKeys(issue)) {
+      return renderer(issue);
+    }
+    const group = unrecognizedGroups.get(coverageKey(entry.union.unionId, issue.path));
+    if (!group) {
+      return renderer(issue);
+    }
+    if (group.intersection.length === 0) {
+      conflicts.push({ issue, keys: group.reported });
+      return undefined;
+    }
+    const keys = group.intersection;
+    return renderer(withMergedKeys(issue, keys, unrecognizedKeysMessage(keys)), keys);
+  };
 
   // Dedupe formatted messages: union expansion repeats the same real issue once
   // per branch that carries the field.
-  const seen = new Set<string>();
-  const issues: string[] = [];
-  for (const { issue } of selectedIssues) {
-    const formatted = formatIssue(issue, toolName, rawInput);
-    if (!seen.has(formatted)) {
-      seen.add(formatted);
-      issues.push(formatted);
-    }
-  }
+  const rendered = selectedIssues.map(render).filter((line) => line !== undefined);
+  const fallback = conflicts.map(({ issue, keys }) =>
+    renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)), keys),
+  );
+  const issues = [...new Set(rendered.length > 0 ? rendered : fallback)];
 
   const hints: string[] = [];
   if (toolName === "swipeOn" || toolName === "tapOn") {

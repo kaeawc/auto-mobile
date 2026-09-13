@@ -137,6 +137,62 @@ describe("acquisition-time enableTools (#6869)", () => {
     expect(payload.enabledTools).toContain("inputText");
   });
 
+  /**
+   * #6886 review — a rejected capability write used to be swallowed by the
+   * enrichment catch, so the acquisition still returned a plain success and the
+   * caller's next call hit a tool that was never enabled. The acquisition itself
+   * really did succeed, so the minted session handle must survive; the failure
+   * has to be stated in the response instead of inferred.
+   */
+  describe("a failed capability write", () => {
+    const withFailingSelectionWrites = async () => {
+      await fixture?.teardown();
+      fixture = new McpTestFixture({
+        sessionToolSelectionService: {
+          isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+          setEnabled: async () => {
+            throw new Error("selection storage unavailable");
+          },
+        },
+      });
+      await fixture.setup();
+      ToolRegistry.clearTools();
+    };
+
+    for (const acquisition of ["getAndroid", "getApple"] as const) {
+      test(`${acquisition} reports the failure and keeps the minted session`, async () => {
+        await withFailingSelectionWrites();
+        registerAcquisition(acquisition);
+
+        const { payload } = await acquire(acquisition, { enableTools: ["inputText"] });
+
+        expect(payload.sessionUuid).toBe("acquired-session");
+        expect(payload.enableToolsError).toContain("selection storage unavailable");
+        expect(payload.enableToolsError).toContain("inputText");
+        expect(payload.gatedTools).toContain("inputText");
+      });
+    }
+
+    test("provisionDevice reports the failure and keeps the minted session", async () => {
+      await withFailingSelectionWrites();
+      registerAcquisition("provisionDevice");
+
+      const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
+
+      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(payload.enableToolsError).toContain("selection storage unavailable");
+      expect(payload.enabledTools).not.toContain("inputText");
+    });
+
+    test("a successful acquisition carries no enableToolsError", async () => {
+      registerAcquisition("getAndroid");
+
+      const { payload } = await acquire("getAndroid", { enableTools: ["inputText"] });
+
+      expect(payload.enableToolsError).toBeUndefined();
+    });
+  });
+
   test("provisionDevice enables the requested tools and reports enabledTools", async () => {
     registerAcquisition("provisionDevice");
 

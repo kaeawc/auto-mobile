@@ -116,29 +116,59 @@ is kept — same session, same `incarnation` — but:
   booted-devices resource, `listDevices`, the shutdown/kill preflight, the
   teardown precondition, pre-boot serial validation, the Android start lifecycle
   target, `provisionDevice`'s exact-boot discovery, and the socket server's
-  input-target and `ide/*` routes. It is idempotent (an observation that already
-  `describesPooledRuntime` is a no-op), takes no lock, and changes no pool
+  input-target and `ide/*` routes. Device-addressed MCP resource reads (storage,
+  databases, DataStore, app data, app files, localization, shared storage,
+  storage capabilities) all go through one `src/server/resourceDeviceResolver.ts`
+  that reconciles: they are not exempt, because resolving a serial and then
+  reading that runtime IS acting on a pooled identity, whatever the read
+  publishes. It is idempotent (an observation that already
+  `describesPooledRuntime` only advances the entry's ordering stamp), takes no
+  lock, and changes no pool
   MEMBERSHIP: a disagreement reaching it is quarantined and left for the paths
   that own allocation to settle. Before it, a read that was the first to see the
   placeholder withheld only its OWN output while the pool went on trusting the
   stale label.
 - **FUNNEL 2, `DevicePool.assertDeviceActionable(deviceId, purpose)`.** Every
-  device-addressed operation at the daemon boundary passes it, WITH OR WITHOUT a
-  session: `assertSessionReadyForAutomation` (the session spelling),
+  device-addressed operation passes it, WITH OR WITHOUT a session. It is enforced
+  at the SEAM, not per entry point: enumerating entry points never finished,
+  because each review round found another route that reached a device without
+  crossing the one just gated — the legacy sessionless tool path when autolock is
+  disabled, MCP resource reads, a stream resolver's own fresh discovery, each
+  target an all-device fan-out expands to.
+
+  The seam is **binding a serial to a device client**, which every Android
+  device-addressed operation does exactly once:
+  `AdbClientFactory.create(device)` and — because it memoizes per serial —
+  `AndroidCtrlProxyClient.getInstance(device)`. Both call the gate through
+  `daemonDeviceAdmissionGate` (`src/daemon/deviceAdmissionGate.ts`), which is a
+  no-op in direct mode, where there is no pool. Android-only is complete coverage
+  rather than a gap: `hasReusableSerial` restricts the quarantine to Android
+  emulator serials, because an iOS UDID is never reused. The one exception is
+  `unadmittedAdbClientFactory`, used ONLY by `AndroidEmulatorClient` — the
+  identity, lifecycle and teardown machinery that must reach a quarantined serial
+  precisely because it is quarantined (discovery reading the AVD name is the only
+  event that can LIFT the quarantine; `emu kill` is how the pool settles a serial
+  it can no longer identify).
+
+  The daemon-boundary gates are KEPT on top of the seam, because they refuse
+  earlier and with a purpose-specific message rather than because the seam needs
+  them: `assertSessionReadyForAutomation` (the session spelling),
   `runTrackedDeviceInput` ahead of its sessionless early return (tap, swipe,
   typeText, button, key, gestures), `request_observation` in the device-data
   stream server (which refuses BEFORE observing, instead of acking `success:
 true` after pushing zero frames), the `ide/*` device-addressed routes, the
-  raw-serial `subscribe_storage` target, and the capture servers — video-stream
-  `subscribe`, `webrtcStream` `start` and `testRecording` `start`. Authorization
-  is NOT this gate: the quarantine deliberately preserves the owning session, so
-  an authorized subscribe or start still passes it and would capture whichever
-  replacement AVD now answers on the serial. The push servers reach the gate
-  through the `DeviceSessionResolver` they already hold; the capture and
-  recording servers, which hold no pool reference, take the narrower
-  `DeviceAdmissionGate` (`src/daemon/deviceAdmissionGate.ts`) instead. Teardown
-  spellings are deliberately exempt — refusing an unsubscribe or a stop would
-  strand device-side state this daemon registered.
+  raw-serial `subscribe_storage` target, every target an all-device
+  `subscribe_storage` expands to (`Daemon.applyStorageSubscriptionRequest`, which
+  reports the refused targets so the request is not acked as complete), and the
+  capture servers — video-stream `subscribe`, `webrtcStream` `start` and
+  `testRecording` `start`. Authorization is NOT this gate: the quarantine
+  deliberately preserves the owning session, so an authorized subscribe or start
+  still passes it and would capture whichever replacement AVD now answers on the
+  serial. The push servers reach the gate through the `DeviceSessionResolver`
+  they already hold; the capture and recording servers, which hold no pool
+  reference, take the narrower `DeviceAdmissionGate` instead. Teardown spellings
+  are deliberately exempt — refusing an unsubscribe or a stop would strand
+  device-side state this daemon registered.
 
 An all-device `request_observation` names no serial for the gate to preflight,
 so the same false acknowledgement is prevented on the way out instead: a
@@ -149,22 +179,29 @@ missing-hierarchy ones) rather than pushed into the routing black hole and acked
 The enforcement is two lint tests, not review attention:
 `test/lint/deviceDiscoveryReconcileFunnel.test.ts` inventories every discovery
 call site in `src/` with a count and a reason and fails on a new one, and
-`test/lint/deviceAddressedAdmissionGate.test.ts` fails on a device-addressed
-socket handler that does not reach the gate.
+`test/lint/deviceAddressedAdmissionGate.test.ts` pins the seam — that both device-
+client resolutions gate, and that only `AndroidEmulatorClient` reaches the
+unadmitted factory — and fails on a device-addressed socket handler that does not
+reach the gate.
 
 Leaving the quarantine is decided by the next discovery that READS a name: the
 pooled label (or the AVD this pool started) restores the entry unchanged, and a
 different name is a replacement — a fresh incarnation, the old session retired,
 exactly as an observed disappearance. Handsets never enter the state.
 
-**Only NEWER evidence lifts it.** Discovery calls run concurrently and finish out
-of order, so an older listing that read the AVD name before it became unreadable
-can land after the placeholder. `PooledDevice.identityUnresolvedAt` records the
-`observedAt` of the observation that entered (or re-confirmed) the quarantine, and
-a strictly older stamped observation is ignored — the same newer-wins ordering the
-pool applies to mutable-name updates through `nameObservedAt`. Unstamped
-observations stay unorderable and lift as before, so a legacy caller cannot wedge
-an entry in quarantine.
+**Only NEWER evidence moves it, in either direction.** Discovery calls run
+concurrently and finish out of order, so an older listing can land after a newer
+one. `PooledDevice.identityObservedAt` records the `observedAt` of the newest
+identity observation folded into the entry — the placeholder or disagreement that
+ENTERED the quarantine, and the resolved name that confirmed or lifted it — and a
+strictly older stamped observation is ignored before BOTH transitions. Recording
+it only on the quarantine transitions made the rule one-sided: a straggler could
+not lift a newer quarantine, but a delayed placeholder could still quarantine an
+entry a newer observation had just resolved, cancelling the bound session's
+in-flight executions on evidence the pool already knew was superseded. This is
+the same newer-wins ordering the pool applies to mutable-name updates through
+`nameObservedAt`. Unstamped observations stay unorderable and transition as
+before, so a legacy caller cannot wedge an entry in either state.
 
 **A disagreement only leaves the quarantine through the replacement actually
 installing.** `replacePooledDeviceForRuntimeIdentity` installs it by evicting the

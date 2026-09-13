@@ -34,6 +34,18 @@ const BODY_EXTRAS = [
 // closing delimiter can land several physical lines later (#6875).
 const EXTRA_START = /^(android\.[A-Za-z0-9_.]+)=[A-Za-z][A-Za-z0-9_$.]*\s+\((.*)$/;
 const RECORD_LINE = /NotificationRecord\(.*?\bpkg=([^\s]+)/;
+// Every extras entry is printed as `<key>=<value>`, whatever the value's type,
+// so a key-shaped line is where the previous entry ended.
+const EXTRA_KEY_LINE = /^[A-Za-z][A-Za-z0-9_$.]*=/;
+
+// The dump prints several record-bearing sections: the active `Notification
+// List:` the shade renders, plus snoozed and enqueued records it does not. A
+// record outside the active list cannot own a rendered row, so it is not
+// correlation evidence — an opaque one would otherwise make every header-less
+// row ambiguous (#6875). A heading is a bare `<Name>:` line, which no record
+// body line is: those all carry `=`.
+const SECTION_HEADING = /^([A-Za-z][A-Za-z0-9 .'()_$-]*):$/;
+const ACTIVE_SECTION = "Notification List";
 
 /** A CharSequence extra whose closing delimiter has not been read yet. */
 interface PendingExtra {
@@ -55,30 +67,44 @@ const addExtra = (record: DumpsysNotificationRecord, key: string, value: string)
   }
 };
 
+// A pending value ends where its entry ends: at the next extras key, at the
+// end of the extras block, or at the next record. A `)` anywhere earlier is
+// part of the printed text, not the dump's closing delimiter (#6875).
+const endsExtrasEntry = (line: string | undefined): boolean => {
+  if (line === undefined) {
+    return true;
+  }
+  const trimmed = line.trim();
+  return trimmed === "}" || EXTRA_KEY_LINE.test(trimmed) || RECORD_LINE.test(trimmed);
+};
+
 // Read one record's `extras={...}` body. A value containing newlines spans
-// physical lines, so accumulate until the closing delimiter; a line that starts
-// another extra ends an unterminated value rather than swallowing it.
+// physical lines, so accumulate until the closing delimiter of the entry; a
+// line that starts another extra ends an unterminated value rather than
+// swallowing it.
 const applyExtras = (record: DumpsysNotificationRecord, lines: readonly string[]): void => {
   let pending: PendingExtra | null = null;
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
     if (pending) {
-      if (line.endsWith(")")) {
+      if (EXTRA_KEY_LINE.test(trimmed)) {
+        // The value never reached its closing delimiter; drop it rather than
+        // swallow the extra that starts here.
+        pending = null;
+      } else if (endsExtrasEntry(lines[index + 1]) && line.endsWith(")")) {
         addExtra(record, pending.key, [...pending.lines, line.slice(0, -1)].join("\n"));
         pending = null;
         continue;
-      }
-      if (!EXTRA_START.test(trimmed)) {
+      } else {
         pending.lines.push(line);
         continue;
       }
-      pending = null;
     }
     const extra = EXTRA_START.exec(trimmed);
     if (!extra) {
       continue;
     }
-    if (extra[2].endsWith(")")) {
+    if (endsExtrasEntry(lines[index + 1]) && extra[2].endsWith(")")) {
       addExtra(record, extra[1], extra[2].slice(0, -1));
     } else {
       pending = { key: extra[1], lines: [extra[2]] };
@@ -90,6 +116,9 @@ const applyExtras = (record: DumpsysNotificationRecord, lines: readonly string[]
 export const parseDumpsysNotificationRecords = (output: string): DumpsysNotificationRecord[] => {
   const records: DumpsysNotificationRecord[] = [];
   let current: DumpsysNotificationRecord | null = null;
+  // Records before the first heading belong to no declared section: a dump
+  // without section headings is read whole rather than discarded.
+  let inActiveSection = true;
   // The physical lines of the extras block being read, or `null` outside one.
   let extrasLines: string[] | null = null;
   const flushExtras = (): void => {
@@ -100,11 +129,19 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
   };
   for (const line of output.split(/\r?\n/)) {
     const trimmed = line.trim();
+    const heading = extrasLines === null ? SECTION_HEADING.exec(trimmed) : null;
+    if (heading) {
+      inActiveSection = heading[1] === ACTIVE_SECTION;
+      current = null;
+      continue;
+    }
     const record = RECORD_LINE.exec(trimmed);
     if (record) {
       flushExtras();
-      current = { pkg: record[1], titles: [], bodies: [] };
-      records.push(current);
+      current = inActiveSection ? { pkg: record[1], titles: [], bodies: [] } : null;
+      if (current) {
+        records.push(current);
+      }
       continue;
     }
     if (!current) {

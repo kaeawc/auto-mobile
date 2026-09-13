@@ -67,6 +67,7 @@ describe("dumpsys notification records", () => {
         dump(
           "  Notification listeners:",
           "    android.title=String (Not a posted notification)",
+          "  Notification List:",
           "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
           "      android.text=String (Outside extras)",
           "      extras={",
@@ -234,5 +235,47 @@ describe("dumpsys notification records", () => {
       ),
     );
     expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBeNull();
+  });
+
+  test("reads a multiline value whose inner line ends in a parenthesis", () => {
+    // The dump prints the value verbatim, so a `)` that belongs to the text is
+    // not the wrapper's closing delimiter: only the last physical line of the
+    // entry ends the value (#6875).
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
+          "      extras={",
+          "        android.bigText=String (Line one",
+          "step (done)",
+          "Line three)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      { pkg: "com.example.app", titles: [], bodies: ["Line one\nstep (done)\nLine three"] },
+    ]);
+  });
+
+  test("ignores records outside the active notification list", () => {
+    // Snoozed and enqueued records are printed in their own sections and are
+    // not rendered in the shade, so they are not correlation evidence; an
+    // opaque one would otherwise make every header-less row ambiguous (#6875).
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        "  Notification List:",
+        "    NotificationRecord(0x1: pkg=com.requested user=UserHandle{0} id=0 tag=null key=0|com.requested|0|null|10100)",
+        "      extras={",
+        "        android.title=String (Syncing)",
+        "      }",
+        "  Snoozed notifications:",
+        "    NotificationRecord(0x2: pkg=com.snoozed user=UserHandle{0} id=0 tag=null key=0|com.snoozed|0|null|10101)",
+        "      extras={",
+        "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+        "      }",
+      ),
+    );
+    expect(records).toEqual([{ pkg: "com.requested", titles: ["Syncing"], bodies: [] }]);
+    expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBe("com.requested");
   });
 });

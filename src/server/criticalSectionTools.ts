@@ -82,6 +82,44 @@ function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> |
   }
 }
 
+/**
+ * Best-effort epilogue warnings a step reported while still succeeding (issue
+ * #6868) — a keyboard that would not dismiss, for example. The step stays
+ * successful, but this used to be its `success:false`, so dropping it would let
+ * the section report an entirely clean success while later steps run against a
+ * screen the caller does not expect.
+ */
+function collectStepWarnings(
+  stepNumber: number,
+  tool: string,
+  result: Record<string, unknown> | undefined,
+): string[] {
+  const warnings = result?.warnings;
+  if (!Array.isArray(warnings)) {
+    return [];
+  }
+  return warnings
+    .filter((warning): warning is string => typeof warning === "string")
+    .map((warning) => `step ${stepNumber} (${tool}): ${warning}`);
+}
+
+function criticalSectionSuccess(
+  lock: string,
+  deviceId: string,
+  executedSteps: number,
+  totalSteps: number,
+  warnings: string[],
+): ReturnType<typeof createJSONToolResponse> {
+  return createJSONToolResponse({
+    success: true,
+    lock,
+    deviceId,
+    executedSteps,
+    totalSteps,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  });
+}
+
 function formatCriticalSectionError(result: Record<string, unknown>, tool: string): string {
   return (
     formatStructuredToolError(result.error) ??
@@ -142,6 +180,7 @@ const criticalSectionHandler = async (
 
     // Execute steps serially
     const executedSteps: Array<{ tool: string; success: boolean }> = [];
+    const warnings: string[] = [];
 
     for (let i = 0; i < normalizedSteps.length; i++) {
       const step = normalizedSteps[i];
@@ -172,6 +211,7 @@ const criticalSectionHandler = async (
           throw new ActionableError(errorMsg);
         }
 
+        warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
         executedSteps.push({ tool: step.tool, success: true });
       } catch (error) {
         executedSteps.push({ tool: step.tool, success: false });
@@ -189,13 +229,13 @@ const criticalSectionHandler = async (
 
     logger.info(`Device ${device.deviceId} completed all steps in critical section "${lock}"`);
 
-    return createJSONToolResponse({
-      success: true,
+    return criticalSectionSuccess(
       lock,
-      deviceId: device.deviceId,
-      executedSteps: executedSteps.length,
-      totalSteps: normalizedSteps.length,
-    });
+      device.deviceId,
+      executedSteps.length,
+      normalizedSteps.length,
+      warnings,
+    );
   } catch (error) {
     // Force cleanup on error to prevent other devices from waiting forever
     coordinator.forceCleanup(lock, namespace);

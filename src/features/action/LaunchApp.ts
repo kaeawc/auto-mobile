@@ -817,11 +817,16 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     if (alreadyForeground) {
+      // "Make this app foreground" is a goal, not a transition: the goal already
+      // holds, so this is a success flagged with `alreadyForeground` — not an
+      // error a client has to string-match to decide whether to continue, which
+      // also discarded the observation a launch normally returns (issue #6868).
       const result = await this.observedInteraction(
         async () => {
           perf.end();
           return {
             success: true,
+            alreadyForeground: true,
             packageName,
             activityName,
             userId: targetUserId,
@@ -834,11 +839,24 @@ export class LaunchApp extends BaseVisualChange {
           signal,
           skipPreviousObserve: true,
           skipUiStability: skipUiStability ?? false,
+          deferPostActionScreenshot: true,
         },
       );
-      result.error = "App is already in foreground";
-      result.success = true;
-      return result;
+      // The foreground read and this observation are two separate device reads,
+      // so another app or a system surface can take over in between. Reconcile
+      // through the SAME validation the launch path uses rather than asserting
+      // `alreadyForeground: true` over a capture of a different app, which
+      // `buildLaunchAppResponse` would surface as a clean success with a
+      // mismatched `observedAppId` and no error (issue #6868 review).
+      const settledResult = await this.ensureLaunchObservationMatchesPackage(
+        result,
+        packageName,
+        undefined,
+        undefined,
+        signal,
+      );
+      await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
+      return settledResult;
     }
 
     logger.info(`[LaunchApp] Proceeding with app launch`);

@@ -2158,7 +2158,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:compileDebugKotlin :junit-runner:compileKotlin :playground:app:compileDebugKotlin"
+          gradle-tasks: ":control-proxy:compileDebugKotlin :junit-runner:compileKotlin :junit-runner:compileTestKotlin :playground:app:compileDebugKotlin :playground:app:compileDebugUnitTestKotlin"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

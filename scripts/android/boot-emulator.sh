@@ -50,7 +50,7 @@ if [[ "${boot_status}" -ne 0 ]]; then
   exit "${boot_status}"
 fi
 
-if ! device_id="$(jq -er '.deviceId' "${boot_stdout_log}")"; then
+if ! device_id="$(jq -er '.deviceId | strings | select(length > 0)' "${boot_stdout_log}")" || [[ -z "${device_id//[[:space:]]/}" ]]; then
   "${script_dir}/collect-emulator-diagnostics.sh" "${diagnostics_dir}" \
     "AutoMobile Android boot returned no usable deviceId."
   echo "error: AutoMobile Android boot returned no deviceId" >&2

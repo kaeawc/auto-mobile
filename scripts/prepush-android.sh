@@ -31,22 +31,36 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-repo_root="$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
+
+repo_root="$(vcs_root)"
 if [[ "${PWD}" != "${repo_root}" ]]; then
   echo "error: run scripts/prepush-android.sh from the repository root" >&2
   exit 2
 fi
 
 if [[ -z "${base_ref}" ]]; then
-  base_ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || printf '%s' origin/main)"
+  # shellcheck disable=SC2310 # A false result selects the Git default below.
+  if vcs_uses_jj; then
+    base_ref="origin/main"
+  else
+    base_ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || printf '%s' origin/main)"
+  fi
 fi
-merge_base="$(git merge-base "${base_ref}" HEAD)"
+base_ref="$(vcs_base_ref "${base_ref}")"
+# shellcheck disable=SC2310 # A false result is reported as an invalid base.
+if ! vcs_base_exists "${base_ref}"; then
+  echo "error: base ref does not exist: ${base_ref}" >&2
+  exit 2
+fi
 
 android_changes=()
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && android_changes+=("${changed_file}")
 done < <(
-  git diff --name-only "${merge_base}" HEAD -- \
+  # shellcheck disable=SC2310 # Diff failure is surfaced by the caller's empty result gate.
+  vcs_changed_files_since_merge_base "${base_ref}" \
     'android/**' \
     'scripts/android/**' \
     '.github/actions/android-emulator/**' \
@@ -57,7 +71,7 @@ done < <(
 )
 
 if [[ "${#android_changes[@]}" -eq 0 ]]; then
-  echo "No Android-relevant changes since ${merge_base}; nothing to check."
+  echo "No Android-relevant changes since ${base_ref}; nothing to check."
   exit 0
 fi
 
@@ -89,11 +103,11 @@ if [[ "${#kotlin_changes[@]}" -eq 0 ]]; then
   exit 0
 fi
 
-echo "Android pre-push smoke check against ${base_ref} (${merge_base})."
+echo "Android pre-push smoke check against ${base_ref}."
 echo "Scoped Detekt is a smoke check, not a substitute for the full-tree CI Detekt job."
 
 echo "==> ktfmt"
-ONLY_CHANGED_SINCE_SHA="${merge_base}" bash scripts/ktfmt/validate_ktfmt.sh
+ONLY_CHANGED_SINCE_SHA="${base_ref}" bash scripts/ktfmt/validate_ktfmt.sh
 
 declare -a modules=()
 for changed_file in "${kotlin_changes[@]}"; do

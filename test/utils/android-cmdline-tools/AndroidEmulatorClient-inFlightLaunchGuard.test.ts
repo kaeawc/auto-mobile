@@ -212,6 +212,47 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     expect(harness.spawnedArgs).toHaveLength(1);
   });
 
+  test("does not spawn while a reserved launch is live but ADB has not listed it yet", async () => {
+    const harness = createHarness();
+
+    const firstLaunch = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(1);
+    // Startup validation resolves off the first emulator output marker, which
+    // arrives seconds before adb names (or even lists) the runtime. The
+    // name-level in-flight claim is released here, so the live console-port
+    // reservation is the only evidence left that this AVD is coming up.
+    completeStartupValidation(harness.children[0]);
+    await firstLaunch;
+
+    // The scan is still EMPTY: the emulator has not reached adb at all.
+    expect(harness.adbFactory.devices).toHaveLength(0);
+
+    const second = await adoptPathWithin(
+      harness.client.startEmulator(AVD),
+      "the second startEmulator did not take the adopt path",
+    );
+
+    expect(second).toBeNull();
+    expect(harness.spawnedArgs).toHaveLength(1);
+  });
+
+  test("a reservation whose child has exited stops blocking later launches", async () => {
+    const harness = createHarness();
+
+    const firstLaunch = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(1);
+    completeStartupValidation(harness.children[0]);
+    await firstLaunch;
+    harness.children[0].emit("exit", 0, null);
+
+    const second = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(2);
+    completeStartupValidation(harness.children[1]);
+
+    expect(await second).toBe(harness.children[1]);
+    expect(harness.spawnedArgs).toHaveLength(2);
+  });
+
   test("an Unknown serial this process did NOT reserve is not mistaken for the target AVD", async () => {
     const harness = createHarness();
     harness.adbFactory.devices = [unknownEmulator("emulator-5560")];

@@ -19,8 +19,10 @@ export interface RunningAvdAdvertisementReader {
   /**
    * Whether a LIVE process on this host advertises `avdName` as running.
    *
-   * Throws on an unexpected read failure so the caller can surface it per the
+   * Throws when the SCAN itself fails so the caller can surface it per the
    * error-handling convention instead of collapsing every failure into `false`.
+   * A single unreadable advertisement is warned about and skipped, so one stale
+   * entry cannot hide a live target (#6407).
    */
   isAvdAdvertisedRunning(avdName: string): Promise<boolean>;
 }
@@ -44,16 +46,20 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
       return false;
     }
 
-    const pidFiles = readdirSync(this.runningDir).filter(
-      (file) => file.startsWith("pid_") && file.endsWith(".ini"),
-    );
+    const pidFiles = readdirSync(this.runningDir)
+      .filter((file) => file.startsWith("pid_") && file.endsWith(".ini"))
+      // Sorted so a scan reads the directory in the same order every time.
+      .sort();
 
     for (const file of pidFiles) {
       const pid = parsePidFromAdvertisementFileName(file);
       if (pid === undefined) {
         continue;
       }
-      const content = readFileSync(join(this.runningDir, file), "utf-8");
+      const content = this.readAdvertisement(file);
+      if (content === undefined) {
+        continue;
+      }
       if (content.match(/^avd\.id=(.+)$/m)?.[1] !== avdName) {
         continue;
       }
@@ -65,6 +71,22 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
     }
 
     return false;
+  }
+
+  /**
+   * One advertisement's contents, or `undefined` when that single entry cannot
+   * be read. Entries are isolated on purpose: a pid file that disappears
+   * between the directory listing and the read is routine, and letting it throw
+   * would hide every advertisement after it in the scan and report the AVD as
+   * not running (#6407).
+   */
+  private readAdvertisement(file: string): string | undefined {
+    try {
+      return readFileSync(join(this.runningDir, file), "utf-8");
+    } catch (error) {
+      logger.warn(`Failed to read running-AVD advertisement ${file}: ${error}`, error);
+      return undefined;
+    }
   }
 }
 

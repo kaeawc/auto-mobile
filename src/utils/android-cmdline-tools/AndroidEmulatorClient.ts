@@ -453,6 +453,16 @@ function emulatorDeviceIdForConsolePort(consolePort: number): string {
   return `emulator-${consolePort}`;
 }
 
+/**
+ * Whether a spawned emulator child is still running. A ChildProcess reports a
+ * code or a signal once it has exited and leaves both unset until then, so this
+ * is the guard that stops a reservation whose `exit` event never arrived from
+ * blocking every later launch of that AVD.
+ */
+function isLaunchChildAlive(child: ChildProcess): boolean {
+  return (child.exitCode ?? null) === null && (child.signalCode ?? null) === null;
+}
+
 function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
   return deviceId === undefined || deviceId.startsWith("emulator-");
 }
@@ -1670,6 +1680,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         );
         return true;
       }
+      const preAdbLaunchSerial = this.findLiveReservationAwaitingAdb(avdName, runningEmulators);
+      if (preAdbLaunchSerial) {
+        logger.info(
+          `AVD '${avdName}' is already starting on ${preAdbLaunchSerial} (this process holds a live reservation adb has not listed yet) - waiting for it to be ready`,
+        );
+        return true;
+      }
       if (await this.isAvdStarting(avdName)) {
         logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
         return true;
@@ -2644,6 +2661,39 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         reservedSerials.has(emulator.deviceId) &&
         this.isUnknownEmulatorName(emulator.name, emulator.deviceId),
     )?.deviceId;
+  }
+
+  /**
+   * The serial this process reserved for `avdName` whose emulator is alive but
+   * has NOT appeared in the adb scan yet.
+   *
+   * Startup validation resolves off the first emulator output marker, which the
+   * emulator prints seconds before adb lists the runtime, and the name-level
+   * in-flight claim is dropped at that point. In that gap
+   * `findReservedLaunchSerial` has nothing in the scan to correlate against, so
+   * the reservation — held only from the spawn until the child exits — is the
+   * one piece of evidence that this AVD is already coming up (#6407).
+   *
+   * A reserved serial the scan DOES list is deliberately not handled here: it
+   * is either the mid-boot placeholder `findReservedLaunchSerial` already
+   * matches, or a serial that has resolved to some other AVD, which makes the
+   * reservation stale rather than evidence about this one.
+   */
+  private findLiveReservationAwaitingAdb(
+    avdName: string,
+    runningEmulators: readonly BootedDevice[],
+  ): string | undefined {
+    const scannedDeviceIds = new Set(runningEmulators.map((emulator) => emulator.deviceId));
+    for (const [child, reservation] of AndroidEmulatorClient.reservedLaunchDeviceIds) {
+      if (
+        reservation.avdName === avdName &&
+        !scannedDeviceIds.has(reservation.deviceId) &&
+        isLaunchChildAlive(child)
+      ) {
+        return reservation.deviceId;
+      }
+    }
+    return undefined;
   }
 
   private recordReservedEmulatorDeviceId(

@@ -21,6 +21,8 @@ export interface CtrlProxyExternalProcess {
   readonly port: number;
 }
 
+export type RunnerOwnership = "owned" | "foreign" | "absent";
+
 interface ProcessClientOptions {
   readonly releaseAttempts?: number;
   readonly releaseGraceMs?: number;
@@ -189,20 +191,31 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  /** Strict shutdown ownership proof; failed inspection remains inconclusive to its caller. */
-  async isOwnedRunnerAlive(pid: number, deviceId: string, deadline?: number): Promise<boolean> {
+  /** Strict shutdown ownership classification; failed inspection remains inconclusive. */
+  async checkRunnerOwnership(
+    pid: number,
+    deviceId: string,
+    deadline?: number,
+  ): Promise<RunnerOwnership> {
     // Both launch paths spawn xcodebuild directly. Parent PID plus the device
     // argument distinguishes another daemon's otherwise identical runner.
     const process = await this.getProcessInfo(pid, deadline, {
       strict: true,
       includeEnvironment: false,
     });
-    return (
-      !!process &&
-      process.ppid === this.ownerPid &&
+    if (!process) {
+      return "absent";
+    }
+    return process.ppid === this.ownerPid &&
       this.isCtrlProxyRunnerCommand(process.command) &&
       this.hasDeviceIdentity(process.command, deviceId)
-    );
+      ? "owned"
+      : "foreign";
+  }
+
+  /** Preserves the existing boolean alive-and-owned contract for other callers. */
+  async isOwnedRunnerAlive(pid: number, deviceId: string, deadline?: number): Promise<boolean> {
+    return (await this.checkRunnerOwnership(pid, deviceId, deadline)) === "owned";
   }
 
   async findDescendantProcessIds(
@@ -316,7 +329,7 @@ export class IOSCtrlProxyProcessClient {
       return false;
     }
     try {
-      return !(await this.isOwnedRunnerAlive(pid, expectedDeviceId, deadline));
+      return (await this.checkRunnerOwnership(pid, expectedDeviceId, deadline)) === "foreign";
     } catch (error) {
       this.remainingTimeoutMs(deadline);
       logger.debug(`[IOSCtrlProxy] Runner ownership remains inconclusive: ${error}`);

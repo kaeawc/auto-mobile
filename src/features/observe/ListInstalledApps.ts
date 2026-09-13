@@ -215,14 +215,17 @@ export class ListInstalledApps {
       return null;
     }
 
-    const lastVerifiedAt = await this.installedAppsRepository.getLatestVerification(
+    // Oldest row wins: the TTL has to cover every row this read will return, so
+    // a single package-event write cannot extend it for rows it never verified
+    // (issue #6639).
+    const cacheVerifiedAt = await this.installedAppsRepository.getCacheVerifiedAt(
       this.device.deviceId,
     );
-    if (!lastVerifiedAt) {
+    if (!cacheVerifiedAt) {
       return null;
     }
 
-    const cacheAgeMs = this.timer.now() - lastVerifiedAt;
+    const cacheAgeMs = this.timer.now() - cacheVerifiedAt;
     if (cacheAgeMs > INSTALLED_APPS_CACHE_TTL_MS) {
       return null;
     }

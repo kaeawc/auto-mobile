@@ -201,3 +201,174 @@ test("an adb listing that still reports transport_id does not affect the kill id
     expectNoTransportOrRebootCommand(adb.getExecutedArgv());
   })();
 });
+
+// `force` (#6864) carries the caller's "act on whatever occupies this serial"
+// contract down to the platform kill. It bypasses ONLY the duplicate name
+// comparison -- the deviceTools layer has already decided not to establish an
+// identity -- and leaves serial selection and the `emu kill` primitive exactly
+// as they are.
+test("force kills a discovered replacement AVD on the expected serial", async () => {
+  const { client, adb, factory } = fixture({ ...original, name: "Pixel_9" });
+  // The checked target comes back under the placeholder: a forced discovery is
+  // serial-only, so no runtime was asked to name itself. That is the honest
+  // answer, and downstream both `isSameBootedDeviceIdentity` and
+  // `isConfirmedDeviceReplacement` read the placeholder as no information
+  // rather than as an identity.
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+    name: "Unknown (emulator-5554)",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+  expect(factory.getCalls().at(-1)?.device?.deviceId).toBe(original.deviceId);
+  expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+});
+
+test("force kills when both the requested and the discovered name are the placeholder", async () => {
+  const placeholder: BootedDevice = {
+    ...original,
+    name: "Unknown (emulator-5554)",
+  };
+  const { client, adb } = fixture(placeholder);
+  await expect(client.killDevice(placeholder, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("force kills when the request carries a pooled label the discovery cannot confirm", async () => {
+  // The teardown path rewrites the target's name to the pooled AVD label before
+  // the kill, so a wedged console produces label-vs-placeholder here.
+  const { client, adb } = fixture({ ...original, name: "Unknown (emulator-5554)" });
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("force still refuses when the expected emulator is no longer running", async () => {
+  // Serial selection is not an identity check: with nothing on the serial there
+  // is nothing for "kill whatever occupies this serial" to act on.
+  const { client, adb } = fixture({ ...original, deviceId: "emulator-5556" });
+  await expect(client.killDevice(original, { force: true })).rejects.toThrow("is not running");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("force does not cross platforms", async () => {
+  const { client, adb } = fixture(original);
+  await expect(
+    client.killDevice({ ...original, platform: "ios" } as BootedDevice, { force: true }),
+  ).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("an unforced kill is unchanged by the new option", async () => {
+  const { client, adb } = fixture({ ...original, name: "Pixel_9" });
+  await expect(client.killDevice(original, { force: false })).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+/**
+ * The per-emulator AVD-name probe budget inside
+ * `getBootedDevicesWithDiagnostics`. A wedged console spends all of it and
+ * answers nothing.
+ */
+const AVD_NAME_PROBE_BUDGET_MS = 2000;
+
+/**
+ * Every attached emulator has a wedged console: `emu avd name` (and the
+ * `getprop` fallback) burn their whole budget and then fail. `setCurrentTime`
+ * moves the clock without firing the client's own pending timeouts, so the cost
+ * is charged exactly the way a stalled adb round trip charges it.
+ */
+function wedgedConsoleFactory(attached: string[]): {
+  factory: AdbClientFactory;
+  commands: string[][];
+  timer: FakeTimer;
+} {
+  const commands: string[][] = [];
+  const timer = new FakeTimer();
+  const deviceLines = attached
+    .map((serial, index) => `${serial} device transport_id:${index + 1}\n`)
+    .join("");
+  const factory: AdbClientFactory = {
+    create: (device) =>
+      new AdbClient(
+        device ?? null,
+        async (_file: string, args: string[], _maxBuffer?: number) => {
+          commands.push(args);
+          const joined = args.join(" ");
+          if (joined === "devices -l") {
+            const stdout = `List of devices attached\n${deviceLines}`;
+            return {
+              stdout,
+              stderr: "",
+              toString: () => stdout,
+              trim: () => stdout.trim(),
+              includes: (part: string) => stdout.includes(part),
+            };
+          }
+          if (joined.includes("avd name") || joined.includes("ro.boot.qemu.avd_name")) {
+            timer.setCurrentTime(timer.now() + AVD_NAME_PROBE_BUDGET_MS);
+            throw new Error("emulator console did not respond");
+          }
+          return {
+            stdout: "",
+            stderr: "",
+            toString: () => "",
+            trim: () => "",
+            includes: () => false,
+          };
+        },
+        null,
+        undefined,
+        timer,
+      ),
+  };
+  return { factory, commands, timer };
+}
+
+function nameProbes(commands: string[][]): string[][] {
+  return commands.filter((args) => {
+    const joined = args.join(" ");
+    return joined.includes("avd name") || joined.includes("ro.boot.qemu.avd_name");
+  });
+}
+
+// The force flag is worthless if the discovery that precedes it spends the
+// caller's whole deadline on the very probes force exists to skip: with three
+// wedged consoles the sequential enrichment alone costs 6s, so a 5s forced
+// teardown never reaches `emu kill`
+// ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+test("a forced kill dispatches within its deadline with several wedged consoles", async () => {
+  const { factory, commands, timer } = wedgedConsoleFactory([
+    "emulator-5554",
+    "emulator-5556",
+    "emulator-5558",
+  ]);
+  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const startedAt = timer.now();
+
+  await client.killDevice(original, { force: true });
+
+  expect(nameProbes(commands)).toEqual([]);
+  expect(timer.now() - startedAt).toBeLessThan(5000);
+  expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
+    ["-s", "emulator-5554", "emu", "kill"],
+  ]);
+});
+
+test("an unforced kill still enriches discovery with the AVD-name probe", async () => {
+  const { factory, commands, timer } = wedgedConsoleFactory([
+    "emulator-5554",
+    "emulator-5556",
+    "emulator-5558",
+  ]);
+  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const startedAt = timer.now();
+
+  await expect(client.killDevice(original)).rejects.toThrow(/identity|could not name itself/);
+
+  expect(nameProbes(commands).length).toBe(3);
+  expect(timer.now() - startedAt).toBe(3 * AVD_NAME_PROBE_BUDGET_MS);
+  expect(commands.some((args) => args.slice(-2).join(" ") === "emu kill")).toBe(false);
+});

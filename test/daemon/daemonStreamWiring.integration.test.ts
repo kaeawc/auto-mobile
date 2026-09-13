@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import {
+  OBSERVATION_BATCH_HEADROOM_MS,
+  PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+} from "../../src/daemon/observationRequestBatch";
 import type {
   DeviceSessionRecord,
   DeviceSessionRegistry,
@@ -69,6 +73,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   screenshotCadenceCallbackInstalled = false;
   hierarchyCadenceCallbackInstalled = false;
   observationCallbackInstalled = false;
+  observationRequestTimeoutMs: number | undefined;
   navigationRequestCallbackInstalled = false;
   storageSubscriptionCallbackInstalled = false;
 
@@ -97,8 +102,9 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.hierarchyCadenceCallbackInstalled = true;
   }
 
-  setOnObservationRequested(_handler: unknown): void {
+  setOnObservationRequested(_handler: unknown, timeoutMs?: number): void {
     this.observationCallbackInstalled = true;
+    this.observationRequestTimeoutMs = timeoutMs;
   }
 
   setOnNavigationGraphRequested(_handler: unknown): void {
@@ -184,6 +190,9 @@ describe("Daemon stream wiring", () => {
       expect(replacementStream.screenshotCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.hierarchyCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.observationCallbackInstalled).toBe(true);
+      expect(replacementStream.observationRequestTimeoutMs).toBe(
+        PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS,
+      );
       expect(replacementStream.navigationRequestCallbackInstalled).toBe(true);
       expect(replacementStream.storageSubscriptionCallbackInstalled).toBe(true);
     } finally {

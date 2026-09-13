@@ -166,7 +166,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): TelemetryFilter {
-    const deviceSessionUuid = (request.deviceSessionUuid as string) ?? null;
+    // Validated, not cast: a blank/non-string key would otherwise become a filter that
+    // matches nothing while the subscribe call still acks success (#6676).
+    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
     return {
       category: (request.category as string) ?? null,
       deviceSessionUuid,

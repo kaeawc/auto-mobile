@@ -6941,6 +6941,61 @@ describe("DevicePool", () => {
       ]);
     });
 
+    test("does not treat an intentionally unenriched placeholder as identity evidence", async () => {
+      const cancellations: { sessionId: string }[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId) => {
+          cancellations.push({ sessionId });
+          return 1;
+        },
+      );
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        "emulator-5554",
+        "android",
+        androidImage,
+      );
+
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved("emulator-5554")],
+        "test:serial-only",
+        { namesResolved: false },
+      );
+
+      const pooled = devicePool.getDevice("emulator-5554");
+      expect(pooled?.identityUnresolved).toBeUndefined();
+      expect(pooled?.sessionId).toBe("owner-session");
+      expect(cancellations).toEqual([]);
+    });
+
+    test("still quarantines a placeholder when name discovery ran", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved("emulator-5554")],
+        "test:name-aware",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+    });
+
     // Concurrent discovery calls finish out of order, so the observation a
     // funnel folds in is not necessarily the newest one. A quarantine entered by
     // the NEWEST evidence must not be lifted by an older listing that happened to

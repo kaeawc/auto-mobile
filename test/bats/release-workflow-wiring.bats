@@ -746,6 +746,7 @@ wiring_requires_yq() {
 # backoff first; the workflow's job must bound that wait so a registry that
 # never serves the version cannot hold a runner open.
 @test "release.yml bounds the Homebrew publish job with a timeout" {
+  wiring_requires_yq
   workflow=".github/workflows/release.yml"
   run yq -r '.jobs."publish-homebrew"."timeout-minutes"' "$workflow"
   [ "$status" -eq 0 ]

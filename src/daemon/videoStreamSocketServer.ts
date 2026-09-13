@@ -25,6 +25,7 @@ import {
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
+import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import {
   encodeDroppedFrames,
   encodePacket,
@@ -683,8 +684,27 @@ export function setVideoStreamSocketServerForTesting(server: VideoStreamSocketSe
  * Device resolution for the relay: an explicit id must match a connected device, and an omitted id
  * is only unambiguous when exactly one device is connected.
  */
-async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
-  const devices = await DeviceSessionManager.getInstance().detectConnectedPlatforms();
+/**
+ * Pick the device this subscribe streams from, and fold the discovery it ran
+ * into the pool first.
+ *
+ * FUNNEL 1. This resolver runs its OWN fresh discovery, so it can be the first
+ * path to see the `Unknown (<serial>)` placeholder or a different AVD on a
+ * reused serial. Without folding that observation in, BOTH admission checks in
+ * `handleSubscribe` -- the one on the named serial and the one on the resolved
+ * device -- re-read pool state from BEFORE this discovery and `attach` starts a
+ * capture on whichever runtime now answers
+ * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ *
+ * Reconciling happens BEFORE the serial is matched, so an observation about some
+ * OTHER serial is still folded in even when this request goes on to fail.
+ */
+export async function resolveVideoStreamDevice(
+  deviceSessionManager: Pick<DeviceSessionManager, "detectConnectedPlatforms">,
+  deviceId?: string,
+): Promise<BootedDevice> {
+  const devices = await deviceSessionManager.detectConnectedPlatforms();
+  await reconcileDiscoveryObservation(devices, "video-stream-resolve");
 
   if (deviceId) {
     const match = devices.find((device) => device.deviceId === deviceId);
@@ -705,6 +725,10 @@ async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
     );
   }
   return devices[0];
+}
+
+async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
+  return await resolveVideoStreamDevice(DeviceSessionManager.getInstance(), deviceId);
 }
 
 function defaultDependencies(): VideoStreamSocketServerDependencies {

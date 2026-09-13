@@ -526,6 +526,60 @@ describe("ViewHierarchy", function () {
         getInstanceSpy.mockRestore();
       }
     });
+
+    test("fences the iOS hierarchy read with the caller's abort signal (#6890)", async function () {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      let receivedSignal: AbortSignal | undefined;
+      const fakeIosClient = {
+        getLatestHierarchy: (
+          _waitForFresh?: boolean,
+          _timeout?: number,
+          _perf?: unknown,
+          _skipWaitForFresh?: boolean,
+          _minTimestamp?: number,
+          signal?: AbortSignal,
+        ) => {
+          receivedSignal = signal;
+          // A wedged CtrlProxy: this settles ONLY when the caller cancels.
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => reject(new Error("Operation cancelled")),
+              { once: true },
+            );
+          });
+        },
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
+
+      try {
+        const viewHierarchyWithMocks = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+        );
+        const controller = new AbortController();
+        const pending = viewHierarchyWithMocks.getViewHierarchy(
+          undefined,
+          undefined,
+          false,
+          0,
+          controller.signal,
+        );
+        controller.abort();
+
+        await expect(pending).rejects.toThrow("Operation cancelled");
+        expect(receivedSignal).toBe(controller.signal);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
   });
 
   describe("FilterViewHierarchy Tests", function () {

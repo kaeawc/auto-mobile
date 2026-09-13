@@ -930,7 +930,7 @@ export async function queryInstalledApps(
       `Failed to list installed apps for device ${device.deviceId}: the app-listing command did not complete successfully`,
     );
   }
-  assertRequestedTypeIsAnswerable(device.deviceId, options, cacheEntry);
+  assertRequestedTypeIsAnswerable(device.deviceId, device.platform, options, cacheEntry);
   const effectiveType = resolveEffectiveAppsQueryType(options.type, cacheEntry, options.profile);
   const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
 
@@ -1004,6 +1004,7 @@ export async function queryInstalledApps(
  */
 function assertRequestedTypeIsAnswerable(
   deviceId: string,
+  platform: Platform,
   options: AppsQueryOptions,
   cacheEntry: AppsCacheEntry,
 ): void {
@@ -1022,6 +1023,16 @@ function assertRequestedTypeIsAnswerable(
     options.type === "launchable" &&
     isLaunchabilityUnknownForQuery(cacheEntry, options.profile)
   ) {
+    if (platform === "ios") {
+      throw new Error(
+        `Cannot filter by type=launchable for device ${deviceId}${
+          options.profile === undefined ? "" : ` profile ${options.profile}`
+        }: simctl's app listing omitted ApplicationType for every app on this device, so ` +
+          "launchability could not be determined. Re-run after the simulator finishes booting, " +
+          `or check \`xcrun simctl listapps ${deviceId}\` output directly. Use type=user, ` +
+          "type=system or type=all.",
+      );
+    }
     throw new Error(
       `Cannot filter by type=launchable for device ${deviceId}${
         options.profile === undefined ? "" : ` profile ${options.profile}`

@@ -181,6 +181,32 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     expect(content.totalCount).toBe(1);
   });
 
+  test("an explicit type=launchable reports missing simctl classification", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.myapp" },
+          { bundleIdentifier: "com.apple.mobilesafari" },
+        ],
+        successful: true,
+      }),
+    }));
+
+    const promise = queryInstalledApps({
+      deviceId: simulatorDevice.deviceId,
+      type: "launchable",
+    });
+
+    await expect(promise).rejects.toThrow(/ApplicationType.*simctl/is);
+    await promise.catch((error: Error) => {
+      expect(error.message).not.toMatch(/CtrlProxy/i);
+      expect(error.message).not.toMatch(/cmd package/i);
+    });
+  });
+
   test('an omitted type filter reports and applies the documented "launchable" default (#6798)', async () => {
     // Control case: reliable classification (simulator ApplicationType) keeps
     // reporting the effective type honestly — only the physical-device,

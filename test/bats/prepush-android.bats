@@ -15,6 +15,7 @@ copy_prepush_fixture() {
 teardown() {
   cd "${REPO_ROOT}"
   rm -rf "${fixture_repo:-}"
+  rm -rf "${symlink_parent:-}"
   rm -f "${invocations_file:-}"
 }
 
@@ -41,6 +42,67 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"No Android-relevant changes"* ]]
   [[ "$output" == *"nothing to check"* ]]
+}
+
+@test "runs full-scope Detekt for a Detekt config-only change" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/config/detekt"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  chmod +x "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'config: initial' > "${fixture_repo}/android/config/detekt/detekt.yml"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial Detekt config"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' 'config: changed' > android/config/detekt/detekt.yml
+  git add android/config/detekt/detekt.yml
+  git commit -qm "change Detekt config"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" \
+    bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx 'detektMain' "${invocations_file}"
+  grep -qx 'detektTest' "${invocations_file}"
+}
+
+@test "accepts a repository root reached through a symlink" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  symlink_parent="$(cd "$(mktemp -d)" && pwd -P)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android"
+  copy_prepush_fixture
+  ln -s "${fixture_repo}" "${symlink_parent}/checkout"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial fixture"
+
+  cd "${symlink_parent}/checkout"
+  run env ANDROID_PREPUSH_BASE_REF=HEAD bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"run scripts/prepush-android.sh from the repository root"* ]]
 }
 
 @test "fails when changed-file discovery has no merge base" {

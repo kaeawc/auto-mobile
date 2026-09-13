@@ -35,7 +35,7 @@ done
 source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
 
 repo_root="$(vcs_root)"
-if [[ "${PWD}" != "${repo_root}" ]]; then
+if [[ "$(pwd -P)" != "${repo_root}" ]]; then
   echo "error: run scripts/prepush-android.sh from the repository root" >&2
   exit 2
 fi
@@ -82,8 +82,12 @@ if [[ "${#android_changes[@]}" -eq 0 ]]; then
 fi
 
 root_gradle_changed=false
+detekt_config_changed=false
 for changed_file in "${android_changes[@]}"; do
   case "${changed_file}" in
+    android/config/detekt/*)
+      detekt_config_changed=true
+      ;;
     android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*)
       root_gradle_changed=true
       ;;
@@ -106,6 +110,15 @@ while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && kotlin_changes+=("${changed_file}")
 done < <(printf '%s\n' "${android_changes[@]+"${android_changes[@]}"}" | grep -E '^android/.*\.(kt|kts)$' || true)
 if [[ "${#kotlin_changes[@]}" -eq 0 ]]; then
+  if [[ "${detekt_config_changed}" == "true" ]]; then
+    echo "==> full-scope Detekt (Detekt config changed)"
+    (cd android && ./gradlew detektMain detektTest)
+    if [[ "${root_gradle_changed}" == "true" ]]; then
+      validate_root_gradle_configuration
+    fi
+    echo "No changed Kotlin files; full-scope Detekt ran; ktfmt, compile, and tests are no-ops."
+    exit 0
+  fi
   if [[ "${root_gradle_changed}" == "true" ]]; then
     validate_root_gradle_configuration
     exit 0
@@ -142,6 +155,15 @@ done < <(printf '%s\n' "${modules[@]+"${modules[@]}"}" | sort -u)
 modules=("${unique_modules[@]+"${unique_modules[@]}"}")
 
 if [[ "${#modules[@]}" -eq 0 ]]; then
+  if [[ "${detekt_config_changed}" == "true" ]]; then
+    echo "==> full-scope Detekt (Detekt config changed)"
+    (cd android && ./gradlew detektMain detektTest)
+    if [[ "${root_gradle_changed}" == "true" ]]; then
+      validate_root_gradle_configuration
+    fi
+    echo "No changed Kotlin modules; full-scope Detekt ran; compile and tests are no-ops."
+    exit 0
+  fi
   if [[ "${root_gradle_changed}" == "true" ]]; then
     validate_root_gradle_configuration
     exit 0

@@ -32,6 +32,12 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
 import {
+  attributeRowByDumpsys,
+  parseDumpsysNotificationRecords,
+  type DumpsysNotificationRecord,
+} from "./system-tray/notificationDumpsys";
+import { errorMessage } from "../utils/describeUnknownError";
+import {
   SYSTEM_TRAY_PACKAGE,
   SYSTEM_TRAY_RESOURCE_ID_HINTS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
@@ -1439,6 +1445,9 @@ export const swipeElement = async (device: BootedDevice, element: Element): Prom
   await getDetector(device).swipeElement(element);
 };
 
+/** Which evidence class attributed a listed row to its app (#6875). */
+export type TrayOwnershipEvidence = "header" | "dumpsys";
+
 export interface ListedTrayNotification {
   id: string | null;
   appId: string;
@@ -1448,6 +1457,7 @@ export interface ListedTrayNotification {
   actions: string[];
   texts: string[];
   inGroup: boolean;
+  ownership: TrayOwnershipEvidence;
 }
 
 // Read semantic Android notification fields, preserving custom-layout text as a
@@ -1524,7 +1534,8 @@ const readTrayNotificationFields = (root: any) => {
 };
 
 interface TrayObservedRow {
-  notification: Omit<ListedTrayNotification, "appId">;
+  // An observed row has no attribution yet: ownership is decided per request.
+  notification: Omit<ListedTrayNotification, "appId" | "ownership">;
   bounds?: Element["bounds"];
 }
 
@@ -1647,6 +1658,89 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
     }),
   );
 
+// SystemUI omits the per-row app-name header for the Silent (low-importance)
+// section, so those rows carry no ownership evidence in the shade at all. The
+// notification service does know who posted them; `--noredact` is what exposes
+// the extras values the rendered row can be correlated against. A redacted or
+// unavailable dump yields no records, which leaves such rows unattributed
+// rather than attributed by guess.
+const readDumpsysNotificationRecords = async (
+  adb: SystemTrayAdb,
+  signal?: AbortSignal,
+): Promise<DumpsysNotificationRecord[]> => {
+  try {
+    const result = await adb.executeCommand(
+      "shell dumpsys notification --noredact",
+      undefined,
+      undefined,
+      true,
+      signal,
+    );
+    return parseDumpsysNotificationRecords(result.stdout ?? "");
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(
+      `[systemTray] could not read dumpsys notification for shade ownership: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
+  }
+};
+
+type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";
+
+const attributeTrayRow = (
+  row: TrayObservedRow,
+  appId: string,
+  appLabel: string | null,
+  records: readonly DumpsysNotificationRecord[],
+): TrayRowAttribution => {
+  if (row.notification.appLabel !== null) {
+    return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
+  }
+  const owner = attributeRowByDumpsys(records, new Set(row.notification.texts));
+  if (owner === null) {
+    return "unknown";
+  }
+  return owner === appId ? "dumpsys" : "other";
+};
+
+// Keep every app's rows available to align pages, then expose only rows an
+// evidence class actually attributes. Message text is not ownership evidence,
+// so a row nothing can attribute is counted rather than claimed or hidden:
+// "0 notifications" must stay distinguishable from "0 rows we could not read".
+const attributeTrayRows = (
+  rows: TrayObservedRow[],
+  appId: string,
+  appLabel: string | null,
+  records: readonly DumpsysNotificationRecord[],
+): { notifications: ListedTrayNotification[]; unattributedRows: number } => {
+  const notifications: ListedTrayNotification[] = [];
+  const nativeIds = new Map<string, number>();
+  let unattributedRows = 0;
+  for (const row of rows) {
+    const attribution = attributeTrayRow(row, appId, appLabel, records);
+    if (attribution === "unknown") {
+      unattributedRows++;
+      continue;
+    }
+    if (attribution === "other") {
+      continue;
+    }
+    const notification = { ...row.notification, appId, ownership: attribution };
+    const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
+    if (previousIndex !== undefined) {
+      notifications[previousIndex] = notification;
+    } else {
+      if (notification.id !== null) {
+        nativeIds.set(notification.id, notifications.length);
+      }
+      notifications.push(notification);
+    }
+  }
+  return { notifications, unattributedRows };
+};
+
 /** Bounded UI inventory, in encounter order, with no inferred posting times. */
 // eslint-disable-next-line complexity -- bounded scan coordinates shade state, pagination, and overlap.
 export const listSystemTrayNotifications = async (
@@ -1658,6 +1752,7 @@ export const listSystemTrayNotifications = async (
   signal?: AbortSignal,
 ): Promise<{
   notifications: ListedTrayNotification[];
+  unattributedRows: number;
   observation: ObserveResult;
   swipes: number;
   order: "encounter";
@@ -1731,25 +1826,13 @@ export const listSystemTrayNotifications = async (
       },
     );
   }
-  // Keep every app's rows available to align pages, then expose only rows
-  // attributed by the verified header. Message text is not ownership evidence.
-  const notifications: ListedTrayNotification[] = [];
-  const nativeIds = new Map<string, number>();
-  for (const row of rows) {
-    if (!appLabel || row.notification.appLabel !== appLabel) {
-      continue;
-    }
-    const notification = { ...row.notification, appId };
-    const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
-    if (previousIndex !== undefined) {
-      notifications[previousIndex] = notification;
-    } else {
-      if (notification.id !== null) {
-        nativeIds.set(notification.id, notifications.length);
-      }
-      notifications.push(notification);
-    }
-  }
+  signal?.throwIfAborted();
+  // Only pay for the dump when the shade actually rendered a row the header
+  // rule cannot attribute.
+  const records = rows.some((row) => row.notification.appLabel === null)
+    ? await readDumpsysNotificationRecords(adbFactory(device), signal)
+    : [];
+  const { notifications, unattributedRows } = attributeTrayRows(rows, appId, appLabel, records);
   signal?.throwIfAborted();
   await detector.collapseTray();
   signal?.throwIfAborted();
@@ -1758,7 +1841,7 @@ export const listSystemTrayNotifications = async (
     await detector.getObservationTimestamp(),
     signal,
   );
-  return { notifications, observation, swipes, order: "encounter" };
+  return { notifications, unattributedRows, observation, swipes, order: "encounter" };
 };
 
 /** Verify label ownership against a successful, fresh installed-package inventory. */

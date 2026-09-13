@@ -549,3 +549,109 @@ describe("systemTray list", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 });
+
+// The Silent (low-importance) section renders rows without the per-row app-name
+// header, so the shade alone cannot say who posted them (#6875).
+describe("systemTray list silent-section ownership", () => {
+  const WELLBEING = "com.google.android.apps.wellbeing";
+  const MESSAGING = "com.google.android.apps.messaging";
+  const SLEEP_TITLE = "Need better sleep?";
+  const SLEEP_BODY = "Use Bedtime mode to silence your phone and keep the screen dark at bedtime";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  // Exactly the two rows observed in #6875: the messaging row carries its app
+  // name, the wellbeing row carries no app name anywhere in the row.
+  const silentRow = (title: string, body: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", body),
+    ]);
+  const shade = () => page(row("(555) 123-4567"), silentRow(SLEEP_TITLE, SLEEP_BODY));
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (pkg: string, title: string, text: string) =>
+    [
+      `    NotificationRecord(0x1: pkg=${pkg} user=UserHandle{0} id=0 tag=null key=0|${pkg}|0|null|10164)`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+
+  test("attributes a Silent-section row to its package via dumpsys", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+    expect(adb.getExecutedCommands()).toContain("shell dumpsys notification --noredact");
+  });
+
+  test("keeps header evidence for rows SystemUI does label", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, MESSAGING, "Messages", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: MESSAGING, title: "(555) 123-4567", ownership: "header" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
+  test("reports unattributed rows instead of a confident empty list", async () => {
+    setup([shade()]);
+    const result = await listSystemTrayNotifications(device, "com.other.app", "Other", 5000);
+    expect(result.notifications).toEqual([]);
+    expect(result.unattributedRows).toBe(1);
+  });
+
+  test("does not claim a header-less row two packages could have posted", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.other.clone", SLEEP_TITLE, SLEEP_BODY),
+        ),
+      ),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toEqual([]);
+    expect(result.unattributedRows).toBe(1);
+  });
+
+  test("does not read dumpsys when every row carries an app header", async () => {
+    const { adb } = setup([page(row("one"))]);
+    await list();
+    expect(adb.getExecutedCommands().some((command) => command.includes("dumpsys"))).toBe(false);
+  });
+
+  test("surfaces unattributed rows through the registered handler message", async () => {
+    setup([shade()]);
+    const apps = new FakeTrayApps();
+    apps.labels.set("com.example.messages", "Other");
+    apps.install();
+    registerInteractionTools();
+    const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "list",
+      notification: { appId: "com.example.messages" },
+    });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.notifications).toEqual([]);
+    expect(payload.unattributedRows).toBe(1);
+    expect(payload.message).toContain("1 shade row");
+  });
+});

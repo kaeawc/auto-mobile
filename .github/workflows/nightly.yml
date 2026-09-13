@@ -437,6 +437,17 @@ jobs:
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
+      - name: "Cache Swift package dependencies"
+        uses: actions/cache@v5
+        id: cache-swift-packages
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm/cache
+          key: ${{ runner.os }}-spm-nightly-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-nightly-swift-packages-${{ matrix.config.xcode }}-
+
       - name: "Install macOS Developer ID certificate"
         if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
         env:
@@ -453,6 +464,17 @@ jobs:
           IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
         run: ./scripts/ios/setup-signing-keychain.sh
 
+      - name: "Resolve Swift package dependencies"
+        shell: bash
+        run: |
+          if [[ "${{ matrix.config.xcode }}" == "26.0" ]]; then
+            (cd ios/auto-mobile-sdk && swift package resolve)
+          else
+            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+              (cd "${package}" && swift package resolve)
+            done
+          fi
+
       - name: "Build Swift Packages"
         if: matrix.config.xcode != '26.0'
         env:
@@ -464,7 +486,11 @@ jobs:
           IOS_SIGNING_IDENTITY: ${{ secrets.IOS_SIGNING_IDENTITY }}
           IOS_SIGNING_TEAM_ID: ${{ secrets.IOS_SIGNING_TEAM_ID }}
           IOS_SIGNING_STRICT: ${{ env.IOS_SIGNING_ENABLED }}
-        run: ./scripts/ios/swift-build.sh
+        run: |
+          echo "Swift cache hit: ${{ steps.cache-swift-packages.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/swift-build.sh
+          echo "build took ${SECONDS}s"
 
       - name: "Test Swift Packages"
         if: matrix.config.xcode != '26.0'
@@ -474,8 +500,11 @@ jobs:
         if: matrix.config.xcode == '26.0'
         working-directory: ios/auto-mobile-sdk
         run: |
+          echo "Swift cache hit: ${{ steps.cache-swift-packages.outputs.cache-hit }}"
+          SECONDS=0
           swift build -Xswiftc -warnings-as-errors
           swift test -Xswiftc -warnings-as-errors
+          echo "build took ${SECONDS}s"
 
   ios-xcode-build-sweep:
     name: "Build Xcode Projects Sweep (${{ matrix.config.name }})"
@@ -497,6 +526,28 @@ jobs:
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
+      - name: "Cache Xcode Swift package dependencies"
+        uses: actions/cache@v5
+        id: cache-xcode-spm
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm/cache
+          key: ${{ runner.os }}-spm-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-nightly-xcode-build-${{ matrix.config.xcode }}-
+
+      - name: "Cache Xcode DerivedData"
+        uses: actions/cache@v5
+        id: cache-xcode-derived-data
+        with:
+          path: |
+            ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}/Build
+            ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}/ModuleCache.noindex
+          key: ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/project.yml', 'ios/**/*.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-
+
       # Network I/O, and the simulator-runtime ensure below never touches
       # xcodegen, so background the install and let the ensure overlap it. The
       # barrier must precede `Generate Xcode Projects`, not merely the build:
@@ -517,8 +568,22 @@ jobs:
       - name: "Generate Xcode Projects"
         run: ./scripts/ios/xcodegen-generate.sh
 
+      - name: "Resolve Xcode project Swift package dependencies"
+        shell: bash
+        run: |
+          for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
+            (cd "${package}" && swift package resolve)
+          done
+
       - name: "Build Xcode Projects"
-        run: ./scripts/ios/xcode-build.sh
+        env:
+          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}"
+        run: |
+          echo "Swift package cache hit: ${{ steps.cache-xcode-spm.outputs.cache-hit }}"
+          echo "DerivedData cache hit: ${{ steps.cache-xcode-derived-data.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/xcode-build.sh
+          echo "build took ${SECONDS}s"
 
   # =============================================================================
   # Android emulator integration tests

@@ -21,6 +21,12 @@ source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
 IOS_DIR="${IOS_DIR:-${PROJECT_ROOT}/ios}"
+# CI can pin this to a cacheable location. Leave it unset for local invocations
+# so Xcode retains its normal per-user DerivedData behavior.
+DERIVED_DATA_ARGS=()
+if [ -n "${AUTOMOBILE_XCODE_DERIVED_DATA:-}" ]; then
+    DERIVED_DATA_ARGS=(-derivedDataPath "${AUTOMOBILE_XCODE_DERIVED_DATA}")
+fi
 
 # Optional positional args restrict which Xcode projects get tested, by name
 # (without the .xcodeproj suffix). With no args, every project under ios/ is
@@ -196,6 +202,7 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
             -destination "${DESTINATION}" \
             -configuration Debug \
             -quiet \
+            "${DERIVED_DATA_ARGS[@]}" \
             "${LOCAL_SIM_ARGS[@]}" \
             test 2>&1; then
             echo -e "    ${GREEN}✓${NC} ${FIRST_SCHEME} tests passed"

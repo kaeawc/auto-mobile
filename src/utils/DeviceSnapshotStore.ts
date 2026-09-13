@@ -231,9 +231,17 @@ export class DeviceSnapshotStore {
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);
       if (entry.isDirectory()) {
-        size += (await this.getDirectorySize(fullPath)) ?? 0;
+        const nestedSize = await this.getDirectorySize(fullPath);
+        if (nestedSize === null) {
+          return null;
+        }
+        size += nestedSize;
       } else {
-        size += await this.getFileSize(fullPath);
+        const fileSize = await this.getFileSize(fullPath);
+        if (fileSize === null) {
+          return null;
+        }
+        size += fileSize;
       }
     }
     return size;
@@ -272,16 +280,16 @@ export class DeviceSnapshotStore {
     }
   }
 
-  private async getFileSize(filePath: string): Promise<number> {
+  private async getFileSize(filePath: string): Promise<number | null> {
     try {
       const stats = await fs.stat(filePath);
       return stats.size;
     } catch (error) {
       // A file that vanished between readdir and stat (an emulator still
-      // writing its snapshot, a concurrent delete) contributes nothing; the
-      // rest of the directory is still worth measuring.
+      // writing its snapshot, a concurrent delete) leaves the total unknown;
+      // callers must not report a partial sum as the full payload size.
       logger.debug(`Failed to stat ${filePath} while measuring a directory: ${error}`);
-      return 0;
+      return null;
     }
   }
 }

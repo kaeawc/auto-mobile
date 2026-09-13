@@ -159,6 +159,21 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(record?.sizeBytes).toBe(2 * 1024 * MB);
   });
 
+  test("rejects the emulator-owned default_boot snapshot name before any capture side effect", async () => {
+    const capture = captureDeviceSnapshot(EMULATOR, {
+      snapshotName: "default_boot",
+      useVmSnapshot: true,
+    });
+
+    await expect(capture).rejects.toBeInstanceOf(ActionableError);
+    await expect(capture).rejects.toMatchObject({
+      message: expect.stringContaining("default_boot"),
+    } satisfies Partial<ActionableError>);
+
+    expect(await repository.getSnapshot("default_boot")).toBeNull();
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "default_boot")).toBe(false);
+  });
+
   test("notifies archive subscribers when a dispatched VM save persists a pending reclaim", async () => {
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer);
@@ -763,6 +778,48 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
       expect((await repository.getSnapshot("vm-legacy"))?.sizeBytes).toBeNull();
       expect((await listDeviceSnapshots()).unsizedCount).toBe(1);
+    });
+
+    test("does not stamp a stale re-measurement onto a concurrently replaced row", async () => {
+      await seedUnsizedVmRow(2 * 1024 * MB);
+      const replacementTimestamp = new Date(2_000).toISOString();
+      const replacementAvd = "am-api34-ga-arm64";
+
+      await setDeviceSnapshotManagerDependencies({
+        avdSnapshots: {
+          measureVmSnapshotBytes: async (avdName: string, snapshotName: string) => {
+            if (snapshotName === "vm-legacy") {
+              await repository.updateSnapshot(snapshotName, {
+                createdAt: replacementTimestamp,
+                lastAccessedAt: replacementTimestamp,
+                deviceName: replacementAvd,
+                deviceId: "emulator-5554",
+                sizeBytes: null,
+                manifest: {
+                  ...vmManifest(snapshotName, replacementTimestamp),
+                  deviceName: replacementAvd,
+                  deviceId: "emulator-5554",
+                },
+              });
+            }
+            return avdSnapshots.measureVmSnapshotBytes(avdName, snapshotName);
+          },
+          listAvdSnapshotDirectories: (avdName: string) =>
+            avdSnapshots.listAvdSnapshotDirectories(avdName),
+          listKnownAvdNames: () => avdSnapshots.listKnownAvdNames(),
+          findLiveEmulatorSerial: (avdName: string) => avdSnapshots.findLiveEmulatorSerial(avdName),
+          deleteVmSnapshot: (deviceId: string, snapshotName: string, timeoutMs: number) =>
+            avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs),
+        },
+      });
+
+      await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 3 });
+
+      expect(await repository.getSnapshot("vm-legacy")).toMatchObject({
+        createdAt: replacementTimestamp,
+        deviceName: replacementAvd,
+        sizeBytes: null,
+      });
     });
   });
 

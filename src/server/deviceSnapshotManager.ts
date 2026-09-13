@@ -1078,6 +1078,13 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   // name lock, and the record is replaced (not duplicated) by the repository
   // upsert — so the old check-then-create existence probe (a TOCTOU window) is
   // gone.
+  if (snapshotName === AVD_DEFAULT_BOOT_SNAPSHOT) {
+    throw new ActionableError(
+      `Snapshot name '${AVD_DEFAULT_BOOT_SNAPSHOT}' is reserved for the emulator's own quick-boot ` +
+        "snapshot and cannot be used as an AutoMobile capture name.",
+    );
+  }
+
   if (isReservedScopeSegment(snapshotName)) {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
@@ -1307,25 +1314,38 @@ async function remeasureUnsizedVmSnapshots(
       continue;
     }
 
-    const sizeBytes = await avdSnapshots.measureVmSnapshotBytes(
-      record.deviceName,
-      record.snapshotName,
-    );
-    if (sizeBytes === null) {
-      measured.push(record);
-      continue;
-    }
-
-    try {
-      await snapshotRepository.updateSnapshot(record.snapshotName, { sizeBytes });
-      measured.push({ ...record, sizeBytes });
-    } catch (error) {
-      logger.warn(
-        `[DeviceSnapshot] Failed to record the re-measured size of VM snapshot ` +
-          `'${record.snapshotName}': ${errorMessage(error)}`,
-        error,
+    const remeasured = await withSnapshotNameLock(record.snapshotName, async () => {
+      const sizeBytes = await avdSnapshots.measureVmSnapshotBytes(
+        record.deviceName,
+        record.snapshotName,
       );
-      measured.push(record);
+      if (sizeBytes === null) {
+        return record;
+      }
+
+      const current = await snapshotRepository.getSnapshot(record.snapshotName);
+      if (!current || current.createdAt !== record.createdAt) {
+        logger.warn(
+          `[DeviceSnapshot] Concurrent replacement detected while re-measuring VM snapshot ` +
+            `'${record.snapshotName}'; skipping stale size update.`,
+        );
+        return current;
+      }
+
+      try {
+        await snapshotRepository.updateSnapshot(record.snapshotName, { sizeBytes });
+        return { ...record, sizeBytes };
+      } catch (error) {
+        logger.warn(
+          `[DeviceSnapshot] Failed to record the re-measured size of VM snapshot ` +
+            `'${record.snapshotName}': ${errorMessage(error)}`,
+          error,
+        );
+        return record;
+      }
+    });
+    if (remeasured) {
+      measured.push(remeasured);
     }
   }
 

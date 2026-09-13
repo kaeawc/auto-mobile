@@ -24,4 +24,13 @@ describe("FakeIosVoiceOverDetector", () => {
     detector.reset();
     await expect(detector.resolveState("device", client)).resolves.toBe(false);
   });
+
+  test("consumes queued legacy boolean results through resolveState in order", async () => {
+    const detector = new FakeIosVoiceOverDetector();
+    const client = new FakeIOSCtrlProxy();
+    detector.enqueueVoiceOverEnabledResults(false, true);
+
+    await expect(detector.resolveState("device", client)).resolves.toBe(false);
+    await expect(detector.resolveState("device", client)).resolves.toBe(true);
+  });
 });

@@ -236,3 +236,37 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
   });
 });
+
+// #6868: `launchApp` on an app that is already foreground reported
+// `error: "App is already in foreground"`, so a client that treats an `error` as
+// fatal aborted a task whose goal was already satisfied. The desired end state
+// held before and after the call, so it is a success — flagged with
+// `alreadyForeground: true` and carrying the same observation a cold launch
+// returns, so no extra `observe` round-trip is needed.
+describe("buildLaunchAppResponse (already foreground, #6868)", () => {
+  const alreadyForegroundResult = (): LaunchAppResult => ({
+    success: true,
+    alreadyForeground: true,
+    packageName: "com.android.settings",
+    observation: observationForApp("com.android.settings"),
+  });
+
+  test("reports success with alreadyForeground and no error", () => {
+    const payload = buildLaunchAppResponse("com.android.settings", alreadyForegroundResult());
+
+    expect(payload.success).toBe(true);
+    expect(payload.alreadyForeground).toBe(true);
+    expect(payload.error).toBeUndefined();
+    expect(payload.verified).toBe(true);
+    expect(payload.observedAppId).toBe("com.android.settings");
+    expect(payload.observation).toBeDefined();
+  });
+
+  test("says the app was already foreground rather than claiming a fresh launch", () => {
+    const payload = buildLaunchAppResponse("com.android.settings", alreadyForegroundResult());
+
+    expect(payload.message).toBe(
+      "App com.android.settings was already in the foreground (foreground verified)",
+    );
+  });
+});

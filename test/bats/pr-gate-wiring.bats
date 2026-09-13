@@ -181,6 +181,27 @@ wiring_requires_yq() {
   [[ "$webrtc_advisory_results" != *'[webrtc-integration-test]'* ]]
 }
 
+@test "advisory loops tolerate empty result maps under bash strict mode" {
+  wiring_requires_yq
+  local gate bash_bin script tmpfile
+  if [[ -x /opt/homebrew/bin/bash ]]; then
+    bash_bin=/opt/homebrew/bin/bash
+  else
+    bash_bin=bash
+  fi
+  echo "$bash_bin --version"
+  "$bash_bin" --version
+
+  for gate in ios-gate android-gate node-tests-gate webrtc-gate; do
+    script="$(yq -r ".jobs.\"${gate}\".steps[] | select(.name == \"Check results\") | .run" "$WF" | sed -E 's/\$\{\{ needs\.[A-Za-z0-9_-]+\.result \}\}/success/g')"
+    tmpfile="$BATS_TEST_TMPDIR/${gate}.sh"
+    printf '%s\n' "$script" >"$tmpfile"
+    run "$bash_bin" -u -e -o pipefail "$tmpfile"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"bad array subscript"* ]]
+  done
+}
+
 @test "portable PR matrices leave macOS coverage to nightly" {
   wiring_requires_yq
   local job expected

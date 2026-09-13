@@ -3388,12 +3388,14 @@ jobs:
               fail=1
             fi
           done
-          for name in "${!advisory_results[@]+"${!advisory_results[@]}"}"; do
-            r="${advisory_results[$name]}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::iOS gate advisory dependency ${name} = ${r}; advisory: ios-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-            fi
-          done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::iOS gate advisory dependency ${name} = ${r}; advisory: ios-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
           if [[ -n "$fail" ]]; then
             exit 1
           fi
@@ -3447,12 +3449,14 @@ jobs:
               fail=1
             fi
           done
-          for name in "${!advisory_results[@]}"; do
-            r="${advisory_results[$name]}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::Android gate advisory dependency ${name} = ${r}; advisory: android-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-            fi
-          done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::Android gate advisory dependency ${name} = ${r}; advisory: android-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
           if [[ -n "$fail" ]]; then
             exit 1
           fi
@@ -3624,12 +3628,14 @@ jobs:
               fail=1
             fi
           done
-          for name in "${!advisory_results[@]}"; do
-            r="${advisory_results[$name]}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; advisory: node-tests-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-            fi
-          done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; advisory: node-tests-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
           if [[ -n "$fail" ]]; then
             exit 1
           fi
@@ -3674,12 +3680,14 @@ jobs:
               fail=1
             fi
           done
-          for name in "${!advisory_results[@]}"; do
-            r="${advisory_results[$name]}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; advisory: webrtc-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-            fi
-          done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; advisory: webrtc-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
           if [[ -n "${fail}" ]]; then
             echo "One or more jobs failed or were cancelled"
             exit 1

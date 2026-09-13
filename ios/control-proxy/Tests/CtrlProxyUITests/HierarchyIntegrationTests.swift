@@ -60,6 +60,9 @@ final class HierarchyIntegrationTests: XCTestCase {
 
         let gestures = GesturePerformer(application: app, elementLocator: locator)
         try gestures.performAction("tap", label: "Message #sample")
+        guard waitForMessageKeyboardFocus(messageTextView) else {
+            return
+        }
         try gestures.typeText(text: "hello")
         let typedTextExpectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "hello"),
@@ -70,6 +73,9 @@ final class HierarchyIntegrationTests: XCTestCase {
 
         let secureField = app.secureTextFields["secure-field"]
         secureField.tap()
+        guard waitForKeyboardFocusOrFail(secureField) else {
+            return
+        }
         secureField.typeText("secret")
 
         let finalHierarchy = try locator.getViewHierarchy(disableAllFiltering: false)
@@ -82,5 +88,31 @@ final class HierarchyIntegrationTests: XCTestCase {
 
     private func hierarchyNodes(in element: UIElementInfo) -> [UIElementInfo] {
         [element] + (element.node ?? []).flatMap { hierarchyNodes(in: $0) }
+    }
+
+    private func waitForMessageKeyboardFocus(_ element: XCUIElement) -> Bool {
+        guard !waitForKeyboardFocus(element) else {
+            return true
+        }
+
+        element.tap()
+        return waitForKeyboardFocusOrFail(element)
+    }
+
+    private func waitForKeyboardFocusOrFail(_ element: XCUIElement) -> Bool {
+        guard !waitForKeyboardFocus(element) else {
+            return true
+        }
+
+        XCTFail("Element '\(element.identifier)' did not gain keyboard focus")
+        return false
+    }
+
+    private func waitForKeyboardFocus(_ element: XCUIElement) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasKeyboardFocus == true"),
+            object: element
+        )
+        return XCTWaiter().wait(for: [expectation], timeout: 5) == .completed
     }
 }

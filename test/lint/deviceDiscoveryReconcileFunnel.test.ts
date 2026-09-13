@@ -97,13 +97,14 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "target, listDevices and provisionDevice exact-boot; each reconciles first.",
     },
 
-    // --- Consult no pooled identity -----------------------------------------
     "src/daemon/webrtcStreamSocketServer.ts": {
       calls: 1,
       reason:
-        "Picks a stream candidate by platform from an injected manager; the pool is not reachable " +
-        "here and the result is never joined to pooled identity.",
+        "Picks a stream candidate by platform from an injected manager, then hands it to an " +
+        "admission gate that reads pooled identity; reconciles first.",
     },
+
+    // --- Consult no pooled identity -----------------------------------------
     "src/utils/DeviceSessionManager.ts": {
       calls: 3,
       reason: "Tracks adb-level connection state; owns no pooled identity and runs below the pool.",
@@ -287,6 +288,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/socketServer.ts",
       "src/server/bootedDeviceResources.ts",
       "src/server/deviceTools.ts",
+      "src/daemon/webrtcStreamSocketServer.ts",
     ];
     for (const file of routed) {
       const source = blankComments(readFileSync(join(ROOT, file), "utf8"));

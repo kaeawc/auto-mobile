@@ -98,10 +98,13 @@ describe("device-addressed admission gate (issue #6863)", () => {
   ];
 
   /**
-   * Pure resolvers: they turn a serial into a `BootedDevice` and RETURN it,
-   * acting on nothing. The gate belongs to the handler that receives the device —
+   * Resolvers: they turn a serial into a `BootedDevice` and RETURN it, acting on
+   * nothing. The gate belongs to the handler that receives the device —
    * `handleStart` above — which this file already pins, so gating here too would
-   * only duplicate the refusal.
+   * only duplicate the refusal. What a resolver running its OWN discovery DOES
+   * owe is FUNNEL 1: `deviceDiscoveryReconcileFunnel.test.ts` pins that this one
+   * folds its observation in, so the handler's gate reads the state this
+   * discovery established ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    */
   const RESOLVERS_ONLY: readonly string[] = [
     "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",

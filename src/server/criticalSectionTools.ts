@@ -82,6 +82,21 @@ function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> |
   }
 }
 
+/**
+ * Best-effort epilogue warnings a step reported while still succeeding (issue
+ * #6868) — a keyboard that would not dismiss, for example. The step stays
+ * successful, but this used to be its `success:false`, so dropping it would let
+ * the section report an entirely clean success while later steps run against a
+ * screen the caller does not expect.
+ */
+function collectStepWarnings(result: Record<string, unknown> | undefined): string[] {
+  const warnings = result?.warnings;
+  if (!Array.isArray(warnings)) {
+    return [];
+  }
+  return warnings.filter((warning): warning is string => typeof warning === "string");
+}
+
 function formatCriticalSectionError(result: Record<string, unknown>, tool: string): string {
   return (
     formatStructuredToolError(result.error) ??
@@ -142,6 +157,7 @@ const criticalSectionHandler = async (
 
     // Execute steps serially
     const executedSteps: Array<{ tool: string; success: boolean }> = [];
+    const warnings: string[] = [];
 
     for (let i = 0; i < normalizedSteps.length; i++) {
       const step = normalizedSteps[i];
@@ -172,6 +188,9 @@ const criticalSectionHandler = async (
           throw new ActionableError(errorMsg);
         }
 
+        for (const warning of collectStepWarnings(toolResult)) {
+          warnings.push(`step ${i + 1} (${step.tool}): ${warning}`);
+        }
         executedSteps.push({ tool: step.tool, success: true });
       } catch (error) {
         executedSteps.push({ tool: step.tool, success: false });
@@ -195,6 +214,7 @@ const criticalSectionHandler = async (
       deviceId: device.deviceId,
       executedSteps: executedSteps.length,
       totalSteps: normalizedSteps.length,
+      ...(warnings.length > 0 ? { warnings } : {}),
     });
   } catch (error) {
     // Force cleanup on error to prevent other devices from waiting forever

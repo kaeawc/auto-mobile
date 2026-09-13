@@ -203,11 +203,22 @@ export class DefaultPlanExecutor implements PlanExecutor {
     toolResult: unknown,
     details: Record<string, unknown>,
   ): void {
-    if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
+    if (toolResult === null || typeof toolResult !== "object") {
       return;
     }
     const tr = toolResult as Record<string, unknown>;
     const payload = getStructuredPayload<Record<string, unknown>>(tr) ?? tr;
+    // `warnings` is the generic best-effort-epilogue channel (issue #6868): the
+    // step stays successful, but the outcome it reports — a keyboard that would
+    // not dismiss, say — used to be the step's `success:false` and is the only
+    // thing telling a plan author why a later step saw the screen it saw. Copy it
+    // for EVERY tool rather than dropping it into the void.
+    if (Array.isArray(payload.warnings) && payload.warnings.length > 0) {
+      details.warnings = payload.warnings;
+    }
+    if (toolName !== "tapOn") {
+      return;
+    }
     if (payload.tapDebug !== undefined && payload.tapDebug !== null) {
       details.tapDebug = payload.tapDebug;
     }

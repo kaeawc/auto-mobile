@@ -233,7 +233,14 @@ export async function settleEmbeddedObservationInResponse(
   }
   if (view.payload.success === false) {
     // The action failed; re-observing would buy the client nothing and would
-    // charge a settle budget to an error path.
+    // charge a settle budget to an error path. The capture it did return is
+    // still an action observation, so it carries the honest verdict for a
+    // capture that never faced a stability check (e.g. `sendKeys` stopping on a
+    // failed command but keeping its post-command observation).
+    writeToolEnvelopePayload(view, {
+      ...view.payload,
+      observation: { ...(observation as ObserveResult), settled: false },
+    });
     return;
   }
 

@@ -346,6 +346,11 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     });
 
     expect(fake.getExecuteCallCount()).toBe(0);
+    // ...but the verdict is still stamped: the capture exists and was never
+    // stability-checked, and the contract says every action observation carries
+    // a boolean.
+    expect((response.structuredContent as Record<string, any>).observation.settled).toBe(false);
+    expect(JSON.parse(response.content[0].text).observation.settled).toBe(false);
   });
 
   test("no embedded observation is a no-op", async () => {

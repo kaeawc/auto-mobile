@@ -437,7 +437,8 @@ export class Daemon {
       recoveryConfiguration.policy,
       (deviceId) => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      (sessionId, reason) => this.cancelAndDrainDeviceSessionExecutions(sessionId, reason),
+      (sessionId, reason, options) =>
+        this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
       this.idGenerator,
     );
     // Initialize singleton for daemon state access
@@ -2231,14 +2232,20 @@ export class Daemon {
   private async cancelAndDrainDeviceSessionExecutions(
     sessionId: string,
     reason: string,
+    options?: { excludeExecutionId?: string },
   ): Promise<number> {
-    const cancelled = await executionTracker.cancelDeviceSessionExecutions(sessionId, reason);
+    const cancelled = await executionTracker.cancelDeviceSessionExecutions(
+      sessionId,
+      reason,
+      options,
+    );
     if (cancelled === 0) {
       return 0;
     }
     const drained = await executionTracker.waitForDeviceSessionExecutionsToEnd(
       sessionId,
       DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+      options,
     );
     if (!drained) {
       logger.warn(

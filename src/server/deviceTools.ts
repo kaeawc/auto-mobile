@@ -1526,7 +1526,15 @@ async function getShutdownDiscovery(
       // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
       // label may be acted on destructively, so the pool must see this
       // observation before that decision (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight");
+      await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
+        // This kill IS the discovering execution. Entering the quarantine
+        // cancels the pooled session's in-flight work, and without this
+        // exemption that includes the kill awaiting this very observation: it
+        // would lose the `runWithinShutdownDeadline` signal race and report a
+        // device-loss failure instead of reaching confirm-or-refuse
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        excludeExecutionId: getShutdownInitiatingExecutionId(),
+      });
       return discovery;
     },
     timeoutMs,
@@ -3121,7 +3129,13 @@ async function readTeardownBootedDiscovery(
       );
       // FUNNEL 1: teardown reads pooled entries (`findAbsentTeardownPooledDevices`)
       // against this observation (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "teardown-precondition");
+      await reconcileDiscoveryObservation(discovery.devices, "teardown-precondition", {
+        // Same exemption as the shutdown preflight: a `deleteDevice` cancelled
+        // by its own observation returns `operation_cancelled` while its
+        // accepted teardown carries on
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        excludeExecutionId: getShutdownInitiatingExecutionId(),
+      });
       return discovery;
     },
     context.timeoutMs,

@@ -358,7 +358,26 @@ interface DeviceRemovedListener {
 }
 
 interface DeviceSessionExecutionCanceller {
-  (sessionId: string, reason: string): Promise<number>;
+  (sessionId: string, reason: string, options?: { excludeExecutionId?: string }): Promise<number>;
+}
+
+/**
+ * What a FUNNEL 1 caller can tell the pool about the observation it is folding
+ * in. Exists for exactly one fact today: WHICH execution performed the
+ * discovery.
+ *
+ * Entering the quarantine cancels every execution indexed under the bound
+ * session, and a session-bound destructive call -- `killDevice`, `deleteDevice`
+ * -- can be the very path whose own discovery reads the placeholder. Cancelling
+ * it would lose the `runWithinShutdownDeadline` signal race for the operation
+ * that is ABOUT to confirm-or-refuse on exactly the evidence it just produced,
+ * so the discovering execution is exempted while every other execution on the
+ * session is still stopped
+ * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ */
+export interface DiscoveryReconcileOptions {
+  /** The execution that performed this discovery; exempt from quarantine cancellation. */
+  readonly excludeExecutionId?: string;
 }
 
 export type DeviceReadinessReservation = (() => Promise<void>) & {
@@ -5855,6 +5874,7 @@ export class DevicePool {
   async reconcileDiscoveryObservation(
     devices: readonly BootedDevice[],
     source: string,
+    options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     for (const device of devices) {
       if (device.platform !== "android") {
@@ -5876,7 +5896,7 @@ export class DevicePool {
         continue;
       }
       logger.debug(`[DevicePool] Reconciling '${device.name}' on ${device.deviceId} (${source})`);
-      await this.reconcileObservedPooledIdentity(pooled, device);
+      await this.reconcileObservedPooledIdentity(pooled, device, options);
     }
   }
 
@@ -5894,15 +5914,17 @@ export class DevicePool {
   private async reconcileObservedPooledIdentity(
     pooled: PooledDevice,
     device: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (this.matchesRuntimeIdentity(pooled, device)) {
-      await this.reconcilePooledIdentityResolution(pooled, device);
+      await this.reconcilePooledIdentityResolution(pooled, device, options);
       return;
     }
     await this.quarantineDisagreeingPooledIdentity(
       pooled,
       device,
       "and the pool cannot install the replacement from this observation",
+      options,
     );
   }
 
@@ -6071,6 +6093,7 @@ export class DevicePool {
   private async reconcilePooledIdentityResolution(
     pooled: PooledDevice,
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
       return;
@@ -6081,6 +6104,7 @@ export class DevicePool {
         "discovery could not read the AVD name, so the pooled identity " +
           `'${pooled.avdName ?? pooled.name}' can no longer be tied to the runtime`,
         discovered.observedAt,
+        options,
       );
       return;
     }
@@ -6163,6 +6187,7 @@ export class DevicePool {
     pooled: PooledDevice,
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     because: string,
+    options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
       return;
@@ -6172,6 +6197,7 @@ export class DevicePool {
       `discovery reports '${discovered.name}' on this serial while the pooled identity is ` +
         `'${pooled.avdName ?? pooled.name}', ${because}`,
       discovered.observedAt,
+      options,
     );
   }
 
@@ -6187,11 +6213,18 @@ export class DevicePool {
    * the device-loss reason so each one surfaces a typed `DeviceLostError`
    * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
    * review).
+   *
+   * The ONE exception is {@link DiscoveryReconcileOptions.excludeExecutionId}:
+   * the execution whose own discovery produced this observation. It is the
+   * operation that is about to act on this evidence -- a session-bound
+   * `killDevice` confirming its target, say -- and cancelling it would make the
+   * funnel defeat the very refusal it exists to enable.
    */
   private async enterPooledIdentityQuarantine(
     pooled: PooledDevice,
     reason: string,
     observedAt?: number,
+    options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     // Re-observing the same unresolved runtime advances the evidence a later
     // lift is ordered against, so a straggler newer than the FIRST placeholder
@@ -6210,6 +6243,11 @@ export class DevicePool {
     const cancelled = await this.cancelDeviceSessionExecutions(
       sessionId,
       deviceLossCancellationReason(pooled.id),
+      // The execution that PRODUCED this observation is the one operation that
+      // must survive it: cancelling it would abort the destructive call that is
+      // about to confirm-or-refuse on this very evidence
+      // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+      { excludeExecutionId: options.excludeExecutionId },
     );
     if (cancelled > 0) {
       logger.warn(

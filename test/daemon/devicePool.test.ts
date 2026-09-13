@@ -6895,6 +6895,52 @@ describe("DevicePool", () => {
       expect(quarantined?.incarnation).toBe(incarnation);
     });
 
+    // The FUNNEL 1 caller can itself be a session-bound destructive call whose
+    // own discovery produced the placeholder. Cancelling it would abort the
+    // operation that is about to confirm-or-refuse on exactly this evidence, so
+    // the discovering execution is exempted while the rest of the session's work
+    // is still stopped ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888)
+    // review).
+    test("exempts the discovering execution from the quarantine cancellation", async () => {
+      const cancellations: { sessionId: string; excludeExecutionId?: string }[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId, _reason, options) => {
+          cancellations.push({ sessionId, excludeExecutionId: options?.excludeExecutionId });
+          return 1;
+        },
+      );
+      await initializeLiveDevices([poolDevice("emulator-5554", "Pixel_8_API_35")]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        "emulator-5554",
+        "android",
+        androidImage,
+      );
+
+      await devicePool.reconcileDiscoveryObservation([unresolved("emulator-5554")], "test:kill", {
+        excludeExecutionId: "kill-execution",
+      });
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+      expect(cancellations).toEqual([
+        { sessionId: "owner-session", excludeExecutionId: "kill-execution" },
+      ]);
+    });
+
     // Concurrent discovery calls finish out of order, so the observation a
     // funnel folds in is not necessarily the newest one. A quarantine entered by
     // the NEWEST evidence must not be lifted by an older listing that happened to

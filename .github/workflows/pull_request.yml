@@ -1254,8 +1254,43 @@ jobs:
           fi
           bash scripts/test-ts.sh unit
 
+      - name: "Upload Node Unit Timing Reports"
+        if: success() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-timing-reports
+          path: scratch/timing-unit-reports
+          retention-days: 7
+
+  node-unit-timing-budget:
+    timeout-minutes: 10
+    name: "Node Unit Timing Budget"
+    runs-on: ubuntu-latest
+    needs: [detect-changes, node-unit-tests]
+    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.node-unit-tests.result == 'success'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: bash scripts/ci/install-bun-deps.sh
+
+      - name: "Download Node Unit Timing Reports"
+        uses: actions/download-artifact@v7
+        with:
+          name: node-unit-timing-reports
+          path: scratch/timing-unit-reports
+
       - name: "Enforce 100ms budget for changed unit tests"
-        if: runner.os == 'Linux'
         shell: bash
         env:
           BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
@@ -3524,21 +3559,23 @@ jobs:
     needs:
       - detect-changes
       - node-unit-tests
+      - node-unit-timing-budget
       - node-host-integration-tests
     permissions: {}
     runs-on: ubuntu-latest
     steps:
-      # HARD dependencies below fail this roll-up. ADVISORY non-required unit
-      # coverage only warns; add new needs as HARD unless they are an excluded
+      # HARD dependencies below fail this roll-up. The ADVISORY timing budget
+      # only warns; add new needs as HARD unless they are an excluded
       # live-device/emulator/simulator lane. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
           declare -A hard_results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
+            [node-unit-tests]="${{ needs.node-unit-tests.result }}"
             [node-host-integration-tests]="${{ needs.node-host-integration-tests.result }}"
           )
           declare -A advisory_results=(
-            [node-unit-tests]="${{ needs.node-unit-tests.result }}"
+            [node-unit-timing-budget]="${{ needs.node-unit-timing-budget.result }}"
           )
           fail=
           for name in "${!hard_results[@]}"; do

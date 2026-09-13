@@ -113,16 +113,18 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.bats-integration-tests.result"* ]]
 }
 
-@test "node-tests-gate rolls up complete unit and host integration matrices" {
+@test "node-tests-gate rolls up complete unit, timing-budget, and host integration lanes" {
   block="$(job_block node-tests-gate)"
   [[ "$block" == *"- node-unit-tests"* ]]
   [[ "$block" == *"needs.node-unit-tests.result"* ]]
+  [[ "$block" == *"- node-unit-timing-budget"* ]]
+  [[ "$block" == *"needs.node-unit-timing-budget.result"* ]]
   [[ "$block" == *"- node-host-integration-tests"* ]]
   [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
 }
 
 @test "advisory roll-ups warn without weakening their hard dependencies" {
-  local ios android node webrtc
+  local ios android node webrtc node_hard_results node_advisory_results
   ios="$(job_block ios-gate)"
   android="$(job_block android-gate)"
   node="$(job_block node-tests-gate)"
@@ -138,8 +140,13 @@ wiring_requires_yq() {
   [[ "$ios" == *'[ios-build-gate]'* ]]
   [[ "$android" == *'[junit-runner-emulator-tests]'* ]]
   [[ "$android" == *'[build-android-control-proxy]'* ]]
-  [[ "$node" == *'[node-unit-tests]'* ]]
+  node_hard_results="${node#*declare -A hard_results=(}"
+  node_hard_results="${node_hard_results%%$'\n          )'*}"
+  node_advisory_results="${node#*declare -A advisory_results=(}"
+  node_advisory_results="${node_advisory_results%%$'\n          )'*}"
+  [[ "$node_hard_results" == *'[node-unit-tests]'* ]]
   [[ "$node" == *'[node-host-integration-tests]'* ]]
+  [[ "$node_advisory_results" == *'[node-unit-timing-budget]'* ]]
   [[ "$webrtc" == *'[detect-changes]'* ]]
   [[ "$webrtc" == *'[android-device-webrtc]'* ]]
 }

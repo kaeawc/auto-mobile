@@ -71,13 +71,13 @@ advisory_only_gate() {
       ;;
     Android)
       [[ -n "$failures" ]] \
-        && grep -Eq '^(JUnit Runner Emulator|Playground AutoMobile Emulator)' <<< "$failures" \
+        && grep -Eq '^Run (JUnit Runner Emulator|Playground Automobile Emulator)' <<< "$failures" \
         && ! grep -Eq '^(Build Android Control Proxy|Build JUnit Runner Library|Build Playground App|SDK Debug Inspector Consumer|JUnit Runner Kotlin Consumer Compatibility|JUnit Runner Unit Tests|Kotlin Code Coverage)$' <<< "$failures"
       ;;
     'Node Tests')
       [[ -n "$failures" ]] \
-        && grep -Eq '^Node Unit Tests' <<< "$failures" \
-        && ! grep -Eq '^Node Host Integration Tests' <<< "$failures"
+        && grep -Eq '^Node Unit Timing Budget$' <<< "$failures" \
+        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests)' <<< "$failures"
       ;;
     WebRTC)
       [[ -n "$failures" ]] \
@@ -85,6 +85,47 @@ advisory_only_gate() {
       ;;
     *) return 1 ;;
   esac
+}
+
+read_log_file() {
+  local log_file="$1"
+  if [[ ! -s "$log_file" ]]; then
+    return 0
+  fi
+  if unzip -Z1 "$log_file" >/dev/null 2>&1; then
+    unzip -p "$log_file" 2>/dev/null || true
+  else
+    sed -n 'p' "$log_file"
+  fi
+}
+
+fetch_job_log() {
+  local job_id="$1"
+  local log_file log_text=''
+  log_file="$(mktemp "${TMPDIR:-/tmp}/classify-failure-job-log.XXXXXX")"
+  if gh api "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
+    log_text="$(read_log_file "$log_file")"
+  fi
+  rm -f "$log_file"
+  printf '%s' "$log_text"
+}
+
+fetch_artifact_logs() {
+  local artifacts artifact_id artifact_file artifact_text=''
+  if ! artifacts="$(gh api "repos/${REPO}/actions/runs/${run_id}/artifacts" 2>/dev/null)"; then
+    return 0
+  fi
+  while IFS= read -r artifact_id; do
+    [[ -n "$artifact_id" ]] || continue
+    artifact_file="$(mktemp "${TMPDIR:-/tmp}/classify-failure-artifact-log.XXXXXX")"
+    if gh api "repos/${REPO}/actions/artifacts/${artifact_id}/zip" > "$artifact_file" 2>/dev/null; then
+      artifact_text+="$(read_log_file "$artifact_file")"
+    fi
+    rm -f "$artifact_file"
+  done < <(
+    jq -r '.artifacts[]? | select((.name // "") | startswith("mcp-build-test-logs-")) | .id' <<< "$artifacts"
+  )
+  printf '%s' "$artifact_text"
 }
 
 failed_count=0
@@ -99,12 +140,16 @@ while IFS=$'\t' read -r job_id job_name steps; do
   if [[ -z "$annotation_text" ]]; then
     annotation_text='none'
   fi
+  log_text="$(fetch_job_log "$job_id")"
+  if [[ -z "$log_text" ]]; then
+    log_text="$(fetch_artifact_logs)"
+  fi
 
   # shellcheck disable=SC2310 # A non-match is expected classifier control flow.
   if advisory_only_gate "$job_name"; then
     verdict='CHECK-UPSTREAM-FIRST — aggregator is red because of an advisory (non-required) lane; inspect the upstream rows above before rerunning or filing an issue'
   else
-    verdict="$(match_signature "$job_name" "${head_branch} ${annotation_text}")"
+    verdict="$(match_signature "$job_name" "${head_branch} ${annotation_text} ${log_text}")"
   fi
 
   printf '%s → %s → %s → %s\n' "$job_name" "${steps:-none}" "$annotation_text" "$verdict"

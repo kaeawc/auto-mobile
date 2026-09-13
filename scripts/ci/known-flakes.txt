@@ -1,10 +1,13 @@
 # job-name-glob|annotation-or-context-glob|verdict|operator note
 # Matching is case-insensitive. The second field also sees the run head branch,
 # so a signature can safely distinguish a Dependabot PR from a source failure.
-XCTestRunner Simulator Tests|*|RERUN-DONT-FIX|macos-26 ScreenCaptureKit simulator-window flake, non-required, rerun
-junit-runner-emulator*|*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
-playground-automobile-emulator-tests|*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
-Node Unit Tests*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
-Node Unit Tests*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
-Node Unit Tests*|*recheck produced*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
+XCTestRunner Simulator Tests|*CtrlProxy is still running after forced teardown*|RERUN-DONT-FIX|macos-26 CtrlProxy forced-teardown lifecycle flap, non-required, rerun
+XCTestRunner Simulator Tests|*daemon did not become ready after*|RERUN-DONT-FIX|macos-26 daemon-ready lifecycle flap, non-required, rerun
+XCTestRunner Simulator Tests|*navigation events did not reach getNavigationGraph*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun
+XCTestRunner Simulator Tests|*could not bind iOS SDK events to navigation graph session*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun
+Run JUnit Runner Emulator*|*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Node Unit Timing Budget*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
+Node Unit Timing Budget*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
+Node Unit Timing Budget*|*recheck produced*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 *|*dependabot*sharp*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -11,6 +12,10 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
+import {
+  screenshotDeviceToken,
+  screenshotFileName,
+} from "../../../src/utils/screenshot/screenshotFormats";
 
 describe("TakeScreenshot", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -100,8 +105,9 @@ describe("TakeScreenshot", function () {
       const first = screenshot.generateScreenshotPath(sameTime, { format: "png" });
       const second = screenshot.generateScreenshotPath(sameTime, { format: "png" });
 
-      expect(first).toMatch(/screenshot_1234567890123_test-device-id_capture-1\.png$/);
-      expect(second).toMatch(/screenshot_1234567890123_test-device-id_capture-2\.png$/);
+      const deviceToken = screenshotDeviceToken("test-device-id");
+      expect(first.endsWith(`screenshot_1234567890123_${deviceToken}_capture-1.png`)).toBe(true);
+      expect(second.endsWith(`screenshot_1234567890123_${deviceToken}_capture-2.png`)).toBe(true);
       expect(first).not.toBe(second);
     });
 
@@ -115,7 +121,12 @@ describe("TakeScreenshot", function () {
 
       const generated = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
 
-      expect(generated).toMatch(/screenshot_1234567890123_127-0-0-1-5555_capture-1\.png$/);
+      expect(
+        generated.endsWith(screenshotFileName(1234567890123, "127.0.0.1:5555", "capture-1", "png")),
+      ).toBe(true);
+      expect(path.basename(generated)).toMatch(
+        /^screenshot_1234567890123_127-0-0-1-5555-[0-9a-f]+_capture-1\.png$/,
+      );
     });
 
     test("persists native Android CtrlProxy JPEG as jpg with metadata", async () => {

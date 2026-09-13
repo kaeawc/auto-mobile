@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * Canonical mapping between the screenshot formats AutoMobile captures and the
  * file extensions it writes into the screenshot cache directory.
@@ -29,6 +31,12 @@ export function isScreenshotFile(fileName: string): boolean {
   return SCREENSHOT_FILE_EXTENSIONS.some((extension) => lower.endsWith(`.${extension}`));
 }
 
+/** Characters of the sanitized device id kept in the token, for readability. */
+const DEVICE_TOKEN_READABLE_LENGTH = 48;
+
+/** Hex characters of the raw-device-id digest appended to every token. */
+const DEVICE_TOKEN_DIGEST_LENGTH = 12;
+
 /**
  * Filename segment identifying the device a capture belongs to.
  *
@@ -37,10 +45,21 @@ export function isScreenshotFile(fileName: string): boolean {
  * only device identity a disk scan can see. Device ids can carry characters
  * that are awkward in filenames (`127.0.0.1:5555`), so they are reduced to
  * `[A-Za-z0-9-]`.
+ *
+ * That reduction alone is many-to-one — `host.name:5555` and `host-name:5555`
+ * both sanitize to `host-name-5555`, which would let one device's capture be
+ * mistaken for the other's on a shared screenshot directory. So the readable
+ * prefix is only a label; identity comes from the appended digest of the raw
+ * device id, which makes the token collision-resistant and still filename-safe.
  */
 export function screenshotDeviceToken(deviceId: string): string {
-  const token = deviceId.replace(/[^A-Za-z0-9-]/g, "-");
-  return token.length > 0 ? token : "unknown";
+  const sanitized = deviceId.replace(/[^A-Za-z0-9-]/g, "-").slice(0, DEVICE_TOKEN_READABLE_LENGTH);
+  const digest = createHash("sha256")
+    .update(deviceId, "utf8")
+    .digest("hex")
+    .slice(0, DEVICE_TOKEN_DIGEST_LENGTH);
+  const label = sanitized.length > 0 ? sanitized : "unknown";
+  return `${label}-${digest}`;
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   findLatestScreenshotPath,
 } from "../../../../src/features/observe/audits/AccessibilityAuditor";
 import { TEMP_SUBDIRS } from "../../../../src/utils/tempDir";
+import { screenshotFileName } from "../../../../src/utils/screenshot/screenshotFormats";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import type { AccessibilityAuditConfig } from "../../../../src/models/AccessibilityAudit";
@@ -144,22 +145,28 @@ describe("findLatestScreenshotPath", () => {
   });
 
   test("ignores another device's newer capture when resolving for a known device", async () => {
-    await seed("screenshot_1_device-a_aaa.jpg", 1_000);
-    const ownCapture = await seed("screenshot_2_device-b_bbb.jpg", 2_000);
-    await seed("screenshot_3_device-a_ccc.jpg", 3_000);
+    await seed(screenshotFileName(1, "device-a", "aaa", "jpg"), 1_000);
+    const ownCapture = await seed(screenshotFileName(2, "device-b", "bbb", "jpg"), 2_000);
+    await seed(screenshotFileName(3, "device-a", "ccc", "jpg"), 3_000);
 
     expect(await findLatestScreenshotPath("device-b")).toBe(ownCapture);
   });
 
   test("returns nothing when the requested device has no capture on disk", async () => {
-    await seed("screenshot_3_device-a_ccc.jpg", 3_000);
+    await seed(screenshotFileName(3, "device-a", "ccc", "jpg"), 3_000);
 
     expect(await findLatestScreenshotPath("device-b")).toBeUndefined();
   });
 
   test("matches captures whose device id needed sanitizing for the filename", async () => {
-    const own = await seed("screenshot_4_127-0-0-1-5555_ddd.png", 4_000);
+    const own = await seed(screenshotFileName(4, "127.0.0.1:5555", "ddd", "png"), 4_000);
 
     expect(await findLatestScreenshotPath("127.0.0.1:5555")).toBe(own);
+  });
+
+  test("does not hand a device the capture of a peer whose id sanitizes identically", async () => {
+    await seed(screenshotFileName(5, "host.name:5555", "eee", "png"), 5_000);
+
+    expect(await findLatestScreenshotPath("host-name:5555")).toBeUndefined();
   });
 });

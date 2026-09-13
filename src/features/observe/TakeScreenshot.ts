@@ -328,8 +328,15 @@ export class TakeScreenshot implements ScreenshotService {
     try {
       // The client's own 10s timeout is unaware of the signal, so race it
       // against the abort the way the iOS path does - otherwise a cancelled
-      // capture still blocks the caller for the full request timeout.
-      const result = await awaitWhileRequestIsLive(client.requestScreenshot(10000), signal);
+      // capture still blocks the caller for the full request timeout. The signal
+      // also goes INTO the client: winning the outer race only unblocks this
+      // caller, while the request itself would still be dispatched once the
+      // (re)connection completes, burning the shared screenshot rate limit and
+      // pushing a late observation-stream frame (#6605).
+      const result = await awaitWhileRequestIsLive(
+        client.requestScreenshot(10000, undefined, false, signal),
+        signal,
+      );
       return signal?.aborted ? null : result;
     } catch (error) {
       // An abort is the caller's own cancellation, not a capture failure: report

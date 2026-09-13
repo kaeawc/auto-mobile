@@ -995,10 +995,10 @@ export class DaemonMcpProxy {
     }
   }
 
-  // Invalidate the matching cache and re-emit a list_changed to listeners,
-  // mirroring the daemon-pushed invalidation path (see handleDaemonNotification)
-  // so a re-fetch is never stale.
-  private notifyListChanged(kind: ListChangedKind): void {
+  // Drop the cached definitions for one list kind. Bumping the discovery epoch
+  // makes a discovery request whose response is still in flight decline to
+  // repopulate the cache this invalidation just cleared (issue #4655).
+  private invalidateListCache(kind: ListChangedKind): void {
     this.discoveryEpoch += 1;
     if (kind === "tools") {
       this.cachedTools = null;
@@ -1006,6 +1006,13 @@ export class DaemonMcpProxy {
       this.cachedResources = null;
       this.cachedResourceTemplates = null;
     }
+  }
+
+  // Invalidate the matching cache and re-emit a list_changed to listeners,
+  // mirroring the daemon-pushed invalidation path (see handleDaemonNotification)
+  // so a re-fetch is never stale.
+  private notifyListChanged(kind: ListChangedKind): void {
+    this.invalidateListCache(kind);
     for (const listener of this.listChangedListeners) {
       try {
         listener(kind);
@@ -1049,16 +1056,7 @@ export class DaemonMcpProxy {
       return;
     }
 
-    // Bump the discovery epoch so a discovery request whose response is still in
-    // flight declines to repopulate the cache this invalidation just cleared
-    // (issue #4655).
-    this.discoveryEpoch += 1;
-    if (kind === "tools") {
-      this.cachedTools = null;
-    } else {
-      this.cachedResources = null;
-      this.cachedResourceTemplates = null;
-    }
+    this.invalidateListCache(kind);
 
     for (const listener of this.listChangedListeners) {
       try {
@@ -2649,10 +2647,21 @@ export class DaemonMcpProxy {
     this.ownedDeviceSessions.add(mintedSessionUuid);
     this.boundSessionFromResultMint = true;
     this.initialSessionBindingConfigured = false;
+    // `tools/list` is forwarded under the bound session, so the binding just
+    // published invalidates every cached definition fetched under the previous
+    // scope. Drop it BEFORE the awaited heartbeat: the daemon's own
+    // `tools/list_changed` for an `enableTools` grant is relayed while this
+    // acquisition is still in flight, so a client that re-listed on it cached a
+    // list scoped to the OLD binding and nothing else would clear it
+    // (#6886 review).
+    this.invalidateListCache("tools");
     // Deliver the first ownership heartbeat as part of the acquisition so the
     // daemon records ownership before the pre-first-heartbeat grace fires
     // (mirrors the establishment guarantee in issue #5637).
     await this.establishBoundSessionHeartbeat();
+    // Prompt the client to re-fetch only once the daemon has recorded ownership
+    // of the new session, so the re-list it triggers is already routable.
+    this.notifyListChanged("tools");
     // The first heartbeat is an awaited daemon round-trip. A shutdown release
     // can arrive while it is in flight, fence and clear the binding, and make
     // this acquisition result stale before it reaches the caller.

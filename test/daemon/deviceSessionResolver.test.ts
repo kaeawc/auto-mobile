@@ -4,6 +4,7 @@ import {
   createRegistryDeviceSessionResolver,
   nullDeviceSessionResolver,
 } from "../../src/daemon/deviceSessionResolver";
+import { ActionableError } from "../../src/models/ActionableError";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -27,7 +28,16 @@ describe("createRegistryDeviceSessionResolver", () => {
   // discovery reads a name again.
   describe("while the pooled identity is quarantined", () => {
     const quarantinedResolver = (registry: DeviceSessionRegistry, quarantined: Set<string>) =>
-      createRegistryDeviceSessionResolver(registry, (deviceId) => quarantined.has(deviceId));
+      createRegistryDeviceSessionResolver(registry, {
+        isPooledIdentityUnresolved: (deviceId: string) => quarantined.has(deviceId),
+        assertDeviceActionable: (deviceId: string, purpose: string) => {
+          if (quarantined.has(deviceId)) {
+            throw new ActionableError(
+              `Refusing ${purpose} on device '${deviceId}': its identity is unresolved.`,
+            );
+          }
+        },
+      });
 
     it("withholds the routing identity in both directions", () => {
       const registry = makeRegistry(["uuid-a"]);

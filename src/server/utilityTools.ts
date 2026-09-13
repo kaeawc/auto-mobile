@@ -4,6 +4,7 @@ import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
   DeviceState,
+  DEVICE_STATE_READABLE_FIELDS,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
   networkConditionInputDegrades,
   networkConditionInputError,
@@ -296,10 +297,14 @@ export const displayConfigSchema = withJsonSchemaOverride(
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
     include: z
-      .array(z.enum(["doNotDisturb", "biometrics", "networkCondition"]))
+      .array(z.enum(DEVICE_STATE_READABLE_FIELDS))
       .min(1)
       .optional()
-      .describe("State fields to read; supports doNotDisturb, biometrics, and networkCondition"),
+      .describe(
+        "State fields to read; supports doNotDisturb, connectivity, biometrics, and " +
+          "networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers " +
+          "whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
+      ),
   }),
 );
 
@@ -870,7 +875,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
+    "Read device-level state: Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack.",
     getDeviceStateSchema,
     getDeviceStateHandler,
     { defaultEnabled: false },

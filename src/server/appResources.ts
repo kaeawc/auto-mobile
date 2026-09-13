@@ -20,6 +20,10 @@ import {
   getIosInstalledAppBundleId,
   getIosInstalledAppPath,
 } from "../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  findBootedDeviceForResource,
+  listBootedDevicesForResource,
+} from "./resourceDeviceResolver";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -511,20 +515,7 @@ function getAndroidAppsMessage(deviceId: string): string {
 }
 
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  try {
-    const manager = PlatformDeviceManagerFactory.getInstance();
-    const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find((device) => device.deviceId === deviceId);
-    if (android) {
-      return android;
-    }
-
-    const iosDevices = await manager.getBootedDevices("ios");
-    return iosDevices.find((device) => device.deviceId === deviceId) ?? null;
-  } catch (error) {
-    logger.warn(`[AppResources] Failed to list booted devices: ${error}`);
-    return null;
-  }
+  return findBootedDeviceForResource(deviceId, "AppResources");
 }
 
 interface FetchedAppsCacheEntry {
@@ -883,11 +874,10 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
     throw new Error("deviceId is required");
   }
 
-  const manager = PlatformDeviceManagerFactory.getInstance();
   const platforms: Platform[] = options.platform ? [options.platform] : ["android", "ios"];
 
   for (const platform of platforms) {
-    const devices = await manager.getBootedDevices(platform);
+    const devices = await listBootedDevicesForResource(platform, "AppResources");
     const matched = devices.find((device) => device.deviceId === options.deviceId);
     if (matched) {
       return matched;

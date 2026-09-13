@@ -17,6 +17,12 @@ export interface BiometricAuthArgs extends BiometricAuthOptions {
 }
 
 // Schema definition
+//
+// #6712: `.strict()` — the advertised `additionalProperties: false` was not
+// enforced at runtime, so an undeclared caller argument was silently dropped.
+// The `errorCode` refinement is applied AFTER `addDeviceTargetingToSchema`
+// because zod v4's `.extend()` (which that helper uses) drops a base object's
+// refinements; applied inside, the check never ran.
 export const biometricAuthSchema = addDeviceTargetingToSchema(
   z
     .object({
@@ -37,22 +43,24 @@ export const biometricAuthSchema = addDeviceTargetingToSchema(
       ttlMs: z.number().optional().describe("SDK override TTL ms (default 5000)"),
       ...responseShapeControlFields,
     })
-    .refine((data) => data.errorCode === undefined || data.action === "error", {
-      message: "errorCode is only applicable when action is 'error'",
-      path: ["errorCode"],
-    }),
-);
-
-export const getIosSimulatorCapabilitiesSchema = z.object({
-  deviceType: z
-    .string()
-    .min(1)
-    .describe("CoreSimulator device-type identifier selected from automobile:devices/images."),
-  runtime: z
-    .string()
-    .min(1)
-    .describe("CoreSimulator runtime identifier selected from automobile:devices/images."),
+    .strict(),
+).refine((data) => data.errorCode === undefined || data.action === "error", {
+  message: "errorCode is only applicable when action is 'error'",
+  path: ["errorCode"],
 });
+
+export const getIosSimulatorCapabilitiesSchema = z
+  .object({
+    deviceType: z
+      .string()
+      .min(1)
+      .describe("CoreSimulator device-type identifier selected from automobile:devices/images."),
+    runtime: z
+      .string()
+      .min(1)
+      .describe("CoreSimulator runtime identifier selected from automobile:devices/images."),
+  })
+  .strict();
 
 interface BiometricEnrollmentCapture {
   sessionManager?: SessionManager;

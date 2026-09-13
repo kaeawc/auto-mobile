@@ -28,6 +28,7 @@ function fakeAppsContent(
     query: { deviceId: "emulator-5554", type: "user" },
     observationComplete: true,
     totalCount: 0,
+    installedCount: 0,
     deviceCount: 1,
     lastUpdated: new Date(0).toISOString(),
     devices: [],
@@ -63,6 +64,7 @@ describe("listApps tool", () => {
     expect(() => tool!.schema.parse({})).not.toThrow();
     expect(() => tool!.schema.parse({ deviceId: "device-123" })).not.toThrow();
     expect(() => tool!.schema.parse({ type: "system", search: "clock", profile: 0 })).not.toThrow();
+    expect(() => tool!.schema.parse({ type: "launchable" })).not.toThrow();
     expect(() => tool!.schema.parse({ type: "bogus" })).toThrow();
   });
 
@@ -161,6 +163,48 @@ describe("listApps tool", () => {
     await expect(tool!.deviceAwareHandler!(device, {})).rejects.toThrow(
       `Failed to list apps for device ${device.deviceId}`,
     );
+  });
+
+  test("the message names the applied filter and what it hid, so a client is not left guessing (#6798)", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    const fakeToolUtils = new FakeToolUtils();
+    setListAppsToolDependencies({
+      toolResponseFormatter: fakeToolUtils,
+      queryInstalledApps: async () =>
+        fakeAppsContent({
+          query: { deviceId: device.deviceId, type: "launchable" },
+          totalCount: 3,
+          installedCount: 180,
+        }),
+    });
+
+    await tool!.deviceAwareHandler!(device, {});
+
+    const message = fakeToolUtils.getLastJSONResponse().message as string;
+    expect(message).toContain("Found 3 app(s)");
+    expect(message).toContain("type=launchable");
+    expect(message).toContain("177");
+    expect(message).toContain('type:"all"');
+  });
+
+  test("says nothing about hidden apps when the filter hid nothing (#6798)", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    const fakeToolUtils = new FakeToolUtils();
+    setListAppsToolDependencies({
+      toolResponseFormatter: fakeToolUtils,
+      queryInstalledApps: async () =>
+        fakeAppsContent({
+          query: { deviceId: device.deviceId, type: "all" },
+          totalCount: 180,
+          installedCount: 180,
+        }),
+    });
+
+    await tool!.deviceAwareHandler!(device, {});
+
+    const message = fakeToolUtils.getLastJSONResponse().message as string;
+    expect(message).toContain("Found 180 app(s)");
+    expect(message).not.toContain("hidden");
   });
 
   test("keeps foreground resource invalidation separate from package cache dirtying", () => {

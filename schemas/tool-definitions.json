@@ -2516,18 +2516,18 @@
   },
   {
     "name": "listApps",
-    "description": "List installed apps on a device. Filters by type (default: user), search, and profile.",
+    "description": "List installed apps on a device, each with its display label and whether it can be launched. Filters by type (default: launchable — every app with a launcher entry point, preinstalled ones included), search (package name or label), and profile.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "type": {
-          "description": "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where user/system classification is unavailable (devicectl reports no such signal there): on such a device an omitted type returns every app (reported as 'all'), and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
+          "description": "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) are visible while content providers and RRO overlays are not. 'user' and 'system' keep their meaning and must be asked for explicitly; 'all' returns every installed package. The default degrades to 'user' when the device reports no launchability signal, and an explicit 'launchable' is then rejected rather than silently empty. On a physical iOS device, where user/system classification is unavailable (devicectl reports no such signal), an omitted type returns every app (reported as 'all') and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
           "type": "string",
-          "enum": ["user", "system", "all"]
+          "enum": ["launchable", "user", "system", "all"]
         },
         "search": {
-          "description": "Filter by a case-insensitive substring of the package name/bundle id. Also matches the app's display name where the platform reports one (iOS only today — Android's listing does not include app labels).",
+          "description": "Filter by a case-insensitive substring of the package name/bundle id or of the app's display label ('contacts' matches both com.android.contacts and an app labelled Contacts). Android labels require the on-device AutoMobile SDK; without it only the package name is matched.",
           "type": "string"
         },
         "profile": {

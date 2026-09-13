@@ -30,6 +30,21 @@ export interface InstalledApp {
    * (Placeholder for future implementation - currently always false)
    */
   recent: boolean;
+
+  /**
+   * Launcher label as a human sees it ("Contacts"). Optional: it is only
+   * available where a label source reported one (issue #6798) — on Android
+   * that is the CtrlProxy accessibility service, since no adb shell surface
+   * resolves a package's `labelRes` resource id.
+   */
+  label?: string;
+
+  /**
+   * Whether the package exposes a MAIN/LAUNCHER entry point, i.e. whether
+   * `launchApp` can do anything with it. `undefined` means "not reported"
+   * (the launcher probe was unavailable), never "no" (issue #6798).
+   */
+  launchable?: boolean;
 }
 
 /**
@@ -56,6 +71,21 @@ export interface SystemInstalledApp {
    * (Placeholder for future implementation - currently always false)
    */
   recent: boolean;
+
+  /**
+   * Launcher label as a human sees it ("Contacts"). Optional: it is only
+   * available where a label source reported one (issue #6798) — on Android
+   * that is the CtrlProxy accessibility service, since no adb shell surface
+   * resolves a package's `labelRes` resource id.
+   */
+  label?: string;
+
+  /**
+   * Whether the package exposes a MAIN/LAUNCHER entry point, i.e. whether
+   * `launchApp` can do anything with it. `undefined` means "not reported"
+   * (the launcher probe was unavailable), never "no" (issue #6798).
+   */
+  launchable?: boolean;
 }
 
 /**

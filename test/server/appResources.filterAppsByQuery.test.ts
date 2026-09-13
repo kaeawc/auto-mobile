@@ -23,10 +23,13 @@ const systemApp: AppsQueryAppInfo = {
 
 const apps: AppsQueryAppInfo[] = [userApp, systemApp];
 
-describe("filterAppsByQuery type default (#6155)", () => {
-  test("omitted type defaults to user, not all apps", () => {
+describe("filterAppsByQuery type default (#6155, default changed by #6798)", () => {
+  test("omitted type is still a filter, not 'all' — neither of these apps reports launchability", () => {
+    // The default moved from "user" to "launchable" (#6798). These fixtures
+    // carry no launchable flag, so the default selects nothing; the point
+    // preserved from #6155 is that an omitted type is never "no filter".
     const result = filterAppsByQuery(apps, {});
-    expect(result).toEqual([userApp]);
+    expect(result).toEqual([]);
   });
 
   test("type=system returns only system apps", () => {
@@ -51,14 +54,14 @@ describe("filterAppsByQuery search normalization (#6216 review)", () => {
     type: "user",
     foreground: false,
     recent: false,
-    displayName: "Camera",
+    label: "Camera",
   };
   const otherApp: AppsQueryAppInfo = {
     packageName: "com.example.other",
     type: "user",
     foreground: false,
     recent: false,
-    displayName: "Other",
+    label: "Other",
   };
   const searchApps = [cameraApp, otherApp];
 
@@ -168,8 +171,10 @@ describe("iOS apps are classified before the type=user default is applied (#6155
   };
   const iosApps = [iosUserApp, iosSystemApp];
 
-  test("default (omitted type) excludes iOS system apps, matching Android", () => {
-    expect(filterAppsByQuery(iosApps, {})).toEqual([iosUserApp]);
+  test("an explicit type=user excludes iOS system apps, matching Android", () => {
+    // The omitted-type default is "launchable" since #6798; type=user remains
+    // the explicit way to ask the #6155 question.
+    expect(filterAppsByQuery(iosApps, { type: "user" })).toEqual([iosUserApp]);
   });
 
   test("type=system returns only iOS system apps", () => {
@@ -224,5 +229,68 @@ describe("profile filtering preserves iOS system apps (#6216 review)", () => {
 
   test("a non-matching profile still excludes iOS apps (the filter itself still works)", () => {
     expect(filterAppsByQuery(iosApps, { type: "all", profile: 1 })).toEqual([]);
+  });
+});
+
+describe("filterAppsByQuery launchable default (#6798)", () => {
+  const contacts: AppsQueryAppInfo = {
+    packageName: "com.android.contacts",
+    type: "system",
+    foreground: false,
+    recent: false,
+    label: "Contacts",
+    launchable: true,
+  };
+  const contactsProvider: AppsQueryAppInfo = {
+    packageName: "com.android.providers.contacts",
+    type: "system",
+    foreground: false,
+    recent: false,
+    label: "Contacts Storage",
+    launchable: false,
+  };
+  const myApp: AppsQueryAppInfo = {
+    packageName: "com.example.myapp",
+    type: "user",
+    foreground: false,
+    recent: false,
+    label: "My App",
+    launchable: true,
+  };
+  const launchableApps = [contacts, contactsProvider, myApp];
+
+  test("an omitted type defaults to launchable, so Contacts is no longer hidden", () => {
+    expect(filterAppsByQuery(launchableApps, {})).toEqual([contacts, myApp]);
+  });
+
+  test("the launchable default still drops providers and overlays that cannot be launched", () => {
+    expect(filterAppsByQuery(launchableApps, {})).not.toContain(contactsProvider);
+  });
+
+  test("the user/system distinction is preserved and still filterable explicitly", () => {
+    expect(filterAppsByQuery(launchableApps, { type: "user" })).toEqual([myApp]);
+    expect(filterAppsByQuery(launchableApps, { type: "system" })).toEqual([
+      contacts,
+      contactsProvider,
+    ]);
+    expect(filterAppsByQuery(launchableApps, { type: "all" })).toEqual(launchableApps);
+  });
+
+  test("an app whose launchability was never reported is excluded by the launchable filter", () => {
+    const unknown: AppsQueryAppInfo = {
+      packageName: "com.example.unknown",
+      type: "user",
+      foreground: false,
+      recent: false,
+    };
+    expect(filterAppsByQuery([unknown], { type: "launchable" })).toEqual([]);
+  });
+
+  test("search matches the display label, so 'contacts' finds the app and not just the id", () => {
+    expect(filterAppsByQuery(launchableApps, { type: "all", search: "Contacts" })).toEqual([
+      contacts,
+      contactsProvider,
+    ]);
+    expect(filterAppsByQuery(launchableApps, { type: "all", search: "my app" })).toEqual([myApp]);
   });
 });

@@ -33,6 +33,7 @@ import {
   invalidateInstalledAppResourceCache,
   notifyInstalledAppResourceUpdated,
   queryInstalledApps,
+  type AppsQueryResourceContent,
   type AppsQueryType,
 } from "./appResources";
 import { logger } from "../utils/logger";
@@ -514,21 +515,27 @@ export const resetKeychainSchema = withAppIdAliases(
 export const listAppsSchema = addDeviceTargetingToSchema(
   z.object({
     type: z
-      .enum(["user", "system", "all"])
+      .enum(["launchable", "user", "system", "all"])
       .optional()
       .describe(
-        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
-          "user/system classification is unavailable (devicectl reports no such signal there): " +
-          "on such a device an omitted type returns every app (reported as 'all'), and an " +
+        "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, " +
+          "user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) " +
+          "are visible while content providers and RRO overlays are not. 'user' and 'system' " +
+          "keep their meaning and must be asked for explicitly; 'all' returns every installed " +
+          "package. The default degrades to 'user' when the device reports no launchability " +
+          "signal, and an explicit 'launchable' is then rejected rather than silently empty. " +
+          "On a physical iOS device, where user/system classification is unavailable (devicectl " +
+          "reports no such signal), an omitted type returns every app (reported as 'all') and an " +
           "explicit 'user' or 'system' filter is rejected rather than silently honored.",
       ),
     search: z
       .string()
       .optional()
       .describe(
-        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
-          "the app's display name where the platform reports one (iOS only today — Android's " +
-          "listing does not include app labels).",
+        "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
+          "display label ('contacts' matches both com.android.contacts and an app labelled " +
+          "Contacts). Android labels require the on-device AutoMobile SDK; without it only the " +
+          "package name is matched.",
       ),
     profile: z
       .number()
@@ -627,6 +634,27 @@ export const setAppPermissionsHandler = async (
   return wholeOperationFailed ? { ...response, isError: true as const } : response;
 };
 
+/**
+ * Says which filter was applied and how many apps it hid. The previous message
+ * reported only the surviving count, so a default-filtered listing looked like
+ * the device's whole inventory and a client had to guess that `type` had other
+ * values (#6798).
+ */
+export function describeListAppsResult(
+  deviceId: string,
+  content: Pick<AppsQueryResourceContent, "totalCount" | "installedCount" | "query">,
+): string {
+  const found = `Found ${content.totalCount} app(s) on ${deviceId}`;
+  const hidden = content.installedCount - content.totalCount;
+  if (hidden <= 0) {
+    return found;
+  }
+  return (
+    `${found} (type=${content.query.type ?? "launchable"}; ${hidden} of ${content.installedCount} ` +
+    'installed package(s) hidden — pass type:"all" to include them)'
+  );
+}
+
 // Register tools
 export function registerAppTools() {
   const listAppsHandler = async (device: BootedDevice, args: ListAppsArgs) => {
@@ -641,7 +669,7 @@ export function registerAppTools() {
       });
 
       return toolResponseFormatter.createJSONToolResponse({
-        message: `Found ${content.totalCount} app(s) on ${device.deviceId}`,
+        message: describeListAppsResult(device.deviceId, content),
         ...content,
       });
     } catch (error) {
@@ -934,7 +962,9 @@ export function registerAppTools() {
 
   ToolRegistry.registerDeviceAware(
     "listApps",
-    "List installed apps on a device. Filters by type (default: user), search, and profile.",
+    "List installed apps on a device, each with its display label and whether it can be " +
+      "launched. Filters by type (default: launchable — every app with a launcher entry point, " +
+      "preinstalled ones included), search (package name or label), and profile.",
     listAppsSchema,
     listAppsHandler,
     {

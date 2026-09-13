@@ -83,7 +83,7 @@ or `--enable-tool sendKeys`.
 
 | Tool                                                                                             | What it does                                                                                                               |
 | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| 📱 <code>listApps</code>                                                                         | Lists installed apps on a device (params: `device`, `type`, `search`, `profile`; default `type=user`).                     |
+| 📱 <code>listApps</code>                                                                         | Lists installed apps with label and launchability (`device`, `type`, `search`, `profile`; default `type=launchable`).      |
 | 🚀 <code>launchApp</code>                                                                        | Launches an app by package name.                                                                                           |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                         |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                       |

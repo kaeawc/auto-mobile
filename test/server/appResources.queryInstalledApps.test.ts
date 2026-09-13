@@ -181,12 +181,150 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     expect(content.totalCount).toBe(1);
   });
 
-  test('an omitted type filter still reports and applies the documented "user" default (#6216 review, round 6)', async () => {
-    // Control case: reliable classification (simulator ApplicationType) must
-    // keep the existing "user" default behavior — only the physical-device,
-    // unreliable-classification case reports "all".
+  test('an omitted type filter reports and applies the documented "launchable" default (#6798)', async () => {
+    // Control case: reliable classification (simulator ApplicationType) keeps
+    // reporting the effective type honestly — only the physical-device,
+    // unreliable-classification case reports "all". Since #6798 the default is
+    // "launchable", which on the simulator selects both the User app and the
+    // System app (Safari launches; only "Hidden" bundles do not).
     const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    expect(content.query.type).toBe("launchable");
+    expect(content.totalCount).toBe(2);
+  });
+
+  test("a Hidden simulator bundle is excluded by the launchable default (#6798)", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.myapp", ApplicationType: "User" },
+          { bundleIdentifier: "com.apple.springboard", ApplicationType: "Hidden" },
+        ],
+        successful: true,
+      }),
+    }));
+    invalidateInstalledAppsCache(simulatorDevice.deviceId);
+
+    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
+    expect(content.installedCount).toBe(2);
+  });
+});
+
+describe("queryInstalledApps launchable default on Android (#6798)", () => {
+  const androidDevice: BootedDevice = {
+    deviceId: "emulator-5558",
+    name: "Pixel 6 API 31",
+    platform: "android",
+  };
+
+  beforeEach(() => {
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setBootedDevices("ios", []);
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
+  });
+
+  afterEach(() => {
+    setListInstalledAppsFactoryForTests(null);
+    PlatformDeviceManagerFactory.setInstance(null);
+    invalidateInstalledAppsCache(androidDevice.deviceId);
+  });
+
+  function setAndroidApps(
+    system: Array<Record<string, unknown>>,
+    user: Array<Record<string, unknown>>,
+  ) {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => ({
+        apps: {
+          profiles: {
+            0: user.map((app) => ({
+              userId: 0,
+              profileType: "primary" as const,
+              foreground: false,
+              recent: false,
+              ...app,
+            })),
+          },
+          system: system.map((app) => ({
+            userIds: [0],
+            foreground: false,
+            recent: false,
+            ...app,
+          })),
+        } as never,
+        successful: true,
+      }),
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+  }
+
+  test("the dogfood case: Contacts is returned by default and carries its label", async () => {
+    setAndroidApps(
+      [
+        { packageName: "com.android.contacts", label: "Contacts", launchable: true },
+        {
+          packageName: "com.android.providers.contacts",
+          label: "Contacts Storage",
+          launchable: false,
+        },
+      ],
+      [{ packageName: "com.example.myapp", label: "My App", launchable: true }],
+    );
+
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+
+    expect(content.query.type).toBe("launchable");
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual([
+      "com.example.myapp",
+      "com.android.contacts",
+    ]);
+    const contacts = content.devices[0].apps.find(
+      (app) => app.packageName === "com.android.contacts",
+    );
+    expect(contacts?.label).toBe("Contacts");
+    expect(contacts?.type).toBe("system");
+    expect(content.installedCount).toBe(3);
+  });
+
+  test("searching by the human name resolves the package in one call", async () => {
+    setAndroidApps(
+      [{ packageName: "com.google.android.deskclock", label: "Clock", launchable: true }],
+      [],
+    );
+
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId, search: "clock" });
+
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual([
+      "com.google.android.deskclock",
+    ]);
+  });
+
+  test("a device with no launchability signal degrades to the user default rather than reporting nothing", async () => {
+    setAndroidApps(
+      [{ packageName: "com.android.contacts" }],
+      [{ packageName: "com.example.myapp" }],
+    );
+
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+
     expect(content.query.type).toBe("user");
-    expect(content.totalCount).toBe(1);
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
+  });
+
+  test("an explicit type=launchable is rejected when launchability is unknown", async () => {
+    setAndroidApps(
+      [{ packageName: "com.android.contacts" }],
+      [{ packageName: "com.example.myapp" }],
+    );
+
+    await expect(
+      queryInstalledApps({ deviceId: androidDevice.deviceId, type: "launchable" }),
+    ).rejects.toThrow(/no launchability signal/);
   });
 });

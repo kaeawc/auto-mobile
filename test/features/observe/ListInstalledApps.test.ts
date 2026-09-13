@@ -312,6 +312,123 @@ describe("ListInstalledApps", function () {
     });
   });
 
+  describe("launchability (#6798)", function () {
+    const users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
+
+    beforeEach(function () {
+      fakeAdb.setUsers(users);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout:
+          "package:com.android.contacts\npackage:com.android.providers.contacts\npackage:com.example.myapp\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
+        stdout: "package:com.android.contacts\npackage:com.android.providers.contacts\n",
+        stderr: "",
+      });
+    });
+
+    test("marks apps with a MAIN/LAUNCHER entry point launchable from one batched adb read", async function () {
+      fakeAdb.setCommandResponse(
+        "shell cmd package query-activities --brief --user 0 " +
+          "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+        {
+          stdout:
+            "2 activities found:\n  Activity #0:\n    com.android.contacts/.activities.PeopleActivity\n" +
+            "  Activity #1:\n    com.example.myapp/.Main\n",
+          stderr: "",
+        },
+      );
+
+      const result = await listInstalledApps.executeDetailed();
+
+      const contacts = result.system.find((app) => app.packageName === "com.android.contacts");
+      const provider = result.system.find(
+        (app) => app.packageName === "com.android.providers.contacts",
+      );
+      const myApp = result.profiles[0].find((app) => app.packageName === "com.example.myapp");
+
+      expect(contacts?.launchable).toBe(true);
+      expect(provider?.launchable).toBe(false);
+      expect(myApp?.launchable).toBe(true);
+    });
+
+    test("issues the launcher probe once per user, not once per package", async function () {
+      await listInstalledApps.executeDetailed();
+
+      const probes = fakeAdb
+        .getExecutedCommands()
+        .filter((command) => command.includes("query-activities"));
+      expect(probes).toHaveLength(1);
+    });
+
+    test("cached rows are still enriched: the DB cache stores no label or launchability", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.myapp",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "primary",
+        },
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.android.providers.contacts",
+          is_system: 1,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "primary",
+        },
+      ]);
+      fakeAdb.setCommandResponse(
+        "shell cmd package query-activities --brief --user 0 " +
+          "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+        { stdout: "com.example.myapp/.Main\n", stderr: "" },
+      );
+
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+      });
+      const result = await cached.executeDetailed();
+
+      expect(result.profiles[0][0].launchable).toBe(true);
+      expect(result.system[0].launchable).toBe(false);
+    });
+
+    test("a names-only listing skips the launcher probe entirely", async function () {
+      // execute() is the package-name path LaunchApp uses to check whether an
+      // app is installed; it must not pay for the catalog's extra adb command.
+      await listInstalledApps.execute();
+
+      expect(
+        fakeAdb.getExecutedCommands().some((command) => command.includes("query-activities")),
+      ).toBe(false);
+    });
+
+    test("a failed launcher probe leaves launchability unknown rather than claiming false", async function () {
+      fakeAdb.setCommandError(
+        "shell cmd package query-activities --brief --user 0 " +
+          "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+        new Error("cmd: Can't find service: package"),
+      );
+
+      const result = await listInstalledApps.executeDetailed();
+
+      expect(result.profiles[0]).toHaveLength(1);
+      expect(result.profiles[0][0].launchable).toBeUndefined();
+      expect(result.system.every((app) => app.launchable === undefined)).toBe(true);
+    });
+  });
+
   describe("cache", function () {
     test("lists iOS bundle IDs live after an out-of-band app change", async function () {
       const iosDevice: BootedDevice = {

@@ -123,7 +123,7 @@ fetch_artifact_logs() {
   matrix_suffix="$(lowercase "${BASH_REMATCH[1]}")"
   matrix_suffix="${matrix_suffix// /-}"
   artifact_name="mcp-build-test-logs-${matrix_suffix}"
-  if ! artifacts="$(gh api "repos/${REPO}/actions/runs/${run_id}/artifacts" 2>/dev/null)"; then
+  if ! artifacts="$(gh api --paginate --slurp "repos/${REPO}/actions/runs/${run_id}/artifacts?per_page=100" 2>/dev/null)"; then
     return 0
   fi
   while IFS= read -r artifact_id; do
@@ -134,7 +134,7 @@ fetch_artifact_logs() {
     fi
     rm -f "$artifact_file"
   done < <(
-    jq -r --arg artifact_name "$artifact_name" '.artifacts[]? | select(.name == $artifact_name) | .id' <<< "$artifacts"
+    jq -r --arg artifact_name "$artifact_name" '[.[].artifacts[]? | select(.name == $artifact_name) | .id] | .[]' <<< "$artifacts"
   )
   printf '%s' "$artifact_text"
 }

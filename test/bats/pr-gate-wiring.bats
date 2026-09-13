@@ -124,7 +124,7 @@ wiring_requires_yq() {
 }
 
 @test "advisory roll-ups warn without weakening their hard dependencies" {
-  local ios android node webrtc node_hard_results node_advisory_results webrtc_hard_results webrtc_advisory_results
+  local ios android node webrtc ios_hard_results ios_advisory_results android_hard_results android_advisory_results node_hard_results node_advisory_results webrtc_hard_results webrtc_advisory_results
   ios="$(job_block ios-gate)"
   android="$(job_block android-gate)"
   node="$(job_block node-tests-gate)"
@@ -133,25 +133,39 @@ wiring_requires_yq() {
   for block in "$ios" "$android" "$node" "$webrtc"; do
     [[ "$block" == *"declare -A hard_results"* ]]
     [[ "$block" == *"declare -A advisory_results"* ]]
-    [[ "$block" == *'::warning::'*'known-flaky, see scripts/ci/known-flakes.txt'* ]]
+    [[ "$block" == *'::warning::'*'advisory: '*' lane failed; classify with scripts/ci/classify-failure.sh <run-id>'* ]]
   done
 
-  [[ "$ios" == *'[ios-xctest-runner-simulator-tests]'* ]]
-  [[ "$ios" == *'[ios-build-gate]'* ]]
-  [[ "$android" == *'[junit-runner-emulator-tests]'* ]]
-  [[ "$android" == *'[build-android-control-proxy]'* ]]
+  ios_hard_results="${ios#*declare -A hard_results=(}"
+  ios_hard_results="${ios_hard_results%%$'\n          )'*}"
+  ios_advisory_results="${ios#*declare -A advisory_results=(}"
+  ios_advisory_results="${ios_advisory_results%%$'\n          )'*}"
+  [[ "$ios_hard_results" == *'[ios-build-gate]'* ]]
+  [[ "$ios_hard_results" == *'[ios-playground-tests]'* ]]
+  [[ "$ios_advisory_results" == *'[ios-xctest-runner-simulator-tests]'* ]]
+  [[ "$ios_advisory_results" != *'[ios-build-gate]'* ]]
+  [[ "$ios_advisory_results" != *'[ios-playground-tests]'* ]]
+  [[ "$ios_hard_results" != *'[ios-xctest-runner-simulator-tests]'* ]]
+  android_hard_results="${android#*declare -A hard_results=(}"
+  android_hard_results="${android_hard_results%%$'\n          )'*}"
+  android_advisory_results="${android#*declare -A advisory_results=(}"
+  android_advisory_results="${android_advisory_results%%$'\n          )'*}"
+  [[ "$android_hard_results" == *'[build-android-control-proxy]'* ]]
+  [[ "$android_advisory_results" == *'[junit-runner-emulator-tests]'* ]]
+  [[ "$android_advisory_results" != *'[build-android-control-proxy]'* ]]
+  [[ "$android_hard_results" != *'[junit-runner-emulator-tests]'* ]]
   node_hard_results="${node#*declare -A hard_results=(}"
   node_hard_results="${node_hard_results%%$'\n          )'*}"
   node_advisory_results="${node#*declare -A advisory_results=(}"
   node_advisory_results="${node_advisory_results%%$'\n          )'*}"
   [[ "$node_hard_results" == *'[node-unit-tests]'* ]]
-  [[ "$node" == *'[node-host-integration-tests]'* ]]
+  [[ "$node_hard_results" == *'[node-host-integration-tests]'* ]]
   [[ "$node_advisory_results" == *'[node-unit-timing-budget]'* ]]
   webrtc_hard_results="${webrtc#*declare -A hard_results=(}"
   webrtc_hard_results="${webrtc_hard_results%%$'\n          )'*}"
   webrtc_advisory_results="${webrtc#*declare -A advisory_results=(}"
   webrtc_advisory_results="${webrtc_advisory_results%%$'\n          )'*}"
-  [[ "$webrtc" == *'[detect-changes]'* ]]
+  [[ "$webrtc_hard_results" == *'[detect-changes]'* ]]
   [[ "$webrtc_hard_results" == *'[webrtc-integration-test]'* ]]
   [[ "$webrtc_advisory_results" == *'[android-device-webrtc]'* ]]
   [[ "$webrtc_advisory_results" == *'[ios-device-webrtc]'* ]]

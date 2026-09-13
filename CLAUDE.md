@@ -289,7 +289,8 @@ lanes, so a red aggregator does not itself mean a required check failed. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before
-pushing integration-test changes, run `bash scripts/prepush-integration.sh`.
+pushing integration-test or runtime-graph input changes, run
+`bash scripts/prepush-integration.sh`.
 See `skills/ci-failure-triage/SKILL.md` for the full workflow.
 
 # Version Control: jj colocated checkouts

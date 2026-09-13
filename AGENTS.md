@@ -179,7 +179,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - A red `iOS`, `Android`, `Node Tests`, or `WebRTC` roll-up does not by itself
   prove a required lane failed. Run `bash scripts/ci/classify-failure.sh <run-id>`
   before rerunning or changing code; it identifies the specific upstream lane
-  and consults `scripts/ci/known-flakes.txt`. For integration-test changes, run
+  and consults `scripts/ci/known-flakes.txt`. For integration-test or runtime-graph input changes, run
   `bash scripts/prepush-integration.sh` before pushing. See `ci-failure-triage`.
 - Use the repo-local `push-pr` skill for publishing one branch or PR. Create or edit PRs with `gh pr create`/`gh pr edit` using `--body-file` to preserve newlines.
 - Android tasks run via the Gradle wrapper from `android/` (e.g., `(cd android && ./gradlew <task>)`).

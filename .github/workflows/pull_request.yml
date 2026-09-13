@@ -3357,7 +3357,7 @@ jobs:
           for name in "${!advisory_results[@]}"; do
             r="${advisory_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::iOS gate advisory dependency ${name} = ${r}; known-flaky, see scripts/ci/known-flakes.txt"
+              echo "::warning::iOS gate advisory dependency ${name} = ${r}; advisory: ios-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
             fi
           done
           if [[ -n "$fail" ]]; then
@@ -3413,7 +3413,7 @@ jobs:
           for name in "${!advisory_results[@]}"; do
             r="${advisory_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::Android gate advisory dependency ${name} = ${r}; known-flaky, see scripts/ci/known-flakes.txt"
+              echo "::warning::Android gate advisory dependency ${name} = ${r}; advisory: android-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
             fi
           done
           if [[ -n "$fail" ]]; then
@@ -3590,7 +3590,7 @@ jobs:
           for name in "${!advisory_results[@]}"; do
             r="${advisory_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; known-flaky, see scripts/ci/known-flakes.txt"
+              echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; advisory: node-tests-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
             fi
           done
           if [[ -n "$fail" ]]; then
@@ -3640,7 +3640,7 @@ jobs:
           for name in "${!advisory_results[@]}"; do
             r="${advisory_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; known-flaky, see scripts/ci/known-flakes.txt"
+              echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; advisory: webrtc-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
             fi
           done
           if [[ -n "${fail}" ]]; then

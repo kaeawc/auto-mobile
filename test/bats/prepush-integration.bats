@@ -30,7 +30,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Integration tests: running 1 affected file(s)."* ]]
   [[ "$output" == *"$FIXTURE"* ]]
-  [[ "$output" == *"Pinned runtime graph: skipped"* ]]
+  [[ "$output" == *"Pinned runtime graph: skipped (no runtime dependency inputs changed)."* ]]
 }
 
 @test "runs the pinned runtime graph audit for every runtime graph input" {
@@ -39,6 +39,7 @@ teardown() {
     scripts/release/runtime-graph.json
     scripts/release/lib/runtime-pins.ts
     scripts/release/lib/runtime-roots.ts
+    scripts/ci/assert-installed-runtime-graph.ts
     scripts/ci/verify-pinned-runtime-graph.sh
   )
 

@@ -13,7 +13,8 @@ read-only unless the user also asks to fix a confirmed cause.
    `scripts/ci/known-flakes.txt` verdict.
 2. Treat `iOS`, `Android`, and `Node Tests` roll-ups as hard only for the
    deterministic dependencies reported by the classifier. Their simulator,
-   emulator, or Node-unit advisory failures warn without blocking the roll-up.
+   emulator, or Node Unit Timing Budget advisory failures warn without blocking
+   the roll-up.
    `WebRTC` treats `WebRTC Publisher Integration (MediaMTX)` as hard/required;
    only its Android and iOS device-capture legs are advisory. `detect-changes`
    remains hard for every roll-up.
@@ -23,8 +24,9 @@ read-only unless the user also asks to fix a confirmed cause.
    sharp/jimp bump that breaks the pinned clean-room graph is designed to be
    rejected; close or ignore that Dependabot PR instead of changing runtime
    dependencies.
-5. For integration-test changes, run `bash scripts/prepush-integration.sh` before
-   pushing. It runs only changed integration files and only runs the clean-room
-   runtime audit when its inputs changed.
+5. For integration-test or runtime-graph input changes, run
+   `bash scripts/prepush-integration.sh` before pushing. It runs only changed
+   integration files and only runs the clean-room runtime audit when its inputs
+   changed.
 
 Use `check-ci` when the failure needs full exact-head PR-state and log analysis.

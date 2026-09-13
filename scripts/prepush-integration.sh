@@ -27,7 +27,7 @@ while IFS= read -r file; do
       ;;
   esac
   case "$relative" in
-    package.json | bun.lock | scripts/release/pin-runtime-deps.ts | scripts/release/runtime-graph.json | scripts/release/lib/runtime-pins.ts | scripts/release/lib/runtime-roots.ts | scripts/ci/verify-pinned-runtime-graph.sh)
+    package.json | bun.lock | scripts/release/pin-runtime-deps.ts | scripts/release/runtime-graph.json | scripts/release/lib/runtime-pins.ts | scripts/release/lib/runtime-roots.ts | scripts/ci/assert-installed-runtime-graph.ts | scripts/ci/verify-pinned-runtime-graph.sh)
       runtime_graph_changed=true
       ;;
   esac
@@ -45,7 +45,7 @@ if [[ "$runtime_graph_changed" == true ]]; then
   bash scripts/ci/verify-pinned-runtime-graph.sh
   bun scripts/release/pin-runtime-deps.ts --check
 else
-  echo "Pinned runtime graph: skipped (package.json, bun.lock, and pin-runtime-deps.ts unchanged)."
+  echo "Pinned runtime graph: skipped (no runtime dependency inputs changed)."
 fi
 
 echo "Pre-push integration summary complete."

@@ -8,9 +8,13 @@
  *
  * Sources, cheapest first:
  *  - CtrlProxy's `installed_packages` result. The accessibility service already
- *    holds a `PackageManager`, so `getApplicationLabel` /
- *    `getLaunchIntentForPackage` come back for every package in the ONE
- *    round-trip the listing already makes. This is the only source of a
+ *    holds a `PackageManager`, so `getApplicationLabel` plus one batched
+ *    MAIN/LAUNCHER `queryIntentActivities` answer for every package in the ONE
+ *    round-trip the listing already makes. That query — not
+ *    `getLaunchIntentForPackage`, which accepts MAIN/INFO too — is deliberately
+ *    the same launcher criterion the adb fallback below uses, so the reported
+ *    `launchable` does not change with CtrlProxy availability (#6924 review).
+ *    This is the only source of a
  *    *resolved* label: a label is a resource id (`labelRes`), and no adb shell
  *    surface resolves resource ids — `pm list packages`, `dumpsys package` and
  *    `cmd package query-activities` all report `labelRes=0x…` /

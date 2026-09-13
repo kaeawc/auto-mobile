@@ -5128,6 +5128,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } else {
           @Suppress("DEPRECATION") packageManager.getInstalledPackages(0)
         }
+      // Launchability comes from ONE batched MAIN/LAUNCHER query rather than a
+      // per-package getLaunchIntentForPackage, which would accept MAIN/INFO and
+      // disagree with the adb fallback for the same install (#6924 review).
+      val launchablePackages = launchablePackageNames(packageManager)
       val records = mutableListOf<dev.jasonpearson.automobile.protocol.InstalledPackageRecord>()
       for (info in infos) {
         val isSystem =
@@ -5139,16 +5143,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           else @Suppress("DEPRECATION") info.versionCode.toLong()
         // Why here: `listApps` has to answer "which package is Contacts?", and a
         // label is a resource id no adb shell surface resolves. PackageManager is
-        // already open for this pass, so both reads are per-package work inside the
-        // ONE round-trip the listing already costs (#6798). Both reads are
-        // best-effort: a package being removed mid-enumeration throws, and one bad
-        // package must not fail the whole listing.
+        // already open for this pass, so this stays inside the ONE round-trip the
+        // listing already costs (#6798). Best-effort: a package being removed
+        // mid-enumeration throws, and one bad package must not fail the listing.
         val label =
           info.applicationInfo?.let { appInfo ->
             runCatching { packageManager.getApplicationLabel(appInfo).toString() }.getOrNull()
           }
-        val pkg = info.packageName
-        val launchIntent = runCatching { packageManager.getLaunchIntentForPackage(pkg) }.getOrNull()
         records.add(
           dev.jasonpearson.automobile.protocol.InstalledPackageRecord(
             packageName = info.packageName,
@@ -5156,7 +5157,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             versionName = info.versionName,
             versionCode = versionCode,
             label = label,
-            launchable = launchIntent != null,
+            launchable = launchablePackages.contains(info.packageName),
           )
         )
       }

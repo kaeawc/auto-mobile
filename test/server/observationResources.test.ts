@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { ScreenshotResult } from "../../src/models/ScreenshotResult";
 import type { TrackedScreenshotService } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
@@ -26,7 +26,9 @@ import {
 } from "../../src/server/directSessionDeviceRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
 
 /** Resolves once the microtask queue has drained, to detect a pending promise. */
 async function settleSentinel(): Promise<"still-pending"> {
@@ -561,8 +563,21 @@ describe("unscoped latest observation resources", () => {
   const deviceA: BootedDevice = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" };
   const deviceB: BootedDevice = { deviceId: "emulator-5556", name: "Pixel B", platform: "android" };
 
+  // Injected once per test so both devices share one in-memory cache, and so
+  // these tests never write through the process-wide FileSystemObserveCacheStore
+  // into the shared cache directory.
+  let cacheTimer: FakeTimer;
+  let cacheStore: FakeObserveCacheStore;
+
+  beforeEach(() => {
+    cacheTimer = new FakeTimer();
+    cacheStore = new FakeObserveCacheStore(cacheTimer);
+  });
+
   afterEach(() => {
-    RealObserveScreen.clearCache();
+    // The store is process-wide once injected, so drop it entirely rather than
+    // only clearing entries out of the shared on-disk store.
+    resetObserveCacheStore();
     ScreenshotJobTracker.clear();
     resetScreenshotStateStore();
     resetScreenshotFileSystem();
@@ -578,6 +593,8 @@ describe("unscoped latest observation resources", () => {
     const observeScreen = new RealObserveScreen(
       device,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
+      { cacheStore },
+      cacheTimer,
     );
     await observeScreen.cacheObserveResult({
       ...observeScreen.createBaseResult(),

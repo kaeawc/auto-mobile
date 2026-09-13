@@ -82,7 +82,6 @@ describe("AdbClient.getBootedAndroidDevices", () => {
         platform: "android",
         deviceId: "emulator-5554",
         observedAt: 1,
-        transportId: "42",
       },
     ]);
   });
@@ -118,13 +117,13 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       }
       calls++;
       return createExecResult(
-        ["List of devices attached", `emulator-5554\tdevice transport_id:${calls}`, ""].join("\n"),
+        ["List of devices attached", `emulator-555${calls}\tdevice`, ""].join("\n"),
       );
     });
 
-    expect(await adb.getBootedAndroidDevices()).toMatchObject([{ transportId: "1" }]);
+    expect(await adb.getBootedAndroidDevices()).toMatchObject([{ deviceId: "emulator-5551" }]);
     expect(await adb.getBootedAndroidDevices({ bypassCache: true })).toMatchObject([
-      { transportId: "2" },
+      { deviceId: "emulator-5552" },
     ]);
     expect(calls).toBe(2);
   });

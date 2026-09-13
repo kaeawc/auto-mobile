@@ -1231,7 +1231,14 @@ export class Daemon {
   }
 
   private setupDeviceSessionRouting(): void {
-    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry);
+    // The pool's unresolved-identity quarantine is the second input: while it
+    // holds for a serial, the registry record stays put but the resolver withholds
+    // it in both directions and every push server drops that serial's frames, so a
+    // possible replacement AVD's passive events cannot reach the previous AVD's
+    // subscribers (#6863 review).
+    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry, (deviceId) =>
+      this.devicePool.isPooledIdentityUnresolved(deviceId),
+    );
     const { deviceDataStream, performancePush, failuresPush, telemetryPush } =
       this.getDeviceSessionRoutingTargets();
     this.deviceDataStreamServer = deviceDataStream;

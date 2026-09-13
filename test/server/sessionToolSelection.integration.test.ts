@@ -850,19 +850,17 @@ describe("post-handler cancellation guard scope", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-test",
-      timer,
-      undefined,
-      new FakeDeviceUtils(),
-    );
+    const deviceUtils = new FakeDeviceUtils();
+    const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const device = {
       name: "Pixel 8",
       platform: "android" as const,
       deviceId: "reused-after-mint-android-1",
     };
+    // An idle Android entry is re-proved present against discovery before it is
+    // assigned, handsets included, so discovery has to list it.
+    deviceUtils.setBootedDevices("android", [device]);
     await pool.initializeWithDevices([device]);
     pool.notifyDeviceReady(device.deviceId);
 
@@ -934,15 +932,13 @@ describe("post-handler cancellation guard scope", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-test",
-      timer,
-      undefined,
-      new FakeDeviceUtils(),
-    );
+    const deviceUtils = new FakeDeviceUtils();
+    const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const device = { name: "Pixel 8", platform: "android" as const, deviceId: "reap-android-1" };
+    // An idle Android entry is re-proved present against discovery before it is
+    // assigned, handsets included, so discovery has to list it.
+    deviceUtils.setBootedDevices("android", [device]);
     await pool.initializeWithDevices([device]);
     pool.notifyDeviceReady(device.deviceId);
 

@@ -1251,8 +1251,22 @@ export async function restoreDeviceSnapshot(
 }
 
 /**
+ * Identity of an in-AVD snapshot payload: `<avd>.avd/snapshots/<name>`. A bare
+ * snapshot name is NOT that identity — two AVDs can each hold a `foo` directory,
+ * and an iOS or archive-type record named `foo` owns bytes somewhere else
+ * entirely. Keying the accounted set on the name alone let any one of those hide
+ * a genuine orphan and all of its bytes (#6490 review).
+ */
+function avdSnapshotKey(avdName: string, snapshotName: string): string {
+  return `${avdName}\u0000${snapshotName}`;
+}
+
+/**
  * Enumerate `<avd>.avd/snapshots/*` for every AVD on this host and report the
  * directories no record accounts for.
+ *
+ * Only an Android `vm` record accounts for an in-AVD directory, and only for its
+ * OWN AVD — `deviceName` on such a record is the AVD name.
  *
  * Report only — an orphan may predate AutoMobile, or be a user-made snapshot
  * someone relies on, so nothing here deletes. The field found nine such
@@ -1260,9 +1274,14 @@ export async function restoreDeviceSnapshot(
  * is a deliberate manual step (see docs/using/test-prep-tools.md).
  */
 async function summarizeOrphanedAvdSnapshots(
-  knownSnapshotNames: Set<string>,
+  records: DeviceSnapshotRecord[],
 ): Promise<OrphanedAvdSnapshotSummary> {
   const { avdSnapshots } = await getDeviceSnapshotDependencies();
+  const accounted = new Set(
+    records
+      .filter(isVmSnapshotRecord)
+      .map((record) => avdSnapshotKey(record.deviceName, record.snapshotName)),
+  );
 
   const entries: OrphanedAvdSnapshot[] = [];
   try {
@@ -1275,7 +1294,7 @@ async function summarizeOrphanedAvdSnapshots(
           .filter(
             (entry) =>
               entry.snapshotName !== AVD_DEFAULT_BOOT_SNAPSHOT &&
-              !knownSnapshotNames.has(entry.snapshotName),
+              !accounted.has(avdSnapshotKey(avdName, entry.snapshotName)),
           )
           .map((entry) => ({ avdName, ...entry })),
       );
@@ -1319,9 +1338,7 @@ export async function listDeviceSnapshots(): Promise<{
 
   const snapshots = records.map(buildArchiveEntry);
   const totalSizeBytes = records.reduce((sum, snapshot) => sum + (snapshot.sizeBytes ?? 0), 0);
-  const orphanedAvdSnapshots = await summarizeOrphanedAvdSnapshots(
-    new Set(records.map((record) => record.snapshotName)),
-  );
+  const orphanedAvdSnapshots = await summarizeOrphanedAvdSnapshots(records);
 
   return {
     snapshots,

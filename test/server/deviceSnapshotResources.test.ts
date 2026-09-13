@@ -84,16 +84,29 @@ describe("deviceSnapshotResources", () => {
 
   test("getSnapshotArchive surfaces unsized, pending-reclaim, and orphaned in-AVD snapshots (#6490)", async () => {
     const repository = new FakeDeviceSnapshotRepository();
+    // A vm record's deviceName IS the AVD name, and that pair — not the bare
+    // snapshot name — is what accounts for an in-AVD directory (#6490 review).
     await repository.insertSnapshot(
-      makeRecord({ snapshotName: "sized", snapshotType: "vm", sizeBytes: 2048 }),
+      makeRecord({
+        snapshotName: "sized",
+        snapshotType: "vm",
+        deviceName: "am-api34",
+        sizeBytes: 2048,
+      }),
     );
     await repository.insertSnapshot(
-      makeRecord({ snapshotName: "unsized", snapshotType: "vm", sizeBytes: null }),
+      makeRecord({
+        snapshotName: "unsized",
+        snapshotType: "vm",
+        deviceName: "am-api34",
+        sizeBytes: null,
+      }),
     );
     await repository.insertSnapshot(
       makeRecord({
         snapshotName: "stranded",
         snapshotType: "vm",
+        deviceName: "am-api34",
         sizeBytes: 4096,
         pendingReclaim: true,
         pendingReclaimReason: "emulator for AVD 'am-api34' is not running",

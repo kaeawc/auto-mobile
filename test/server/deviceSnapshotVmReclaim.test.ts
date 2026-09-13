@@ -238,3 +238,95 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "sweepSnap")).toBe(true);
   });
 });
+
+describe("orphan accounting is keyed by AVD and record type (#6891 review)", () => {
+  const OTHER_AVD = "am-api34-ga-arm64";
+  let fakeTimer: FakeTimer;
+  let repository: FakeDeviceSnapshotRepository;
+  let configRepository: FakeDeviceSnapshotConfigRepository;
+  let store: FakeDeviceSnapshotStore;
+  let avdSnapshots: FakeAvdSnapshotService;
+
+  beforeEach(async () => {
+    fakeTimer = new FakeTimer();
+    repository = new FakeDeviceSnapshotRepository();
+    configRepository = new FakeDeviceSnapshotConfigRepository();
+    store = new FakeDeviceSnapshotStore();
+    avdSnapshots = new FakeAvdSnapshotService();
+    await configRepository.setConfig({
+      includeAppData: true,
+      includeSettings: false,
+      useVmSnapshot: true,
+      strictBackupMode: false,
+      vmSnapshotTimeoutMs: 12000,
+      maxArchiveSizeMb: 4096,
+    });
+    await setDeviceSnapshotManagerDependencies({
+      snapshotRepository: repository as any,
+      configRepository: configRepository as any,
+      snapshotStore: store as any,
+      avdSnapshots,
+      timer: fakeTimer,
+      now: () => new Date(fakeTimer.now()),
+    });
+  });
+
+  afterEach(() => {
+    resetDeviceSnapshotManagerDependencies();
+  });
+
+  async function insertRecord(
+    snapshotName: string,
+    deviceName: string,
+    platform: "android" | "ios",
+    snapshotType: "vm" | "archive",
+  ): Promise<void> {
+    const timestamp = new Date(1000).toISOString();
+    await repository.insertSnapshot({
+      snapshotName,
+      deviceId: platform === "android" ? "emulator-5556" : "SIM-UUID",
+      deviceName,
+      platform,
+      snapshotType,
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 0,
+      manifest: {
+        snapshotName,
+        timestamp,
+        deviceId: platform === "android" ? "emulator-5556" : "SIM-UUID",
+        deviceName,
+        platform,
+        snapshotType,
+        includeAppData: true,
+        includeSettings: false,
+      },
+    });
+  }
+
+  test("a vm record for another AVD does not hide an unrecorded directory of the same name", async () => {
+    await insertRecord("shared", AVD_NAME, "android", "vm");
+    avdSnapshots.setVmSnapshot(AVD_NAME, "shared", 1024 * MB);
+    avdSnapshots.setVmSnapshot(OTHER_AVD, "shared", 3 * 1024 * MB);
+
+    const listed = await listDeviceSnapshots();
+
+    expect(listed.orphanedAvdSnapshots.entries).toEqual([
+      { avdName: OTHER_AVD, snapshotName: "shared", sizeBytes: 3 * 1024 * MB },
+    ]);
+  });
+
+  test("a non-vm record of the same name does not account for an in-AVD directory", async () => {
+    await insertRecord("mirror", AVD_NAME, "android", "archive");
+    await insertRecord("sim-only", "iPhone 16", "ios", "archive");
+    avdSnapshots.setVmSnapshot(AVD_NAME, "mirror", 2 * 1024 * MB);
+    avdSnapshots.setVmSnapshot(AVD_NAME, "sim-only", 1024 * MB);
+
+    const listed = await listDeviceSnapshots();
+
+    expect(listed.orphanedAvdSnapshots.count).toBe(2);
+    expect(listed.orphanedAvdSnapshots.totalSizeBytes).toBe(3 * 1024 * MB);
+  });
+});

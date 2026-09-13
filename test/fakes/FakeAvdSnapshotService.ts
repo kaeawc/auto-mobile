@@ -84,8 +84,14 @@ export class FakeAvdSnapshotService implements AvdSnapshotOperations {
     if (this.deleteFailureReason) {
       return { reclaimed: false, reason: this.deleteFailureReason };
     }
-    for (const byName of this.avdSnapshots.values()) {
-      byName.delete(snapshotName);
+    // The emulator console only ever reaches the AVD behind this serial, so the
+    // fake must too: deleting every same-named directory across AVDs would hide
+    // exactly the cross-AVD confusion these tests exist to catch.
+    const avdName = Array.from(this.liveSerials.entries()).find(
+      ([, serial]) => serial === deviceId,
+    )?.[0];
+    if (avdName !== undefined) {
+      this.avdSnapshots.get(avdName)?.delete(snapshotName);
     }
     return { reclaimed: true };
   }

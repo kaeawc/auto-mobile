@@ -245,6 +245,25 @@ function resolveDiffContext(
  * observation) rather than `servedObservation` so it is populated
  * unconditionally, regardless of projection.
  */
+/**
+ * The `truncationReasons` to attach to a diff response (issue #6601): a diff
+ * replaces the projected observation outright, so the provenance the skeleton
+ * projection lifted out of `viewHierarchy` — and, under `project:"full"`, the
+ * `viewHierarchy.truncationReasons` that never needed lifting — would be
+ * dropped with the observation it replaced. Resolved from the served projection
+ * first and otherwise from the raw observation's hierarchy, so the field is
+ * populated in every projection mode. `undefined` (nothing was truncated)
+ * serializes away exactly like an absent key.
+ */
+function resolveDiffTruncationReasons(
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+): string[] | undefined {
+  const reasons =
+    servedObservation.truncationReasons ?? rawObservation.viewHierarchy?.truncationReasons;
+  return reasons && reasons.length > 0 ? [...reasons] : undefined;
+}
+
 function resolveDiffScreenState(
   rawObservation: ObserveResult,
 ): Pick<ObserveDiff, "activeWindow" | "freshness"> {
@@ -573,6 +592,12 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           // `undefined` when the underlying observation lacks them, which drops
           // out of the serialized diff the same way an absent key would.
           Object.assign(diff, resolveDiffScreenState(payload.observation as ObserveResult));
+          // Issue #6601: nor may a diff silently drop the hierarchy's truncation
+          // provenance — see resolveDiffTruncationReasons.
+          diff.truncationReasons = resolveDiffTruncationReasons(
+            servedObservation,
+            payload.observation as ObserveResult,
+          );
           const screenChangedWithEmptyDiff =
             hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;

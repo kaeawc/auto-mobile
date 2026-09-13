@@ -726,6 +726,17 @@ export const observeDiffSchema = z
           "diff modes. Populated from the post-transition observation, not by " +
           "`diffObserveResult` itself.",
       ),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
+          "a skeleton-projected full observation carries, so a client reads it the " +
+          "same way in both modes. Present only when rows were dropped: a " +
+          "device-side stop (max_nodes, max_depth) or the per-node child cap " +
+          "(max_children[<node> kept N of M]). When present, `skeleton`/`context` " +
+          "are a subset of the screen.",
+      ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),
     changed: z.array(observeDiffNodeChangeSchema),

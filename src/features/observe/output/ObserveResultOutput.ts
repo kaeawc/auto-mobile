@@ -648,6 +648,15 @@ export interface ObserveDiff {
    * no single accessor for "is this capture fresh" across full and diff modes.
    */
   freshness?: ObserveResult["freshness"];
+  /**
+   * Why the captured hierarchy is incomplete — the same top-level field a
+   * skeleton-projected full observation carries (issue #6601). A diff REPLACES
+   * the projected observation, so without this the provenance the projection
+   * lifted out of `viewHierarchy` is dropped with it and a capped `skeleton`
+   * reads as a complete one. Populated by the `finalizeToolResponse` call site
+   * from the post-action observation, not by {@link diffObserveResult}.
+   */
+  truncationReasons?: string[];
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];

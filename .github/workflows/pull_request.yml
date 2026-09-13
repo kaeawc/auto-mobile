@@ -355,6 +355,7 @@ jobs:
               - 'bunfig.toml'
               - 'test/setup/**'
               - 'test/integration/iosVideoRecordingStartStop.integration.test.ts'
+              - 'test/helpers/sessionOwnershipHeartbeat.ts'
               - 'test/features/navigation/iosNavigationGraphWorkflow.test.ts'
               - 'package.json'
               - 'bun.lock'

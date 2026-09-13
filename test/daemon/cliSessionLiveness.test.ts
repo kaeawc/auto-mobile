@@ -77,6 +77,10 @@ describe("CLI-owned session liveness (#6870)", () => {
     expect(session.livenessPolicy).toBe("cli-idle");
     expect(session.heartbeatTimeoutMs).toBe(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS);
     expect(session.hasReceivedHeartbeat).toBe(true);
+    // The ordinary expiry deadline is widened too, so the next CLI call is not
+    // refused as "expired" once the original 60 s idle timeout has elapsed.
+    expect(session.sessionTimeoutMs).toBe(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS);
+    expect(session.expiresAt).toBe(timer.now() + DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS);
   });
 
   it("adoptCliLivenessPolicy reports an unknown session instead of throwing", () => {
@@ -110,6 +114,51 @@ describe("CLI-owned session liveness (#6870)", () => {
     await monitor.tick();
 
     expect(reaped).toEqual([]);
+  });
+
+  it("keeps an autolock-shaped CLI session past its 60 s ordinary expiry", async () => {
+    // Autolock sessions are created with a 60 s sessionTimeoutMs (and matching
+    // heartbeat timeout). Adopting the CLI policy must widen the ordinary expiry
+    // deadline too, otherwise the monitor's cleanupExpiredSessions() sweep
+    // releases the session at ~60 s, long before the CLI idle timeout (#6870).
+    await sessionManager.createSession("cli", "emulator-5554", "android", 60_000, 60_000);
+    sessionManager.adoptCliLivenessPolicy("cli");
+
+    const reaped: Array<{ sessionId: string; reason: string }> = [];
+    const monitor = monitorWith(reaped);
+
+    timer.advanceTime(60_001);
+    await monitor.tick();
+
+    expect(reaped).toEqual([]);
+    expect(sessionManager.getSession("cli")).not.toBeNull();
+    expect(sessionManager.getSession("cli")!.livenessPolicy).toBe("cli-idle");
+  });
+
+  it("still reaps an autolock-shaped CLI session at the CLI idle timeout", async () => {
+    await sessionManager.createSession("cli", "emulator-5554", "android", 60_000, 60_000);
+    sessionManager.adoptCliLivenessPolicy("cli");
+
+    const reaped: Array<{ sessionId: string; reason: string }> = [];
+    const monitor = monitorWith(reaped);
+
+    timer.advanceTime(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS + 1);
+    await monitor.tick();
+
+    expect(reaped).toEqual([{ sessionId: "cli", reason: "cli-idle-timeout" }]);
+  });
+
+  it("does not shorten the ordinary expiry of a long-lived session on adoption", async () => {
+    const session = await sessionManager.createSession(
+      "cli",
+      "emulator-5554",
+      "android",
+      30 * 60_000,
+    );
+    sessionManager.adoptCliLivenessPolicy("cli");
+
+    expect(session.sessionTimeoutMs).toBe(30 * 60_000);
+    expect(session.expiresAt).toBe(timer.now() + 30 * 60_000);
   });
 
   it("reaps a CLI session once it is idle past the CLI idle timeout", async () => {

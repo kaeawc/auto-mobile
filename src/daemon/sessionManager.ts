@@ -2797,8 +2797,18 @@ export class SessionManager {
       logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
       return false;
     }
+    const idleTimeoutMs = getCliSessionIdleTimeoutMs();
     session.livenessPolicy = "cli-idle";
-    session.heartbeatTimeoutMs = getCliSessionIdleTimeoutMs();
+    session.heartbeatTimeoutMs = idleTimeoutMs;
+    // Widen the ordinary expiry deadline too. An autolocked session is created
+    // with a 60 s `sessionTimeoutMs`, and the heartbeat monitor sweeps
+    // `cleanupExpiredSessions()` on every tick — so leaving `expiresAt` on the
+    // 60 s clock would release a CLI-owned session long before the CLI idle
+    // timeout the policy promises. `Math.max` keeps adoption from ever
+    // *shortening* the deadline of a session that already had a longer one
+    // (a plain 30-minute session stays at 30 minutes; the cli-idle policy still
+    // reaps it at the idle timeout, which is the stricter of the two).
+    session.sessionTimeoutMs = Math.max(session.sessionTimeoutMs, idleTimeoutMs);
     this.recordHeartbeat(sessionId);
     logger.debug(
       `Session ${sessionId} adopted the CLI liveness policy (idle timeout ${session.heartbeatTimeoutMs}ms)`,
@@ -2875,6 +2885,15 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
+    // A CLI-owned session (#6870) is governed solely by the wall-clock idle
+    // policy `SessionHeartbeatMonitor` applies, which releases it as
+    // `cli-idle-timeout`. The ordinary expiry deadline must not release it
+    // first: autolock mints sessions with a 60 s `sessionTimeoutMs`, and both
+    // deadlines would otherwise land on the same millisecond once adoption
+    // widens `expiresAt`, letting the generic sweep win the tie.
+    if (session.livenessPolicy === "cli-idle") {
+      return false;
+    }
     return (
       !this.activeSessionExecutionChecker(session.sessionId) && this.timer.now() > session.expiresAt
     );

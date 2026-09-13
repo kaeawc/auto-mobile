@@ -3248,6 +3248,7 @@ async function stopSegmentedVideoRecordingsBeforeDestroy(
 async function readTeardownBootedDiscovery(
   context: TeardownContext,
   detail = "booted-device precondition discovery did not complete",
+  skipAndroidNameEnrichment = false,
 ): Promise<BootedDeviceDiscovery> {
   return await runWithinShutdownDeadline(
     context.deadlineDevice,
@@ -3258,9 +3259,42 @@ async function readTeardownBootedDiscovery(
     async () =>
       await context.deviceManager.getBootedDevicesDetailed(context.args.target.platform, {
         bypassAndroidDeviceListCache: true,
+        ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
       }),
     context.timeoutMs,
   );
+}
+
+/**
+ * The booted scan target RESOLUTION reads, which for a forced teardown must not
+ * be the name-aware one.
+ *
+ * Normal discovery enriches every attached emulator with `emu avd name`,
+ * sequentially, budgeting 2s each. That happens BEFORE the forced branch in
+ * `AndroidEmulatorClient.killDevice` can skip its own probe, so three wedged
+ * consoles spend 6s of a 5s forced teardown inside discovery and `emu kill` is
+ * never dispatched -- the flag times out in the exact state it exists for
+ * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review). Forced, the
+ * first scan therefore lists serials and asks nothing; the pool supplies the AVD
+ * label for an emulator this daemon started, including a quarantined one.
+ *
+ * It is a FAST PATH, not a replacement. An emulator the pool never started has
+ * no label to supply, and a serial-only scan can only answer the placeholder for
+ * it, so when the cheap scan matches nothing the name-aware scan still runs on
+ * the remaining deadline and resolution is unchanged. `force` must not become
+ * the one call that cannot find a healthy, name-addressed AVD.
+ */
+async function readTeardownTargetDiscovery(
+  context: TeardownContext,
+  devicePool: DevicePool | undefined,
+): Promise<BootedDeviceDiscovery> {
+  if (context.args.force !== true || context.args.target.platform !== "android") {
+    return await readTeardownBootedDiscovery(context);
+  }
+  const serialOnly = await readTeardownBootedDiscovery(context, undefined, true);
+  return findMatchingBootedTeardownDevices(serialOnly, context.args, devicePool).length > 0
+    ? serialOnly
+    : await readTeardownBootedDiscovery(context);
 }
 
 async function readTeardownInventory(
@@ -3478,7 +3512,9 @@ async function rebindIosTeardownLease(
 }
 
 async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
-  const booted = await readTeardownBootedDiscovery(context);
+  const daemonState = DaemonState.getInstance();
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const booted = await readTeardownTargetDiscovery(context, devicePool);
   if (context.args.target.platform === "android") {
     context.initialAndroidRuntimeIds = new Set(
       booted.devices
@@ -3486,8 +3522,6 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
         .map((device) => device.deviceId),
     );
   }
-  const daemonState = DaemonState.getInstance();
-  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   // A booted emulator only matches this teardown by its POOLED AVD name when its
   // runtime name is unknown. Pin that label to its epoch here; the runtime is
   // made to confirm it immediately before the stop's platform kill, which is

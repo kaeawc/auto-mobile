@@ -46,6 +46,7 @@ import {
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import type {
   BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
   DeviceDestroyOptions,
   DeviceShutdownOptions,
 } from "../../src/utils/deviceUtils";
@@ -82,6 +83,14 @@ class TeardownDeviceManager extends FakeDeviceUtils {
    * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
    */
   readonly killedDeviceOptions: Array<DeviceShutdownOptions | undefined> = [];
+  /**
+   * The discovery options each booted scan was given, so a test can pin that a
+   * forced teardown resolves its target from a SERIAL-ONLY scan rather than
+   * paying 2s of AVD-name enrichment per attached emulator before it can even
+   * dispatch the kill ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874)
+   * review).
+   */
+  readonly bootedDiscoveryOptions: Array<BootedDeviceDiscoveryOptions | undefined> = [];
   destroyError?: Error;
   killError?: Error;
   replacementAfterKill?: BootedDevice;
@@ -99,7 +108,11 @@ class TeardownDeviceManager extends FakeDeviceUtils {
 
   private discoveriesSinceKill: number | undefined;
 
-  override async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDeviceDiscovery> {
+    this.bootedDiscoveryOptions.push(options);
     if (
       this.discoveriesSinceKill !== undefined &&
       this.clearBootedDevicesAfterDiscoveries !== undefined
@@ -109,7 +122,21 @@ class TeardownDeviceManager extends FakeDeviceUtils {
       }
       this.discoveriesSinceKill++;
     }
-    return await super.getBootedDevicesDetailed(platform);
+    const discovery = await super.getBootedDevicesDetailed(platform);
+    if (options?.skipAndroidNameEnrichment !== true) {
+      return discovery;
+    }
+    // A serial-only scan asks nothing, so every attached emulator comes back
+    // under the placeholder -- exactly what `AndroidEmulatorClient` produces
+    // when `skipNameEnrichment` is set.
+    return {
+      ...discovery,
+      devices: discovery.devices.map((device) =>
+        device.platform === "android" && device.deviceId.startsWith("emulator-")
+          ? { ...device, name: `Unknown (${device.deviceId})` }
+          : device,
+      ),
+    };
   }
 
   override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
@@ -1310,6 +1337,95 @@ describe("deleteDevice handler", () => {
         device: expect.objectContaining({ platform: "android", name: pooledAvdName }),
       }),
     ]);
+  });
+
+  // Resolution runs BEFORE the forced branch in the platform kill, and the
+  // normal scan enriches every attached emulator with `emu avd name` -- 2s
+  // apiece, sequentially. Three wedged consoles therefore burn a 5s forced
+  // teardown inside discovery and `emu kill` is never sent. Forced resolution
+  // asks for serials only; the pool supplies the label for an emulator this
+  // daemon started ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874)
+  // review).
+  test("force resolves its target from a serial-only Android scan", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const image: DeviceInfo = { platform: "android", name: pooledAvdName, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      image,
+    );
+    manager.setBootedDevices("android", [
+      { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+    ]);
+    await pool.refreshDevices();
+    manager.setDeviceImages("android", [image]);
+    manager.bootedDiscoveryOptions.length = 0;
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", pooledAvdName, pooledAvdName),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(manager.bootedDiscoveryOptions[0]?.skipAndroidNameEnrichment).toBe(true);
+    // One scan is enough: the pool named the serial, so the name-aware fallback
+    // never has to run.
+    expect(manager.bootedDiscoveryOptions[1]?.skipAndroidNameEnrichment).not.toBe(true);
+    expect(manager.killedDevices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
+  });
+
+  test("an unforced teardown still resolves its target from a name-aware scan", async () => {
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      { platform: "android", name: avdName, deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+
+    const body = responseBody(await teardownTool().handler(request("android", avdName, avdName)));
+
+    expect(body.state).toBe("destroyed");
+    expect(
+      manager.bootedDiscoveryOptions.every(
+        (options) => options?.skipAndroidNameEnrichment !== true,
+      ),
+    ).toBe(true);
+  });
+
+  // The serial-only scan is a FAST PATH, not a replacement. An emulator this
+  // daemon did not start has no pooled label, so a serial-only scan can only
+  // answer the placeholder for it -- and a forced teardown must not become the
+  // one call that cannot find a perfectly healthy, name-addressed AVD. When the
+  // cheap scan matches nothing the name-aware scan still runs.
+  test("force falls back to a name-aware scan for an emulator the pool never started", async () => {
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      { platform: "android", name: avdName, deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", avdName, avdName),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(manager.bootedDiscoveryOptions[0]?.skipAndroidNameEnrichment).toBe(true);
+    expect(manager.bootedDiscoveryOptions[1]?.skipAndroidNameEnrichment).not.toBe(true);
+    expect(manager.killedDevices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
   });
 
   // The other half of the same contract: reaching a quarantined entry at all is

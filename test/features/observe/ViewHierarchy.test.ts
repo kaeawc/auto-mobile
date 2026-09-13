@@ -546,11 +546,9 @@ describe("ViewHierarchy", function () {
           receivedSignal = signal;
           // A wedged CtrlProxy: this settles ONLY when the caller cancels.
           return new Promise((_resolve, reject) => {
-            signal?.addEventListener(
-              "abort",
-              () => reject(new Error("Operation cancelled")),
-              { once: true },
-            );
+            signal?.addEventListener("abort", () => reject(new Error("Operation cancelled")), {
+              once: true,
+            });
           });
         },
       };

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CLI_OUTPUT_INLINE_MAX_BYTES,
   CLI_TOOL_RESULT_ARTIFACT_PAYLOAD,
+  MAX_CONSECUTIVE_ZERO_PROGRESS_WRITES,
   renderCliToolOutput,
   writeAllSync,
   type BlockingByteWriter,
@@ -13,12 +14,15 @@ import {
   setCliOutputSinksForTesting,
   setDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactFileSystem,
 } from "../../src/server/toolOutputArtifactWriter";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type {
@@ -144,6 +148,7 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
   });
 
   test("runCliCommand writes complete, parseable JSON for an oversized result", async () => {
+    const toolOutputsDir = mkdtempSync(path.join(tmpdir(), "automobile-cli-toolout-"));
     const written: string[] = [];
     setCliOutputSinksForTesting({
       stdout: { write: (text) => written.push(text) },
@@ -154,12 +159,19 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {},
     }));
+    serverConfig.setToolOutputsDir(toolOutputsDir);
 
     try {
       await runCliCommand(["tapOn"]);
+
+      const parsed = JSON.parse(written[0]);
+      expect(parsed.artifact.path).toStartWith(toolOutputsDir);
+      expect(existsSync(parsed.artifact.path)).toBe(true);
     } finally {
       resetDaemonProxyFactoryForTesting();
       resetCliOutputSinksForTesting();
+      serverConfig.setToolOutputsDir(undefined);
+      rmSync(toolOutputsDir, { recursive: true, force: true });
     }
 
     expect(written).toHaveLength(1);
@@ -317,6 +329,24 @@ describe("writeAllSync delivers every byte (#6870)", () => {
     writeAllSync(1, text, syscalls);
 
     expect(syscalls.received).toBe(text);
+    expect(syscalls.sleeps).toEqual([1, 1]);
+  });
+
+  test("refuses to spin forever when writes make no progress", () => {
+    const syscalls = new FakeSyscalls(Array(MAX_CONSECUTIVE_ZERO_PROGRESS_WRITES).fill(0));
+
+    expect(() => writeAllSync(7, '{"success":true}', syscalls)).toThrow(
+      `Zero-progress write to fd 7 after ${MAX_CONSECUTIVE_ZERO_PROGRESS_WRITES} attempts; refusing to spin`,
+    );
+    expect(syscalls.sleeps).toEqual(Array(MAX_CONSECUTIVE_ZERO_PROGRESS_WRITES).fill(1));
+  });
+
+  test("resets zero-progress retries after a write makes progress", () => {
+    const syscalls = new FakeSyscalls([0, 1, 0]);
+
+    writeAllSync(1, '{"success":true}', syscalls);
+
+    expect(syscalls.received).toBe('{"success":true}');
     expect(syscalls.sleeps).toEqual([1, 1]);
   });
 

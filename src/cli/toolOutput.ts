@@ -170,6 +170,23 @@ export const nodeBlockingByteWriter: BlockingByteWriter = {
   },
 };
 
+// One-second total wait at the same 1 ms granularity used for EAGAIN retries.
+export const MAX_CONSECUTIVE_ZERO_PROGRESS_WRITES = 1_000;
+
+/** Wait for a zero-byte write retry, refusing to spin indefinitely. */
+function handleZeroProgressWrite(
+  fd: number,
+  consecutiveZeroProgressWrites: number,
+  syscalls: BlockingByteWriter,
+): number {
+  const attempts = consecutiveZeroProgressWrites + 1;
+  syscalls.sleepSync(1);
+  if (attempts >= MAX_CONSECUTIVE_ZERO_PROGRESS_WRITES) {
+    throw new Error(`Zero-progress write to fd ${fd} after ${attempts} attempts; refusing to spin`);
+  }
+  return attempts;
+}
+
 /**
  * Write every byte to `fd` before returning.
  *
@@ -184,9 +201,20 @@ export function writeAllSync(
 ): void {
   const buffer = Buffer.from(text, "utf8");
   let offset = 0;
+  let consecutiveZeroProgressWrites = 0;
   while (offset < buffer.length) {
     try {
-      offset += syscalls.writeSync(fd, buffer, offset, buffer.length - offset);
+      const written = syscalls.writeSync(fd, buffer, offset, buffer.length - offset);
+      if (written === 0) {
+        consecutiveZeroProgressWrites = handleZeroProgressWrite(
+          fd,
+          consecutiveZeroProgressWrites,
+          syscalls,
+        );
+        continue;
+      }
+      consecutiveZeroProgressWrites = 0;
+      offset += written;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "EAGAIN") {

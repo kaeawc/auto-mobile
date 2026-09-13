@@ -95,7 +95,14 @@ is kept — same session, same `incarnation` — but:
   `cancelDeviceSessionExecutions` seam (the one the ADB-reset quarantine uses).
   The admission gate only refuses LATER calls; an execution already in flight
   keeps issuing serial-addressed operations. The session and the `incarnation`
-  survive — only the work is stopped;
+  survive — only the work is stopped. ONE execution is exempt: the one whose own
+  discovery produced this observation, named by the caller through
+  `DiscoveryReconcileOptions.excludeExecutionId`. A session-bound `killDevice` or
+  `deleteDevice` can be the first path to read the placeholder on its own target,
+  and cancelling it would lose the `runWithinShutdownDeadline` signal race for the
+  operation about to confirm-or-refuse on exactly that evidence. The post-cancel
+  drain takes the same exemption, so it does not spend its budget waiting on work
+  it deliberately did not cancel;
 - **stream routing** — the daemon builds its `DeviceSessionResolver` over the
   pool quarantine, so a quarantined serial has NO routing identity in either
   direction (serial→uuid and uuid→serial), and each push server
@@ -115,13 +122,21 @@ is kept — same session, same `incarnation` — but:
   wrapper or the socket server's own private helper — the disconnect monitor, the
   booted-devices resource, `listDevices`, the shutdown/kill preflight, the
   teardown precondition, pre-boot serial validation, the Android start lifecycle
-  target, `provisionDevice`'s exact-boot discovery, and the socket server's
-  input-target and `ide/*` routes. Device-addressed MCP resource reads (storage,
+  target, `provisionDevice`'s exact-boot discovery, the socket server's
+  input-target and `ide/*` routes, and the two capture resolvers that run their
+  own discovery (`resolveWebRtcStreamDevice` and `resolveVideoStreamDevice` —
+  without reconciling, BOTH of their admission checks re-read pool state from
+  before the discovery they just performed). Device-addressed MCP resource reads (storage,
   databases, DataStore, app data, app files, localization, shared storage,
   storage capabilities) all go through one `src/server/resourceDeviceResolver.ts`
   that reconciles: they are not exempt, because resolving a serial and then
   reading that runtime IS acting on a pooled identity, whatever the read
-  publishes. It is idempotent (an observation that already
+  publishes. Reconciling is also not the END of a request: the booted-devices
+  resource skips `enrichDeviceServiceStatuses` / `enrichDeviceLockStates` for a
+  serial its own reconciliation just quarantined and publishes that entry with
+  discovery-only identity plus `identityUnresolved: true`, rather than probing a
+  runtime it has just said it cannot identify. It is idempotent (an observation
+  that already
   `describesPooledRuntime` only advances the entry's ordering stamp), takes no
   lock, and changes no pool
   MEMBERSHIP: a disagreement reaching it is quarantined and left for the paths

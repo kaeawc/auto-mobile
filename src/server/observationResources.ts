@@ -120,10 +120,12 @@ export const RESOURCE_URIS = {
   FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",
 } as const;
 
-// Helper to get the latest screenshot path from cache
-async function getLatestScreenshotPath(): Promise<string | undefined> {
+// Helper to get the cached screenshot path for a specific device. The device is
+// always the one that owns the observation being served, so the hierarchy and
+// the screenshot can never describe two different devices (issue #6600).
+async function getLatestScreenshotPath(deviceId: string): Promise<string | undefined> {
   try {
-    const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPath();
+    const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
     if (!screenshotPath) {
       return undefined;
     }
@@ -143,7 +145,7 @@ async function getLatestScreenshotPath(): Promise<string | undefined> {
 // Handler for latest observation resource (text/json)
 async function getLatestObservation(): Promise<ResourceContent> {
   try {
-    const cachedResult = RealObserveScreen.getRecentCachedResult();
+    const cachedResult = RealObserveScreen.getRecentCachedObservation()?.result;
 
     if (!cachedResult) {
       return {
@@ -185,8 +187,8 @@ async function getLatestObservation(): Promise<ResourceContent> {
 // Handler for latest screenshot resource (image/png as blob)
 async function getLatestScreenshot(): Promise<ResourceContent> {
   try {
-    const cachedResult = RealObserveScreen.getRecentCachedResult();
-    if (!cachedResult) {
+    const cachedObservation = RealObserveScreen.getRecentCachedObservation();
+    if (!cachedObservation) {
       return {
         uri: RESOURCE_URIS.LATEST_SCREENSHOT,
         mimeType: "application/json",
@@ -201,18 +203,16 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       };
     }
 
-    let screenshotPath = await getLatestScreenshotPath();
+    const { deviceId } = cachedObservation;
+    let screenshotPath = await getLatestScreenshotPath(deviceId);
 
-    if (!screenshotPath) {
-      const pendingDeviceId = ScreenshotJobTracker.getMostRecentPendingDeviceId();
-      if (pendingDeviceId) {
-        await ScreenshotJobTracker.waitForCompletion(pendingDeviceId, 3000);
-        screenshotPath = await getLatestScreenshotPath();
-      }
+    if (!screenshotPath && ScreenshotJobTracker.isPending(deviceId)) {
+      await ScreenshotJobTracker.waitForCompletion(deviceId, 3000);
+      screenshotPath = await getLatestScreenshotPath(deviceId);
     }
 
     if (!screenshotPath) {
-      const screenshotError = RealObserveScreen.getRecentCachedScreenshotError();
+      const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
       const errorMessage = screenshotError
         ? `No screenshot available from the latest observation: ${screenshotError}`
         : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";

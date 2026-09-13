@@ -14,7 +14,10 @@ import {
   setSessionScreenshotResourceDependencies,
   setScreenshotFileSystem,
 } from "../../src/server/observationResources";
-import { getScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
+import {
+  getScreenshotStateStore,
+  resetScreenshotStateStore,
+} from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { ResourceRegistry, type ResourceReadContext } from "../../src/server/resourceRegistry";
 import {
   clearDirectSessionDevices,
@@ -533,5 +536,97 @@ describe("session screenshot resources", () => {
       device: sessionDevice,
       incarnation: expect.any(Number),
     });
+  });
+});
+
+describe("unscoped latest observation resources", () => {
+  const deviceA: BootedDevice = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" };
+  const deviceB: BootedDevice = { deviceId: "emulator-5556", name: "Pixel B", platform: "android" };
+
+  afterEach(() => {
+    RealObserveScreen.clearCache();
+    ScreenshotJobTracker.clear();
+    resetScreenshotStateStore();
+    resetScreenshotFileSystem();
+  });
+
+  function readLatestObservation() {
+    registerObservationResources();
+    return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_OBSERVATION)!.handler();
+  }
+
+  async function cacheObservationFor(device: BootedDevice, marker: string): Promise<void> {
+    const observeScreen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    );
+    await observeScreen.cacheObserveResult({
+      ...observeScreen.createBaseResult(),
+      viewHierarchy: marker,
+    } as ObserveResult);
+  }
+
+  test("does not pair one device's hierarchy with another device's screenshot", async () => {
+    // Device A observed first and its screenshot landed; device B observed after
+    // but its screenshot write is still in flight (issue #6600).
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    await cacheObservationFor(deviceB, "device-b-hierarchy");
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => Buffer.from("89504e470d0a1a0a", "hex"),
+    });
+
+    const observation = await readLatestObservation();
+    const screenshot = await readLatestScreenshot();
+
+    expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-b-hierarchy");
+    // Device A's screenshot must never be served for device B's hierarchy.
+    expect(screenshot.blob).toBeUndefined();
+    expect(screenshot.mimeType).toBe("application/json");
+    expect(JSON.parse(screenshot.text!).error).toContain("No screenshot available");
+  });
+
+  test("waits for the pending screenshot job of the observed device, not the newest job", async () => {
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    await cacheObservationFor(deviceB, "device-b-hierarchy");
+    ScreenshotJobTracker.startJob(deviceB.deviceId, async () => {
+      getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
+      return { success: true, path: "/tmp/device-b.png" };
+    });
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return Buffer.from("89504e470d0a1a0a", "hex");
+      },
+    });
+
+    const screenshot = await readLatestScreenshot();
+
+    expect(screenshot.mimeType).toBe("image/png");
+    expect(readPaths).toEqual(["/tmp/device-b.png"]);
+  });
+
+  test("still serves the cached screenshot when only one device is observed", async () => {
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return Buffer.from("89504e470d0a1a0a", "hex");
+      },
+    });
+
+    const observation = await readLatestObservation();
+    const screenshot = await readLatestScreenshot();
+
+    expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-a-hierarchy");
+    expect(screenshot.mimeType).toBe("image/png");
+    expect(readPaths).toEqual(["/tmp/device-a.png"]);
   });
 });

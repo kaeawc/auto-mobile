@@ -407,6 +407,15 @@ export interface DiscoveryReconcileOptions {
    * device would quarantine healthy pooled peers that were never probed.
    */
   readonly namesResolved?: boolean;
+  /**
+   * A signal that is aborted once the caller's deadline/abort has already won
+   * a race this observation is racing against. Checked between devices so a
+   * stale, still-draining reconcile stops touching pooled identities the
+   * instant the caller it was deferred from has already settled — an unrelated
+   * acquisition may otherwise bind one of the remaining devices while this
+   * loop is still walking toward it (#6955 review).
+   */
+  readonly signal?: AbortSignal;
 }
 
 export type DeviceReadinessReservation = (() => Promise<void>) & {
@@ -6130,6 +6139,12 @@ export class DevicePool {
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     for (const device of devices) {
+      // A caller that settled its deadline/abort can no longer safely apply a
+      // stale snapshot to pooled entries an unrelated acquisition may have bound
+      // while this loop was draining (#6955 review).
+      if (options.signal?.aborted) {
+        break;
+      }
       if (device.platform !== "android") {
         continue;
       }

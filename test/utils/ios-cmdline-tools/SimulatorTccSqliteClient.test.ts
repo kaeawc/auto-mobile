@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { ExecResult } from "../../../src/models";
 import type {
   HostCommandExecutor,
@@ -11,6 +11,10 @@ import {
   tccServiceForPermission,
   type TccDatabaseFileSystem,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  normalizeCoreSimulatorDeviceSetPathEnv,
+} from "../../../src/utils/workingDirectory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const DEVICE_ID = "12345678-1234-1234-1234-123456789ABC";
@@ -92,6 +96,33 @@ describe("SimulatorTccSqliteClient", () => {
     expect(permissionForTccService("kTCCServiceUnknown")).toBe("kTCCServiceUnknown");
   });
 
+  test("resolves a relative device set from the daemon launch directory", async () => {
+    const previous = process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD;
+    const launchDirectory = resolve("launch-project");
+    process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD = launchDirectory;
+    try {
+      const fileSystem = new FakeTccFileSystem();
+      fileSystem.error = Object.assign(new Error("absent"), { code: "ENOENT" });
+      const client = new SimulatorTccSqliteClient({
+        executor: new FakeSqliteExecutor(),
+        fileSystem,
+        environment: { CORESIMULATOR_DEVICE_SET_PATH: "custom-devices" },
+      });
+      await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+        "unavailable",
+      );
+      expect(fileSystem.paths).toEqual([
+        join(launchDirectory, "custom-devices", DEVICE_ID, "data/Library/TCC/TCC.db"),
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD = previous;
+      }
+    }
+  });
+
   test("owns TCC path resolution and issues parameterized sqlite argv queries", async () => {
     const executor = new FakeSqliteExecutor();
     const fileSystem = new FakeTccFileSystem();
@@ -121,6 +152,7 @@ describe("SimulatorTccSqliteClient", () => {
       executor,
       fileSystem,
       homeDirectory: "/Users/test user",
+      environment: {},
     });
     const databasePath = join(
       "/Users/test user",
@@ -149,9 +181,10 @@ describe("SimulatorTccSqliteClient", () => {
     expect(executor.calls).toHaveLength(2);
     expect(executor.calls[0]).toMatchObject({
       file: "sqlite3",
-      args: ["-json", databasePath, "pragma table_info(access);"],
+      args: ["-readonly", "-json", databasePath, "pragma table_info(access);"],
     });
     expect(executor.calls[1]?.args).toEqual([
+      "-readonly",
       "-json",
       "-cmd",
       ".parameter init",
@@ -166,6 +199,9 @@ describe("SimulatorTccSqliteClient", () => {
         "where client = :appId and service in (:service0);",
       ].join("\n"),
     ]);
+    for (const call of executor.calls) {
+      expect(call.args[0]).toBe("-readonly");
+    }
   });
 
   test("encodes apostrophes and quotes for sqlite dot-command parameters", async () => {
@@ -305,5 +341,123 @@ describe("SimulatorTccSqliteClient", () => {
       "Timed out after 123ms while reading simulator TCC database",
     );
     expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  test("resolves the TCC database under an injected custom device-set root", async () => {
+    const executor = new FakeSqliteExecutor();
+    const fileSystem = new FakeTccFileSystem();
+    executor.onExecute = async () =>
+      executor.calls.at(-1)?.args.at(-1) === "pragma table_info(access);"
+        ? result(JSON.stringify([{ name: "service" }, { name: "client" }]))
+        : result("[]");
+    const customDeviceSetRoot = "/Users/tester/CustomDeviceSets/ci-job-42/Devices";
+    const client = new SimulatorTccSqliteClient({
+      executor,
+      fileSystem,
+      homeDirectory: "/Users/tester",
+      deviceSetRoot: customDeviceSetRoot,
+    });
+    const expectedPath = join(customDeviceSetRoot, DEVICE_ID, "data", "Library", "TCC", "TCC.db");
+
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).resolves.toEqual([]);
+
+    expect(fileSystem.paths).toEqual([expectedPath]);
+  });
+
+  test("honors CORESIMULATOR_DEVICE_SET_PATH when no deviceSetRoot dependency is injected", async () => {
+    const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    process.env.CORESIMULATOR_DEVICE_SET_PATH = "/Volumes/CI/DeviceSets/job-7/Devices";
+    try {
+      const fileSystem = new FakeTccFileSystem();
+      fileSystem.error = Object.assign(new Error("no such file or directory"), { code: "ENOENT" });
+      const client = new SimulatorTccSqliteClient({
+        executor: new FakeSqliteExecutor(),
+        fileSystem,
+        homeDirectory: "/Users/tester",
+      });
+
+      await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+        "Simulator TCC database is unavailable",
+      );
+
+      expect(fileSystem.paths).toEqual([
+        join("/Volumes/CI/DeviceSets/job-7/Devices", DEVICE_ID, "data", "Library", "TCC", "TCC.db"),
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+      } else {
+        process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+      }
+    }
+  });
+
+  test("resolves the identical device set the daemon normalized for simctl before chdir", async () => {
+    // Issue #6582: SimCtlClient spawns `xcrun simctl` inheriting `process.env`
+    // verbatim, so it sees whatever CORESIMULATOR_DEVICE_SET_PATH looks like at
+    // exec time. `Daemon.start()` normalizes a relative value to an absolute
+    // one — via normalizeCoreSimulatorDeviceSetPathEnv, anchored at the daemon
+    // launch directory — BEFORE chdir so that value stays valid no matter where
+    // the daemon's cwd ends up. This asserts the TCC reader, which falls back to
+    // reading that same env var when no deviceSetRoot/environment override is
+    // injected, resolves the exact directory simctl would inherit rather than
+    // re-resolving the raw relative value against a different directory.
+    const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+    const previousDeviceSet = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    const launchDirectory = resolve("launch-project");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchDirectory;
+    process.env.CORESIMULATOR_DEVICE_SET_PATH = "custom-devices";
+    try {
+      normalizeCoreSimulatorDeviceSetPathEnv();
+      const deviceSetPathInheritedBySimctl = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+      expect(deviceSetPathInheritedBySimctl).toBe(join(launchDirectory, "custom-devices"));
+
+      const fileSystem = new FakeTccFileSystem();
+      fileSystem.error = Object.assign(new Error("absent"), { code: "ENOENT" });
+      const client = new SimulatorTccSqliteClient({
+        executor: new FakeSqliteExecutor(),
+        fileSystem,
+      });
+
+      await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+        "unavailable",
+      );
+      expect(fileSystem.paths).toEqual([
+        join(deviceSetPathInheritedBySimctl, DEVICE_ID, "data", "Library", "TCC", "TCC.db"),
+      ]);
+    } finally {
+      if (previousLaunchCwd === undefined) {
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
+      } else {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+      }
+      if (previousDeviceSet === undefined) {
+        delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+      } else {
+        process.env.CORESIMULATOR_DEVICE_SET_PATH = previousDeviceSet;
+      }
+    }
+  });
+
+  test("classifies a locked/busy TCC database distinctly from a corrupted one", async () => {
+    const executor = new FakeSqliteExecutor();
+    const client = new SimulatorTccSqliteClient({
+      executor,
+      fileSystem: new FakeTccFileSystem(),
+      homeDirectory: "/Users/tester",
+    });
+
+    executor.error = new Error("database is locked");
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+      /locked|busy/i,
+    );
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.not.toThrow(
+      "Failed to read simulator TCC database",
+    );
+
+    executor.error = new Error("SQLITE_BUSY: database is busy");
+    await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+      /locked|busy/i,
+    );
   });
 });

@@ -69,8 +69,9 @@ EOF
   git commit -qm "baseline"
   mkdir -p scripts test/bats
   printf '%s\n' "#!/usr/bin/env bash" > scripts/renamed-helper.sh
+  printf '%s\n' "#!/usr/bin/env bash" > scripts/deleted-check.sh
   printf '%s\n' '# renamed-helper' > test/bats/renamed-helper.bats
-  git add scripts/renamed-helper.sh test/bats/renamed-helper.bats
+  git add scripts/renamed-helper.sh scripts/deleted-check.sh test/bats/renamed-helper.bats
   git commit -qm "rename baseline"
   mkdir -p scripts/lib
   printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-one.sh
@@ -101,6 +102,7 @@ install_registry_stub() {
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'claude-plugin\tscripts/claude/validate_plugin.sh\n'
+  printf 'deleted-check\tscripts/deleted-check.sh\n'
   printf 'stdlib-first\tscripts/conventions/validate-stdlib-first.sh\n'
   printf 'helper-consumer-one\tscripts/check-helper-consumer-one.sh\n'
   printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
@@ -132,6 +134,17 @@ EOF
 
   [ "${status}" -eq 0 ]
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,claude-plugin' "${FAST_LOG}"
+}
+
+@test "a deleted registered fast-check implementation still selects that check" {
+  install_registry_stub
+  git rm -q scripts/deleted-check.sh
+  git commit -qm "delete scripts/deleted-check.sh"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,deleted-check' "${FAST_LOG}"
 }
 
 @test "a changed sourced helper selects every registered consumer" {

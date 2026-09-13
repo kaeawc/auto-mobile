@@ -104,11 +104,12 @@ print_check_scripts() {
     if [[ "${command}" != *"${project_root_marker}"* ]]; then
       continue
     fi
+    if [[ "${command}" == cd\ * ]]; then
+      continue
+    fi
     script_path="${command#*"${project_root_marker}"}"
     script_path="${script_path%%\"*}"
-    if [[ -f "${PROJECT_ROOT}/${script_path}" ]]; then
-      printf '%s\t%s\n' "${CHECK_NAMES[$idx]}" "${script_path}"
-    fi
+    printf '%s\t%s\n' "${CHECK_NAMES[$idx]}" "${script_path}"
   done
 }
 

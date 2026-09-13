@@ -10,6 +10,7 @@
 SCRIPT="scripts/all_fast_validate_checks.sh"
 COHERENCE_SCRIPT="scripts/check-bun-version-coherence.ts"
 COHERENCE_FIXTURE=".github/actions/bun-version-coherence-fixture/action.yml"
+LIST_CHECKS_FIXTURE=""
 
 setup() {
   ABS_SCRIPT="$(cd "$(dirname "$SCRIPT")" && pwd)/$(basename "$SCRIPT")"
@@ -17,6 +18,9 @@ setup() {
 
 teardown() {
   rm -rf "$(dirname "$COHERENCE_FIXTURE")"
+  if [[ -n "${LIST_CHECKS_FIXTURE}" ]]; then
+    rm -rf "${LIST_CHECKS_FIXTURE}"
+  fi
 }
 
 @test "prune_finished_jobs handles an empty job list under set -u" {
@@ -60,6 +64,18 @@ teardown() {
   if [[ "$output" == *$'github-python-lock\t'* ]]; then
     grep -Eq $'^github-python-lock\t$' <<< "$output"
   fi
+}
+
+@test "fast validation lists missing registered implementation scripts" {
+  LIST_CHECKS_FIXTURE="$(mktemp -d)"
+  mkdir -p "${LIST_CHECKS_FIXTURE}/scripts/lib"
+  cp "${ABS_SCRIPT}" "${LIST_CHECKS_FIXTURE}/scripts/all_fast_validate_checks.sh"
+  cp "scripts/lib/shell-core.sh" "${LIST_CHECKS_FIXTURE}/scripts/lib/shell-core.sh"
+
+  run "${LIST_CHECKS_FIXTURE}/scripts/all_fast_validate_checks.sh" --list-checks
+
+  [ "$status" -eq 0 ]
+  grep -Fqx -- $'claude-plugin\tscripts/claude/validate_plugin.sh' <<< "$output"
 }
 
 @test "fast validation registers the runtime pin drift check" {

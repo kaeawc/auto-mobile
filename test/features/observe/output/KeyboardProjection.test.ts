@@ -61,7 +61,13 @@ describe("Android keyboard output projection", () => {
     const source = observation();
     const before = JSON.stringify(source);
     const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
-    expect(result.skeleton?.map((entry) => entry.label)).toEqual(["SAVE", "App control"]);
+    expect(result.skeleton?.map((entry) => entry.label)).toEqual([
+      "SAVE",
+      "App control",
+      // The folded IME is still announced as ONE row (issue #6871), so a client
+      // can see the keyboard is up without being handed a key per cap.
+      "Keyboard (example.keyboard)",
+    ]);
     expect(result.keyboard).toEqual({ visible: true, package: "example.keyboard" });
     expect(result.context).toBeUndefined();
     expect(JSON.stringify(source)).toBe(before);
@@ -96,5 +102,116 @@ describe("Android keyboard output projection", () => {
     });
     expect(result.skeleton?.map((entry) => entry.label)).toContain("Q");
     expect(result.keyboard).toBeUndefined();
+  });
+});
+
+/**
+ * The dogfood repro for issue #6871: the IME window floods the skeleton with one
+ * tap row per keycap. The #6825 fold keys off the `automobile:imePackage` extra,
+ * which only a re-cut control proxy supplies — on an older on-device proxy (and
+ * on the `uiautomator dump` path) the extra is absent and every key came
+ * through. This fixture therefore carries NO extra, only the real
+ * `…:id/key_pos_*` resource-id family the emulator emits.
+ */
+function keyboardFloodObservation(): ObserveResult {
+  const IME = "com.google.android.inputmethod.latin";
+  const key = (index: number): ViewHierarchyNode => {
+    const left = (index % 10) * 10;
+    const top = 600 + Math.floor(index / 10) * 40;
+    return {
+      $: {
+        "resource-id": `${IME}:id/key_pos_${Math.floor(index / 10)}_${index % 10}`,
+        text: String.fromCharCode(97 + (index % 26)),
+        clickable: true,
+        bounds: { left, top, right: left + 10, bottom: top + 40 },
+      },
+    };
+  };
+  const keys = Array.from({ length: 40 }, (_, index) => key(index));
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.android.systemui:id/remote_input_send",
+              text: "Send",
+              clickable: true,
+              bounds: { left: 0, top: 100, right: 200, bottom: 150 },
+            },
+          },
+          {
+            $: { bounds: { left: 0, top: 590, right: 100, bottom: 800 } },
+            node: [
+              ...keys,
+              {
+                $: {
+                  "resource-id": "android:id/input_method_nav_back",
+                  "content-desc": "Back",
+                  clickable: true,
+                  bounds: { left: 0, top: 780, right: 40, bottom: 800 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
+  };
+}
+
+describe("IME window collapses to one skeleton node (#6871)", () => {
+  test("keycaps identified by the key_pos_* family collapse without the imePackage extra", () => {
+    const result = sanitizeObserveResult(keyboardFloodObservation(), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const ids = result.skeleton!.map((entry) => entry.elementId);
+    expect(ids.filter((id) => id?.includes("key_pos_"))).toEqual([]);
+    expect(ids).toContain("com.android.systemui:id/remote_input_send");
+    // Non-keycap chrome inside the IME window stays individually actionable.
+    expect(ids).toContain("android:id/input_method_nav_back");
+    const ime = result.skeleton!.find((entry) => entry.elementId === "<ime>");
+    expect(ime).toEqual({
+      elementId: "<ime>",
+      label: "Keyboard (com.google.android.inputmethod.latin)",
+      bounds: [0, 600, 100, 760],
+      affordances: ["input"],
+    });
+    expect(result.keyboard).toEqual({
+      visible: true,
+      package: "com.google.android.inputmethod.latin",
+    });
+  });
+
+  test("project: full keeps every keycap", () => {
+    const result = sanitizeObserveResult(keyboardFloodObservation(), {
+      dropElements: false,
+      project: "full",
+    });
+    expect(
+      result.elements!.clickable.filter((el) => `${el["resource-id"]}`.includes("key_pos_")).length,
+    ).toBe(40);
+    expect(result.skeleton).toBeUndefined();
+  });
+
+  test("the captured-extra path emits the same single node", () => {
+    const result = sanitizeObserveResult(observation(), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    expect(result.skeleton?.map((entry) => entry.label)).toEqual([
+      "SAVE",
+      "App control",
+      "Keyboard (example.keyboard)",
+    ]);
   });
 });

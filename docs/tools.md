@@ -241,13 +241,29 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description. |
 | 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
 
-On Android, compact observations fold captured soft-keyboard keys into a single
-`keyboard: { visible: true, package: "…" }` summary. Use `sendKeys` for text input
-and semantic keys, or `keyboard` to open or close it. `observe` with
-`project: "full"` or `raw: true` retains the individual keys. Folding requires
-a control-proxy build that supplies IME window identity; older builds retain
-their existing key output. An absent summary means no IME identity was captured,
+On Android, compact observations fold soft-keyboard keys into a single
+`keyboard: { visible: true, package: "…" }` summary plus exactly one skeleton row:
+
+```
+<ime> | Keyboard (com.google.android.inputmethod.latin) | input
+```
+
+`<ime>` is a marker, not a selector — use `sendKeys` for text input and semantic
+keys, or `keyboard` to open or close it. Genuinely non-keycap affordances that
+share the IME window (for example `android:id/input_method_nav_back`) stay
+individually actionable. `observe` with `project: "full"` or `raw: true` retains
+the individual keys. Keys are identified from the IME window identity a re-cut
+control proxy supplies, and otherwise from the `…:id/key_pos_*` keycap
+resource-id family, so the fold also applies on older proxy builds and on the
+`uiautomator dump` path. An absent summary means no IME identity was captured,
 not a confirmed hidden keyboard.
+
+A skeleton row omits `label` entirely when it has none — the key is never
+present with a placeholder value. A state-carrying container with no text of its
+own (the `switchWidget` of a Settings row, a scrollable fragment root) takes the
+label of its nearest labelled enclosing row, so a `checked` state is attributable
+to the setting it belongs to (`com.android.settings:id/switchWidget | Airplane
+mode | toggle checked=false`).
 
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public

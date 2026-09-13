@@ -1150,3 +1150,60 @@ describe("toSkeleton — acceptance criteria", () => {
     });
   });
 });
+
+describe("container rows never read as `undefined` (#6871)", () => {
+  /**
+   * The standard Settings preference row: a clickable row that owns the tap and
+   * carries no text of its own, a `TextView` holding the visible label, and a
+   * non-clickable `Switch` that owns the `checked` state. Before #6871 the
+   * switch came through as `com.android.settings:id/switchWidget | undefined |
+   * toggle checked=false` — the state was there but nothing tied it to the
+   * setting it belongs to.
+   */
+  function settingsRow(): ObserveElements {
+    const row: Element = {
+      "resource-id": "com.android.settings:id/recycler_view_row",
+      bounds: bounds(0, 100, 1000, 200),
+      clickable: true,
+    };
+    const title: Element = {
+      "resource-id": "android:id/title",
+      bounds: bounds(40, 120, 400, 180),
+      text: "Airplane mode",
+    };
+    const widget: Element = {
+      "resource-id": "com.android.settings:id/switchWidget",
+      bounds: bounds(800, 120, 960, 180),
+      class: "android.widget.Switch",
+      checkable: true,
+      checked: false,
+    };
+    return makeElements({ clickable: [row, widget], text: [title] });
+  }
+
+  test("an unlabelled toggle takes its owning row's label", () => {
+    const widget = findById(toSkeleton(settingsRow()), "com.android.settings:id/switchWidget");
+    expect(widget?.label).toBe("Airplane mode");
+    expect(widget?.checked).toBe(false);
+  });
+
+  test("a container with no attributable label omits the key rather than emitting a string", () => {
+    const root: Element = {
+      "resource-id": "com.google.android.contacts:id/quickcontact_fragment_root",
+      bounds: bounds(0, 0, 1000, 2000),
+      scrollable: true,
+    };
+    const [entry] = toSkeleton(makeElements({ scrollable: [root] }));
+    expect(entry.elementId).toBe("com.google.android.contacts:id/quickcontact_fragment_root");
+    expect("label" in entry).toBe(false);
+    expect(JSON.stringify(entry)).not.toContain("undefined");
+  });
+
+  test("a labelled row keeps its own label and is not overwritten by an ancestor", () => {
+    const rows = toSkeleton(settingsRow());
+    expect(findById(rows, "com.android.settings:id/recycler_view_row")?.label).toBe(
+      "Airplane mode",
+    );
+    expect(rows.every((row) => row.label !== "undefined")).toBe(true);
+  });
+});

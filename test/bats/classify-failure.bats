@@ -27,6 +27,9 @@ case "$1 $2" in
       */check-runs/3/annotations) printf '[{"message":"sharp: Could not load the sharp module"}]\n' ;;
       */check-runs/4/annotations) printf '[{"message":"expect(received).toBe(expected) ... deviceDiscoveryReconcileFunnel assertion failed"}]\n' ;;
       */check-runs/5/annotations) printf '[{"message":"XCTAssertEqual failed: (\\"foo\\") is not equal to (\\"bar\\")"}]\n' ;;
+      */check-runs/9/annotations) printf '[{"message":"expect(received).toBe(expected) ... some product assertion failed"}]\n' ;;
+      */check-runs/10/annotations) printf '[{"message":"oxlint: no-unused-vars lint failure"}]\n' ;;
+      */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
       *) printf '[]\n' ;;
     esac
     ;;
@@ -50,6 +53,23 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 456
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bun Security Audit → Audit → sharp: Could not load the sharp module → KNOWN-NONFIX"* ]]
+}
+
+@test "does not classify an unrelated failure on a Dependabot sharp branch as a known non-fix" {
+  fixture="$BATS_TEST_TMPDIR/dependabot-sharp-unrelated-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "dependabot/npm_and_yarn/sharp-0.35.4",
+  "jobs": [
+    {"databaseId": 10, "name": "Bun Lint", "conclusion": "failure", "steps": [{"name": "Run oxlint", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 457
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bun Lint → Run oxlint → oxlint: no-unused-vars lint failure → UNKNOWN"* ]]
+  [[ "$output" != *"KNOWN-NONFIX"* ]]
 }
 
 @test "does not classify an unrelated Node Unit Tests assertion as a rerun flake" {
@@ -109,6 +129,23 @@ JSON
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
 }
 
+@test "does not classify a JUnit assertion in Playground Emulator Tests as an advisory flake" {
+  fixture="$BATS_TEST_TMPDIR/playground-emulator-assertion-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/playground-emulator-assertion",
+  "jobs": [
+    {"databaseId": 9, "name": "Run Playground Automobile Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run AutoMobile tests that require emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 912
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run Playground Automobile Emulator Tests → Run AutoMobile tests that require emulator → expect(received).toBe(expected) ... some product assertion failed → UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
 @test "marks Android as upstream-only when Playground Automobile Emulator is its only failure" {
   fixture="$BATS_TEST_TMPDIR/android-advisory-run.json"
   cat > "$fixture" <<'JSON'
@@ -124,4 +161,23 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 321
   [ "$status" -eq 0 ]
   [[ "$output" == *"Android → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+@test "does not mark Android advisory-only when Build CtrlProxy APK also fails" {
+  fixture="$BATS_TEST_TMPDIR/android-hard-and-advisory-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-hard-and-advisory",
+  "jobs": [
+    {"databaseId": 7, "name": "Run Playground Automobile Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run AutoMobile tests that require emulator", "conclusion": "failure"}]},
+    {"databaseId": 11, "name": "Build CtrlProxy APK", "conclusion": "failure", "steps": [{"name": "Build Android APK", "conclusion": "failure"}]},
+    {"databaseId": 8, "name": "Android", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 322
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Android → Check results → none → UNKNOWN — no signature match, investigate"* ]]
+  [[ "$output" != *"Android → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }

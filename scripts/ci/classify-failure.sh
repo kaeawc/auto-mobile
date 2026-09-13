@@ -72,7 +72,7 @@ advisory_only_gate() {
     Android)
       [[ -n "$failures" ]] \
         && grep -Eq '^Run (JUnit Runner Emulator|Playground Automobile Emulator)' <<< "$failures" \
-        && ! grep -Eq '^(Build Android Control Proxy|Build JUnit Runner Library|Build Playground App|SDK Debug Inspector Consumer|JUnit Runner Kotlin Consumer Compatibility|JUnit Runner Unit Tests|Kotlin Code Coverage)$' <<< "$failures"
+        && ! grep -Eq '^(Detect Documentation-Only or SHA256-Only Changes|Build CtrlProxy APK|Build JUnitRunner Library|Build Playground App|SDK Debug Inspector Consumer|JUnit Runner Kotlin Consumer Compatibility|Run JUnit Runner Unit Tests|Run CtrlProxy Unit Tests)$' <<< "$failures"
       ;;
     'Node Tests')
       [[ -n "$failures" ]] \

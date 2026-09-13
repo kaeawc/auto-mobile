@@ -5,9 +5,18 @@ XCTestRunner Simulator Tests|*CtrlProxy is still running after forced teardown*|
 XCTestRunner Simulator Tests|*daemon did not become ready after*|RERUN-DONT-FIX|macos-26 daemon-ready lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests|*navigation events did not reach getNavigationGraph*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests|*could not bind iOS SDK events to navigation graph session*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun
-Run JUnit Runner Emulator*|*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
-Run Playground Automobile Emulator*|*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run JUnit Runner Emulator*|*startDevice automation runner readiness failed*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run JUnit Runner Emulator*|*readiness phase exceeded the remaining deadline*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run JUnit Runner Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run JUnit Runner Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run JUnit Runner Emulator*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*startDevice automation runner readiness failed*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*readiness phase exceeded the remaining deadline*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Node Unit Timing Budget*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 Node Unit Timing Budget*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 Node Unit Timing Budget*|*recheck produced*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
-*|*dependabot*sharp*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
+*|*dependabot*sharp*sharp: could not load the sharp module*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
+*|*dependabot*sharp*sharp native matrix is incoherent*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code

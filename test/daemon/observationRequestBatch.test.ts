@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS } from "../../src/daemon/deviceDataStreamSocketServer";
 import { runObservationRequestBatch } from "../../src/daemon/observationRequestBatch";
 import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -30,14 +31,14 @@ describe("runObservationRequestBatch", () => {
       {
         timer,
         signal: new AbortController().signal,
-        perDeviceTimeoutMs: 17_000,
+        perDeviceTimeoutMs: DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS,
       },
     );
 
     await Promise.resolve();
     expect(started).toEqual(["slow", "healthy-one", "healthy-two"]);
 
-    await timer.advanceTimeAsync(17_000);
+    await timer.advanceTimeAsync(DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS);
 
     const observations = await batch;
 
@@ -48,7 +49,7 @@ describe("runObservationRequestBatch", () => {
     ]);
     expect(observations[0]?.observation.viewHierarchy).toBeUndefined();
     expect(observations[0]?.observation.error).toBe(
-      "Observation request timed out after 17000ms for device slow",
+      `Observation request timed out after ${DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS}ms for device slow`,
     );
     expect(signals.get("slow")?.aborted).toBe(true);
     expect(signals.get("healthy-one")?.aborted).toBe(false);
@@ -57,6 +58,47 @@ describe("runObservationRequestBatch", () => {
       { deviceId: "healthy-one", observation: successfulObservation() },
       { deviceId: "healthy-two", observation: successfulObservation() },
     ]);
+  });
+
+  test("keeps an iOS observation that completes within the full request budget", async () => {
+    const timer = new FakeTimer();
+    const signals = new Map<string, AbortSignal>();
+
+    const batch = runObservationRequestBatch(
+      [
+        { id: "ios-nearly-complete", platform: "ios" },
+        { id: "stalled-sibling", platform: "android" },
+      ],
+      async (device, signal) => {
+        signals.set(device.id, signal);
+        await timer.sleep(device.platform === "ios" ? 18_000 : 25_000);
+        return successfulObservation();
+      },
+      {
+        timer,
+        signal: new AbortController().signal,
+      },
+    );
+
+    await timer.advanceTimeAsync(18_000);
+    await timer.advanceTimeAsync(DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS - 18_000);
+
+    const observations = await batch;
+
+    expect(observations).toEqual([
+      { deviceId: "ios-nearly-complete", observation: successfulObservation() },
+      {
+        deviceId: "stalled-sibling",
+        observation: {
+          updatedAt: DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS,
+          screenSize: { width: 0, height: 0 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          error: `Observation request timed out after ${DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS}ms for device stalled-sibling`,
+        },
+      },
+    ]);
+    expect(signals.get("ios-nearly-complete")?.aborted).toBe(false);
+    expect(signals.get("stalled-sibling")?.aborted).toBe(true);
   });
 
   test("returns an actionable failure without observing a quarantined device", async () => {

@@ -6,11 +6,13 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 
 /**
- * iOS may legitimately need up to 15 seconds for a fresh hierarchy. Leave three
- * seconds below the stream's 20-second outer guard so a single stalled device
- * settles locally while the outer guard can still catch a callback-level hang.
+ * Each device gets the full outer request budget because batch devices now race
+ * concurrently. This is deliberately not the outer budget minus headroom: the
+ * outer wrapper remains the true ceiling, while this timeout only fires when
+ * that wrapper is absent or has a larger budget, so it never cuts a device
+ * shorter than it was before batching.
  */
-export const PER_DEVICE_OBSERVATION_TIMEOUT_MS = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS - 3_000;
+export const PER_DEVICE_OBSERVATION_TIMEOUT_MS = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
 export interface ObservationRequestDevice {
   id: string;

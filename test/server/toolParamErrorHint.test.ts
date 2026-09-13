@@ -424,3 +424,21 @@ describe("formatToolParamError nested union unrecognized keys (#6867 follow-up)"
     expect(message).toContain("provide exactly one");
   });
 });
+
+// PR #6882 review: the top-level-parameter hint read `def.in` of the `z.preprocess`
+// wrapper that `withFieldAliases` puts around every app-ID-aware schema, landing on
+// the transform (no keys) instead of the object schema at the pipe's `out`. The hint
+// therefore never fired for `observe` and friends.
+describe("formatToolParamError top-level hint through preprocess (#6867 follow-up)", () => {
+  test("a top-level observe parameter nested inside waitFor points one level up", () => {
+    const input = { platform: "android", waitFor: { text: "ready", settled: { for: 1 } } };
+    const result = observeSchema.safeParse(input as object);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected invalid observe input");
+    }
+    const message = formatToolParamError("observe", result.error, input, observeSchema);
+    expect(message).toContain('waitFor Unrecognized key: "settled"');
+    expect(message).toContain('did you mean the top-level "settled" parameter?');
+  });
+});

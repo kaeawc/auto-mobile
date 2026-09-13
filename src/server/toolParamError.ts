@@ -209,6 +209,7 @@ function topLevelHint(
 interface ZodDefLike {
   type?: string;
   in?: unknown;
+  out?: unknown;
   innerType?: unknown;
   options?: readonly unknown[];
 }
@@ -238,8 +239,13 @@ function topLevelSchemaKeys(schema: unknown, depth = 0): ReadonlySet<string> {
   if (Array.isArray(def.options)) {
     return new Set(def.options.flatMap((option) => [...topLevelSchemaKeys(option, depth + 1)]));
   }
-  const inner = def.in ?? def.innerType;
-  return inner === undefined ? new Set<string>() : topLevelSchemaKeys(inner, depth + 1);
+  // Both ends of a pipe carry parameter names worth hinting at, and only one of
+  // them ever does: `withFieldAliases` wraps every app-ID-aware schema in
+  // `z.preprocess`, whose `in` is the alias-normalizing transform and whose `out`
+  // is the object schema — following `in` alone found no keys, so tools such as
+  // `observe` never produced the hint at all (#6867, PR review).
+  const wrapped = [def.out, def.in, def.innerType].filter((inner) => inner !== undefined);
+  return new Set(wrapped.flatMap((inner) => [...topLevelSchemaKeys(inner, depth + 1)]));
 }
 
 function formatSelectorIssue(

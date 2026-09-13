@@ -14,6 +14,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 mkdir -p ci-logs
+# Capture setup, pin validation, packing, installation, and final assertion.
+# The CI job uploads this file on failure, so an early failure must not lose its
+# only diagnostic output.
+exec > >(tee -a ci-logs/pinned-runtime-graph.log) 2>&1
 
 # 1. Ensure the published payload exists (dist/ is what gets packed).
 if [ ! -f "dist/src/index.js" ]; then
@@ -63,7 +67,6 @@ echo "Installing packed artifact into clean room ($consumer_dir)…"
 package_root="$consumer_dir/node_modules/@kaeawc/auto-mobile"
 consumer_nm="$consumer_dir/node_modules"
 
-bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$package_root" "$consumer_nm" \
-  | tee ci-logs/pinned-runtime-graph.log
+bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$package_root" "$consumer_nm"
 
 echo "Pinned runtime graph clean-room verification passed."

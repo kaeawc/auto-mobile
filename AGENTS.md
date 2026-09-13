@@ -181,6 +181,11 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).
+- A red `iOS`, `Android`, `Node Tests`, or `WebRTC` roll-up does not by itself
+  prove a required lane failed. Run `bash scripts/ci/classify-failure.sh <run-id>`
+  before rerunning or changing code; it identifies the specific upstream lane
+  and consults `scripts/ci/known-flakes.txt`. For integration-test or runtime-graph input changes, run
+  `bash scripts/prepush-integration.sh` before pushing. See `ci-failure-triage`.
 - Use the repo-local `push-pr` skill for publishing one branch or PR. Create or edit PRs with `gh pr create`/`gh pr edit` using `--body-file` to preserve newlines.
 - Android tasks run via the Gradle wrapper from `android/` (e.g., `(cd android && ./gradlew <task>)`).
 - Local validations live under `scripts/` (prefer existing scripts over ad-hoc checks).
@@ -198,6 +203,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ### Workflow Skills
 
 - check-ci: Inspect PR checks, fetch failing logs, reproduce likely failures locally, and summarize next steps. Path: `skills/check-ci/SKILL.md`.
+- ci-failure-triage: Classify failed pull-request workflow runs, distinguish hard from advisory roll-ups, and avoid re-fixing documented non-fixes. Path: `skills/ci-failure-triage/SKILL.md`.
 - shell-prepush: Use this workflow skill before pushing shell or scripts changes to run scoped fast validation and targeted BATS tests, interpret stale dependency-pin failures, and retrieve empty Fast Validation logs from artifacts. Path: `skills/shell-prepush/SKILL.md`.
 - github-pr-feedback: Collect every PR discussion and review thread, triage it, and safely resolve feedback after verified fixes without posting comments. Path: `skills/github-pr-feedback/SKILL.md`.
 - dead-code: Detect and remove dead code using repo scripts and targeted validation. Path: `skills/dead-code/SKILL.md`.

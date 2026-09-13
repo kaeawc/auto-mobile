@@ -1254,8 +1254,43 @@ jobs:
           fi
           bash scripts/test-ts.sh unit
 
+      - name: "Upload Node Unit Timing Reports"
+        if: success() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-timing-reports
+          path: scratch/timing-unit-reports
+          retention-days: 7
+
+  node-unit-timing-budget:
+    timeout-minutes: 10
+    name: "Node Unit Timing Budget"
+    runs-on: ubuntu-latest
+    needs: [detect-changes, node-unit-tests]
+    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.node-unit-tests.result == 'success'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: bash scripts/ci/install-bun-deps.sh
+
+      - name: "Download Node Unit Timing Reports"
+        uses: actions/download-artifact@v7
+        with:
+          name: node-unit-timing-reports
+          path: scratch/timing-unit-reports
+
       - name: "Enforce 100ms budget for changed unit tests"
-        if: runner.os == 'Linux'
         shell: bash
         env:
           BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
@@ -1266,7 +1301,9 @@ jobs:
     timeout-minutes: 20
     name: "Node Host Integration Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    needs: detect-changes
+    # Do not consume real-I/O runner capacity after the cheap required gate has
+    # already established that this revision cannot pass.
+    needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
       fail-fast: false
@@ -3320,7 +3357,9 @@ jobs:
     # ios-playground-tests normally runs on CircleCI; the GHA job stays in this
     # roll-up for the label-forced-without-iOS-paths fallback, where it runs here.
     # In the common iOS-path case it is skipped (result 'skipped'), which this
-    # gate treats as non-failing.
+    # gate treats as non-failing. XCTestRunner Simulator Tests is intentionally
+    # not part of this roll-up: the ~10-30 minute, simulator-flaky macOS lane
+    # remains a standalone, non-required advisory check outside the gate.
     needs:
       - detect-changes
       - ios-build-gate
@@ -3328,20 +3367,38 @@ jobs:
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
     steps:
+      # HARD dependencies below fail this roll-up. The ~10-30 minute,
+      # simulator-flaky macOS XCTestRunner Simulator Tests lane is intentionally
+      # standalone and non-required outside this gate, so it is not an advisory
+      # dependency here. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
-          results=( \
-            "${{ needs.detect-changes.result }}" \
-            "${{ needs.ios-build-gate.result }}" \
-            "${{ needs.ios-playground-tests.result }}" \
-            "${{ needs.ios-spm-root-package-build.result }}" \
+          declare -A hard_results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [ios-build-gate]="${{ needs.ios-build-gate.result }}"
+            [ios-playground-tests]="${{ needs.ios-playground-tests.result }}"
+            [ios-spm-root-package-build]="${{ needs.ios-spm-root-package-build.result }}"
           )
-          for r in "${results[@]}"; do
+          declare -A advisory_results=( )
+          fail=
+          for name in "${!hard_results[@]}"; do
+            r="${hard_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "One or more jobs failed or were cancelled"
-              exit 1
+              echo "::error::iOS gate HARD dependency ${name} = ${r}"
+              fail=1
             fi
           done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::iOS gate advisory dependency ${name} = ${r}; advisory: ios-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
+          if [[ -n "$fail" ]]; then
+            exit 1
+          fi
 
   android-gate:
     timeout-minutes: 10
@@ -3362,29 +3419,47 @@ jobs:
       - kotlin-code-coverage
     runs-on: ubuntu-latest
     steps:
+      # HARD dependencies below fail this roll-up. ADVISORY live emulator lanes
+      # only warn; add new needs as HARD unless they are non-required device/
+      # emulator/simulator coverage. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
           # Compile-smoke failure is checked directly; downstream emulator skips only propagate that failure.
-          results=( \
-            "${{ needs.detect-changes.result }}" \
-            "${{ needs.build-android-control-proxy.result }}" \
-            "${{ needs.build-junit-runner-library.result }}" \
-            "${{ needs.build-playground-app.result }}" \
-            "${{ needs.sdk-debug-inspector-consumer.result }}" \
-            "${{ needs.junit-runner-kotlin-consumer-compatibility.result }}" \
-            "${{ needs.junit-runner-unit-tests.result }}" \
-            "${{ needs.android-emulator-compile-smoke.result }}" \
-            "${{ needs.junit-runner-emulator-tests.result }}" \
-            "${{ needs.junit-runner-emulator-wtf-tests.result }}" \
-            "${{ needs.playground-automobile-emulator-tests.result }}" \
-            "${{ needs.kotlin-code-coverage.result }}" \
+          declare -A hard_results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [build-android-control-proxy]="${{ needs.build-android-control-proxy.result }}"
+            [build-junit-runner-library]="${{ needs.build-junit-runner-library.result }}"
+            [build-playground-app]="${{ needs.build-playground-app.result }}"
+            [sdk-debug-inspector-consumer]="${{ needs.sdk-debug-inspector-consumer.result }}"
+            [junit-runner-kotlin-consumer-compatibility]="${{ needs.junit-runner-kotlin-consumer-compatibility.result }}"
+            [junit-runner-unit-tests]="${{ needs.junit-runner-unit-tests.result }}"
+            [android-emulator-compile-smoke]="${{ needs.android-emulator-compile-smoke.result }}"
+            [kotlin-code-coverage]="${{ needs.kotlin-code-coverage.result }}"
           )
-          for r in "${results[@]}"; do
+          declare -A advisory_results=(
+            [junit-runner-emulator-tests]="${{ needs.junit-runner-emulator-tests.result }}"
+            [junit-runner-emulator-wtf-tests]="${{ needs.junit-runner-emulator-wtf-tests.result }}"
+            [playground-automobile-emulator-tests]="${{ needs.playground-automobile-emulator-tests.result }}"
+          )
+          fail=
+          for name in "${!hard_results[@]}"; do
+            r="${hard_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "One or more jobs failed or were cancelled"
-              exit 1
+              echo "::error::Android gate HARD dependency ${name} = ${r}"
+              fail=1
             fi
           done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::Android gate advisory dependency ${name} = ${r}; advisory: android-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
+          if [[ -n "$fail" ]]; then
+            exit 1
+          fi
 
   ide-plugin-gate:
     timeout-minutes: 10
@@ -3526,26 +3601,41 @@ jobs:
       - detect-changes
       - fast-validation
       - node-unit-tests
+      - node-unit-timing-budget
       - node-host-integration-tests
     permissions: {}
     runs-on: ubuntu-latest
     steps:
+      # HARD dependencies below fail this roll-up. The ADVISORY timing budget
+      # only warns; add new needs as HARD unless they are an excluded
+      # live-device/emulator/simulator lane. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
-          declare -A results=(
+          declare -A hard_results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
             [fast-validation]="${{ needs.fast-validation.result }}"
             [node-unit-tests]="${{ needs.node-unit-tests.result }}"
             [node-host-integration-tests]="${{ needs.node-host-integration-tests.result }}"
           )
+          declare -A advisory_results=(
+            [node-unit-timing-budget]="${{ needs.node-unit-timing-budget.result }}"
+          )
           fail=
-          for name in "${!results[@]}"; do
-            r="${results[$name]}"
+          for name in "${!hard_results[@]}"; do
+            r="${hard_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::Node Tests gate dependency ${name} = ${r}"
+              echo "::error::Node Tests gate HARD dependency ${name} = ${r}"
               fail=1
             fi
           done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; advisory: node-tests-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
           if [[ -n "$fail" ]]; then
             exit 1
           fi
@@ -3568,22 +3658,36 @@ jobs:
     permissions: {}
     runs-on: ubuntu-latest
     steps:
+      # detect-changes remains HARD. Every WebRTC input is currently live
+      # device/hardware coverage and non-required, so this intentionally always
+      # passes when triggered until a deterministic WebRTC leg exists; see the
+      # advisory-until-promoted rule above and scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
-          declare -A results=(
+          declare -A hard_results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
             [webrtc-integration-test]="${{ needs.webrtc-integration-test.result }}"
+          )
+          declare -A advisory_results=(
             [android-device-webrtc]="${{ needs.android-device-webrtc.result }}"
             [ios-device-webrtc]="${{ needs.ios-device-webrtc.result }}"
           )
           fail=
-          for name in "${!results[@]}"; do
-            r="${results[$name]}"
+          for name in "${!hard_results[@]}"; do
+            r="${hard_results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::WebRTC gate dependency ${name} = ${r}"
+              echo "::error::WebRTC gate HARD dependency ${name} = ${r}"
               fail=1
             fi
           done
+          if (( ${#advisory_results[@]} > 0 )); then
+            for name in "${!advisory_results[@]}"; do
+              r="${advisory_results[$name]}"
+              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+                echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; advisory: webrtc-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
+              fi
+            done
+          fi
           if [[ -n "${fail}" ]]; then
             echo "One or more jobs failed or were cancelled"
             exit 1

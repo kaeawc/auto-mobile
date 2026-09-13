@@ -93,6 +93,11 @@ interface DaemonDisconnectInternals {
 
 interface DevicePoolRecoveryInternals {
   recoveringAndroidImages: Map<string, DeviceInfo>;
+  recoveringSessionLosses: Map<string, unknown>;
+  completeEmulatorLossRecovery(
+    incidentId: string | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+  ): Promise<void>;
 }
 
 async function flush(): Promise<void> {
@@ -288,6 +293,43 @@ test("ordinary session recovery retries after its deferred shutdown cooldown", a
   }
 });
 
+test("release during shutdown confirmation finalizes session recovery instead of deferring it", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const completeRecovery = internals.completeEmulatorLossRecovery;
+  let finalizations = 0;
+  internals.completeEmulatorLossRecovery = async (...args) => {
+    finalizations++;
+    await completeRecovery.call(pool, ...args);
+  };
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await sessions.releaseSession("session", "explicit-release");
+    await flush();
+
+    timer.advanceTime(30_000);
+    expect(await recovery).toBe("released");
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+    expect(
+      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
+    ).toBe(false);
+    expect(
+      (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.has("session"),
+    ).toBe(false);
+    expect(finalizations).toBe(1);
+
+    const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
+    await releaseLease();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("disconnect recovery retries through the daemon after its deferred shutdown cooldown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
@@ -423,6 +465,33 @@ test("matching startup lease wakes when a deferred recovery settles", async () =
     await releaseLease?.();
   } finally {
     manager.releaseReadiness.resolve();
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("unnamed startup lease ignores a different AVD's deferred recovery", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  manager.deviceImages = [
+    { ...image, isRunning: false },
+    { ...image, name: "Pixel_9_API_36", isRunning: false },
+  ];
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await recovery).toBe("deferred");
+    expect(
+      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
+    ).toBe(true);
+
+    const releaseLease = await pool.reserveAndroidStartupLease(undefined, false);
+    await releaseLease();
+  } finally {
     sessions.stopCleanupTimer();
   }
 });

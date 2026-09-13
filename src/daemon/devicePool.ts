@@ -2667,6 +2667,7 @@ export class DevicePool {
       } catch (releaseError) {
         this.failedTerminalRecoveryReleases.add(sessionId);
         await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+        finalized = true;
         logger.warn(
           `[DevicePool] Failed to release session ${sessionId} after recovery error: ${releaseError}`,
           releaseError,
@@ -2688,8 +2689,8 @@ export class DevicePool {
         if (recovery?.avdName) {
           this.clearRecoveringAndroidImage(recovery.avdName);
         }
+        this.settleEmulatorLossIncident(incidentId);
       }
-      this.settleEmulatorLossIncident(incidentId);
     }
   }
 
@@ -2863,6 +2864,7 @@ export class DevicePool {
     session: Session,
     incidentId: string | undefined,
   ): Promise<SessionPreservingRecoveryResult> {
+    let deferred = false;
     try {
       const recovered = await this.rebootDisconnectedAndroidDevice(device, incidentId, {
         preserveSessionId: session.sessionId,
@@ -2887,7 +2889,7 @@ export class DevicePool {
           incidentId,
           avdName: device.avdName,
         });
-        await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+        deferred = true;
         return "deferred";
       }
       try {
@@ -2905,7 +2907,9 @@ export class DevicePool {
       logger.warn(`[DevicePool] ADB-reset recovery failed for ${device.id}: ${error}`, error);
       return "released";
     } finally {
-      this.settleEmulatorLossIncident(incidentId);
+      if (!deferred) {
+        this.settleEmulatorLossIncident(incidentId);
+      }
     }
   }
 
@@ -2940,7 +2944,6 @@ export class DevicePool {
       deferredUntil: this.timer.now() + UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS,
       deferredShutdowns: deferredShutdowns + 1,
     });
-    await this.completeEmulatorLossRecovery(incidentId, "exhausted");
     return "deferred";
   }
 

@@ -91,6 +91,11 @@ interface DaemonDisconnectInternals {
   ): Promise<{ incidentId: string | undefined; handled: boolean }>;
 }
 
+interface DaemonDeferredRecoverySweepInternals {
+  deferredSessionRecoverySweeps: Set<Promise<void>>;
+  trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
+}
+
 interface DevicePoolRecoveryInternals {
   recoveringAndroidImages: Map<string, DeviceInfo>;
   recoveringSessionLosses: Map<string, unknown>;
@@ -293,6 +298,43 @@ test("ordinary session recovery retries after its deferred shutdown cooldown", a
   }
 });
 
+test("a deferred session recovery incident remains pending until its retry recovers", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const incidentId = await pool.recordEmulatorLossIncident(
+      original.deviceId,
+      "device-discovery-miss",
+      undefined,
+      "absent",
+    );
+    if (!incidentId) {
+      throw new Error("Expected emulator-loss incident to be recorded");
+    }
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incidentId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+    expect(
+      (await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome,
+    ).toBeUndefined();
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    await pool.retryDueDeferredSessionRecoveries();
+
+    expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toBe(
+      "recovered",
+    );
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("release during shutdown confirmation finalizes session recovery instead of deferring it", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   const internals = pool as unknown as DevicePoolRecoveryInternals;
@@ -375,6 +417,43 @@ test("disconnect recovery retries through the daemon after its deferred shutdown
   }
 });
 
+test("a tracked deferred recovery sweep does not block another due-retry check", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
+  const internals = daemon as unknown as DaemonDeferredRecoverySweepInternals;
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+
+    timer.advanceTime(30_000);
+    const blockedRetry = pool.retryDueDeferredSessionRecoveries();
+    internals.trackDeferredSessionRecoverySweep(blockedRetry);
+    await flush();
+    expect(internals.deferredSessionRecoverySweeps.has(blockedRetry)).toBe(true);
+
+    await pool.retryDueDeferredSessionRecoveries();
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+    await blockedRetry;
+    await flush();
+    expect(internals.deferredSessionRecoverySweeps.has(blockedRetry)).toBe(false);
+  } finally {
+    if (DaemonState.getInstance().isInitialized()) {
+      DaemonState.getInstance().reset();
+    }
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("ordinary session recovery releases after its retry also has unconfirmed shutdown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
@@ -399,6 +478,45 @@ test("ordinary session recovery releases after its retry also has unconfirmed sh
     expect(await retry).toBe("released");
     expect(sessions.getSession("session")).toBeNull();
     expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a deferred session recovery incident is not terminal before its retry releases", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const incidentId = await pool.recordEmulatorLossIncident(
+      original.deviceId,
+      "device-discovery-miss",
+      undefined,
+      "absent",
+    );
+    if (!incidentId) {
+      throw new Error("Expected emulator-loss incident to be recorded");
+    }
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incidentId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+    expect(
+      (await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome,
+    ).toBeUndefined();
+
+    timer.advanceTime(30_000);
+    const retry = pool.retryDueDeferredSessionRecoveries();
+    await flush();
+    timer.advanceTime(30_000);
+    await retry;
+
+    expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toBe(
+      "exhausted",
+    );
   } finally {
     sessions.stopCleanupTimer();
   }

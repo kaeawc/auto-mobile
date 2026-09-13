@@ -265,6 +265,7 @@ export class Daemon {
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
+  private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
   private socketBindCommitted = false;
   // Preserves a live incumbent daemon's PID record across our own early-owner
@@ -1771,7 +1772,14 @@ export class Daemon {
             return;
           }
 
-          await this.devicePool.retryDueDeferredSessionRecoveries();
+          this.trackDeferredSessionRecoverySweep(
+            this.devicePool.retryDueDeferredSessionRecoveries().catch((error) => {
+              logger.warn(
+                `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
+                error,
+              );
+            }),
+          );
 
           const discovery = await deviceManager.getBootedDevicesDetailed("either");
           // FUNNEL 1: this sweep joins the observation to `getAllDevices()` by
@@ -2014,6 +2022,14 @@ export class Daemon {
       },
     );
     this.deviceDisconnectMonitor.start();
+  }
+
+  private trackDeferredSessionRecoverySweep(sweep: Promise<void>): void {
+    this.deferredSessionRecoverySweeps.add(sweep);
+    void sweep.then(
+      () => this.deferredSessionRecoverySweeps.delete(sweep),
+      () => this.deferredSessionRecoverySweeps.delete(sweep),
+    );
   }
 
   private async tryRecoverProcessWideAdbServerResetDevice(
@@ -2577,6 +2593,7 @@ export class Daemon {
             if (!disconnectSettled) {
               logger.warn("Device disconnect monitor did not settle before daemon shutdown");
             }
+            await Promise.allSettled(this.deferredSessionRecoverySweeps);
           },
         },
         {

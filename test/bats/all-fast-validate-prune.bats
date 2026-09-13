@@ -47,6 +47,21 @@ teardown() {
   [[ "$output" == *"bun-version-coherence"* ]]
 }
 
+@test "fast validation lists registered implementation scripts" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'claude-plugin\tscripts/claude/validate_plugin.sh'* ]]
+  while IFS=$'\t' read -r name script_path; do
+    [[ -n "$name" ]]
+    [[ -n "$script_path" ]]
+    [[ "$script_path" == scripts/* ]]
+  done <<< "$output"
+  if [[ "$output" == *$'github-python-lock\t'* ]]; then
+    grep -Eq $'^github-python-lock\t$' <<< "$output"
+  fi
+}
+
 @test "fast validation registers the runtime pin drift check" {
   run "$ABS_SCRIPT" --list
 

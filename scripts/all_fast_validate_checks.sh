@@ -7,6 +7,7 @@
 # Usage:
 #   ./scripts/all_fast_validate_checks.sh
 #   ./scripts/all_fast_validate_checks.sh --list
+#   ./scripts/all_fast_validate_checks.sh --list-checks
 #   ./scripts/all_fast_validate_checks.sh --only shellcheck,xml
 #   ./scripts/all_fast_validate_checks.sh --skip lychee
 #   ./scripts/all_fast_validate_checks.sh --group docs,config
@@ -76,6 +77,7 @@ Usage:
 
 Options:
   --list                List available checks and exit
+  --list-checks          List registered check implementation scripts and exit
   --only <names>        Run only the named checks (comma-separated)
   --skip <names>        Skip the named checks (comma-separated)
   --group <groups>      Run checks in the named groups (comma-separated)
@@ -91,6 +93,22 @@ print_list() {
   for idx in "${!CHECK_NAMES[@]}"; do
     printf "  %-14s %s (groups: %s)\n" \
       "${CHECK_NAMES[$idx]}" "${CHECK_DESCRIPTIONS[$idx]}" "${CHECK_GROUPS[$idx]}"
+  done
+}
+
+print_check_scripts() {
+  local idx command project_root_marker script_path
+  project_root_marker="${PROJECT_ROOT}/"
+  for idx in "${!CHECK_NAMES[@]}"; do
+    command="${CHECK_COMMANDS[$idx]}"
+    if [[ "${command}" != *"${project_root_marker}"* ]]; then
+      continue
+    fi
+    script_path="${command#*"${project_root_marker}"}"
+    script_path="${script_path%%\"*}"
+    if [[ -f "${PROJECT_ROOT}/${script_path}" ]]; then
+      printf '%s\t%s\n' "${CHECK_NAMES[$idx]}" "${script_path}"
+    fi
   done
 }
 
@@ -141,6 +159,7 @@ timestamp_ms() {
 }
 
 list_requested=0
+list_checks_requested=0
 declare -a only_list=()
 declare -a skip_list=()
 declare -a group_list=()
@@ -151,6 +170,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --list)
       list_requested=1
+      shift
+      ;;
+    --list-checks)
+      list_checks_requested=1
       shift
       ;;
     --only)
@@ -207,6 +230,11 @@ done
 
 if [[ "$list_requested" -eq 1 ]]; then
   print_list
+  exit 0
+fi
+
+if [[ "$list_checks_requested" -eq 1 ]]; then
+  print_check_scripts
   exit 0
 fi
 

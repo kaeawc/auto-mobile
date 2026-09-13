@@ -72,6 +72,12 @@ EOF
   printf '%s\n' '# renamed-helper' > test/bats/renamed-helper.bats
   git add scripts/renamed-helper.sh test/bats/renamed-helper.bats
   git commit -qm "rename baseline"
+  mkdir -p scripts/lib
+  printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-one.sh
+  printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-two.sh
+  printf '%s\n' 'helper baseline' > scripts/lib/shared-helper.sh
+  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/lib/shared-helper.sh
+  git commit -qm "add helper consumers"
   git branch -M main
   git branch base
   git checkout -qb feature
@@ -90,6 +96,22 @@ commit_change() {
   git commit -qm "change ${path}"
 }
 
+install_registry_stub() {
+  cat > "${TEST_ROOT}/scripts/all_fast_validate_checks.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list-checks" ]]; then
+  printf 'claude-plugin\tscripts/claude/validate_plugin.sh\n'
+  printf 'stdlib-first\tscripts/conventions/validate-stdlib-first.sh\n'
+  printf 'helper-consumer-one\tscripts/check-helper-consumer-one.sh\n'
+  printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
+  exit 0
+fi
+printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
+printf 'STDLIB_FIRST_BASE_REF=%s\n' "${STDLIB_FIRST_BASE_REF:-<unset>}" >> "${PREPUSH_FAST_LOG}"
+EOF
+  chmod +x "${TEST_ROOT}/scripts/all_fast_validate_checks.sh"
+}
+
 @test "a changed shell script selects shell checks without unrelated docs checks" {
   commit_change "scripts/example.sh" "#!/usr/bin/env bash"
   printf '%s\n' '# scripts/example.sh' > test/bats/example.bats
@@ -100,6 +122,38 @@ commit_change() {
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
   ! grep -Fq -- 'mkdocs-nav' "${FAST_LOG}"
   grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
+}
+
+@test "a changed registered fast-check implementation selects that check" {
+  install_registry_stub
+  commit_change "scripts/claude/validate_plugin.sh" "#!/usr/bin/env bash"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,claude-plugin' "${FAST_LOG}"
+}
+
+@test "a changed sourced helper selects every registered consumer" {
+  install_registry_stub
+  printf '%s\n' 'helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change scripts/lib/shared-helper.sh"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two' "${FAST_LOG}"
+}
+
+@test "an unmatched scripts file selects no registered fast check" {
+  install_registry_stub
+  commit_change "scripts/unmatched-prepush-fixture.txt" "fixture"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first' "${FAST_LOG}"
 }
 
 @test "a changed sete baseline selects shell-sete" {

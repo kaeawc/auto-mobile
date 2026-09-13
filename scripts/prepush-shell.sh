@@ -70,6 +70,47 @@ binary_diff_for_path() {
   fi
 }
 
+load_fast_check_registry() {
+  local registry_output registry_status check_name check_script
+  set +e
+  registry_output="$(./scripts/all_fast_validate_checks.sh --list-checks)"
+  registry_status=$?
+  set -e
+  if [[ "${registry_status}" -ne 0 ]]; then
+    echo "Failed to list registered fast validation checks." >&2
+    exit "${registry_status}"
+  fi
+
+  while IFS=$'\t' read -r check_name check_script; do
+    if [[ -n "${check_name}" && -n "${check_script}" ]]; then
+      registered_check_names+=("${check_name}")
+      registered_check_scripts+=("${check_script}")
+    fi
+  done <<< "${registry_output}"
+}
+
+add_registered_checks_for_script_path() {
+  local path="$1"
+  local idx check_name check_script directive helper_path
+  for idx in "${!registered_check_names[@]}"; do
+    check_name="${registered_check_names[$idx]}"
+    check_script="${registered_check_scripts[$idx]}"
+    if [[ "${path}" == "${check_script}" ]]; then
+      add_check "${check_name}"
+    fi
+    if [[ "${check_script}" != *.sh || ! -f "${check_script}" ]]; then
+      continue
+    fi
+    while IFS= read -r directive; do
+      helper_path="${directive#*source=}"
+      helper_path="${helper_path%%[[:space:]]*}"
+      if [[ "${path}" == "${helper_path}" ]]; then
+        add_check "${check_name}"
+      fi
+    done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+  done
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base)
@@ -141,6 +182,22 @@ fi
 selected_checks=()
 bats_files=()
 hook_files=()
+registered_check_names=()
+registered_check_scripts=()
+has_changed_scripts=0
+for path in "${changed_files[@]}"; do
+  case "${path}" in
+    scripts/*)
+      has_changed_scripts=1
+      break
+      ;;
+  esac
+done
+
+if [[ "${has_changed_scripts}" -eq 1 ]]; then
+  load_fast_check_registry
+fi
+
 for path in "${changed_files[@]}"; do
   case "${path}" in
     scripts/*.sh|.githooks/*)
@@ -213,6 +270,7 @@ for path in "${changed_files[@]}"; do
   case "${path}" in
     scripts/*)
       add_check "stdlib-first"
+      add_registered_checks_for_script_path "${path}"
       ;;
   esac
 

@@ -26,7 +26,7 @@ import {
   type HostPortAvailabilityChecker,
 } from "./ios/IOSHostPortAvailabilityChecker";
 import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
-import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
+import { IOSCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IOSCtrlProxyProcessClient";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
@@ -668,8 +668,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
     }
     if (runnerPid) {
-      const stillOwned = await this.isRunnerStillOwnedWithinShutdownDeadline(runnerPid);
-      if (stillOwned) {
+      const mayTerminate = await this.isRunnerStillOwnedWithinShutdownDeadline(runnerPid);
+      if (mayTerminate) {
         await this.processClient
           .terminateProcessTree(runnerPid, deadline, {
             skipGraceful: true,
@@ -680,8 +680,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           });
       } else {
         logger.warn(
-          `[IOSCtrlProxy] Tracked runner PID ${runnerPid} is no longer verifiably ours ` +
-            `(exited/PID-reused); skipping forced termination`,
+          `[IOSCtrlProxy] Tracked runner PID ${runnerPid} is confirmed foreign ` +
+            `(PID-reused); skipping forced termination`,
         );
       }
     }
@@ -694,22 +694,27 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * by a short timeout, separate from the caller's terminateProcessTree budget, so a
    * slow `ps`/`kill -0` round trip cannot itself consume the 250 ms force-stop
    * deadline — on timeout we fail OPEN (treat as still owned) to preserve today's
-   * shutdown behavior rather than silently skip a genuinely hung runner.
+   * shutdown behavior rather than silently skip a genuinely hung runner. An absent
+   * root also proceeds because its original process group may still have live members.
    */
   private async isRunnerStillOwnedWithinShutdownDeadline(runnerPid: number): Promise<boolean> {
     let timeout: NodeJS.Timeout | undefined;
-    const fallbackToOwned = new Promise<boolean>((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve(true), FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS);
+    const fallbackToOwned = new Promise<RunnerOwnership>((resolve) => {
+      timeout = this.timer.setTimeout(
+        () => resolve("owned"),
+        FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS,
+      );
     });
     try {
-      return await Promise.race([
-        this.processClient.isOwnedRunnerAlive(
+      const ownership = await Promise.race([
+        this.processClient.checkRunnerOwnership(
           runnerPid,
           this.device.deviceId,
           this.timer.now() + FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS,
         ),
         fallbackToOwned,
       ]);
+      return ownership !== "foreign";
     } catch (error) {
       // A failed ownership check (exec error) is treated the same as "cannot
       // disprove ownership": fail open so a genuinely hung runner still gets

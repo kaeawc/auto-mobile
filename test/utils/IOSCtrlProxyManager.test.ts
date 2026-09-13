@@ -2026,6 +2026,34 @@ describe("IOSCtrlProxyManager", function () {
       expect(ownedRunner.alive).toBe(false);
     });
 
+    test("forceStopForShutdown kills a surviving owned process group after its root exits (#6579)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const runnerPid = 912351;
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = runnerPid;
+      const exitedRunner = { ...ownRunnerProcess(runnerPid), alive: false };
+      const survivingChild: FakeListeningProcess = {
+        pid: 912352,
+        port: 8765,
+        command: "CtrlProxyUITests-Runner",
+        alive: true,
+        ppid: 1,
+        pgid: runnerPid,
+      };
+      installListeningProcessFakes(fakeExecutor, [exitedRunner, survivingChild]);
+
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(250);
+
+      expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(true);
+      expect(survivingChild.alive).toBe(false);
+    });
+
     test("start() waits for an own runner then terminates it if it never becomes healthy (#2834)", async function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice, // simulator UUID

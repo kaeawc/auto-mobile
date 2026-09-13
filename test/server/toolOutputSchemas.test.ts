@@ -322,6 +322,26 @@ describe("observationSummarySchema: truncation reasons (#6601)", () => {
     expect(json.properties.truncationReasons).toBeDefined();
     expect(json.required ?? []).not.toContain("truncationReasons");
   });
+
+  test("declares nested hierarchy truncation reasons on full/raw action observations", () => {
+    const full = {
+      activeWindow: { appId: "com.example" },
+      viewHierarchy: {
+        hierarchy: { node: { bounds: [0, 0, 100, 50] } },
+        truncationReasons: ["max_children[root] kept 10 of 12"],
+      },
+    };
+
+    const parsed = observationOutputSchema.parse(full);
+    expect(parsed.viewHierarchy?.truncationReasons).toEqual(full.viewHierarchy.truncationReasons);
+
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    const viewHierarchy = json.properties.viewHierarchy as Record<string, any>;
+    const viewHierarchySchema = viewHierarchy.$ref
+      ? (json.$defs[viewHierarchy.$ref.replace("#/$defs/", "")] as Record<string, any>)
+      : viewHierarchy;
+    expect(viewHierarchySchema.properties.truncationReasons).toBeDefined();
+  });
 });
 
 describe("viewHierarchyResultSchema: nested truncation reasons (#6601)", () => {

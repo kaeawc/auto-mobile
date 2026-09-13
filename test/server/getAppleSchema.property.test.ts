@@ -17,7 +17,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 const ID_POOL = ["udid-A", "udid-B", "SIM-0000-1111", "abc"] as const;
 const optionalId = fc.option(fc.constantFrom(...ID_POOL), { nil: undefined });
 
-const KNOWN_KEYS = ["udid", "deviceId", "bootTimeoutMs", "automationReadyTimeoutMs"];
+const KNOWN_KEYS = ["udid", "deviceId", "bootTimeoutMs", "automationReadyTimeoutMs", "enableTools"];
 
 // Timeout fields pass their own `.int().max(MAX)` (and `.min(MIN)` for the
 // automation field) individually, so these generators isolate the cross-field
@@ -167,6 +167,24 @@ describe("getAppleSchema strictness (property-based)", () => {
         (key) => {
           const result = getAppleSchema.safeParse(args("sim", undefined, { [key]: "value" }));
           return result.success === false;
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+});
+
+// #6869 — `enableTools` is the same field on both acquisition schemas.
+describe("getAppleSchema enableTools (property-based)", () => {
+  test("accepts or rejects an enableTools array exactly as getAndroidSchema does", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.string({ maxLength: 8 }), { minLength: 0, maxLength: 4 }),
+        (enableTools) => {
+          const apple = getAppleSchema.safeParse({ udid: "sim", enableTools });
+          const android = getAndroidSchema.safeParse({ avdName: "Pixel", enableTools });
+          const expected = enableTools.length > 0 && enableTools.every((n) => n.length > 0);
+          return apple.success === expected && android.success === expected;
         },
       ),
       RUN_OPTIONS,

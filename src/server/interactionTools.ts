@@ -434,107 +434,119 @@ const swipeOnLookForSchema = createElementIdTextSelectorSchema({
   text: "Text to look for",
 });
 
+// #6613: dragAndDrop/swipeOn/pinchOn/inputText advertised
+// `additionalProperties: false` but were not `.strict()`, so an undeclared
+// caller argument was silently dropped instead of rejected. Same treatment as
+// tapOn/tapAny (#6154).
 export const dragAndDropSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
-    z.object({
-      source: dragAndDropSelectorSchema("Source"),
-      target: dragAndDropSelectorSchema("Target"),
-      pressDurationMs: z
-        .number()
-        .min(600)
-        .max(3000)
-        .optional()
-        .describe("Press duration ms (min: 600, max: 3000, default: 600)"),
-      dragDurationMs: z
-        .number()
-        .min(300)
-        .max(1000)
-        .optional()
-        .describe("Drag duration ms (min: 300, max: 1000, default: 300)"),
-      holdDurationMs: z
-        .number()
-        .min(100)
-        .max(3000)
-        .optional()
-        .describe("Hold duration ms (min: 100, max: 3000, default: 100)"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        source: dragAndDropSelectorSchema("Source"),
+        target: dragAndDropSelectorSchema("Target"),
+        pressDurationMs: z
+          .number()
+          .min(600)
+          .max(3000)
+          .optional()
+          .describe("Press duration ms (min: 600, max: 3000, default: 600)"),
+        dragDurationMs: z
+          .number()
+          .min(300)
+          .max(1000)
+          .optional()
+          .describe("Drag duration ms (min: 300, max: 1000, default: 300)"),
+        holdDurationMs: z
+          .number()
+          .min(100)
+          .max(3000)
+          .optional()
+          .describe("Hold duration ms (min: 100, max: 3000, default: 100)"),
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["source", "target"]),
 );
 
 export const swipeOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
-    z.object({
-      includeSystemInsets: z
-        .boolean()
-        .optional()
-        .describe("Use full screen including status/nav bars"),
-      container: elementContainerSchema.optional().describe("Scope search to a container"),
-      autoTarget: z
-        .boolean()
-        .optional()
-        .describe("Auto-target scrollable containers (default: true)"),
-      direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
-      gestureType: z
-        .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])
-        .optional()
-        .describe("Finger direction or content scroll direction; default: scrollTowardsDirection"),
-      lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
-      boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
-      apexPause: z
-        .number()
-        .min(0)
-        .max(3000)
-        .optional()
-        .describe("Pause duration at swipe apex in ms (0-3000)"),
-      returnSpeed: z
-        .number()
-        .min(0.1)
-        .max(3.0)
-        .optional()
-        .describe("Speed multiplier for return swipe (0.1-3.0)"),
-      speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        includeSystemInsets: z
+          .boolean()
+          .optional()
+          .describe("Use full screen including status/nav bars"),
+        container: elementContainerSchema.optional().describe("Scope search to a container"),
+        autoTarget: z
+          .boolean()
+          .optional()
+          .describe("Auto-target scrollable containers (default: true)"),
+        direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
+        gestureType: z
+          .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])
+          .optional()
+          .describe(
+            "Finger direction or content scroll direction; default: scrollTowardsDirection",
+          ),
+        lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
+        boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
+        apexPause: z
+          .number()
+          .min(0)
+          .max(3000)
+          .optional()
+          .describe("Pause duration at swipe apex in ms (0-3000)"),
+        returnSpeed: z
+          .number()
+          .min(0.1)
+          .max(3.0)
+          .optional()
+          .describe("Speed multiplier for return swipe (0.1-3.0)"),
+        speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
 );
 
 export const pinchOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
-    z.object({
-      direction: z.enum(["in", "out"]).describe("Pinch direction"),
-      distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
-      distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
-      scale: z.number().optional().describe("Scale factor (overrides distances)"),
-      duration: z.number().optional().describe("Gesture duration (ms)"),
-      rotationDegrees: z
-        .number()
-        .optional()
-        .describe(
-          "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
-        ),
-      includeSystemInsets: z
-        .boolean()
-        .optional()
-        .describe("Use full screen including status/nav bars"),
-      container: elementContainerSchema.optional().describe("Scope search to a container"),
-      autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        direction: z.enum(["in", "out"]).describe("Pinch direction"),
+        distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
+        distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
+        scale: z.number().optional().describe("Scale factor (overrides distances)"),
+        duration: z.number().optional().describe("Gesture duration (ms)"),
+        rotationDegrees: z
+          .number()
+          .optional()
+          .describe(
+            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
+          ),
+        includeSystemInsets: z
+          .boolean()
+          .optional()
+          .describe("Use full screen including status/nav bars"),
+        container: elementContainerSchema.optional().describe("Scope search to a container"),
+        autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
 );
@@ -706,31 +718,33 @@ const inputTextSelectorSchema = z
   );
 
 export const inputTextSchema = addDeviceTargetingToSchema(
-  z.object({
-    text: z.string().min(1),
-    selector: inputTextSelectorSchema
-      .optional()
-      .describe(
-        "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
-          "one call. Without it, text goes to whatever is currently focused.",
-      ),
-    mode: z
-      .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
-      .optional()
-      .describe(
-        "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
-      ),
-    imeAction: z
-      .enum(["done", "next", "search", "send", "go", "previous"])
-      .optional()
-      .describe("IME action after input"),
-    dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      text: z.string().min(1),
+      selector: inputTextSelectorSchema
+        .optional()
+        .describe(
+          "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
+            "one call. Without it, text goes to whatever is currently focused.",
+        ),
+      mode: z
+        .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
+        .optional()
+        .describe(
+          "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
+        ),
+      imeAction: z
+        .enum(["done", "next", "search", "send", "go", "previous"])
+        .optional()
+        .describe("IME action after input"),
+      dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 const sendKeysKeyValues = [...SUPPORTED_INPUT_KEYS, ...SEND_KEYS_SEMANTIC_KEYS] as const;
@@ -1142,6 +1156,56 @@ export async function pinchOnHandler(
   // formatPinchOnMessage already gates the message on `result.success`; the MCP
   // envelope must agree, exactly as tapOn/inputText do (#6152, #5902), so a
   // conforming client can't mistake a failed pinch for a completed one (#6163).
+  return result.success ? response : { ...response, isError: true };
+}
+
+// Injection seam for the inputText handler (mirrors the swipeOn/pinchOn factory
+// seams in this file). Lets a unit test exercise the registered handler wiring
+// with a fake InputText, so the #6868 warning-vs-error contract is covered at
+// the tool boundary and not only inside the feature.
+export type InputTextLike = Pick<InputText, "execute">;
+
+let inputTextFactory: (device: BootedDevice) => InputTextLike = (device) => new InputText(device);
+
+export function setInputTextFactory(factory: (device: BootedDevice) => InputTextLike): void {
+  inputTextFactory = factory;
+}
+
+export function resetInputTextFactory(): void {
+  inputTextFactory = (device) => new InputText(device);
+}
+
+/**
+ * Run inputText and report its outcome.
+ *
+ * `isError` is reserved for a failed TEXT WRITE. A best-effort epilogue that
+ * failed (keyboard dismissal) rides along as `keyboardDismissed: false` plus a
+ * `warnings` entry on a SUCCESSFUL response, so a client no longer has to parse
+ * English prose to learn that the text it asked for actually landed (#6868).
+ */
+export async function inputTextHandler(
+  device: BootedDevice,
+  args: InputTextArgs,
+  _progress?: ProgressCallback,
+  signal?: AbortSignal,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
+  const mode = device.platform === "android" ? args.mode : undefined;
+  const inputText = inputTextFactory(device);
+  const result = await inputText.execute(
+    args.text,
+    args.imeAction,
+    dismissKeyboard,
+    mode,
+    signal,
+    args.selector,
+  );
+  const response = createJSONToolResponse({
+    message: buildInputTextResultMessage(result),
+    observation: result.observation,
+    ...result,
+  });
   return result.success ? response : { ...response, isError: true };
 }
 
@@ -1614,6 +1678,21 @@ export async function rotateHandler(
   }
 }
 
+// An empty list is only honest when every rendered row could be attributed;
+// otherwise say how many rows stayed unreadable so "0" is not mistaken for
+// "this app has no notifications" (#6875).
+function formatTrayListMessage(
+  appId: string,
+  result: { notifications: unknown[]; unattributedRows: number },
+): string {
+  const listed = `Listed ${result.notifications.length} notifications for ${appId}`;
+  if (result.unattributedRows === 0) {
+    return listed;
+  }
+  const rows = result.unattributedRows === 1 ? "row" : "rows";
+  return `${listed} (${result.unattributedRows} shade ${rows} carry no app header and could not be correlated to ${appId})`;
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -1699,7 +1778,7 @@ export function registerInteractionTools() {
         );
         await captureSystemTrayTerminalEvidence(device, result.observation);
         return createJSONToolResponse({
-          message: `Listed ${result.notifications.length} notifications for ${appId}`,
+          message: formatTrayListMessage(appId, result),
           ...result,
           success: true,
         });
@@ -1910,33 +1989,8 @@ export function registerInteractionTools() {
   // pinchOn handler is defined at module scope (with an injectable PinchOn
   // factory) so a unit test can exercise the registered handler wiring (#6056).
 
-  // Input text handler
-  const inputTextHandler = async (
-    device: BootedDevice,
-    args: InputTextArgs,
-    _progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const dismissKeyboard =
-      args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
-    const mode = device.platform === "android" ? args.mode : undefined;
-    const inputText = new InputText(device);
-    const result = await inputText.execute(
-      args.text,
-      args.imeAction,
-      dismissKeyboard,
-      mode,
-      signal,
-      args.selector,
-    );
-    const response = createJSONToolResponse({
-      message: buildInputTextResultMessage(result),
-      observation: result.observation,
-      ...result,
-    });
-    return result.success ? response : { ...response, isError: true };
-  };
+  // inputText handler is defined at module scope (with an injectable InputText
+  // factory) so a unit test can exercise the registered handler wiring (#6868).
 
   const sendKeysHandler = async (
     device: BootedDevice,
@@ -2149,7 +2203,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "inputText",
-    "Input text. The optional mode field is Android-only and ignored on iOS.",
+    "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
     inputTextSchema,
     inputTextHandler,
     { defaultEnabled: !sendKeysReleased },

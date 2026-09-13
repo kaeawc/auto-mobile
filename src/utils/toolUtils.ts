@@ -226,3 +226,51 @@ export const throwIfAborted = (signal?: AbortSignal): void => {
     throw new Error(OPERATION_CANCELLED_MESSAGE);
   }
 };
+
+/**
+ * Await an operation that accepts no cancellation signal of its own, while
+ * still letting the caller's signal end the WAIT.
+ *
+ * `ensureConnected()` — WebSocket handshake, reconnect, iOS runner auto-setup —
+ * is the recurring case: it is not interruptible, and a caller working against
+ * a much tighter bound than its internal 5000ms handshake budget (the #6866
+ * embedded-observation settle gate advertises 1s) would otherwise be fenced by
+ * nothing at all until it resolved on its own. Rejecting here does NOT cancel
+ * the underlying work; it hands the caller its deadline back so it can degrade
+ * on time, and so it never dispatches a follow-up request the caller has
+ * already given up on.
+ *
+ * Rejects with the same error `throwIfAborted` would raise, so device-loss
+ * abort reasons keep their typed carrier.
+ */
+export const awaitWhileRequestIsLive = async <T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> => {
+  throwIfAborted(signal);
+  if (!signal) {
+    return await operation;
+  }
+  return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      try {
+        throwIfAborted(signal);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+};

@@ -5,7 +5,14 @@ import { logger } from "../utils/logger";
 
 async function getSnapshotArchive(): Promise<ResourceContent> {
   try {
-    const { snapshots, count, totalSizeBytes } = await listDeviceSnapshots();
+    const {
+      snapshots,
+      count,
+      totalSizeBytes,
+      unsizedCount,
+      pendingReclaimCount,
+      orphanedAvdSnapshots,
+    } = await listDeviceSnapshots();
     const config = await getDeviceSnapshotConfig();
 
     return {
@@ -16,6 +23,17 @@ async function getSnapshotArchive(): Promise<ResourceContent> {
           snapshots,
           count,
           totalSizeBytes,
+          // Records whose payload could not be measured. They are NOT in
+          // totalSizeBytes, so a non-zero count here means the archive is
+          // bigger than the total says (#6490).
+          unsizedCount,
+          // Records whose in-AVD payload still needs an emulator-console
+          // delete; the sweep completes them when that AVD is next live.
+          pendingReclaimCount,
+          // In-AVD snapshot directories with no record behind them. Reported,
+          // never auto-deleted — see docs/using/test-prep-tools.md for the
+          // manual cleanup path.
+          orphanedAvdSnapshots,
           maxArchiveSizeMb: config.maxArchiveSizeMb,
         },
         null,

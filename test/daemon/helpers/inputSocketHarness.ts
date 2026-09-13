@@ -12,6 +12,7 @@ import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/Platf
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 /**
  * Shared fixtures + Unix-socket request helpers for the `input/*` socket-server
@@ -64,9 +65,17 @@ export function createFakeSession(
   };
 }
 
+/**
+ * @param quarantinedDevices serials whose pooled identity is unresolved, i.e. the
+ *   ones `DevicePool.assertDeviceActionable` refuses. Sessionless device-addressed
+ *   input must pass that gate too, so the fake pool implements it rather than
+ *   only the session-keyed `assertSessionReadyForAutomation`
+ *   ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
 export function createFakeDaemonState(
   autolockSessions: Map<string, Session> = new Map(),
   mcpAutolockSessions: Map<string, string> = new Map(),
+  quarantinedDevices: ReadonlySet<string> = new Set(),
 ) {
   return {
     isInitialized: () => true,
@@ -83,6 +92,15 @@ export function createFakeDaemonState(
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
       assertSessionReadyForAutomation: () => {},
+      assertDeviceActionable: (deviceId: string, purpose: string) => {
+        if (quarantinedDevices.has(deviceId)) {
+          throw new ActionableError(
+            `Refusing ${purpose} on device '${deviceId}': this daemon has it recorded as AVD ` +
+              "'Pixel', but discovery could not read the AVD name from the runtime, so its " +
+              "identity is unresolved.",
+          );
+        }
+      },
       resolveAutolockSessionForMcpSession: (
         mcpSessionId: string | undefined,
         platform?: "android" | "ios",

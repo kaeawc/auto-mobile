@@ -8,7 +8,7 @@ setup() {
   BATS_LOG="${TEST_ROOT}/bats.log"
   SHELLCHECK_LOG="${TEST_ROOT}/shellcheck.log"
   REAL_GIT="$(command -v git)"
-  mkdir -p "${TEST_ROOT}/scripts" "${TEST_ROOT}/test/bats" "${STUB_DIR}"
+  mkdir -p "${TEST_ROOT}/scripts/lib" "${TEST_ROOT}/test/bats" "${STUB_DIR}"
 
   cat > "${TEST_ROOT}/scripts/all_fast_validate_checks.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -49,6 +49,8 @@ EOF
   chmod +x "${STUB_DIR}/git"
 
   cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${TEST_ROOT}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/tsImportDeps.ts" "${TEST_ROOT}/scripts/lib/tsImportDeps.ts"
+  ln -s "${REPO_ROOT}/node_modules" "${TEST_ROOT}/node_modules"
   chmod +x "${TEST_ROOT}/scripts/prepush-shell.sh"
 
   export PREPUSH_FAST_LOG="${FAST_LOG}"
@@ -84,6 +86,38 @@ EOF
   git checkout -qb feature
 }
 
+@test "a changed TypeScript dependency selects its registered check" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add runtime pins fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/release/lib/runtime-roots.ts" "export const runtimeRoots = [\"changed\"];"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,runtime-pins' "${FAST_LOG}"
+}
+
+@test "an unrelated TypeScript script does not select a registered TypeScript check" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add runtime pins fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/unrelated.ts" "export const unrelated = true;"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first' "${FAST_LOG}"
+}
+
 teardown() {
   rm -rf "${TEST_ROOT}"
 }
@@ -106,6 +140,7 @@ if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'stdlib-first\tscripts/conventions/validate-stdlib-first.sh\n'
   printf 'helper-consumer-one\tscripts/check-helper-consumer-one.sh\n'
   printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
+  printf 'runtime-pins\tscripts/release/pin-runtime-deps.ts\n'
   exit 0
 fi
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"

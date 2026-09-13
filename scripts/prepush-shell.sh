@@ -98,16 +98,27 @@ add_registered_checks_for_script_path() {
     if [[ "${path}" == "${check_script}" ]]; then
       add_check "${check_name}"
     fi
-    if [[ "${check_script}" != *.sh || ! -f "${check_script}" ]]; then
+    if [[ ! -f "${check_script}" ]]; then
       continue
     fi
-    while IFS= read -r directive; do
-      helper_path="${directive#*source=}"
-      helper_path="${helper_path%%[[:space:]]*}"
-      if [[ "${path}" == "${helper_path}" ]]; then
-        add_check "${check_name}"
-      fi
-    done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+    case "${check_script}" in
+      *.sh)
+        while IFS= read -r directive; do
+          helper_path="${directive#*source=}"
+          helper_path="${helper_path%%[[:space:]]*}"
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+        ;;
+      *.ts)
+        while IFS= read -r helper_path; do
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done < <(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}")
+        ;;
+    esac
   done
 }
 

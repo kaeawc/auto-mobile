@@ -717,3 +717,28 @@ describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
     expect("accessibilityAuditSkipped" in outcome.observation).toBe(false);
   });
 });
+
+describe("settle poll cost (#6890 review)", () => {
+  test("every poll skips the performance audit, not just the screenshot and a11y audit", async () => {
+    // The performance audit drives up to three synthetic touches plus ADB and
+    // DB work that honours none of this gate's one-second budget. Running it
+    // per poll on the hot path of every navigation action would perturb the
+    // very screen being settled and corrupt the measurement.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs(AIRPLANE_ROW_INFLATED, 20), obs(AIRPLANE_ROW_INFLATED, 30)]);
+
+    await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+      settleObserve: settleFor(fake, timer),
+    });
+
+    const options = fake.getExecuteOptions();
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.every((option) => option.skipPerformanceAudit === true)).toBe(true);
+    expect(options.every((option) => option.skipScreenshot === true)).toBe(true);
+    expect(options.every((option) => option.skipAccessibilityAudit === true)).toBe(true);
+  });
+});

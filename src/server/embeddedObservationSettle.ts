@@ -80,6 +80,16 @@ export async function settleEmbeddedObservation(
       pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
       signal: combineAbortSignals(input.signal, deadline),
       initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
+      // The poll already drops the screenshot and the accessibility audit as
+      // intermediate state; the performance audit has to go too. It drives up
+      // to three synthetic touches plus ADB/database work that honours neither
+      // the loop's budget nor the deadline above, so on THIS path — every
+      // navigation action, one-second budget — it would perturb the screen the
+      // gate is trying to settle, corrupt its own measurement, and stretch the
+      // action by seconds (#6890 review). The action's own
+      // `performanceAudit`, measured across the action window, is preserved by
+      // {@link ACTION_AUTHORED_OBSERVATION_METADATA}.
+      skipPerformanceAudit: true,
     });
     return {
       observation: isAdoptableCapture(input.observation, result.observation)

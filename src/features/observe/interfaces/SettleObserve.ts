@@ -27,6 +27,16 @@ export interface SettleOptions {
    * would reject every genuinely fresh capture and burn the whole budget.
    */
   initialMinTimestampMs?: number;
+  /**
+   * Skip the performance audit on every settle poll, forwarded verbatim to
+   * {@link pollObserveUntil} (issue #6890 review). Off by default: the
+   * standalone `observe(waitFor: {for: "stable"})` path keeps whatever the
+   * caller's audit configuration asks for. Set it on a short-budget loop that
+   * runs on a hot path -- the embedded-observation settle gate (#6866) -- where
+   * a per-poll audit's synthetic touches would perturb the very screen being
+   * settled and blow the budget several times over.
+   */
+  skipPerformanceAudit?: boolean;
 }
 
 /**

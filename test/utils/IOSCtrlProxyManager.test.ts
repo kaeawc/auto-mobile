@@ -461,6 +461,53 @@ describe("IOSCtrlProxyManager", function () {
       expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
     });
 
+    test("does not wait when the eviction deadline has already expired", async function () {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const timer = new FakeTimer();
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(
+        () => new Promise<void>(() => {}),
+      );
+      let settled = false;
+
+      void IOSCtrlProxyManager.evict(testDevice.deviceId, timer, -1).then(() => {
+        settled = true;
+      });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(settled).toBe(true);
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(timer.now()).toBe(0);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+    });
+
+    test("caps force-stop waiting at the remaining eviction deadline", async function () {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const timer = new FakeTimer();
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(
+        () => new Promise<void>(() => {}),
+      );
+      let settled = false;
+
+      void IOSCtrlProxyManager.evict(testDevice.deviceId, timer, 10).then(() => {
+        settled = true;
+      });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await Promise.resolve();
+      }
+      expect(forceStop).toHaveBeenCalledTimes(1);
+
+      timer.advanceTime(10);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(settled).toBe(true);
+      expect(timer.now()).toBe(10);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+    });
+
     test("still releases the port and clears the map entry when stopping fails", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       spyOn(first as any, "forceStopForShutdown").mockRejectedValue(new Error("stop failed"));

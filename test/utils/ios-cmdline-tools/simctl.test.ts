@@ -12,11 +12,13 @@ function resetSimctlCaches(): void {
     deviceListCache: { devices: unknown[]; timestamp: number } | null;
     lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
     inFlightDeviceList: Promise<unknown[]> | null;
+    inFlightDeviceListRequestSequence: number | null;
     simulatorBoots: Map<string, unknown>;
   };
   simctlClass.deviceListCache = null;
   simctlClass.lastGoodDeviceList = null;
   simctlClass.inFlightDeviceList = null;
+  simctlClass.inFlightDeviceListRequestSequence = null;
   simctlClass.simulatorBoots.clear();
 }
 
@@ -1262,6 +1264,100 @@ describe("Simctl", function () {
         expect(fresh.map((device) => device.deviceId)).toEqual(empty ? [] : ["new"]);
       },
     );
+
+    test.each([
+      ["bypass", { bypassCache: true }],
+      ["shared", {}],
+    ] as const)(
+      "an earlier bypass cannot overwrite a later %s listing",
+      async function (_laterKind, laterOptions) {
+        const timer = new FakeTimer();
+        const requests: Array<{
+          resolve: (value: ExecResult) => void;
+        }> = [];
+        let calls = 0;
+        mockExecAsync = async (_file, args) => {
+          if (args.join(" ") !== "simctl list devices --json") {
+            return createExecResult("", "");
+          }
+          calls++;
+          if (calls <= 2) {
+            return new Promise<ExecResult>((resolve) => {
+              requests.push({ resolve });
+            });
+          }
+          throw new Error("simctl list devices exploded");
+        };
+        simctl = new Simctl(null, mockExecAsync, timer);
+
+        const older = simctl.listSimulatorImages(undefined, { bypassCache: true });
+        await waitForCondition(() => requests.length === 1, "older bypass listing");
+        const newer = simctl.listSimulatorImages(undefined, laterOptions);
+        await waitForCondition(() => requests.length === 2, "newer listing");
+
+        requests[1].resolve(createExecResult(bootedListPayload("newer"), ""));
+        await expect(newer).resolves.toHaveLength(1);
+        requests[0].resolve(createExecResult(bootedListPayload("older"), ""));
+        await expect(older).resolves.toHaveLength(1);
+
+        timer.advanceTime(6000);
+        const fallback = await simctl.listSimulatorImages();
+        expect(calls).toBe(3);
+        expect(fallback.map((device) => device.deviceId)).toEqual(["newer"]);
+      },
+    );
+
+    test("a bypass does not evict the shared coalescing slot", async function () {
+      const requests: Array<{ resolve: (value: ExecResult) => void }> = [];
+      mockExecAsync = async (_file, args) => {
+        if (args.join(" ") !== "simctl list devices --json") {
+          return createExecResult("", "");
+        }
+        return new Promise<ExecResult>((resolve) => {
+          requests.push({ resolve });
+        });
+      };
+      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+
+      const firstShared = simctl.listSimulatorImages();
+      const bypass = simctl.listSimulatorImages(undefined, { bypassCache: true });
+      const secondShared = simctl.listSimulatorImages();
+      const requestCount = requests.length;
+      for (const [index, request] of requests.entries()) {
+        request.resolve(createExecResult(bootedListPayload(`device-${index}`), ""));
+      }
+      await Promise.all([firstShared, bypass, secondShared]);
+
+      expect(requestCount).toBe(2);
+    });
+
+    test("a bypass started before invalidation cannot repopulate the cache", async function () {
+      let calls = 0;
+      let resolveBypass!: (value: ExecResult) => void;
+      mockExecAsync = async (_file, args) => {
+        if (args.join(" ") !== "simctl list devices --json") {
+          return createExecResult("", "");
+        }
+        calls++;
+        if (calls === 1) {
+          return new Promise<ExecResult>((resolve) => {
+            resolveBypass = resolve;
+          });
+        }
+        return createExecResult(bootedListPayload("post-invalidation"), "");
+      };
+      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+
+      const stale = simctl.listSimulatorImages(undefined, { bypassCache: true });
+      await waitForCondition(() => resolveBypass !== undefined, "pre-invalidation bypass listing");
+      Simctl.invalidateDeviceListCache();
+      resolveBypass(createExecResult(bootedListPayload("pre-invalidation"), ""));
+      await expect(stale).resolves.toHaveLength(1);
+
+      const current = await simctl.listSimulatorImages();
+      expect(calls).toBe(2);
+      expect(current.map((device) => device.deviceId)).toEqual(["post-invalidation"]);
+    });
 
     test("a failed bypass refresh must not discard a shared flight that succeeded with newer data", async function () {
       const timer = new FakeTimer();

@@ -588,12 +588,16 @@ export class SimCtlClient implements SimCtl {
   // Mirrors DevicectlDeviceLister.DEVICE_LIST_TIMEOUT_MS; each waiter instead
   // races the shared result against its OWN deadline/signal (issue #6576).
   private static readonly SHARED_DEVICE_LIST_TIMEOUT_MS = 15_000;
-  // Bumped by invalidateDeviceListCache() (create/delete a simulator, or an
-  // explicit cache reset). A listing started before the bump must not
-  // repopulate the cache/last-good snapshot after it resolves -- that would
-  // resurrect a pre-mutation snapshot the invalidation was meant to discard
-  // (issue #6576).
+  // Invalidation epoch. A listing started in an older epoch must not
+  // repopulate the cache/last-good snapshot after a create/delete/reset.
   private static deviceListGeneration = 0;
+  // Physical listing order is distinct from invalidation. Only successful
+  // reads advance the recorded sequence, so a failed newer refresh does not
+  // discard an older flight's usable result; once a newer read succeeds, an
+  // older completion cannot overwrite it.
+  private static deviceListRequestSequence = 0;
+  private static recordedDeviceListRequestSequence = 0;
+  private static inFlightDeviceListRequestSequence: number | null = null;
   private static readonly simulatorBoots = new Map<string, SimulatorBootState>();
 
   /**
@@ -1734,17 +1738,6 @@ export class SimCtlClient implements SimCtl {
     // — that request's failure-fallback behavior is not this caller's to
     // inherit. Run it standalone instead of sharing the coalescing slot below.
     if (options.bypassCache) {
-      // Do NOT bump the generation here, before the bypass read has produced
-      // an authoritative result: a shared flight that started earlier and
-      // resolves successfully WHILE this bypass is still in flight must still
-      // be allowed to populate the cache/last-good snapshot. Bumping eagerly
-      // would discard that genuinely successful data solely because an
-      // unrelated, as-yet-unproven bypass happened to overlap it -- including
-      // when the bypass itself goes on to fail (issue #6576 follow-up). Only a
-      // bypass read that ITSELF succeeds is authoritative enough to supersede
-      // a concurrent shared flight, so the generation bump moves to
-      // runListSimulatorImages's success path below.
-      SimCtlClient.inFlightDeviceList = null;
       return this.runListSimulatorImages(timeoutMs, { bypassCache: true, signal });
     }
 
@@ -1754,23 +1747,22 @@ export class SimCtlClient implements SimCtl {
   private sharedDeviceList(): Promise<DeviceInfo[]> {
     if (!SimCtlClient.inFlightDeviceList) {
       const generation = SimCtlClient.deviceListGeneration;
+      const requestSequence = ++SimCtlClient.deviceListRequestSequence;
       const flight = runWithAbortSignal(undefined, () =>
         this.listDevicesForBootedCheck(SimCtlClient.SHARED_DEVICE_LIST_TIMEOUT_MS, undefined),
       )
         .then((devices) => {
-          if (SimCtlClient.deviceListGeneration === generation) {
-            const timestamp = this.timer.now();
-            SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
-            SimCtlClient.lastGoodDeviceList = { devices, timestamp };
-          }
+          this.recordDeviceListSnapshot(devices, generation, requestSequence);
           return devices;
         })
         .finally(() => {
           if (SimCtlClient.inFlightDeviceList === flight) {
             SimCtlClient.inFlightDeviceList = null;
+            SimCtlClient.inFlightDeviceListRequestSequence = null;
           }
         });
       SimCtlClient.inFlightDeviceList = flight;
+      SimCtlClient.inFlightDeviceListRequestSequence = requestSequence;
     }
     return SimCtlClient.inFlightDeviceList;
   }
@@ -1860,57 +1852,51 @@ export class SimCtlClient implements SimCtl {
     return devices;
   }
 
-  /**
-   * Write a successful listing to the cache/last-good snapshot. A bypass read
-   * always writes -- it is always the freshest, most authoritative result
-   * available, so there is no earlier-generation snapshot to defer to -- and
-   * bumps the generation AFTER writing (not before starting the read, see
-   * listSimulatorImages) so a concurrent shared flight that resolves
-   * successfully can still populate the cache while the bypass is in flight;
-   * only once this bypass itself succeeds does it supersede that shared
-   * flight for any later resolution (issue #6576 follow-up). A bypass that
-   * throws never reaches this write, so a sibling shared flight's success is
-   * preserved rather than discarded when the bypass fails. A shared (non-
-   * bypass) read only writes if its captured generation is still current: a
-   * create/delete (or explicit invalidation) that landed while it was in
-   * flight bumps the generation, and a snapshot captured under the OLD
-   * generation may already be obsolete, so writing it would resurrect
-   * pre-mutation data right after the mutation invalidated it.
-   */
+  /** Write a successful physical listing unless invalidation or a newer success superseded it. */
   private recordDeviceListSnapshot(
     devices: DeviceInfo[],
-    options: { bypassCache?: boolean },
     generation: number,
-  ): void {
-    if (!options.bypassCache && SimCtlClient.deviceListGeneration !== generation) {
-      return;
+    requestSequence: number,
+  ): boolean {
+    if (
+      SimCtlClient.deviceListGeneration !== generation ||
+      requestSequence < SimCtlClient.recordedDeviceListRequestSequence
+    ) {
+      return false;
     }
     const timestamp = this.timer.now();
     SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
     SimCtlClient.lastGoodDeviceList = { devices, timestamp };
-    if (options.bypassCache) {
-      SimCtlClient.deviceListGeneration++;
-    }
+    SimCtlClient.recordedDeviceListRequestSequence = requestSequence;
+    return true;
   }
 
   private async runListSimulatorImages(
     timeoutMs: number | undefined,
     options: { bypassCache?: boolean; signal?: AbortSignal },
-    generation: number = SimCtlClient.deviceListGeneration,
   ): Promise<DeviceInfo[]> {
     logger.debug("Getting list of iOS simulators");
+    const generation = SimCtlClient.deviceListGeneration;
+    const requestSequence = options.bypassCache
+      ? ++SimCtlClient.deviceListRequestSequence
+      : undefined;
 
     try {
       const devices = options.bypassCache
         ? await this.listDevicesForBootedCheck(timeoutMs, options.signal)
         : await this.sharedDeviceList();
-      this.recordDeviceListSnapshot(devices, options, generation);
+      if (
+        requestSequence !== undefined &&
+        this.recordDeviceListSnapshot(devices, generation, requestSequence) &&
+        SimCtlClient.inFlightDeviceListRequestSequence !== null &&
+        SimCtlClient.inFlightDeviceListRequestSequence < requestSequence
+      ) {
+        SimCtlClient.inFlightDeviceList = null;
+        SimCtlClient.inFlightDeviceListRequestSequence = null;
+      }
       return devices;
     } catch (error) {
       options.signal?.throwIfAborted();
-      if (!options.bypassCache && SimCtlClient.deviceListGeneration === generation) {
-        SimCtlClient.deviceListCache = null;
-      }
       const detail = errorMessage(error);
 
       // A caller that explicitly requested a fresh read (e.g. boot
@@ -2218,6 +2204,7 @@ export class SimCtlClient implements SimCtl {
     SimCtlClient.deviceListCache = null;
     SimCtlClient.lastGoodDeviceList = null;
     SimCtlClient.inFlightDeviceList = null;
+    SimCtlClient.inFlightDeviceListRequestSequence = null;
     SimCtlClient.deviceListGeneration++;
   }
 

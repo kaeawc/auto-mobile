@@ -307,7 +307,12 @@ for file in ${offender_files[@]+"${offender_files[@]}"}; do
     # Nothing to re-run; the first sample stands for this file's offenders.
     continue
   fi
-  if is_changed_test_file "$file"; then
+  # Invoke separately (not in a condition) so set -e stays armed inside the call.
+  set +e
+  is_changed_test_file "$file"
+  changed_test_status=$?
+  set -e
+  if [[ "$changed_test_status" -eq 0 ]]; then
     recheck_files+=("$file")
     printf '%s\n' "$file" >> "$rechecked_list"
     changed_offender_count=$((changed_offender_count + 1))
@@ -320,7 +325,12 @@ for file in ${offender_files[@]+"${offender_files[@]}"}; do
   if [[ ! -f "$file" ]]; then
     continue
   fi
-  if is_changed_test_file "$file"; then
+  # Invoke separately (not in a condition) so set -e stays armed inside the call.
+  set +e
+  is_changed_test_file "$file"
+  changed_test_status=$?
+  set -e
+  if [[ "$changed_test_status" -eq 0 ]]; then
     continue
   fi
   if [[ "$capped_recheck_count" -lt "$recheck_max_files" ]]; then

@@ -1256,6 +1256,104 @@ describe("deleteDevice handler", () => {
     ]);
   });
 
+  // The state `force` exists FOR is the persistent one: a pool refresh has
+  // already seen the placeholder on the live entry and QUARANTINED it, which
+  // makes every non-destructive reader -- including this teardown's own stableId
+  // match -- treat the pooled label as absent. The caller names the AVD this
+  // daemon published, nothing booted matches it, and the unresolved-runtime
+  // refusal answers before the forced branch is ever reached, so the escape
+  // hatch is unusable in exactly the wedged-console case it was added for
+  // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+  test("force resolves a quarantined pooled AVD label to its booted serial", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const image: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      image,
+    );
+    manager.setBootedDevices("android", [
+      { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+    ]);
+    await pool.refreshDevices();
+    expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(true);
+    manager.setDeviceImages("android", [image]);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", pooledAvdName, pooledAvdName),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(runtimeAvdNameProbes).toEqual([]);
+    expect(manager.killedDevices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
+    // `deleteAvd` takes a NAME. Carrying the `Unknown (<serial>)` placeholder
+    // through to the destroy would delete no AVD at all.
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({ platform: "android", name: pooledAvdName }),
+      }),
+    ]);
+  });
+
+  // The other half of the same contract: reaching a quarantined entry at all is
+  // the FORCED path's privilege. Unforced, the quarantined label is still not a
+  // statement about the runtime, so the teardown refuses exactly as before.
+  test("an unforced teardown still refuses a quarantined pooled AVD label", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const image: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      image,
+    );
+    manager.setBootedDevices("android", [
+      { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+    ]);
+    await pool.refreshDevices();
+    expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(true);
+    manager.setDeviceImages("android", [image]);
+
+    const body = responseBody(
+      await teardownTool().handler(request("android", pooledAvdName, pooledAvdName)),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
+    expect(manager.killedDevices).toEqual([]);
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   // The probe runs inside a lifecycle lease that is already on a deadline, so it
   // must borrow that deadline instead of starting its own timer (#6863 review).
   test("bounds the AVD name probe by the caller's remaining teardown deadline", async () => {

@@ -2901,11 +2901,37 @@ function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNam
   );
 }
 
+/**
+ * The stable AVD label a booted emulator is matched and acted on by: the name
+ * the runtime gave, or the pool's label when the runtime could not name itself.
+ *
+ * `allowQuarantinedPooledLabel` is the FORCED reading of the same lookup
+ * (#6864). Unforced, a quarantined entry reads as "no label" -- rule 3 of
+ * {@link getValidatedPooledAndroidEntry} -- and that is right for every
+ * non-destructive consumer. But the quarantine is precisely the persistent
+ * state a wedged console puts the daemon in, so under that rule a forced
+ * teardown of the AVD this daemon itself published matched NOTHING booted and
+ * was refused by the unresolved-runtime precondition long before the forced
+ * branch in {@link confirmPooledAvdIdentity} could skip the probe -- the escape
+ * hatch was unreachable in its own headline case. Forced, the caller's label is
+ * bound to the pooled serial instead, which is also the only way `destroyDevice`
+ * receives a real AVD name rather than the `Unknown (<serial>)` placeholder
+ * `deleteAvd` cannot delete
+ * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+ *
+ * This widens what force can MATCH, not what it may act on unchecked: the
+ * `moved` incarnation refusal, the stopped-image inventory refusal and the
+ * post-stop restart checks all still run on the resolved target.
+ */
 function getBootedAndroidStableName(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
+  allowQuarantinedPooledLabel = false,
 ): string {
-  return getValidatedPooledAndroidAvdName(device, devicePool) ?? device.name;
+  const pooledAvdName = allowQuarantinedPooledLabel
+    ? getPooledAndroidEntryForIdentityCheck(device, devicePool)?.avdName
+    : getValidatedPooledAndroidAvdName(device, devicePool);
+  return pooledAvdName ?? device.name;
 }
 
 // iOS `deleteDevice` targets are frequently expressed by name (the identifier
@@ -2922,6 +2948,7 @@ function matchesTeardownStableId(
   device: BootedDevice,
   stableId: string,
   devicePool: DevicePool | undefined,
+  allowQuarantinedPooledLabel: boolean,
 ): boolean {
   // The name-or-UDID fallback is an iOS-only concern (#6250 delete-by-name).
   // Branching explicitly on platform keeps a physical Android device whose
@@ -2932,7 +2959,7 @@ function matchesTeardownStableId(
     return matchesIosTeardownIdentity(device, stableId);
   }
   return isVirtualAndroidDevice(device)
-    ? getBootedAndroidStableName(device, devicePool) === stableId
+    ? getBootedAndroidStableName(device, devicePool, allowQuarantinedPooledLabel) === stableId
     : device.deviceId === stableId;
 }
 
@@ -3007,7 +3034,7 @@ function findMatchingBootedTeardownDevices(
   return discovery.devices.filter(
     (device) =>
       device.platform === args.target.platform &&
-      matchesTeardownStableId(device, args.target.stableId, devicePool),
+      matchesTeardownStableId(device, args.target.stableId, devicePool, args.force === true),
   );
 }
 
@@ -3017,7 +3044,9 @@ function createBootedTeardownTarget(
   devicePool: DevicePool | undefined,
 ): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
   const stableName =
-    device.platform === "android" ? getBootedAndroidStableName(device, devicePool) : device.name;
+    device.platform === "android"
+      ? getBootedAndroidStableName(device, devicePool, args.force === true)
+      : device.name;
   if (args.target.stableName && args.target.stableName !== stableName) {
     return { conflict: "The requested stable name does not match the booted device identity." };
   }

@@ -4,6 +4,7 @@ import {
   ActionableError,
   DeviceSnapshotManifest,
   DeviceSnapshotType,
+  toActionableError,
 } from "../../models";
 import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotProvider";
 import {
@@ -41,6 +42,8 @@ export interface RestoreSnapshotArgs {
   manifest: DeviceSnapshotManifest;
   useVmSnapshot?: boolean;
   vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
+  onVmSnapshotLoaded?: () => Promise<void> | void;
+  onBeforeVmSnapshotLoad?: () => Promise<void> | void;
 }
 
 export interface RestoreSnapshotResult {
@@ -119,7 +122,14 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   }
 
   private async executeAndroid(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
-    const { snapshotName, manifest, useVmSnapshot = true, vmSnapshotTimeoutMs = 30000 } = args;
+    const {
+      snapshotName,
+      manifest,
+      useVmSnapshot = true,
+      vmSnapshotTimeoutMs = 30000,
+      onVmSnapshotLoaded,
+      onBeforeVmSnapshotLoad,
+    } = args;
 
     logger.info(
       `Restoring snapshot '${snapshotName}' (type: ${manifest.snapshotType}) to device ${this.device.deviceId}`,
@@ -137,7 +147,13 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     const shouldUseVmSnapshot = useVmSnapshot && manifest.snapshotType === "vm" && isEmulator;
 
     if (shouldUseVmSnapshot) {
-      await this.restoreVmSnapshot(snapshotName, manifest, vmSnapshotTimeoutMs);
+      await this.restoreVmSnapshot(
+        snapshotName,
+        manifest,
+        vmSnapshotTimeoutMs,
+        onVmSnapshotLoaded,
+        onBeforeVmSnapshotLoad,
+      );
     } else {
       await this.restoreSettingsSnapshot(manifest);
     }
@@ -157,6 +173,8 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     snapshotName: string,
     manifest: DeviceSnapshotManifest,
     vmSnapshotTimeoutMs: number,
+    onVmSnapshotLoaded?: () => Promise<void> | void,
+    onBeforeVmSnapshotLoad?: () => Promise<void> | void,
   ): Promise<void> {
     logger.info(`Restoring VM snapshot for emulator ${this.device.deviceId}`);
 
@@ -164,6 +182,8 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       // Load VM snapshot using ADB emu command
       const loadCommand = buildVmSnapshotCommand("load", snapshotName);
       logger.info(`Executing: adb -s ${this.device.deviceId} ${loadCommand}`);
+
+      await onBeforeVmSnapshotLoad?.();
 
       let result;
       try {
@@ -174,19 +194,41 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
       const evaluation = evaluateVmSnapshotResult("load", snapshotName, result);
       if (!evaluation.ok) {
-        throw new Error(evaluation.errorMessage);
+        const failure = Object.assign(new Error(evaluation.errorMessage), {
+          isDefinitiveVmSnapshotLoadFailure: true as const,
+        });
+        throw failure;
       }
 
       logger.info(`VM snapshot restored successfully`);
+      await onVmSnapshotLoaded?.();
 
-      // Wait a moment for emulator to stabilize after snapshot load
-      await this.timer.sleep(2000);
+      await this.emulator.waitForEmulatorReady(
+        manifest.deviceName,
+        vmSnapshotTimeoutMs,
+        null,
+        this.device.deviceId,
+        undefined,
+        { skipWakeAndUnlock: true },
+      );
 
       logger.info("VM snapshot restoration complete");
     } catch (error) {
       const message = errorMessage(error);
       logger.error(`Failed to restore VM snapshot: ${message}`);
-      throw new ActionableError(`Failed to restore VM snapshot: ${message}`);
+      const context = `Failed to restore VM snapshot '${snapshotName}' on device ${this.device.deviceId}`;
+      const actionableError =
+        error instanceof ActionableError
+          ? new ActionableError(`${context}: ${error.message}`, { cause: error })
+          : toActionableError(error, context);
+      if (
+        error instanceof Error &&
+        (error as { isDefinitiveVmSnapshotLoadFailure?: boolean })
+          .isDefinitiveVmSnapshotLoadFailure === true
+      ) {
+        Object.assign(actionableError, { isDefinitiveVmSnapshotLoadFailure: true });
+      }
+      throw actionableError;
     }
   }
 

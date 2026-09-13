@@ -7,13 +7,17 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { SetAccessibilityFocus } from "../features/accessibility/SetAccessibilityFocus";
 import { accessibilityFocusResultSchema } from "./toolOutputSchemas";
 
+// #6712: `.strict()` so an undeclared caller argument is rejected instead of
+// silently deleted (the advertised schema already says additionalProperties:false).
 export const accessibilityFocusSchema = addDeviceTargetingToSchema(
-  z.object({
-    action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
-    resourceId: z.string().optional().describe("Target resource ID"),
-    text: z.string().optional().describe("Target text"),
-    contentDesc: z.string().optional().describe("Target content-desc"),
-  }),
+  z
+    .object({
+      action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
+      resourceId: z.string().optional().describe("Target resource ID"),
+      text: z.string().optional().describe("Target text"),
+      contentDesc: z.string().optional().describe("Target content-desc"),
+    })
+    .strict(),
 );
 
 interface AccessibilityFocusArgs {

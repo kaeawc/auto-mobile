@@ -323,7 +323,7 @@ interface StorageSubscriptionState {
 // legitimately wait up to 15s for a fresh hierarchy. Keep this wrapper timeout
 // above that so slow-but-valid iOS captures are not reported as stream errors
 // before the platform observe path has its allotted time to complete.
-const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
+export const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_SCREENSHOT_INTERVAL_MS = 3000;
 const DEFAULT_HIERARCHY_INTERVAL_MS = 1000;
 const MIN_SCREENSHOT_INTERVAL_MS = 250;
@@ -1359,19 +1359,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private parseHierarchyIntervalMs(value: unknown): number | null {
     return this.parseClampedIntervalMs(value, MIN_HIERARCHY_INTERVAL_MS, MAX_HIERARCHY_INTERVAL_MS);
-  }
-
-  private parseDeviceSessionUuid(value: unknown): string | null {
-    if (value === undefined || value === null) {
-      return null;
-    }
-    if (typeof value !== "string") {
-      throw new Error("deviceSessionUuid must be a string or null");
-    }
-    if (value.trim().length === 0) {
-      throw new Error("deviceSessionUuid must not be blank");
-    }
-    return value;
   }
 
   private parseClampedIntervalMs(

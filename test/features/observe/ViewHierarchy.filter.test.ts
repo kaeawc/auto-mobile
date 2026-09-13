@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
+import {
+  MAX_FILTERED_CHILDREN_PER_NODE,
+  ViewHierarchy,
+} from "../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 const device = {
@@ -130,5 +133,55 @@ describe("ViewHierarchy filtering", () => {
     const result = viewHierarchy.filterSingleNode(root, true);
 
     expect(result).toEqual({ class: "android.widget.FrameLayout", enabled: "true" });
+  });
+
+  test("reports a truncation reason when a node has more children than the cap", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const total = 70;
+    const children = Array.from({ length: total }, (_, index) => ({
+      "resource-id": `com.example:id/row_${index}`,
+      text: `Row ${index}`,
+    }));
+    const result = viewHierarchy.filterViewHierarchy({
+      hierarchy: {
+        node: {
+          "resource-id": "com.example:id/list",
+          scrollable: "true",
+          node: children,
+        },
+      },
+    });
+
+    expect(result.hierarchy.node.node).toHaveLength(MAX_FILTERED_CHILDREN_PER_NODE);
+    expect(result.truncationReasons).toEqual([
+      `max_children[com.example:id/list kept ${MAX_FILTERED_CHILDREN_PER_NODE} of ${total}]`,
+    ]);
+  });
+
+  test("does not report truncation when the child count is exactly the cap", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const children = Array.from({ length: MAX_FILTERED_CHILDREN_PER_NODE }, (_, index) => ({
+      "resource-id": `com.example:id/row_${index}`,
+    }));
+    const result = viewHierarchy.filterViewHierarchy({
+      hierarchy: { node: { "resource-id": "com.example:id/list", node: children } },
+    });
+
+    expect(result.hierarchy.node.node).toHaveLength(MAX_FILTERED_CHILDREN_PER_NODE);
+    expect(result.truncationReasons).toBeUndefined();
+  });
+
+  test("appends child truncation to pre-existing truncation reasons", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const children = Array.from({ length: 65 }, () => ({ text: "row" }));
+    const result = viewHierarchy.filterViewHierarchy({
+      truncationReasons: ["max_nodes"],
+      hierarchy: { node: { class: "android.widget.GridView", node: children } },
+    });
+
+    expect(result.truncationReasons).toEqual([
+      "max_nodes",
+      `max_children[android.widget.GridView kept ${MAX_FILTERED_CHILDREN_PER_NODE} of 65]`,
+    ]);
   });
 });

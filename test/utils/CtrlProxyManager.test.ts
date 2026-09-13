@@ -100,6 +100,16 @@ describe("CtrlProxyManager", function () {
     }
   });
 
+  test("evicts per-serial readiness caches after a VM incarnation change", () => {
+    expect(AndroidCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBe(
+      accessibilityServiceClient,
+    );
+
+    AndroidCtrlProxyManager.invalidateForDeviceIncarnation(testDevice.deviceId);
+
+    expect(AndroidCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBeUndefined();
+  });
+
   describe("framework boot failures", () => {
     for (const { method, command, service, readyOutput } of [
       {

@@ -12,8 +12,16 @@ import {
   SystemInstalledApp,
 } from "../models";
 import { logger } from "../utils/logger";
-import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
-import { getDbWriteBarrier } from "../db/dbWriteBarrier";
+import {
+  getInstalledAppsCacheWriteCoordinator,
+  type InstalledAppsCacheWriteCoordinator,
+} from "../db/installedAppsCacheWriteCoordinator";
+import { getDbWriteBarrier, type DbWriteBarrier } from "../db/dbWriteBarrier";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
+import {
+  registerDeviceIncarnationListener,
+  type DeviceIncarnationListener,
+} from "../utils/deviceIncarnation";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
@@ -985,6 +993,32 @@ export function invalidateInstalledAppsCache(deviceId?: string): void {
     getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(cachedDeviceId);
   }
 }
+
+export function createInstalledAppsDeviceIncarnationListener(
+  repository: InstalledAppsStore = new InstalledAppsRepository(),
+  coordinator: InstalledAppsCacheWriteCoordinator = getInstalledAppsCacheWriteCoordinator(),
+  barrier: DbWriteBarrier = getDbWriteBarrier(),
+  invalidateCache: (deviceId: string) => void = invalidateInstalledAppsCache,
+  notifyResourcesUpdated: (deviceId: string) => Promise<void> = notifyInstalledAppResourceUpdated,
+): DeviceIncarnationListener {
+  return {
+    name: "installed-apps",
+    onDeviceIncarnationChanged: async (deviceId) => {
+      // Dirty the in-process cache before the best-effort persistence write.
+      invalidateCache(deviceId);
+      await notifyResourcesUpdated(deviceId);
+      await coordinator.invalidate(
+        deviceId,
+        async () =>
+          await barrier.track(async () => {
+            await repository.markDeviceStale(deviceId);
+          }),
+      );
+    },
+  };
+}
+
+registerDeviceIncarnationListener(createInstalledAppsDeviceIncarnationListener());
 
 export function invalidateInstalledAppResourceCache(deviceId?: string): void {
   if (deviceId) {

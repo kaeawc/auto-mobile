@@ -738,3 +738,21 @@ wiring_requires_yq() {
   [[ "$script" == *'REF_TYPE'* ]]
   [[ "$script" == *'REF_NAME'* ]]
 }
+
+# The Homebrew formula step used to race npm's publish/propagation: `npm
+# publish` returns before the registry serves the new version, so the tarball
+# fetch 404'd for its whole budget and reddened the 0.0.69 release (#6810).
+# update-brew-formula.sh now waits on the npm version document with exponential
+# backoff first; the workflow's job must bound that wait so a registry that
+# never serves the version cannot hold a runner open.
+@test "release.yml bounds the Homebrew publish job with a timeout" {
+  wiring_requires_yq
+  workflow=".github/workflows/release.yml"
+  run yq -r '.jobs."publish-homebrew"."timeout-minutes"' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "null" ]]
+  # Long enough for the script's bounded propagation wait (~6 min) plus its
+  # tarball retry budget (~5 min), short enough to fail rather than hang.
+  [ "$output" -ge 15 ]
+  [ "$output" -le 45 ]
+}

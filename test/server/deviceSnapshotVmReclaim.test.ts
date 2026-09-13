@@ -89,6 +89,10 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
           restoredAt: new Date(fakeTimer.now()).toISOString(),
         }),
       }),
+      deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => undefined,
+        invalidate: async () => undefined,
+      },
     });
   });
 
@@ -695,6 +699,10 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
           };
         },
       }),
+      deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => undefined,
+        invalidate: async () => undefined,
+      },
     });
 
     const restoring = restoreDeviceSnapshot(EMULATOR, { snapshotName: "vm-restoring" });

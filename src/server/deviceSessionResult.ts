@@ -78,3 +78,61 @@ export function getDeviceSessionIdFromResult(result: unknown): string | undefine
     return undefined;
   }
 }
+
+/**
+ * The error codes a tool RESULT uses to say the device session it names is gone
+ * — emitted as ordinary `isError: true` envelopes by `src/server/index.ts`
+ * (`session_ownership_lost`) and `src/server/proxyServer.ts`
+ * (`session_ownership_lost`, `no_active_device_session`). A proxy must not bind
+ * or refresh the lease of a session an answer like this just declared dead.
+ */
+const DEVICE_SESSION_INVALID_ERROR_CODES: readonly string[] = [
+  "session_ownership_lost",
+  "no_active_device_session",
+];
+
+/**
+ * Whether an MCP tool result is one of the session-invalid error envelopes
+ * above. Anything else — including every ordinary tool failure, which carries
+ * prose rather than a JSON error payload — is false, because those still ran
+ * against a LIVE session.
+ */
+export function declaresDeviceSessionInvalid(result: unknown): boolean {
+  if (!result || typeof result !== "object" || !("isError" in result)) {
+    return false;
+  }
+  if ((result as { isError?: unknown }).isError !== true) {
+    return false;
+  }
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some((item) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      (item as { type?: unknown }).type !== "text" ||
+      typeof (item as { text?: unknown }).text !== "string"
+    ) {
+      return false;
+    }
+    const text = (item as { text: string }).text;
+    // Cheap pre-filter: an ordinary tool failure answers with prose, so this
+    // keeps JSON.parse (and its catch) off the common path entirely.
+    if (!DEVICE_SESSION_INVALID_ERROR_CODES.some((code) => text.includes(code))) {
+      return false;
+    }
+    try {
+      const payload = JSON.parse(text) as { error?: { code?: unknown } };
+      return (
+        typeof payload?.error?.code === "string" &&
+        DEVICE_SESSION_INVALID_ERROR_CODES.includes(payload.error.code)
+      );
+    } catch (error) {
+      // A result that merely mentions the code in prose is not the envelope.
+      logger.debug("[MCP] Session-invalid probe: error result was not JSON", { error });
+      return false;
+    }
+  });
+}

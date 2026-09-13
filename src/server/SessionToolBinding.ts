@@ -85,6 +85,7 @@ export class SessionToolBinding {
       mcpSessionId,
       lookup,
       matches,
+      deviceId,
       fallback,
       selectingActiveDevice,
     );
@@ -94,6 +95,7 @@ export class SessionToolBinding {
     mcpSessionId: string | undefined,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
     matches: (device: { deviceId: string; platform: string }) => boolean,
+    deviceId: string | undefined,
     rebindFallback?: string,
     selectingActiveDevice = false,
   ): string | undefined {
@@ -115,6 +117,11 @@ export class SessionToolBinding {
       candidates.some((candidate) => candidate.sessionUuid === rebindFallback)
     ) {
       return rebindFallback;
+    }
+    if (selected.length === 0 && deviceId) {
+      // An explicit device outside this connection's sessions must continue to
+      // ordinary discovery, where the standard admission gate runs.
+      return undefined;
     }
     if (selected.length === 1) {
       return selected[0].sessionUuid;

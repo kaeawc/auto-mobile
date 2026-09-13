@@ -18,9 +18,11 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
+  HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -120,6 +122,39 @@ class ScriptedDaemonClient implements DaemonClientLike {
 }
 
 describe("DaemonMcpProxy", () => {
+  test("restores the current owned session before older sessions after reconnect", async () => {
+    const mintingResult = (sessionUuid: string) => ({
+      content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
+    });
+    const fakeClient = new FakeDaemonClient({
+      toolResultFor: (toolName) =>
+        toolName === "getAndroid" ? mintingResult("session-a") : mintingResult("session-b"),
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("getAndroid", {});
+      await proxy.callTool("getApple", {});
+      await proxy.callTool("setActiveDevice", { deviceId: "free-device-c" });
+
+      expect(fakeClient.callToolCalls.at(-1)).toEqual({
+        toolName: "setActiveDevice",
+        params: {
+          deviceId: "free-device-c",
+          [DAEMON_OWNED_SESSIONS_PARAM]: ["session-b", "session-a"],
+        },
+      });
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   describe("connection management", () => {
     test("connects to daemon on first request", async () => {
       const fakeClient = new FakeDaemonClient({
@@ -192,14 +227,38 @@ describe("DaemonMcpProxy", () => {
         ]);
 
         expect(firstClient.callDaemonMethodCalls).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
           { method: "tools/list", params: { sessionUuid: "device-session-a" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
         ]);
         expect(secondClient.callDaemonMethodCalls).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-b",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-b",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
         ]);
         expect(firstClient.callToolCalls).toEqual([
           {
@@ -251,18 +310,66 @@ describe("DaemonMcpProxy", () => {
         expect(
           firstClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
         ).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
         ]);
         expect(
           secondClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
         ).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-b",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-b",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-b",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-b",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -295,11 +402,23 @@ describe("DaemonMcpProxy", () => {
         await timer.advanceTimeAsync(2_000);
 
         expect(staleClient.callDaemonMethodCalls).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
         ]);
         expect(staleClient.closeCallCount).toBe(1);
         expect(freshClient.callDaemonMethodCalls).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "device-session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            },
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -2554,11 +2673,17 @@ describe("DaemonMcpProxy", () => {
         expect(tools).toEqual([{ name: "scopedTool", inputSchema: {} }]);
         // The stale attempt and the reconnect retry both carry the bound session.
         expect(staleClient.callDaemonMethodCalls).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: { sessionId: "session-a", livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
         expect(freshClient.callDaemonMethodCalls).toEqual([
-          { method: "daemon/heartbeat", params: { sessionId: "session-a" } },
+          {
+            method: "daemon/heartbeat",
+            params: { sessionId: "session-a", livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
@@ -3964,8 +4089,20 @@ describe("DaemonMcpProxy", () => {
           expect(
             fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
           ).toEqual([
-            { method: "daemon/heartbeat", params: { sessionId: "released-session" } },
-            { method: "daemon/heartbeat", params: { sessionId: "provisioned-session" } },
+            {
+              method: "daemon/heartbeat",
+              params: {
+                sessionId: "released-session",
+                livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              },
+            },
+            {
+              method: "daemon/heartbeat",
+              params: {
+                sessionId: "provisioned-session",
+                livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              },
+            },
           ]);
           await proxy.callTool("observe", {});
           expect(fakeClient.callToolCalls.at(-1)).toEqual({
